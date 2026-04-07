@@ -1770,7 +1770,7 @@ function renderDashStats() {
   $('dash-stats').innerHTML = `
     <div class="stat c-sky" style="cursor:pointer" onclick="go('vendor')"><div class="stat-lbl">등록 업체</div><div class="stat-val" style="text-decoration:underline dotted">${DB.vendors.length}</div><div class="stat-sub">원자재 ${DB.vendors.filter(v=>v.type==='원자재').length} · 부자재 ${DB.vendors.filter(v=>v.type==='부자재').length} · OEM ${DB.vendors.filter(v=>v.type==='OEM').length}</div><div class="stat-ico">🏢</div></div>
     <div class="stat c-green" style="cursor:pointer" onclick="go('item')"><div class="stat-lbl">등록 품목</div><div class="stat-val" style="text-decoration:underline dotted">${DB.items.length}</div><div class="stat-sub">원자재 ${DB.items.filter(i=>i.type==='원자재').length} · 부자재 ${DB.items.filter(i=>i.type==='부자재').length} · OEM ${DB.items.filter(i=>i.type==='OEM').length} · 완제품 ${DB.items.filter(i=>i.type==='완제품').length}</div><div class="stat-ico">📦</div></div>
-    <div class="stat ${lateProds?'c-red':'c-amber'}" style="cursor:pointer" onclick="go('production')"><div class="stat-lbl">진행중 생산</div><div class="stat-val" style="text-decoration:underline dotted">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').length}</div><div class="stat-sub" style="line-height:2">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').map(p=>{const it=getItem(p.productId);const nm=(it.name||p.productName||'?').replace('르니브 ','').replace('3중 장벽 20층 리뉴 ','');return '<span style="font-weight:500">'+nm+'</span><br><span style="color:var(--sky-500)">'+fmt(p.qty)+'EA</span>';}).join('<br>') || '없음'}</div><div class="stat-ico">🏭</div></div>
+    <div class="stat ${lateProds?'c-red':'c-amber'}" style="cursor:pointer" onclick="go('production')"><div class="stat-lbl">진행중 생산</div><div class="stat-val" style="text-decoration:underline dotted">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').length}</div><div class="stat-sub" style="line-height:2">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').map(p=>{const it=getItem(p.productId);const nm=(it&&it.name?it.name:p.productName||'?').replace('르니브 ','').replace('3중 장벽 20층 리뉴 ','');return '<span style="font-weight:500">'+nm+'</span><br><span style="color:var(--sky-500)">'+fmt(p.qty)+'EA</span>';}).join('<br>') || '없음'}</div><div class="stat-ico">🏭</div></div>
     <div class="stat c-purple" style="cursor:pointer" onclick="go('order')"><div class="stat-lbl">총 발주금액 <span style="font-size:9px;opacity:.8">(VAT포함)</span></div><div class="stat-val" style="font-size:15px;text-decoration:underline dotted">${fmtW(Math.round(thisMonthAmt*1.1))}</div><div class="stat-sub" style="line-height:1.8">${(()=>{const vmap={};DB.orders.forEach(o=>{const v=getVendor(o.vendorId);const t=o.rows.reduce((s,r)=>s+r.qty*r.price,0);vmap[v.company||'-']=(vmap[v.company||'-']||0)+t;});return Object.entries(vmap).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,t])=>c.replace('(주)','').replace('㈜','')+' '+fmtW(Math.round(t))).join('<br>');})()||'발주 없음'}</div><div class="stat-ico">💰</div></div>
   `;
 }
@@ -1780,8 +1780,9 @@ function renderDashProdTable() {
   $('dash-prod-table').innerHTML = DB.productions.slice(0,5).map(p => {
     const item = getItem(p.productId);
     const col = statusColor[p.status] || 'var(--gray-400)';
+    const pName = (item && item.name) ? item.name : (p.productName || '-');
     return `<tr>
-      <td class="lnk" onclick="showItemDetail(${p.productId})">${item.name||'-'}</td>
+      <td class="lnk" onclick="showItemDetail(${p.productId})">${pName}</td>
       <td>${p.orderDate}</td>
       <td>${p.inDate||'-'}</td>
       <td>${statusBadge(p.status)}</td>
@@ -1792,9 +1793,9 @@ function renderDashProdTable() {
 
 function renderDashTimeline() {
   const events = [
-    ...DB.productions.filter(p=>p.status==='입고완료').map(p=>({title:getItem(p.productId).name+' 입고 완료', date:p.inDate, dot:'done'})),
-    ...DB.productions.filter(p=>p.status==='지연').map(p=>({title:getItem(p.productId).name+' 납기 지연', date:p.inDate, dot:'late'})),
-    ...DB.productions.filter(p=>p.status==='생산중').map(p=>({title:getItem(p.productId).name+' 입고 예정', date:p.inDate, dot:''})),
+    ...DB.productions.filter(p=>p.status==='입고완료').map(p=>({title:(getItem(p.productId).name||p.productName||'?')+' 입고 완료', date:p.inDate, dot:'done'})),
+    ...DB.productions.filter(p=>p.status==='지연').map(p=>({title:(getItem(p.productId).name||p.productName||'?')+' 납기 지연', date:p.inDate, dot:'late'})),
+    ...DB.productions.filter(p=>p.status==='생산중').map(p=>({title:(getItem(p.productId).name||p.productName||'?')+' 입고 예정', date:p.inDate, dot:''})),
     ...DB.productions.filter(p=>p.status==='생산대기').map(p=>({title:getItem(p.productId).name+' 생산 예정', date:p.inDate, dot:'plan'})),
   ].slice(0,6);
   $('dash-timeline').innerHTML = events.map(e=>`
@@ -3109,6 +3110,18 @@ function saveOrder() {
       qty,
       price: parseFloat(priceEl ? priceEl.value : 0) || 0
     });
+
+    // 품목관리 이름 자동 동기화 — 발주서에서 이름 수정 시 품목관리에도 반영
+    if (itemId) {
+      const itemIdx = DB.items.findIndex(i => i.id === itemId);
+      if (itemIdx >= 0 && DB.items[itemIdx].name !== name && name) {
+        DB.items[itemIdx].name = name;
+        // 생산관리의 productName도 동기화
+        DB.productions.forEach((p, pi) => {
+          if (p.productId === itemId) DB.productions[pi].productName = name;
+        });
+      }
+    }
   });
   if (!rows.length) { showNotif('품목을 추가하세요','warning'); return; }
   const id = editingId['add-order'];
