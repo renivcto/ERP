@@ -803,7 +803,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="card">
         <div class="card-body p0 tbl-wrap">
           <table>
-            <thead><tr><th>발주번호</th><th>업체명</th><th>품목</th><th>발주일</th><th>납기일</th><th>금액</th><th>원본</th><th>날인본</th><th>상태</th><th>관리</th></tr></thead>
+            <thead><tr><th>발주번호</th><th>업체명</th><th>품목</th><th>발주일</th><th>납기일</th><th>결제일</th><th>금액</th><th>입고상태</th><th>원본</th><th>날인본</th><th>상태</th><th>관리</th></tr></thead>
             <tbody id="order-table"></tbody>
           </table>
         </div>
@@ -1174,13 +1174,41 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="fg2">
         <div class="fg"><label>업체명<span class="req">*</span></label><select class="fs" id="o-vendor" onchange="fillOrderVendor()"></select></div>
         <div class="fg"><label>발주일<span class="req">*</span></label><input class="fi" id="o-date" type="date"></div>
-        <div class="fg"><label>납기일(입고예정)</label><input class="fi" id="o-in-date" type="date"></div>
+        <div class="fg"><label>납기일(입고예정)</label><input class="fi" id="o-in-date" type="date" onchange="updateGCalLink('in')"></div>
         <div class="fg"><label>납품 주소</label><input class="fi" id="o-addr" placeholder="납품받을 주소"></div>
         <div class="fg"><label>일련번호</label><input class="fi" id="o-serial" placeholder="예: 20260331-1"></div>
-        <div class="fg"><label>상태</label>
+        <div class="fg"><label>발주 상태</label>
           <select class="fs" id="o-status">
             <option>진행중</option><option>완료</option><option>취소</option><option>지연</option>
           </select>
+        </div>
+        <div class="fg">
+          <label>결제일 📅</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input class="fi" id="o-pay-date" type="date" style="flex:1" onchange="updateGCalLink('pay')">
+            <a id="gcal-pay-link" href="#" target="_blank" title="구글 캘린더에 결제일 등록"
+              style="display:none;background:#4285f4;color:#fff;padding:5px 9px;border-radius:6px;font-size:11px;text-decoration:none;white-space:nowrap;flex-shrink:0">
+              📅 캘린더 등록
+            </a>
+          </div>
+        </div>
+        <div class="fg">
+          <label>입고 상태</label>
+          <select class="fs" id="o-stock-status">
+            <option value="입고전">📦 입고 전</option>
+            <option value="입고완료">✅ 입고 완료</option>
+            <option value="부분입고">⚠️ 부분 입고</option>
+            <option value="입고반려">❌ 입고 반려</option>
+          </select>
+        </div>
+        <div class="fg full" id="gcal-in-wrap" style="display:none">
+          <div style="background:var(--sky-50);border:1px solid var(--sky-200);border-radius:7px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between">
+            <span style="font-size:12px;color:var(--sky-700)">📅 납기일을 구글 캘린더에 등록하세요</span>
+            <a id="gcal-in-link" href="#" target="_blank"
+              style="background:#4285f4;color:#fff;padding:5px 12px;border-radius:6px;font-size:11.5px;text-decoration:none;font-weight:500">
+              구글 캘린더 열기
+            </a>
+          </div>
         </div>
       </div>
 
@@ -1400,7 +1428,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE
 // ═══════════════════════════════════════════════════════
-const STORE_KEY = 'reniv_erp_v2';
+const STORE_KEY = 'reniv_erp_v3';
 
 function loadData() {
   try {
@@ -2415,6 +2443,12 @@ function previewQuoteById(id) {
 // ORDER
 // ═══════════════════════════════════════════════════════
 function renderOrderTable() {
+  const stockStatusBadge = s => {
+    const map = {'입고전':'gray','입고완료':'green','부분입고':'amber','입고반려':'red'};
+    const icon = {'입고전':'📦','입고완료':'✅','부분입고':'⚠️','입고반려':'❌'};
+    const cls = map[s]||'gray';
+    return `<span class="badge ${cls}">${icon[s]||'📦'} ${s||'입고 전'}</span>`;
+  };
   $('order-table').innerHTML = DB.orders.map(o => {
     const v = getVendor(o.vendorId);
     const total = o.rows.reduce((s,r)=>s+r.qty*r.price,0);
@@ -2425,13 +2459,20 @@ function renderOrderTable() {
     const stampBadge = o.stampName
       ? `<span class="badge red" style="cursor:pointer;font-size:10px" onclick="viewOrderPDFById(${o.id},'stamp')" title="${o.stampName}">🔴 보기</span>`
       : `<span class="badge gray" style="font-size:10px">없음</span>`;
+    // 결제일 D-day 표시
+    const payDday = o.payDate ? calcDday(o.payDate) : null;
+    const payDisplay = o.payDate
+      ? `${o.payDate} ${payDday !== null ? `<span class="badge ${payDday < 0 ? 'red' : payDday <= 7 ? 'amber' : 'green'}" style="font-size:9px">D${payDday >= 0 ? '-'+payDday : '+'+Math.abs(payDday)}</span>` : ''}`
+      : '<span style="color:var(--gray-400);font-size:11px">미정</span>';
     return `<tr>
       <td style="font-family:monospace;font-size:11px">${o.serial||'PO-'+String(o.id).padStart(3,'0')}</td>
       <td class="lnk" onclick="viewVendor(${o.vendorId})">${v.company||'-'}</td>
-      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${itemList}">${itemList}</td>
+      <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${itemList}">${itemList}</td>
       <td>${o.orderDate||'-'}</td>
       <td>${o.inDate||'-'}</td>
+      <td>${payDisplay}</td>
       <td>${fmtW(total)}</td>
+      <td>${stockStatusBadge(o.stockStatus)}</td>
       <td>${pdfBadge}</td>
       <td>${stampBadge}</td>
       <td>${statusBadge(o.status)}</td>
@@ -2441,7 +2482,7 @@ function renderOrderTable() {
         <button class="btn btn-danger btn-xs" onclick="deleteOrder(${o.id})">삭제</button>
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="10" class="empty">발주서가 없습니다</td></tr>';
+  }).join('') || '<tr><td colspan="12" class="empty">발주서가 없습니다</td></tr>';
 }
 
 function ensureOrderRows() {
@@ -2751,6 +2792,32 @@ function applyParsedOrder(parsed, fileData, fileName) {
   showNotif('발주서 데이터 자동 입력 완료!','success');
 }
 
+// ── 구글 캘린더 링크 생성 ─────────────────────────────
+function updateGCalLink(type) {
+  const vendorEl = $('o-vendor');
+  const vendorName = vendorEl ? (vendorEl.options[vendorEl.selectedIndex]?.text || '업체') : '업체';
+
+  if (type === 'pay') {
+    const date = $('o-pay-date')?.value;
+    if (!date) { $('gcal-pay-link').style.display='none'; return; }
+    const d = date.replace(/-/g,'');
+    const title = encodeURIComponent(`[르니브] ${vendorName} 결제일`);
+    const detail = encodeURIComponent(`발주서 결제일 - ${vendorName}`);
+    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${d}/${d}&details=${detail}`;
+    $('gcal-pay-link').href = url;
+    $('gcal-pay-link').style.display = '';
+  } else if (type === 'in') {
+    const date = $('o-in-date')?.value;
+    if (!date) { $('gcal-in-wrap').style.display='none'; return; }
+    const d = date.replace(/-/g,'');
+    const title = encodeURIComponent(`[르니브] ${vendorName} 납기일`);
+    const detail = encodeURIComponent(`발주서 납기일 - ${vendorName}`);
+    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${d}/${d}&details=${detail}`;
+    $('gcal-in-link').href = url;
+    $('gcal-in-wrap').style.display = '';
+  }
+}
+
 function saveOrder() {
   const vendorId = parseInt($('o-vendor').value);
   if (!vendorId) { showNotif('업체를 선택하세요','warning'); return; }
@@ -2766,6 +2833,7 @@ function saveOrder() {
   const existing = id ? (DB.orders.find(o=>o.id===id)||{}) : {};
   const data = {
     vendorId, orderDate:$('o-date').value, inDate:$('o-in-date').value,
+    payDate:$('o-pay-date').value, stockStatus:$('o-stock-status').value,
     addr:$('o-addr').value, serial:$('o-serial').value,
     rows, note:$('o-note').value, status:$('o-status').value,
     pdfName:  _orderPdfName  || existing.pdfName  || '',
@@ -2794,6 +2862,11 @@ function editOrder(id) {
   $('o-in-date').value=o.inDate||''; $('o-addr').value=o.addr||'';
   $('o-note').value=o.note||''; $('o-serial').value=o.serial||'';
   $('o-status').value=o.status||'진행중';
+  $('o-pay-date').value=o.payDate||'';
+  $('o-stock-status').value=o.stockStatus||'입고전';
+  // 구글 캘린더 링크 업데이트
+  if (o.payDate) updateGCalLink('pay');
+  if (o.inDate) updateGCalLink('in');
   $('order-modal-rows').innerHTML='';
   o.rows.forEach(r => {
     addOrderRow();
@@ -2928,6 +3001,12 @@ function showRenivOrderPreview(o) {
           <td style="border:1px solid #333;padding:7px 10px">${o.addr||'-'}</td>
           <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600">담당자</td>
           <td style="border:1px solid #333;padding:7px 10px">송희강 이사 / 권다빈 이사</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600">연락처</td>
+          <td style="border:1px solid #333;padding:7px 10px">010-3328-3652 / 010-8874-5722</td>
+          <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600">이메일</td>
+          <td style="border:1px solid #333;padding:7px 10px">cto@reniv.co.kr</td>
         </tr>
         <tr>
           <td colspan="4" style="border:1px solid #333;padding:9px 10px;background:#fffde7;font-weight:700;text-align:center;font-size:13px">
