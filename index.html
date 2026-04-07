@@ -2548,70 +2548,96 @@ async function parseOrderPDF(input) {
   const file = input.files[0];
   if (!file) return;
 
-  $('o-ai-status').textContent = '⏳ AI가 발주서를 분석 중...';
+  $('o-ai-status').textContent = '⏳ 파일 변환 중...';
   $('o-ai-status').style.color = 'var(--sky-600)';
   $('o-ai-result').style.display = 'none';
 
-  // 파일을 base64로 변환
-  const reader = new FileReader();
-  reader.onload = async e => {
-    const base64Data = e.target.result.split(',')[1];
-    const mediaType = file.type || 'application/pdf';
+  try {
+    let imageBase64, mediaType;
 
-    try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'anthropic-dangerous-direct-browser-access': 'true'
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          messages: [{
-            role: 'user',
-            content: [
-              {
-                type: mediaType.includes('pdf') ? 'document' : 'image',
-                source: { type: 'base64', media_type: mediaType, data: base64Data }
-              },
-              {
-                type: 'text',
-                text: `이 발주서 문서에서 다음 정보를 추출해서 JSON으로만 응답해줘. 다른 텍스트 없이 JSON만:
-{
-  "vendor": "수신 업체명",
-  "serial": "일련번호",
-  "orderDate": "발주일 YYYY-MM-DD 형식 (없으면 오늘날짜)",
-  "inDate": "납기일자 YYYY-MM-DD 형식",
-  "addr": "입고처 주소",
-  "note": "특기사항",
-  "rows": [
-    {"code": "품목코드", "name": "품목명", "qty": 수량숫자, "price": 단가숫자}
-  ]
-}`
-              }
-            ]
-          }]
-        })
-      });
-      const data = await res.json();
-      const text = data.content?.[0]?.text || '';
-
-      // JSON 파싱
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error('파싱 실패');
-      const parsed = JSON.parse(jsonMatch[0]);
-
-      // 폼에 자동 입력
-      applyParsedOrder(parsed, e.target.result, file.name);
-
-    } catch(err) {
-      $('o-ai-status').textContent = '❌ 분석 실패 — 수동으로 입력해주세요';
-      $('o-ai-status').style.color = 'var(--red-500)';
+    if (file.type === 'application/pdf') {
+      $('o-ai-status').textContent = '⏳ PDF 이미지 변환 중...';
+      imageBase64 = await pdfToImage(file);
+      mediaType = 'image/png';
+    } else {
+      const dataUrl = await fileToDataUrl(file);
+      imageBase64 = dataUrl.split(',')[1];
+      mediaType = file.type || 'image/jpeg';
     }
-  };
-  reader.readAsDataURL(file);
+
+    $('o-ai-status').textContent = '⏳ AI가 발주서를 분석 중...';
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1500,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
+            { type: 'text', text: '이 발주서 이미지에서 정보를 추출해서 JSON으로만 응답해줘. 다른 텍스트 없이 순수 JSON만:\n{\n  "vendor": "수신 업체명(회사명만)",\n  "serial": "일련번호",\n  "orderDate": "발주일 YYYY-MM-DD",\n  "inDate": "납기일자 YYYY-MM-DD",\n  "addr": "입고처 주소",\n  "note": "비고 또는 특기사항",\n  "rows": [{"code": "품목코드", "name": "품목명", "qty": 수량숫자, "price": 단가숫자}]\n}' }
+          ]
+        }]
+      })
+    });
+
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    const text = data.content?.[0]?.text || '';
+    const cleaned = text.replace(/```json|```/g, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('JSON 추출 실패: ' + text.slice(0,100));
+    const parsed = JSON.parse(jsonMatch[0]);
+    const originalDataUrl = await fileToDataUrl(file);
+    applyParsedOrder(parsed, originalDataUrl, file.name);
+
+  } catch(err) {
+    console.error('PDF 파싱 오류:', err);
+    $('o-ai-status').textContent = '❌ ' + (err.message||'분석 실패 — 다시 시도해주세요');
+    $('o-ai-status').style.color = 'var(--red-500)';
+  }
 }
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => resolve(e.target.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function pdfToImage(file) {
+  if (!window.pdfjsLib) {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      s.onload = () => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        resolve();
+      };
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const page = await pdf.getPage(1);
+  const scale = 2.0;
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+  return canvas.toDataURL('image/png').split(',')[1];
+}
+
 
 function applyParsedOrder(parsed, fileData, fileName) {
   // 업체명 매칭
