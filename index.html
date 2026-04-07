@@ -927,12 +927,12 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="card">
           <div class="card-hdr"><span class="card-title">🏭 회사 정보</span></div>
           <div class="card-body">
-            <div class="fg"><label>회사명</label><input class="fi" value="RENIV Cosmetics"></div>
-            <div class="fg"><label>사업자번호</label><input class="fi" placeholder="000-00-00000"></div>
-            <div class="fg"><label>대표자</label><input class="fi" placeholder="홍길동"></div>
-            <div class="fg"><label>주소</label><input class="fi" placeholder="서울시 강남구..."></div>
-            <div class="fg"><label>전화</label><input class="fi" placeholder="02-0000-0000"></div>
-            <button class="btn btn-primary" onclick="showNotif('회사 정보 저장됨','success')">저장</button>
+            <div class="fg"><label>회사명</label><input class="fi" id="s-company" value="RENIV Cosmetics"></div>
+            <div class="fg"><label>사업자번호</label><input class="fi" id="s-bizno" placeholder="000-00-00000"></div>
+            <div class="fg"><label>대표자</label><input class="fi" id="s-ceo" placeholder="홍길동"></div>
+            <div class="fg"><label>주소</label><input class="fi" id="s-addr" placeholder="서울시 강남구..."></div>
+            <div class="fg"><label>전화</label><input class="fi" id="s-tel" placeholder="02-0000-0000"></div>
+            <button class="btn btn-primary" onclick="saveCompanyInfo()">저장</button>
           </div>
         </div>
         <div class="card">
@@ -1448,24 +1448,83 @@ const STORE_KEY = 'reniv_erp_v8';
 function saveData() {
   try {
     const dbToSave = JSON.parse(JSON.stringify(DB));
-    // PDF/stamp 데이터를 별도 키에 저장 (용량 초과 방지)
-    dbToSave.orders.forEach((o, i) => {
-      if (o.pdfData) {
-        try { localStorage.setItem('reniv_pdf_' + o.id, o.pdfData); } catch(e) {}
-        dbToSave.orders[i].pdfData = '__stored__';  // 저장됨 표시
+    // 이미지/PDF 데이터는 IndexedDB에 별도 저장 (용량 무제한)
+    dbToSave.items.forEach((item, i) => {
+      if (item.image && item.image.length > 100) {
+        idbSet('item_img_' + item.id, item.image);
+        dbToSave.items[i].image = '__idb__';
       }
-      if (o.stampData) {
-        try { localStorage.setItem('reniv_stamp_' + o.id, o.stampData); } catch(e) {}
-        dbToSave.orders[i].stampData = '__stored__';
+    });
+    dbToSave.orders.forEach((o, i) => {
+      if (o.pdfData && o.pdfData !== '__stored__') {
+        idbSet('order_pdf_' + o.id, o.pdfData);
+        dbToSave.orders[i].pdfData = '__idb__';
+      }
+      if (o.stampData && o.stampData !== '__stored__') {
+        idbSet('order_stamp_' + o.id, o.stampData);
+        dbToSave.orders[i].stampData = '__idb__';
       }
     });
     localStorage.setItem(STORE_KEY, JSON.stringify(dbToSave));
   } catch(e) {
+    // 최후 수단 - 바이너리 없이 저장
     try {
       const dbMin = JSON.parse(JSON.stringify(DB));
+      dbMin.items.forEach((item, i) => { if (item.image && item.image.length > 100) dbMin.items[i].image = ''; });
       dbMin.orders.forEach((o, i) => { dbMin.orders[i].pdfData = null; dbMin.orders[i].stampData = null; });
       localStorage.setItem(STORE_KEY, JSON.stringify(dbMin));
     } catch(e2) {}
+  }
+}
+
+// ── IndexedDB 헬퍼 ──────────────────────────────────────
+const IDB_NAME = 'reniv_idb';
+const IDB_STORE = 'blobs';
+let _idb = null;
+
+function openIDB() {
+  return new Promise((res, rej) => {
+    if (_idb) { res(_idb); return; }
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore(IDB_STORE);
+    req.onsuccess = e => { _idb = e.target.result; res(_idb); };
+    req.onerror = () => rej(req.error);
+  });
+}
+
+function idbSet(key, value) {
+  openIDB().then(db => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(value, key);
+  }).catch(()=>{});
+}
+
+function idbGet(key) {
+  return openIDB().then(db => new Promise((res) => {
+    const req = db.transaction(IDB_STORE).objectStore(IDB_STORE).get(key);
+    req.onsuccess = () => res(req.result || null);
+    req.onerror = () => res(null);
+  })).catch(() => null);
+}
+
+async function restoreIDBData() {
+  // 품목 이미지 복원
+  for (let i = 0; i < DB.items.length; i++) {
+    if (DB.items[i].image === '__idb__') {
+      const img = await idbGet('item_img_' + DB.items[i].id);
+      DB.items[i].image = img || '';
+    }
+  }
+  // 발주서 PDF/stamp 복원
+  for (let i = 0; i < DB.orders.length; i++) {
+    if (!DB.orders[i].pdfData || DB.orders[i].pdfData === '__idb__' || DB.orders[i].pdfData === '__stored__') {
+      const pdf = await idbGet('order_pdf_' + DB.orders[i].id);
+      DB.orders[i].pdfData = pdf || null;
+    }
+    if (!DB.orders[i].stampData || DB.orders[i].stampData === '__idb__' || DB.orders[i].stampData === '__stored__') {
+      const stamp = await idbGet('order_stamp_' + DB.orders[i].id);
+      DB.orders[i].stampData = stamp || null;
+    }
   }
 }
 
@@ -1473,23 +1532,7 @@ function loadData() {
   try {
     const s = localStorage.getItem(STORE_KEY);
     if (!s) return null;
-    const db = JSON.parse(s);
-    // PDF/stamp 데이터 복원
-    if (db.orders) {
-      db.orders.forEach((o, i) => {
-        if (o.pdfData === '__stored__' || !o.pdfData) {
-          const pdf = localStorage.getItem('reniv_pdf_' + o.id);
-          if (pdf) db.orders[i].pdfData = pdf;
-          else db.orders[i].pdfData = null;
-        }
-        if (o.stampData === '__stored__' || !o.stampData) {
-          const stamp = localStorage.getItem('reniv_stamp_' + o.id);
-          if (stamp) db.orders[i].stampData = stamp;
-          else db.orders[i].stampData = null;
-        }
-      });
-    }
-    return db;
+    return JSON.parse(s);
   } catch(e) {}
   return null;
 }
@@ -1757,6 +1800,7 @@ function go(page) {
     settings: () => {
       const saved = localStorage.getItem('reniv_sheets_webapp_url');
       if (saved && $('webapp-url')) $('webapp-url').value = saved;
+      loadCompanyInfo();
     }
   };
   if (renders[page]) renders[page]();
@@ -4627,6 +4671,28 @@ async function exportToSheets() {
 }
 
 // 설정에서 Web App URL 저장
+function saveCompanyInfo() {
+  const info = {
+    company: $('s-company')?.value.trim() || '',
+    bizno:   $('s-bizno')?.value.trim()   || '',
+    ceo:     $('s-ceo')?.value.trim()     || '',
+    addr:    $('s-addr')?.value.trim()    || '',
+    tel:     $('s-tel')?.value.trim()     || '',
+  };
+  DB._companyInfo = info;
+  saveData();
+  showNotif('회사 정보가 저장되었습니다', 'success');
+}
+
+function loadCompanyInfo() {
+  const info = DB._companyInfo || {};
+  if ($('s-company')) $('s-company').value = info.company || 'RENIV Cosmetics';
+  if ($('s-bizno'))   $('s-bizno').value   = info.bizno   || '';
+  if ($('s-ceo'))     $('s-ceo').value     = info.ceo     || '';
+  if ($('s-addr'))    $('s-addr').value     = info.addr    || '';
+  if ($('s-tel'))     $('s-tel').value      = info.tel     || '';
+}
+
 function saveWebAppUrl() {
   const url = $('webapp-url') ? $('webapp-url').value.trim() : '';
   if (!url) { showNotif('URL을 입력해주세요', 'warning'); return; }
@@ -4684,27 +4750,27 @@ function showERPOrWaiting() {
 }
 
 function initERPWhenReady() {
-  if (typeof Chart !== 'undefined') {
-    // Chart.js 이미 로드됨
-    updateBadges();
-    renderDashboard();
-  } else {
-    // Chart.js 로드 대기
-    let tries = 0;
-    const wait = setInterval(() => {
-      tries++;
-      if (typeof Chart !== 'undefined') {
-        clearInterval(wait);
-        updateBadges();
-        renderDashboard();
-      } else if (tries > 50) {
-        // 5초 후에도 안 되면 차트 없이 진행
-        clearInterval(wait);
-        updateBadges();
-        try { renderDashboard(); } catch(e) { console.warn('Dashboard init error:', e); }
-      }
-    }, 100);
-  }
+  // IndexedDB에서 이미지/PDF 데이터 먼저 복원 후 렌더링
+  restoreIDBData().then(() => {
+    if (typeof Chart !== 'undefined') {
+      updateBadges();
+      renderDashboard();
+    } else {
+      let tries = 0;
+      const wait = setInterval(() => {
+        tries++;
+        if (typeof Chart !== 'undefined') {
+          clearInterval(wait);
+          updateBadges();
+          renderDashboard();
+        } else if (tries > 50) {
+          clearInterval(wait);
+          updateBadges();
+          try { renderDashboard(); } catch(e) { console.warn('Dashboard init error:', e); }
+        }
+      }, 100);
+    }
+  });
 }
 
 // ─── 사용자 관리 페이지 — Firestore 연동 ────────────────
