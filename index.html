@@ -1783,6 +1783,7 @@ function renderDashKPI() {
 }
 
 function renderDashCharts() {
+  if (typeof Chart === 'undefined') return; // Chart.js 미로드 시 skip
   // Monthly order chart
   const months = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
   const monthlyData = [8.2,6.5,12.1,34.2,0,0,0,0,0,0,0,0];
@@ -3727,7 +3728,6 @@ function showERPOrWaiting() {
   document.getElementById('login-screen').classList.remove('show');
 
   if (!user || user.status === '승인대기') {
-    // 승인 대기 화면
     document.getElementById('waiting-screen').classList.add('show');
     document.getElementById('app').style.display = 'none';
     if (user) {
@@ -3736,7 +3736,6 @@ function showERPOrWaiting() {
       if (user.photo) document.getElementById('waiting-avatar').src = user.photo;
     }
   } else {
-    // ERP 진입
     document.getElementById('waiting-screen').classList.remove('show');
     document.getElementById('app').style.display = 'flex';
     // 사이드바 사용자 정보 업데이트
@@ -3744,11 +3743,32 @@ function showERPOrWaiting() {
     document.getElementById('sb-avatar').textContent = initials;
     document.getElementById('sb-name').textContent = user.name || '-';
     document.getElementById('sb-role').textContent = (user.role||'멤버') + (user.isAdmin ? ' · 관리자' : '');
-    // ERP 초기화
-    if (typeof updateBadges === 'function') {
-      updateBadges();
-      renderDashboard();
-    }
+    // Chart.js 로드 완료 후 ERP 초기화
+    initERPWhenReady();
+  }
+}
+
+function initERPWhenReady() {
+  if (typeof Chart !== 'undefined') {
+    // Chart.js 이미 로드됨
+    updateBadges();
+    renderDashboard();
+  } else {
+    // Chart.js 로드 대기
+    let tries = 0;
+    const wait = setInterval(() => {
+      tries++;
+      if (typeof Chart !== 'undefined') {
+        clearInterval(wait);
+        updateBadges();
+        renderDashboard();
+      } else if (tries > 50) {
+        // 5초 후에도 안 되면 차트 없이 진행
+        clearInterval(wait);
+        updateBadges();
+        try { renderDashboard(); } catch(e) { console.warn('Dashboard init error:', e); }
+      }
+    }, 100);
   }
 }
 
@@ -3804,6 +3824,8 @@ async function toggleFirestoreUser(uid, currentStatus) {
 window.addEventListener('load', function() {
   // app은 처음엔 숨김 — Firebase 인증 후 표시
   document.getElementById('app').style.display = 'none';
+  // 이전 버전 캐시 정리
+  ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3'].forEach(k => localStorage.removeItem(k));
   updateBadges();
 });</script>
 </body>
