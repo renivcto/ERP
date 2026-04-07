@@ -613,7 +613,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           </div>
         </div>
         <div class="card-body">
-          <div class="kanban" id="dash-kanban-board" style="grid-template-columns:repeat(4,1fr)"></div>
+          <div id="dash-kanban-board" style="width:100%;overflow-x:auto"></div>
         </div>
       </div>
     </div>
@@ -1835,14 +1835,18 @@ function renderDashStats() {
   $('dash-stats').innerHTML = `
     <div class="stat c-sky" style="cursor:pointer" onclick="go('vendor')"><div class="stat-lbl">등록 업체</div><div class="stat-val" style="text-decoration:underline dotted">${DB.vendors.length}</div><div class="stat-sub">원자재 ${DB.vendors.filter(v=>v.type==='원자재').length} · 부자재 ${DB.vendors.filter(v=>v.type==='부자재').length} · OEM ${DB.vendors.filter(v=>v.type==='OEM').length}</div><div class="stat-ico">🏢</div></div>
     <div class="stat c-green" style="cursor:pointer" onclick="go('item')"><div class="stat-lbl">등록 품목</div><div class="stat-val" style="text-decoration:underline dotted">${DB.items.length}</div><div class="stat-sub">원자재 ${DB.items.filter(i=>i.type==='원자재').length} · 부자재 ${DB.items.filter(i=>i.type==='부자재').length} · OEM ${DB.items.filter(i=>i.type==='OEM').length} · 완제품 ${DB.items.filter(i=>i.type==='완제품').length}</div><div class="stat-ico">📦</div></div>
-    <div class="stat ${lateProds?'c-red':'c-amber'}" style="cursor:pointer" onclick="go('production')"><div class="stat-lbl">진행중 생산</div><div class="stat-val" style="text-decoration:underline dotted">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').length}</div><div class="stat-sub" style="line-height:2">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').map(p=>{const it=getItem(p.productId);const nm=(it&&it.name?it.name:p.productName||'?').replace('르니브 3중 장벽 20층 ','').replace('르니브 ','');return '<span style="font-weight:500">'+nm+'</span><br><span style="color:var(--sky-500)">'+fmt(p.qty)+'EA</span>';}).join('<br>') || '없음'}</div><div class="stat-ico">🏭</div></div>
+    <div class="stat ${lateProds?'c-red':'c-amber'}" style="cursor:pointer" onclick="go('production')"><div class="stat-lbl">진행중 생산</div><div class="stat-val" style="text-decoration:underline dotted">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').length}</div><div class="stat-sub" style="line-height:2">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').map(p=>{const it=getItem(p.productId);const nm=(it&&it.name?it.name:p.productName||'?').replace('르니브 3중 장벽 20층 ','').replace('르니브 ','');return '<span style="font-weight:500">'+nm+'</span> <span style="color:var(--sky-500);font-size:10px">'+fmt(p.qty)+'EA</span>';}).join('<br>') || '없음'}</div><div class="stat-ico">🏭</div></div>
     <div class="stat c-purple" style="cursor:pointer" onclick="go('order')"><div class="stat-lbl">총 발주금액 <span style="font-size:9px;opacity:.8">(VAT포함)</span></div><div class="stat-val" style="font-size:15px;text-decoration:underline dotted">${fmtW(Math.round(thisMonthAmt*1.1))}</div><div class="stat-sub" style="line-height:1.8">${(()=>{const vmap={};DB.orders.forEach(o=>{const v=getVendor(o.vendorId);const t=o.rows.reduce((s,r)=>s+r.qty*r.price,0);vmap[v.company||'-']=(vmap[v.company||'-']||0)+t;});return Object.entries(vmap).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,t])=>c.replace('(주)','').replace('㈜','')+' '+fmtW(Math.round(t))).join('<br>');})()||'발주 없음'}</div><div class="stat-ico">💰</div></div>
   `;
 }
 
 function renderDashProdTable() {
   const statusColor = {입고완료:'var(--green-500)',생산중:'var(--sky-400)',생산대기:'var(--amber-500)',지연:'var(--red-500)',QC검사:'var(--purple-500)'};
-  $('dash-prod-table').innerHTML = DB.productions.slice(0,5).map(p => {
+  const dashProdSorted = [...DB.productions].sort((a,b)=>{
+    const o={생산중:0,지연:1,QC검사:2,생산완료:3,입고완료:4};
+    return (o[a.status]??5)-(o[b.status]??5);
+  });
+  $('dash-prod-table').innerHTML = dashProdSorted.slice(0,5).map(p => {
     const item = getItem(p.productId);
     const col = statusColor[p.status] || 'var(--gray-400)';
     const pName = (item && item.name) ? item.name : (p.productName || '-');
@@ -3744,9 +3748,23 @@ function editUser(id) {
   $('u-status').value = u.status || '활성';
   $('u-permission').value = u.permission || 'read';
   $('u-memo').value  = u.memo  || '';
-  // 본인(관리자)은 삭제 버튼 숨김
   $('u-delete-btn').style.display = u.id === 1 ? 'none' : '';
   $('u-delete-btn').onclick = () => { if(confirm(u.name+' 사용자를 삭제합니까?')) { DB.users = DB.users.filter(x=>x.id!==id); saveData(); closeModal('edit-user'); renderUserTable(); updateBadges(); showNotif('사용자가 삭제되었습니다'); } };
+  openModal('edit-user');
+}
+
+// Firestore 사용자 편집 (이름 클릭 시)
+function editFirestoreUser(uid, name, email, role, permission) {
+  // edit-user 모달 재사용
+  editingId['edit-user'] = 'firestore_' + uid;
+  editingId['_firestoreUid'] = uid;
+  if ($('u-name'))       $('u-name').value = name || '';
+  if ($('u-email'))      $('u-email').value = email || '';
+  if ($('u-role'))       $('u-role').value = role || '멤버';
+  if ($('u-status'))     $('u-status').value = '활성';
+  if ($('u-permission')) $('u-permission').value = permission || 'read';
+  if ($('u-memo'))       $('u-memo').value = '';
+  if ($('u-delete-btn')) $('u-delete-btn').style.display = 'none';
   openModal('edit-user');
 }
 
@@ -3754,6 +3772,27 @@ function saveUser() {
   const id = editingId['edit-user'];
   const name = $('u-name').value.trim();
   if (!name) { showNotif('이름을 입력하세요','warning'); return; }
+
+  // Firestore 사용자인 경우
+  if (typeof id === 'string' && id.startsWith('firestore_')) {
+    const uid = editingId['_firestoreUid'];
+    const permission = $('u-permission').value;
+    const role = $('u-role').value;
+    if (window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
+      const userRef = window._firestoreDoc(window._firebaseDb, 'users', uid);
+      window._firestoreSetDoc(userRef, { name, role, permission }, { merge: true })
+        .then(() => {
+          showNotif(name + ' 정보가 수정되었습니다', 'success');
+          closeModal('edit-user');
+          renderUserTableFirestore();
+        }).catch(e => showNotif('저장 실패: ' + e.message, 'warning'));
+    } else {
+      showNotif('Firestore 연결이 필요합니다', 'warning');
+    }
+    return;
+  }
+
+  // 로컬 사용자
   const idx = DB.users.findIndex(u => u.id === id);
   if (idx < 0) return;
   DB.users[idx] = {
@@ -4089,29 +4128,29 @@ function renderDashKanban() {
     const cards = DB._trelloCards;
     const labelColor = {green:'#61bd4f',yellow:'#f2d600',orange:'#ff9f1a',red:'#eb5a46',purple:'#c377e0',blue:'#0079bf',sky:'#00c2e0',lime:'#51e898',pink:'#ff78cb',black:'#344563'};
     board.innerHTML = `
-      <div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;align-items:flex-start">
+      <div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;align-items:flex-start;min-width:0">
         ${lists.map(list => {
           const listCards = cards.filter(c => c.idList === list.id).slice(0, 4);
           return `
-            <div style="flex-shrink:0;width:200px;background:#ebecf0;border-radius:10px;padding:10px">
-              <div style="font-size:12.5px;font-weight:700;color:#172b4d;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
-                <span>${list.name}</span>
-                <span style="background:#0052cc;color:#fff;border-radius:10px;padding:1px 7px;font-size:10.5px">${cards.filter(c=>c.idList===list.id).length}</span>
+            <div style="flex:0 0 calc(${100/Math.min(lists.length,6)}% - 10px);min-width:160px;max-width:220px;background:#ebecf0;border-radius:10px;padding:10px">
+              <div style="font-size:12px;font-weight:700;color:#172b4d;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${list.name}</span>
+                <span style="flex-shrink:0;background:#0052cc;color:#fff;border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px">${cards.filter(c=>c.idList===list.id).length}</span>
               </div>
               ${listCards.map(card=>`
-                <div style="background:#fff;border-radius:6px;padding:8px 10px;margin-bottom:6px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.1)" onclick="window.open('https://trello.com/b/69ce5a3c','_blank')">
-                  ${card.labels && card.labels.length ? `<div style="display:flex;gap:3px;margin-bottom:5px">${card.labels.map(l=>`<span style="height:5px;width:28px;border-radius:3px;background:${labelColor[l.color]||'#ccc'};display:inline-block"></span>`).join('')}</div>` : ''}
-                  <div style="color:#172b4d;font-size:11.5px;font-weight:500;line-height:1.4">${card.name}</div>
-                  ${card.due ? `<div style="color:#6b778c;font-size:10px;margin-top:3px">📅 ${card.due.slice(0,10)}</div>` : ''}
+                <div style="background:#fff;border-radius:6px;padding:7px 9px;margin-bottom:5px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.1)" onclick="window.open('https://trello.com/b/69ce5a3c','_blank')">
+                  ${card.labels && card.labels.length ? `<div style="display:flex;gap:3px;margin-bottom:4px">${card.labels.map(l=>`<span style="height:4px;width:24px;border-radius:2px;background:${labelColor[l.color]||'#ccc'};display:inline-block"></span>`).join('')}</div>` : ''}
+                  <div style="color:#172b4d;font-size:11px;font-weight:500;line-height:1.4">${card.name}</div>
+                  ${card.due ? `<div style="color:#6b778c;font-size:9.5px;margin-top:3px">📅 ${card.due.slice(0,10)}</div>` : ''}
                 </div>`).join('')}
-              ${cards.filter(c=>c.idList===list.id).length > 4 ? `<div style="text-align:center;font-size:10.5px;color:#6b778c;padding:3px;cursor:pointer" onclick="window.open('https://trello.com/b/69ce5a3c','_blank')">+${cards.filter(c=>c.idList===list.id).length-4}개 더...</div>` : ''}
+              ${cards.filter(c=>c.idList===list.id).length > 4 ? `<div style="text-align:center;font-size:10px;color:#6b778c;padding:2px;cursor:pointer" onclick="window.open('https://trello.com/b/69ce5a3c','_blank')">+${cards.filter(c=>c.idList===list.id).length-4}개 더...</div>` : ''}
             </div>`;
         }).join('')}
       </div>`;
     return;
   }
 
-  // Trello 없으면 ERP 칸반
+  // Trello 없으면 안내
   board.innerHTML = `<div style="padding:16px;text-align:center;color:var(--gray-400);font-size:12px">
     📋 <span style="color:var(--sky-600);cursor:pointer" onclick="go('settings')">설정</span>에서 Trello API Key를 입력하고 카드를 불러오세요.
   </div>`;
@@ -4572,7 +4611,7 @@ async function renderUserTableFirestore() {
     const users = await window._loadFirestoreUsers();
     $('user-table').innerHTML = users.map(u => `
       <tr>
-        <td><strong>${u.name||'-'}</strong>${u.isAdmin?' 👑':''}</td>
+        <td><span class="lnk" style="font-weight:600" onclick="editFirestoreUser('${u.uid}','${u.name||''}','${u.email||''}','${u.role||'멤버'}','${u.permission||'read'}')">${u.name||'-'}${u.isAdmin?' 👑':''}</span></td>
         <td>${u.email||'-'}</td>
         <td><span class="badge ${u.isAdmin?'sky':'gray'}">${u.role||'멤버'}</span></td>
         <td>${u.isAdmin ? '<span class=\"badge sky\">✏️ 쓰기</span>' : u.permission==='write' ? '<span class=\"badge sky\">✏️ 쓰기</span>' : '<span class=\"badge gray\">👁️ 보기</span>'}</td>
