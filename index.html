@@ -1447,26 +1447,25 @@ const STORE_KEY = 'reniv_erp_v8';
 
 function saveData() {
   try {
-    // PDF 데이터는 별도 키에 저장 (localStorage 용량 초과 방지)
-    const pdfStore = {};
     const dbToSave = JSON.parse(JSON.stringify(DB));
+    // PDF/stamp 데이터를 별도 키에 저장 (용량 초과 방지)
     dbToSave.orders.forEach((o, i) => {
-      if (o.pdfData) { pdfStore['pdf_' + o.id] = o.pdfData; dbToSave.orders[i].pdfData = null; }
-      if (o.stampData) { pdfStore['stamp_' + o.id] = o.stampData; dbToSave.orders[i].stampData = null; }
-    });
-    // PDF 파일 데이터 별도 저장
-    Object.entries(pdfStore).forEach(([k, v]) => {
-      try { localStorage.setItem('reniv_pdf_' + k, v); } catch(e) { console.warn('PDF 저장 실패(용량 초과):', k); }
+      if (o.pdfData) {
+        try { localStorage.setItem('reniv_pdf_' + o.id, o.pdfData); } catch(e) {}
+        dbToSave.orders[i].pdfData = '__stored__';  // 저장됨 표시
+      }
+      if (o.stampData) {
+        try { localStorage.setItem('reniv_stamp_' + o.id, o.stampData); } catch(e) {}
+        dbToSave.orders[i].stampData = '__stored__';
+      }
     });
     localStorage.setItem(STORE_KEY, JSON.stringify(dbToSave));
   } catch(e) {
-    // 용량 초과 시 PDF 없이 저장
     try {
       const dbMin = JSON.parse(JSON.stringify(DB));
       dbMin.orders.forEach((o, i) => { dbMin.orders[i].pdfData = null; dbMin.orders[i].stampData = null; });
       localStorage.setItem(STORE_KEY, JSON.stringify(dbMin));
-      showNotif('저장 완료 (PDF는 별도 보관됩니다)', 'info');
-    } catch(e2) { console.error('저장 실패:', e2); }
+    } catch(e2) {}
   }
 }
 
@@ -1475,13 +1474,19 @@ function loadData() {
     const s = localStorage.getItem(STORE_KEY);
     if (!s) return null;
     const db = JSON.parse(s);
-    // PDF 데이터 복원
+    // PDF/stamp 데이터 복원
     if (db.orders) {
       db.orders.forEach((o, i) => {
-        const pdf = localStorage.getItem('reniv_pdf_pdf_' + o.id);
-        const stamp = localStorage.getItem('reniv_pdf_stamp_' + o.id);
-        if (pdf) db.orders[i].pdfData = pdf;
-        if (stamp) db.orders[i].stampData = stamp;
+        if (o.pdfData === '__stored__' || !o.pdfData) {
+          const pdf = localStorage.getItem('reniv_pdf_' + o.id);
+          if (pdf) db.orders[i].pdfData = pdf;
+          else db.orders[i].pdfData = null;
+        }
+        if (o.stampData === '__stored__' || !o.stampData) {
+          const stamp = localStorage.getItem('reniv_stamp_' + o.id);
+          if (stamp) db.orders[i].stampData = stamp;
+          else db.orders[i].stampData = null;
+        }
       });
     }
     return db;
@@ -2794,7 +2799,14 @@ function renderOrderTable() {
     }
     return `<span class="badge ${cls}">${icon[s]||'📦'} ${s||'입고 전'}</span>`;
   };
-  $('order-table').innerHTML = DB.orders.map(o => {
+  // 입고완료/완료는 아래로, 나머지는 최신순
+  const sorted = [...DB.orders].sort((a, b) => {
+    const aD = (a.stockStatus === '입고완료' || a.status === '완료') ? 1 : 0;
+    const bD = (b.stockStatus === '입고완료' || b.status === '완료') ? 1 : 0;
+    if (aD !== bD) return aD - bD;
+    return (b.orderDate||'').localeCompare(a.orderDate||'');
+  });
+  $('order-table').innerHTML = sorted.map(o => {
     const v = getVendor(o.vendorId);
     const supplyTotal = o.rows.reduce((s,r)=>s+r.qty*r.price,0);
     const total = Math.round(supplyTotal * 1.1);
