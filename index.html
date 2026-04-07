@@ -724,8 +724,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         </div>
         <div class="card">
           <div class="card-hdr"><span class="card-title">💰 원가 구성</span></div>
-          <div class="card-body">
-            <div class="chart-wrap"><canvas id="chart-bom"></canvas></div>
+          <div class="card-body" style="overflow-y:auto;max-height:600px">
+            <div class="chart-wrap" style="height:180px"><canvas id="chart-bom"></canvas></div>
             <div id="bom-cost-breakdown" style="margin-top:12px"></div>
           </div>
         </div>
@@ -1066,7 +1066,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="fg"><label>발주 수량</label><input class="fi" id="p-qty" type="number" placeholder="0"></div>
         <div class="fg"><label>예상금액(원)</label><input class="fi" id="p-amount" type="number" placeholder="0"></div>
         <div class="fg"><label>업체</label><select class="fs" id="p-vendor"></select></div>
-        <div class="fg"><label>상태</label><select class="fs" id="p-status"><option>생산중</option><option>QC검사</option><option>입고완료</option><option>지연</option></select></div>
+        <div class="fg"><label>상태</label><select class="fs" id="p-status"><option>생산중</option><option>QC검사</option><option>생산완료</option><option>입고완료</option><option>지연</option></select></div>
         <div class="fg"><label>진행률(%)</label><input class="fi" id="p-progress" type="number" min="0" max="100" value="0"></div>
       </div>
       <div class="sec-title">체크 사항</div>
@@ -1617,7 +1617,7 @@ function nextId(key) { return DB._nextId[key]++; }
 
 function statusBadge(s) {
   const map = {
-    '입고완료':'green','생산중':'sky','생산대기':'amber','지연':'red','QC검사':'purple','완료':'green',
+    '입고완료':'green','생산중':'sky','생산완료':'green','생산대기':'amber','지연':'red','QC검사':'purple','완료':'green',
     '확정':'green','검토중':'amber','진행중':'sky','취소':'red','활성':'green','승인대기':'amber',
     '합격':'green','불합격':'red','조건부합격':'amber','보류':'amber','진행중2':'sky',
     '정상':'green','부족':'red','주의':'amber','계획':'gray',
@@ -2223,14 +2223,15 @@ function renderProdTable() {
     `<div class="chip ${s===prodFilter?'active':''}" onclick="prodFilter='${s}';renderProdTable()">${s}(${s==='전체'?DB.productions.length:DB.productions.filter(p=>p.status===s).length})</div>`
   ).join('');
   const filtered = prodFilter==='전체' ? DB.productions : DB.productions.filter(p=>p.status===prodFilter);
-  const statusColor = {입고완료:'var(--green-500)',생산중:'var(--sky-400)',생산대기:'var(--amber-500)',지연:'var(--red-500)',QC검사:'var(--purple-500)'};
+  const statusColor = {입고완료:'var(--green-500)',생산중:'var(--sky-400)',생산완료:'var(--green-400)',생산대기:'var(--amber-500)',지연:'var(--red-500)',QC검사:'var(--purple-500)'};
   $('prod-table').innerHTML = filtered.map(p => {
     const item = getItem(p.productId);
     const vendor = getVendor(p.vendorId);
     const col = statusColor[p.status]||'var(--gray-400)';
     const checkCount = (p.checks||[]).filter(Boolean).length;
+    const displayName = (item && item.name) ? item.name : (p.productName || '-');
     return `<tr>
-      <td class="lnk" onclick="showItemDetail(${p.productId})">${item.name||'-'}</td>
+      <td class="lnk" onclick="showItemDetail(${p.productId})">${displayName}</td>
       <td>${p.orderDate||'-'}</td>
       <td>${p.inDate||'-'}</td>
       <td>${p.payDate||'-'}</td>
@@ -2601,6 +2602,7 @@ function quickStockIn(orderId) {
   if (idx >= 0) DB.orders[idx] = o;
 
   processOrderStockIn(o.rows, o.inDate || today(), o.serial || '');
+  completeRelatedProductions(o.rows, o.serial || '');
   saveData();
   renderOrderTable();
   updateBadges();
@@ -3050,30 +3052,66 @@ function saveOrder() {
   _orderPdfData=null; _orderPdfName=null; _orderStampData=null; _orderStampName=null;
 }
 
-// 발주서 → 생산관리 자동 등록
+// 발주서 저장 → 생산관리 자동 등록 (모든 품목)
 function autoRegisterProduction(rows, orderData) {
+  let addedCount = 0;
   rows.forEach(row => {
-    if (!row.itemId && !row.name) return;
-    // 완제품이나 OEM 품목만 생산관리에 등록
+    if (!row.name || !row.qty) return;
     const item = row.itemId ? DB.items.find(i => i.id === row.itemId) : DB.items.find(i => i.name === row.name);
-    if (!item) return;
-    if (item.type !== '완제품' && item.type !== 'OEM' && item.type !== '반제품') return;
+    const itemName = item ? item.name : row.name;
+    const itemId = item ? item.id : null;
+    // 이미 같은 발주서 serial로 등록된 생산건 중복 방지
+    const alreadyExists = orderData.serial && DB.productions.find(p =>
+      p.note && p.note.includes(orderData.serial) && p.productId === itemId
+    );
+    if (alreadyExists) return;
     const newProd = {
       id: nextId('prod'),
-      productId: item.id,
+      productId: itemId || 0,
+      productName: itemName, // itemId 없을 경우 이름으로 표시
       orderDate: orderData.orderDate || today(),
       inDate: orderData.inDate || '',
       payDate: '',
       qty: row.qty || 0,
-      amount: (row.qty || 0) * (item.price || 0),
+      amount: (row.qty || 0) * (row.price || (item ? item.price : 0)),
       vendorId: orderData.vendorId || null,
-      progress: 0,
+      progress: 10,
       status: '생산중',
       checks: [false, false, false, false, false],
-      note: '발주서 자동등록 ' + (orderData.serial || '')
+      serial: orderData.serial || '',
+      orderId: orderData.id || null,
+      note: '발주서 자동등록' + (orderData.serial ? ' (' + orderData.serial + ')' : '')
     };
     DB.productions.push(newProd);
+    addedCount++;
   });
+  if (addedCount > 0) {
+    showNotif('생산관리에 ' + addedCount + '개 품목이 자동 등록되었습니다', 'success');
+    saveData();
+  }
+}
+
+// 입고완료 시 연결된 생산건 → 생산완료 처리
+function completeRelatedProductions(rows, serial) {
+  if (!serial && !rows.length) return;
+  let completedCount = 0;
+  rows.forEach(row => {
+    const itemId = row.itemId || null;
+    // serial 또는 itemId로 매칭
+    DB.productions.forEach((p, idx) => {
+      if (p.status === '생산완료') return;
+      const matchSerial = serial && p.serial === serial;
+      const matchItem = itemId && p.productId === itemId;
+      if (matchSerial || matchItem) {
+        DB.productions[idx].status = '생산완료';
+        DB.productions[idx].progress = 100;
+        completedCount++;
+      }
+    });
+  });
+  if (completedCount > 0) {
+    showNotif('생산관리 ' + completedCount + '건이 생산완료로 변경되었습니다', 'success');
+  }
 }
 
 // 발주서 입고완료 → 재고 자동 입고 처리
@@ -3147,6 +3185,8 @@ function processOrderStockIn(rows, date, serial) {
   });
   if (addedCount > 0) {
     showNotif('✅ 입고완료! ' + addedCount + '개 품목 재고가 자동 반영되었습니다', 'success');
+    // 연결된 생산건 → 생산완료 처리
+    completeRelatedProductions(rows, serial);
     saveData();
   }
 }
