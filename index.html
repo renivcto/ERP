@@ -1442,16 +1442,48 @@ const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
 
+function saveData() {
+  try {
+    // PDF 데이터는 별도 키에 저장 (localStorage 용량 초과 방지)
+    const pdfStore = {};
+    const dbToSave = JSON.parse(JSON.stringify(DB));
+    dbToSave.orders.forEach((o, i) => {
+      if (o.pdfData) { pdfStore['pdf_' + o.id] = o.pdfData; dbToSave.orders[i].pdfData = null; }
+      if (o.stampData) { pdfStore['stamp_' + o.id] = o.stampData; dbToSave.orders[i].stampData = null; }
+    });
+    // PDF 파일 데이터 별도 저장
+    Object.entries(pdfStore).forEach(([k, v]) => {
+      try { localStorage.setItem('reniv_pdf_' + k, v); } catch(e) { console.warn('PDF 저장 실패(용량 초과):', k); }
+    });
+    localStorage.setItem(STORE_KEY, JSON.stringify(dbToSave));
+  } catch(e) {
+    // 용량 초과 시 PDF 없이 저장
+    try {
+      const dbMin = JSON.parse(JSON.stringify(DB));
+      dbMin.orders.forEach((o, i) => { dbMin.orders[i].pdfData = null; dbMin.orders[i].stampData = null; });
+      localStorage.setItem(STORE_KEY, JSON.stringify(dbMin));
+      showNotif('저장 완료 (PDF는 별도 보관됩니다)', 'info');
+    } catch(e2) { console.error('저장 실패:', e2); }
+  }
+}
+
 function loadData() {
   try {
     const s = localStorage.getItem(STORE_KEY);
-    if (s) return JSON.parse(s);
+    if (!s) return null;
+    const db = JSON.parse(s);
+    // PDF 데이터 복원
+    if (db.orders) {
+      db.orders.forEach((o, i) => {
+        const pdf = localStorage.getItem('reniv_pdf_pdf_' + o.id);
+        const stamp = localStorage.getItem('reniv_pdf_stamp_' + o.id);
+        if (pdf) db.orders[i].pdfData = pdf;
+        if (stamp) db.orders[i].stampData = stamp;
+      });
+    }
+    return db;
   } catch(e) {}
   return null;
-}
-
-function saveData() {
-  localStorage.setItem(STORE_KEY, JSON.stringify(DB));
 }
 
 // Default DB
@@ -1786,7 +1818,7 @@ function renderDashStats() {
   $('dash-stats').innerHTML = `
     <div class="stat c-sky" style="cursor:pointer" onclick="go('vendor')"><div class="stat-lbl">등록 업체</div><div class="stat-val" style="text-decoration:underline dotted">${DB.vendors.length}</div><div class="stat-sub">원자재 ${DB.vendors.filter(v=>v.type==='원자재').length} · 부자재 ${DB.vendors.filter(v=>v.type==='부자재').length} · OEM ${DB.vendors.filter(v=>v.type==='OEM').length}</div><div class="stat-ico">🏢</div></div>
     <div class="stat c-green" style="cursor:pointer" onclick="go('item')"><div class="stat-lbl">등록 품목</div><div class="stat-val" style="text-decoration:underline dotted">${DB.items.length}</div><div class="stat-sub">원자재 ${DB.items.filter(i=>i.type==='원자재').length} · 부자재 ${DB.items.filter(i=>i.type==='부자재').length} · OEM ${DB.items.filter(i=>i.type==='OEM').length} · 완제품 ${DB.items.filter(i=>i.type==='완제품').length}</div><div class="stat-ico">📦</div></div>
-    <div class="stat ${lateProds?'c-red':'c-amber'}" style="cursor:pointer" onclick="go('production')"><div class="stat-lbl">진행중 생산</div><div class="stat-val" style="text-decoration:underline dotted">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').length}</div><div class="stat-sub" style="line-height:2">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').map(p=>{const it=getItem(p.productId);const nm=(it&&it.name?it.name:p.productName||'?').replace('르니브 3중 장벽 20층 ','').replace('르니브 ','').replace(/ \([^)]*\)/g,'');return '<span style="font-weight:500">'+nm+'</span> <span style="color:var(--sky-500);font-size:10px">'+fmt(p.qty)+'EA</span>';}).join('<br>') || '없음'}</div><div class="stat-ico">🏭</div></div>
+    <div class="stat ${lateProds?'c-red':'c-amber'}" style="cursor:pointer" onclick="go('production')"><div class="stat-lbl">진행중 생산</div><div class="stat-val" style="text-decoration:underline dotted">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').length}</div><div class="stat-sub" style="line-height:2">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').map(p=>{const it=getItem(p.productId);const nm=(it&&it.name?it.name:p.productName||'?').replace('르니브 3중 장벽 20층 리뉴 크림 ','').replace('르니브 ','');return '<span style="font-weight:500">'+nm+'</span> <span style="color:var(--sky-500);font-size:10px">'+fmt(p.qty)+'EA</span>';}).join('<br>') || '없음'}</div><div class="stat-ico">🏭</div></div>
     <div class="stat c-purple" style="cursor:pointer" onclick="go('order')"><div class="stat-lbl">총 발주금액 <span style="font-size:9px;opacity:.8">(VAT포함)</span></div><div class="stat-val" style="font-size:15px;text-decoration:underline dotted">${fmtW(Math.round(thisMonthAmt*1.1))}</div><div class="stat-sub" style="line-height:1.8">${(()=>{const vmap={};DB.orders.forEach(o=>{const v=getVendor(o.vendorId);const t=o.rows.reduce((s,r)=>s+r.qty*r.price,0);vmap[v.company||'-']=(vmap[v.company||'-']||0)+t;});return Object.entries(vmap).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,t])=>c.replace('(주)','').replace('㈜','')+' '+fmtW(Math.round(t*1.1))).join('<br>');})()||'발주 없음'}</div><div class="stat-ico">💰</div></div>
   `;
 }
