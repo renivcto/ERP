@@ -900,17 +900,29 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           </div>
         </div>
         <div class="card">
-          <div class="card-hdr"><span class="card-title">🎯 Trello 연동</span></div>
+          <div class="card-hdr"><span class="card-title">🎯 Trello 연동</span><span class="badge sky" style="font-size:10px">보드 ID 설정됨</span></div>
           <div class="card-body">
-            <div class="fg"><label>API Key</label><input class="fi" type="password" placeholder="Trello API Key"></div>
-            <div class="fg"><label>Board ID</label><input class="fi" placeholder="Board ID"></div>
-            <div class="fg"><label>자동 동기화</label>
-              <div class="chk-list" style="margin-top:6px">
-                <label class="chk-item"><input type="checkbox" checked> 워크플로우 → Trello 카드</label>
-                <label class="chk-item"><input type="checkbox"> 생산 일정 → Trello 카드</label>
+            <div style="background:var(--sky-50);border:1px solid var(--sky-200);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--sky-800)">
+              📋 <strong>연결된 보드:</strong> 르니브 Work Flow<br>
+              <span style="font-family:monospace;font-size:10.5px;color:var(--gray-500)">Board ID: 69ce5a3c96127754b5c331df</span>
+            </div>
+            <div class="fg">
+              <label>API Key <span style="color:var(--red-500)">*</span></label>
+              <input class="fi" id="trello-api-key" type="password" placeholder="Trello API Key 입력" value="${DB._trelloKey||''}">
+              <div style="font-size:10.5px;color:var(--gray-400);margin-top:3px">
+                <a href="https://trello.com/app-key" target="_blank" style="color:var(--sky-600)">trello.com/app-key</a>에서 발급 → Power-Up Admin Portal에서 확인
               </div>
             </div>
-            <button class="btn btn-primary" onclick="showNotif('Trello 연동 설정 저장됨','success')">저장</button>
+            <div class="fg">
+              <label>Token <span style="color:var(--red-500)">*</span></label>
+              <input class="fi" id="trello-token" type="password" placeholder="Trello Token 입력" value="${DB._trelloToken||''}">
+              <div style="font-size:10.5px;color:var(--gray-400);margin-top:3px">API Key 발급 후 같은 페이지에서 Token 생성</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-primary" onclick="saveTrelloSettings()">💾 저장</button>
+              <button class="btn btn-outline" onclick="loadTrelloCards()">🔄 Trello 카드 불러오기</button>
+            </div>
+            <div id="trello-status" style="margin-top:8px;font-size:11.5px"></div>
           </div>
         </div>
         <div class="card">
@@ -3878,9 +3890,107 @@ const KANBAN_COLS = ['계획','진행중','검토','완료'];
 const PRIORITY_COLOR = {높음:'red',보통:'sky',낮음:'gray'};
 let dragTask = null;
 
+// ═══════════════════════════════════════════════════════
+// TRELLO 연동
+// ═══════════════════════════════════════════════════════
+const TRELLO_BOARD_ID = '69ce5a3c96127754b5c331df';
+
+function saveTrelloSettings() {
+  const key   = document.getElementById('trello-api-key')?.value.trim();
+  const token = document.getElementById('trello-token')?.value.trim();
+  if (!key || !token) { showNotif('API Key와 Token을 모두 입력하세요','warning'); return; }
+  DB._trelloKey   = key;
+  DB._trelloToken = token;
+  saveData();
+  showNotif('Trello 설정이 저장되었습니다','success');
+  const el = document.getElementById('trello-status');
+  if (el) el.innerHTML = '<span style="color:var(--green-600)">✅ 저장 완료! 워크플로우에서 카드를 불러올 수 있습니다.</span>';
+}
+
+async function loadTrelloCards() {
+  const key   = DB._trelloKey;
+  const token = DB._trelloToken;
+  if (!key || !token) {
+    showNotif('설정 메뉴에서 Trello API Key와 Token을 먼저 입력하세요','warning');
+    go('settings');
+    return;
+  }
+  const statusEl = document.getElementById('trello-status');
+  if (statusEl) statusEl.innerHTML = '⏳ Trello에서 카드를 불러오는 중...';
+  showNotif('Trello 카드 불러오는 중...','info');
+
+  try {
+    // 1. 보드의 리스트 가져오기
+    const listsRes = await fetch(
+      `https://api.trello.com/1/boards/${TRELLO_BOARD_ID}/lists?key=${key}&token=${token}`
+    );
+    if (!listsRes.ok) throw new Error('인증 실패: API Key 또는 Token을 확인하세요');
+    const lists = await listsRes.json();
+
+    // 2. 각 리스트의 카드 가져오기
+    const cardsRes = await fetch(
+      `https://api.trello.com/1/boards/${TRELLO_BOARD_ID}/cards?key=${key}&token=${token}&fields=name,idList,due,labels,desc`
+    );
+    const cards = await cardsRes.json();
+
+    // 3. DB에 저장
+    DB._trelloLists = lists;
+    DB._trelloCards = cards;
+    saveData();
+
+    showNotif(`✅ Trello 카드 ${cards.length}개를 불러왔습니다!`, 'success');
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--green-600)">✅ ${cards.length}개 카드 로드 완료</span>`;
+
+    // 4. 워크플로우 재렌더링
+    renderKanban();
+    renderDashKanban();
+
+  } catch(e) {
+    console.error('Trello error:', e);
+    showNotif('Trello 연결 실패: ' + e.message, 'warning');
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--red-500)">❌ ${e.message}</span>`;
+  }
+}
+
+function renderTrelloCards(containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const lists = DB._trelloLists || [];
+  const cards = DB._trelloCards || [];
+  if (!lists.length || !cards.length) return;
+
+  const labelColor = {green:'#61bd4f',yellow:'#f2d600',orange:'#ff9f1a',red:'#eb5a46',purple:'#c377e0',blue:'#0079bf',sky:'#00c2e0',lime:'#51e898',pink:'#ff78cb',black:'#344563'};
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-top:12px">
+      ${lists.map(list => {
+        const listCards = cards.filter(c => c.idList === list.id).slice(0,4);
+        return `
+          <div style="background:var(--gray-50);border-radius:10px;padding:10px;border:1px solid var(--gray-200)">
+            <div style="font-size:12px;font-weight:600;color:var(--gray-700);margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid var(--sky-400)">${list.name} <span style="color:var(--gray-400);font-weight:400">(${cards.filter(c=>c.idList===list.id).length})</span></div>
+            ${listCards.map(card => `
+              <div style="background:#fff;border-radius:7px;padding:8px 10px;margin-bottom:6px;border:1px solid var(--gray-100);font-size:11.5px">
+                ${card.labels?.length ? `<div style="display:flex;gap:3px;margin-bottom:4px">${card.labels.slice(0,3).map(l=>`<span style="width:28px;height:4px;border-radius:2px;background:${labelColor[l.color]||'#ccc'};display:inline-block"></span>`).join('')}</div>` : ''}
+                <div style="color:var(--gray-700);font-weight:500;line-height:1.4">${card.name}</div>
+                ${card.due ? `<div style="color:var(--gray-400);font-size:10.5px;margin-top:3px">📅 ${card.due.slice(0,10)}</div>` : ''}
+              </div>`).join('')}
+            ${cards.filter(c=>c.idList===list.id).length > 4 ? `<div style="text-align:center;font-size:10.5px;color:var(--gray-400);padding:4px">+${cards.filter(c=>c.idList===list.id).length-4}개 더...</div>` : ''}
+          </div>`;
+      }).join('')}
+    </div>`;
+}
+
 function renderDashKanban() {
-  const board = $('dash-kanban-board');
+  const board = document.getElementById('dash-kanban-board');
   if (!board) return;
+
+  // Trello 카드가 있으면 Trello 표시
+  if (DB._trelloLists && DB._trelloCards && DB._trelloCards.length) {
+    renderTrelloCards('dash-kanban-board');
+    return;
+  }
+
+  // 없으면 ERP 내부 칸반 표시
   board.innerHTML = KANBAN_COLS.map(col => {
     const tasks = DB.tasks.filter(t=>t.status===col);
     const colColor = {계획:'var(--gray-400)',진행중:'var(--sky-500)',검토:'var(--amber-500)',완료:'var(--green-500)'}[col]||'var(--gray-400)';
@@ -3904,7 +4014,54 @@ function renderDashKanban() {
 
 function renderKanban() {
   const board = $('kanban-board');
-  board.innerHTML = KANBAN_COLS.map(col => {
+
+  // Trello 카드 섹션 추가
+  let trelloSection = '';
+  if (DB._trelloLists && DB._trelloCards && DB._trelloCards.length) {
+    const lists = DB._trelloLists;
+    const cards = DB._trelloCards;
+    const labelColor = {green:'#61bd4f',yellow:'#f2d600',orange:'#ff9f1a',red:'#eb5a46',purple:'#c377e0',blue:'#0079bf',sky:'#00c2e0',lime:'#51e898',pink:'#ff78cb',black:'#344563'};
+    trelloSection = `
+      <div style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="font-size:12.5px;font-weight:600;color:var(--gray-700);display:flex;align-items:center;gap:6px">
+            <span style="background:#0052cc;color:#fff;border-radius:5px;padding:2px 8px;font-size:11px">Trello</span>
+            르니브 Work Flow
+            <span style="color:var(--gray-400);font-size:11px;font-weight:400">${cards.length}개 카드</span>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="loadTrelloCards()">🔄 새로고침</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
+          ${lists.map(list => {
+            const listCards = cards.filter(c => c.idList === list.id).slice(0,5);
+            return `
+              <div style="background:var(--gray-50);border-radius:10px;padding:10px;border:1px solid var(--gray-200)">
+                <div style="font-size:12px;font-weight:600;color:var(--gray-700);margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #0052cc">
+                  ${list.name} <span style="color:var(--gray-400);font-weight:400;font-size:10.5px">${cards.filter(c=>c.idList===list.id).length}개</span>
+                </div>
+                ${listCards.map(card=>`
+                  <div style="background:#fff;border-radius:7px;padding:8px 10px;margin-bottom:6px;border:1px solid var(--gray-100);cursor:pointer" onclick="window.open('https://trello.com/c/${card.shortLink||''}','_blank')">
+                    ${card.labels?.length?`<div style="display:flex;gap:3px;margin-bottom:5px">${card.labels.slice(0,4).map(l=>`<span style="height:5px;width:32px;border-radius:3px;background:${labelColor[l.color]||'#ccc'};display:inline-block" title="${l.name||''}"></span>`).join('')}</div>`:''}
+                    <div style="color:var(--gray-700);font-size:11.5px;font-weight:500;line-height:1.4">${card.name}</div>
+                    ${card.due?`<div style="color:var(--gray-400);font-size:10px;margin-top:3px">📅 ${card.due.slice(0,10)}</div>`:''}
+                  </div>`).join('')}
+                ${cards.filter(c=>c.idList===list.id).length>5?`<div style="text-align:center;font-size:10.5px;color:var(--gray-400);padding:2px">+${cards.filter(c=>c.idList===list.id).length-5}개 더</div>`:''}
+              </div>`;
+          }).join('')}
+        </div>
+      </div>
+      <div style="border-top:1px solid var(--gray-200);padding-top:14px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:600;color:var(--gray-600);margin-bottom:8px">📋 ERP 내부 태스크</div>
+      </div>`;
+  } else {
+    trelloSection = `
+      <div style="background:var(--sky-50);border:1px dashed var(--sky-300);border-radius:10px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:12px;color:var(--sky-700)">📋 Trello 카드를 여기에 표시할 수 있습니다. 설정에서 API Key를 입력하세요.</div>
+        <button class="btn btn-outline btn-sm" onclick="go('settings')">⚙️ 설정</button>
+      </div>`;
+  }
+
+  board.innerHTML = trelloSection + `<div class="kanban" style="margin:0">` + KANBAN_COLS.map(col => {
     const tasks = DB.tasks.filter(t=>t.status===col);
     return `
       <div class="kb-col" ondragover="event.preventDefault()" ondrop="dropTask(event,'${col}')">
@@ -3925,7 +4082,7 @@ function renderKanban() {
         `).join('')}
       </div>
     `;
-  }).join('');
+  }).join('') + `</div>`;
 }
 
 function dropTask(e, col) {
