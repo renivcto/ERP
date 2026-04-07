@@ -676,7 +676,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="card">
         <div class="card-body p0 tbl-wrap">
           <table>
-            <thead><tr><th>코드</th><th>품목명</th><th>분류</th><th>용량</th><th>단가</th><th style="text-align:center">재고수량</th><th>업체</th><th>관리</th></tr></thead>
+            <thead><tr><th>코드</th><th>품목명</th><th style="text-align:center">이미지</th><th>분류</th><th>용량</th><th>단가</th><th style="text-align:center">재고수량</th><th>업체</th><th>관리</th></tr></thead>
             <tbody id="item-table"></tbody>
           </table>
         </div>
@@ -1017,7 +1017,13 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="fg"><label>업체</label><select class="fs" id="i-vendor"></select></div>
         <div class="fg"><label>재질</label><input class="fi" id="i-material" placeholder="유리, PP 등"></div>
         <div class="fg full"><label>비고</label><textarea class="fta" id="i-note"></textarea></div>
-        <div class="fg full"><label>이미지</label><input type="file" accept="image/*" id="i-img"></div>
+        <div class="fg full">
+          <label>이미지</label>
+          <div style="display:flex;align-items:center;gap:10px">
+            <input type="file" accept="image/*" id="i-img" onchange="previewItemImg(this)">
+            <div id="i-img-preview" style="width:60px;height:60px;border:1px dashed var(--gray-300);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:22px;overflow:hidden;background:var(--gray-50);flex-shrink:0">📷</div>
+          </div>
+        </div>
       </div>
     </div>
     <div class="modal-ft" style="justify-content:space-between">
@@ -1208,7 +1214,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="sec-title">발주 품목</div>
       <div class="tbl-wrap" style="margin-bottom:8px">
         <table>
-          <thead><tr><th>품목코드</th><th>품목명</th><th>이미지</th><th>수량</th><th>단가(원)</th><th>소계</th><th></th></tr></thead>
+          <thead><tr><th colspan="2">품목 선택 / 직접입력</th><th style="text-align:center">이미지</th><th style="text-align:center">수량</th><th style="text-align:right">단가(원)</th><th style="text-align:right">소계</th><th></th></tr></thead>
           <tbody id="order-modal-rows"></tbody>
         </table>
       </div>
@@ -1975,9 +1981,13 @@ function renderItemTable() {
   const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray'})[t]||'gray';
   $('item-table').innerHTML = filtered.map(i => {
     const v = getVendor(i.vendorId);
+    const imgHtml = i.image
+      ? `<img src="${i.image}" style="width:36px;height:36px;object-fit:cover;border-radius:5px;border:1px solid var(--gray-200)">`
+      : `<span style="color:var(--gray-300);font-size:16px">📷</span>`;
     return `<tr>
-      <td style="font-family:monospace;font-size:11px">${i.code}</td>
+      <td style="font-family:monospace;font-size:12.5px;font-weight:500">${i.code}</td>
       <td class="lnk" onclick="showItemDetail(${i.id})">${i.name}</td>
+      <td style="text-align:center">${imgHtml}</td>
       <td><span class="badge ${typeBadge(i.type)}">${i.type}</span></td>
       <td>${i.spec||'-'}</td>
       <td>${fmtW(i.price)}</td>
@@ -1987,7 +1997,7 @@ function renderItemTable() {
         <button class="btn btn-outline btn-xs" onclick="editItem(${i.id})">수정</button>
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="8" class="empty">등록된 품목이 없습니다</td></tr>';
+  }).join('') || '<tr><td colspan="9" class="empty">등록된 품목이 없습니다</td></tr>';
 }
 
 function populateItemVendorSelect() {
@@ -2012,26 +2022,47 @@ function saveItem() {
   if (!price) { showNotif('단가를 입력하세요','warning'); return; }
   const id = editingId['add-item'];
   const existingItem = id ? DB.items.find(i=>i.id===id) : null;
+  const imgFile = $('i-img');
   const data = {
     type:$('i-type').value, code:$('i-code').value, name,
     spec:$('i-spec').value, price,
-    stock: existingItem ? existingItem.stock : 0, // 재고수량은 재고관리에서만 수정
+    stock: existingItem ? existingItem.stock : 0,
     minStock: existingItem ? existingItem.minStock : 0,
     maxStock:parseFloat($('i-max').value)||0,
     vendorId:parseInt($('i-vendor').value)||null, material:$('i-material').value,
-    note:$('i-note').value
+    note:$('i-note').value,
+    image: existingItem ? (existingItem.image||'') : ''
   };
-  if (id) {
-    const idx = DB.items.findIndex(i=>i.id===id);
-    if (idx>=0) DB.items[idx] = {...DB.items[idx], ...data};
-    showNotif('품목이 수정되었습니다','success');
+  // 이미지 처리
+  const saveAndClose = () => {
+    if (id) {
+      const idx = DB.items.findIndex(i=>i.id===id);
+      if (idx>=0) DB.items[idx] = {...DB.items[idx], ...data};
+      showNotif('품목이 수정되었습니다','success');
+    } else {
+      DB.items.push({id:nextId('item'), lot:'', expiry:'', ...data});
+      showNotif('품목이 등록되었습니다','success');
+    }
+    saveData(); closeModal('add-item'); renderItemTable(); updateBadges();
+  };
+  if (imgFile && imgFile.files && imgFile.files[0]) {
+    const reader = new FileReader();
+    reader.onload = e => { data.image = e.target.result; saveAndClose(); };
+    reader.readAsDataURL(imgFile.files[0]);
   } else {
-    DB.items.push({id:nextId('item'), lot:'', expiry:'', ...data});
-    showNotif('품목이 등록되었습니다','success');
+    saveAndClose();
   }
-  saveData(); closeModal('add-item'); renderItemTable();
-  // Update badges
-  updateBadges();
+}
+
+function previewItemImg(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const div = $('i-img-preview');
+    if (div) div.innerHTML = `<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover;border-radius:6px">`;
+  };
+  reader.readAsDataURL(file);
 }
 
 function editItem(id) {
@@ -2054,7 +2085,18 @@ function editItem(id) {
   if (delBtn) delBtn.style.display = '';
   openModal('add-item');
   // openModal 이후 vendor 값 재설정 (드롭다운 재생성 방지용)
-  setTimeout(() => { if ($('i-vendor')) $('i-vendor').value = i.vendorId || ''; }, 10);
+  setTimeout(() => {
+    if ($('i-vendor')) $('i-vendor').value = i.vendorId || '';
+    // 기존 이미지 미리보기
+    const prev = $('i-img-preview');
+    if (prev) {
+      if (i.image) {
+        prev.innerHTML = `<img src="${i.image}" style="width:100%;height:100%;object-fit:cover;border-radius:6px">`;
+      } else {
+        prev.innerHTML = '📷';
+      }
+    }
+  }, 10);
 }
 
 function deleteItem(id) {
@@ -2564,7 +2606,7 @@ function exportStockReport() {
 // QUOTE
 // ═══════════════════════════════════════════════════════
 function populateVendorSelect(selId) {
-  $(selId).innerHTML = DB.vendors.map(v=>`<option value="${v.id}">${v.company}</option>`).join('');
+  $(selId).innerHTML = '<option value="">선택하세요</option>' + DB.vendors.map(v=>`<option value="${v.id}">${v.company}</option>`).join('');
 }
 
 function renderQuoteTable() {
@@ -2789,6 +2831,14 @@ function fillOrderRowFromItem(sel) {
   tr.querySelector('.row-price').value = item.price || 0;
   // itemId 저장 (재고 연동용)
   sel.dataset.itemId = itemId;
+  // 품목관리 이미지 자동 불러오기
+  if (item.image) {
+    const rowId = tr.querySelector('[id^="row-img-"]') ? tr.querySelector('[id^="row-img-"]').id : null;
+    if (rowId) {
+      const div = document.getElementById(rowId);
+      if (div) { div.innerHTML = `<img src="${item.image}" style="width:100%;height:100%;object-fit:cover;border-radius:4px">`; div.dataset.img = item.image; }
+    }
+  }
   calcOrderTotal();
 }
 
