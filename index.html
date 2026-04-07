@@ -803,7 +803,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="card">
         <div class="card-body p0 tbl-wrap">
           <table>
-            <thead><tr><th>발주번호</th><th>업체명</th><th>품목</th><th>발주일</th><th>입고예정</th><th>금액</th><th>PDF</th><th>상태</th><th>관리</th></tr></thead>
+            <thead><tr><th>발주번호</th><th>업체명</th><th>품목</th><th>발주일</th><th>납기일</th><th>금액</th><th>원본</th><th>날인본</th><th>상태</th><th>관리</th></tr></thead>
             <tbody id="order-table"></tbody>
           </table>
         </div>
@@ -1156,43 +1156,85 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
   <div class="modal wide">
     <div class="modal-hdr"><span class="modal-ttl">📝 발주서 작성/수정</span><button class="modal-x" onclick="closeModal('add-order')">✕</button></div>
     <div class="modal-body">
+
+      <!-- AI PDF 자동 입력 영역 -->
+      <div style="background:linear-gradient(135deg,var(--sky-50),#f0fdf4);border:1px solid var(--sky-200);border-radius:10px;padding:14px 16px;margin-bottom:16px">
+        <div style="font-size:12.5px;font-weight:600;color:var(--sky-800);margin-bottom:8px;display:flex;align-items:center;gap:6px">
+          ✨ AI 발주서 자동 입력
+          <span style="font-size:10px;font-weight:400;color:var(--sky-600)">PDF를 업로드하면 데이터를 자동으로 인식합니다</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="file" id="o-ai-pdf" accept=".pdf,.jpg,.jpeg,.png" style="flex:1;font-size:12px" onchange="parseOrderPDF(this)">
+          <div id="o-ai-status" style="font-size:11px;color:var(--gray-400)">파일을 선택하세요</div>
+        </div>
+        <div id="o-ai-result" style="display:none;margin-top:10px;padding:10px;background:white;border-radius:7px;border:1px solid var(--green-400);font-size:12px;color:var(--green-700)"></div>
+      </div>
+
       <div class="fg2">
         <div class="fg"><label>업체명<span class="req">*</span></label><select class="fs" id="o-vendor" onchange="fillOrderVendor()"></select></div>
         <div class="fg"><label>발주일<span class="req">*</span></label><input class="fi" id="o-date" type="date"></div>
-        <div class="fg"><label>입고예정일</label><input class="fi" id="o-in-date" type="date"></div>
+        <div class="fg"><label>납기일(입고예정)</label><input class="fi" id="o-in-date" type="date"></div>
         <div class="fg"><label>납품 주소</label><input class="fi" id="o-addr" placeholder="납품받을 주소"></div>
+        <div class="fg"><label>일련번호</label><input class="fi" id="o-serial" placeholder="예: 20260331-1"></div>
+        <div class="fg"><label>상태</label>
+          <select class="fs" id="o-status">
+            <option>진행중</option><option>완료</option><option>취소</option><option>지연</option>
+          </select>
+        </div>
       </div>
+
       <div class="sec-title">발주 품목</div>
       <div class="tbl-wrap" style="margin-bottom:8px">
         <table>
-          <thead><tr><th>품목명</th><th>수량</th><th>단가(원)</th><th>소계</th><th></th></tr></thead>
+          <thead><tr><th>품목코드</th><th>품목명</th><th>수량</th><th>단가(원)</th><th>소계</th><th></th></tr></thead>
           <tbody id="order-modal-rows"></tbody>
         </table>
       </div>
       <button class="btn btn-outline btn-sm" onclick="addOrderRow()">+ 품목 추가</button>
-      <div style="margin-top:14px;text-align:right">
+      <div style="margin-top:14px;padding:10px 14px;background:var(--gray-50);border-radius:7px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:12px;color:var(--gray-500)">VAT 별도</span>
         <strong style="font-size:14px">합계: <span id="order-total" style="color:var(--sky-700)">₩0</span></strong>
       </div>
       <div class="fg" style="margin-top:12px"><label>특기사항</label><textarea class="fta" id="o-note"></textarea></div>
-      <div class="fg" style="margin-top:4px">
-        <label>📎 발주서 PDF 첨부</label>
-        <input type="file" id="o-pdf" accept=".pdf,.jpg,.jpeg,.png" onchange="handleOrderFile(this)">
-        <div id="o-pdf-preview" style="margin-top:8px;display:none">
-          <div style="display:flex;align-items:center;gap:8px;background:var(--sky-50);border:1px solid var(--sky-200);border-radius:7px;padding:8px 12px;font-size:12px;color:var(--sky-700)">
-            <span style="font-size:16px">📄</span>
-            <span id="o-pdf-name" style="flex:1"></span>
-            <button class="btn btn-outline btn-xs" onclick="clearOrderFile()">✕ 제거</button>
+
+      <!-- 발주서 원본 PDF -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
+        <div class="fg">
+          <label>📎 발주서 원본 PDF</label>
+          <input type="file" id="o-pdf" accept=".pdf,.jpg,.jpeg,.png" onchange="handleOrderFile(this,'origin')">
+          <div id="o-pdf-preview" style="margin-top:8px;display:none">
+            <div style="display:flex;align-items:center;gap:8px;background:var(--sky-50);border:1px solid var(--sky-200);border-radius:7px;padding:8px 12px;font-size:12px;color:var(--sky-700)">
+              <span>📄</span><span id="o-pdf-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+              <button class="btn btn-outline btn-xs" onclick="clearOrderFile('origin')">✕</button>
+            </div>
+          </div>
+          <div id="o-pdf-existing" style="margin-top:8px;display:none">
+            <div style="display:flex;align-items:center;gap:8px;background:var(--green-50);border:1px solid var(--green-400);border-radius:7px;padding:8px 12px;font-size:12px;color:var(--green-700)">
+              <span>📄</span><span id="o-pdf-existing-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+              <button class="btn btn-outline btn-xs" onclick="viewOrderFileDirect('origin')">보기</button>
+              <button class="btn btn-outline btn-xs" onclick="clearOrderFile('origin')">변경</button>
+            </div>
           </div>
         </div>
-        <div id="o-pdf-existing" style="margin-top:8px;display:none">
-          <div style="display:flex;align-items:center;gap:8px;background:var(--green-50);border:1px solid var(--green-400);border-radius:7px;padding:8px 12px;font-size:12px;color:var(--green-700)">
-            <span style="font-size:16px">📄</span>
-            <span id="o-pdf-existing-name" style="flex:1"></span>
-            <button class="btn btn-outline btn-xs" onclick="viewOrderPDF()">보기</button>
-            <button class="btn btn-outline btn-xs" onclick="clearOrderFile()">변경</button>
+        <div class="fg">
+          <label>🔴 도장 날인본 PDF</label>
+          <input type="file" id="o-stamp-pdf" accept=".pdf,.jpg,.jpeg,.png" onchange="handleOrderFile(this,'stamp')">
+          <div id="o-stamp-preview" style="margin-top:8px;display:none">
+            <div style="display:flex;align-items:center;gap:8px;background:var(--red-50);border:1px solid var(--red-400);border-radius:7px;padding:8px 12px;font-size:12px;color:var(--red-700)">
+              <span>🔴</span><span id="o-stamp-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+              <button class="btn btn-outline btn-xs" onclick="clearOrderFile('stamp')">✕</button>
+            </div>
+          </div>
+          <div id="o-stamp-existing" style="margin-top:8px;display:none">
+            <div style="display:flex;align-items:center;gap:8px;background:var(--red-50);border:1px solid var(--red-400);border-radius:7px;padding:8px 12px;font-size:12px;color:var(--red-700)">
+              <span>🔴</span><span id="o-stamp-existing-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+              <button class="btn btn-outline btn-xs" onclick="viewOrderFileDirect('stamp')">보기</button>
+              <button class="btn btn-outline btn-xs" onclick="clearOrderFile('stamp')">변경</button>
+            </div>
           </div>
         </div>
       </div>
+
     </div>
     <div class="modal-ft">
       <button class="btn btn-outline" onclick="closeModal('add-order')">취소</button>
@@ -2376,16 +2418,20 @@ function renderOrderTable() {
     const total = o.rows.reduce((s,r)=>s+r.qty*r.price,0);
     const itemList = o.rows.map(r=>r.name).slice(0,2).join(', ') + (o.rows.length>2?` 외 ${o.rows.length-2}건`:'');
     const pdfBadge = o.pdfName
-      ? `<span class="badge green" style="cursor:pointer;font-size:10px" onclick="viewOrderPDFById(${o.id})" title="${o.pdfName}">📄 PDF</span>`
-      : `<span class="badge gray" style="font-size:10px">PDF 없음</span>`;
+      ? `<span class="badge green" style="cursor:pointer;font-size:10px" onclick="viewOrderPDFById(${o.id},'origin')" title="${o.pdfName}">📄 보기</span>`
+      : `<span class="badge gray" style="font-size:10px">없음</span>`;
+    const stampBadge = o.stampName
+      ? `<span class="badge red" style="cursor:pointer;font-size:10px" onclick="viewOrderPDFById(${o.id},'stamp')" title="${o.stampName}">🔴 보기</span>`
+      : `<span class="badge gray" style="font-size:10px">없음</span>`;
     return `<tr>
-      <td style="font-family:monospace">PO-2025-${String(o.id).padStart(3,'0')}</td>
+      <td style="font-family:monospace;font-size:11px">${o.serial||'PO-'+String(o.id).padStart(3,'0')}</td>
       <td class="lnk" onclick="viewVendor(${o.vendorId})">${v.company||'-'}</td>
-      <td>${itemList}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${itemList}">${itemList}</td>
       <td>${o.orderDate||'-'}</td>
       <td>${o.inDate||'-'}</td>
       <td>${fmtW(total)}</td>
       <td>${pdfBadge}</td>
+      <td>${stampBadge}</td>
       <td>${statusBadge(o.status)}</td>
       <td style="display:flex;gap:4px">
         <button class="btn btn-outline btn-xs" onclick="previewOrderById(${o.id})">보기</button>
@@ -2393,7 +2439,7 @@ function renderOrderTable() {
         <button class="btn btn-danger btn-xs" onclick="deleteOrder(${o.id})">삭제</button>
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="9" class="empty">발주서가 없습니다</td></tr>';
+  }).join('') || '<tr><td colspan="10" class="empty">발주서가 없습니다</td></tr>';
 }
 
 function ensureOrderRows() {
@@ -2403,7 +2449,13 @@ function ensureOrderRows() {
 function addOrderRow() {
   const tbody = $('order-modal-rows');
   const tr = document.createElement('tr');
-  tr.innerHTML = `<td><input class="fi" placeholder="품목명" style="min-width:140px" oninput="calcOrderTotal()"></td><td><input class="fi" type="number" value="1" style="width:70px" oninput="calcOrderTotal()"></td><td><input class="fi" type="number" value="0" style="width:100px" oninput="calcOrderTotal()"></td><td class="row-subtotal">₩0</td><td><button class="btn btn-danger btn-xs" onclick="this.closest('tr').remove();calcOrderTotal()">✕</button></td>`;
+  tr.innerHTML = `
+    <td><input class="fi" placeholder="O-3X-01" style="width:90px;font-family:monospace;font-size:11px" oninput="calcOrderTotal()"></td>
+    <td><input class="fi" placeholder="품목명" style="min-width:160px" oninput="calcOrderTotal()"></td>
+    <td><input class="fi" type="number" value="0" style="width:70px" oninput="calcOrderTotal()"></td>
+    <td><input class="fi" type="number" value="0" style="width:100px" oninput="calcOrderTotal()"></td>
+    <td class="row-subtotal" style="white-space:nowrap">₩0</td>
+    <td><button class="btn btn-danger btn-xs" onclick="this.closest('tr').remove();calcOrderTotal()">✕</button></td>`;
   tbody.appendChild(tr);
 }
 
@@ -2411,8 +2463,8 @@ function calcOrderTotal() {
   let total = 0;
   $('order-modal-rows').querySelectorAll('tr').forEach(tr => {
     const inputs = tr.querySelectorAll('input');
-    if (inputs.length >= 3) {
-      const sub = (parseFloat(inputs[1].value)||0)*(parseFloat(inputs[2].value)||0);
+    if (inputs.length >= 4) {
+      const sub = (parseFloat(inputs[2].value)||0) * (parseFloat(inputs[3].value)||0);
       total += sub;
       const sc = tr.querySelector('.row-subtotal');
       if (sc) sc.textContent = fmtW(sub);
@@ -2427,47 +2479,187 @@ function fillOrderVendor() {
 }
 
 // ── PDF 파일 처리 ──────────────────────────────────────
-let _orderPdfData = null;
+let _orderPdfData = null;   // 원본
 let _orderPdfName = null;
+let _orderStampData = null; // 도장 날인본
+let _orderStampName = null;
 
-function handleOrderFile(input) {
+function handleOrderFile(input, type) {
   const file = input.files[0];
   if (!file) return;
-  if (file.size > 5 * 1024 * 1024) { showNotif('파일 크기는 5MB 이하여야 합니다', 'warning'); return; }
+  if (file.size > 10 * 1024 * 1024) { showNotif('파일 크기는 10MB 이하여야 합니다','warning'); return; }
   const reader = new FileReader();
   reader.onload = e => {
-    _orderPdfData = e.target.result;
-    _orderPdfName = file.name;
-    $('o-pdf-name').textContent = file.name;
-    $('o-pdf-preview').style.display = 'block';
-    $('o-pdf-existing').style.display = 'none';
+    if (type === 'stamp') {
+      _orderStampData = e.target.result;
+      _orderStampName = file.name;
+      $('o-stamp-name').textContent = file.name;
+      $('o-stamp-preview').style.display = 'block';
+      $('o-stamp-existing').style.display = 'none';
+      showNotif('도장 날인본이 첨부되었습니다','success');
+    } else {
+      _orderPdfData = e.target.result;
+      _orderPdfName = file.name;
+      $('o-pdf-name').textContent = file.name;
+      $('o-pdf-preview').style.display = 'block';
+      $('o-pdf-existing').style.display = 'none';
+    }
   };
   reader.readAsDataURL(file);
 }
 
-function clearOrderFile() {
-  _orderPdfData = null;
-  _orderPdfName = null;
-  $('o-pdf').value = '';
-  $('o-pdf-preview').style.display = 'none';
-  $('o-pdf-existing').style.display = 'none';
-}
-
-function viewOrderPDF() {
-  if (_orderPdfData) {
-    const w = window.open();
-    w.document.write(`<iframe src="${_orderPdfData}" style="width:100%;height:100vh;border:none"></iframe>`);
+function clearOrderFile(type) {
+  if (type === 'stamp') {
+    _orderStampData = null; _orderStampName = null;
+    $('o-stamp-pdf').value = '';
+    $('o-stamp-preview').style.display = 'none';
+    $('o-stamp-existing').style.display = 'none';
+  } else {
+    _orderPdfData = null; _orderPdfName = null;
+    $('o-pdf').value = '';
+    $('o-pdf-preview').style.display = 'none';
+    $('o-pdf-existing').style.display = 'none';
   }
 }
 
-function viewOrderPDFById(id) {
+function viewOrderFileDirect(type) {
+  const data = type === 'stamp' ? _orderStampData : _orderPdfData;
+  if (!data) return;
+  const w = window.open();
+  w.document.write(`<iframe src="${data}" style="width:100%;height:100vh;border:none"></iframe>`);
+}
+
+function viewOrderPDF() { viewOrderFileDirect('origin'); }
+
+function viewOrderPDFById(id, type) {
   const o = DB.orders.find(x => x.id === id);
-  if (!o || !o.pdfData) {
-    showNotif('저장된 PDF 파일이 없습니다. 수정에서 파일을 첨부해주세요', 'warning');
+  if (!o) return;
+  const data = type === 'stamp' ? o.stampData : o.pdfData;
+  if (!data) {
+    showNotif(type === 'stamp' ? '도장 날인본이 없습니다' : '원본 PDF가 없습니다','warning');
     return;
   }
   const w = window.open();
-  w.document.write(`<iframe src="${o.pdfData}" style="width:100%;height:100vh;border:none"></iframe>`);
+  w.document.write(`<iframe src="${data}" style="width:100%;height:100vh;border:none"></iframe>`);
+}
+
+// ── AI PDF 자동 파싱 ──────────────────────────────────
+async function parseOrderPDF(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  $('o-ai-status').textContent = '⏳ AI가 발주서를 분석 중...';
+  $('o-ai-status').style.color = 'var(--sky-600)';
+  $('o-ai-result').style.display = 'none';
+
+  // 파일을 base64로 변환
+  const reader = new FileReader();
+  reader.onload = async e => {
+    const base64Data = e.target.result.split(',')[1];
+    const mediaType = file.type || 'application/pdf';
+
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          messages: [{
+            role: 'user',
+            content: [
+              {
+                type: mediaType.includes('pdf') ? 'document' : 'image',
+                source: { type: 'base64', media_type: mediaType, data: base64Data }
+              },
+              {
+                type: 'text',
+                text: `이 발주서 문서에서 다음 정보를 추출해서 JSON으로만 응답해줘. 다른 텍스트 없이 JSON만:
+{
+  "vendor": "수신 업체명",
+  "serial": "일련번호",
+  "orderDate": "발주일 YYYY-MM-DD 형식 (없으면 오늘날짜)",
+  "inDate": "납기일자 YYYY-MM-DD 형식",
+  "addr": "입고처 주소",
+  "note": "특기사항",
+  "rows": [
+    {"code": "품목코드", "name": "품목명", "qty": 수량숫자, "price": 단가숫자}
+  ]
+}`
+              }
+            ]
+          }]
+        })
+      });
+      const data = await res.json();
+      const text = data.content?.[0]?.text || '';
+
+      // JSON 파싱
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('파싱 실패');
+      const parsed = JSON.parse(jsonMatch[0]);
+
+      // 폼에 자동 입력
+      applyParsedOrder(parsed, e.target.result, file.name);
+
+    } catch(err) {
+      $('o-ai-status').textContent = '❌ 분석 실패 — 수동으로 입력해주세요';
+      $('o-ai-status').style.color = 'var(--red-500)';
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+function applyParsedOrder(parsed, fileData, fileName) {
+  // 업체명 매칭
+  if (parsed.vendor) {
+    const matched = DB.vendors.find(v =>
+      v.company.includes(parsed.vendor) || parsed.vendor.includes(v.company.replace('(주)','').replace('㈜','').trim())
+    );
+    if (matched) $('o-vendor').value = matched.id;
+  }
+
+  // 날짜
+  if (parsed.orderDate) $('o-date').value = parsed.orderDate;
+  if (parsed.inDate) $('o-in-date').value = parsed.inDate;
+  if (parsed.addr) $('o-addr').value = parsed.addr;
+  if (parsed.serial) $('o-serial').value = parsed.serial;
+  if (parsed.note) $('o-note').value = parsed.note;
+
+  // 품목 행 자동 입력
+  if (parsed.rows && parsed.rows.length > 0) {
+    $('order-modal-rows').innerHTML = '';
+    parsed.rows.forEach(r => {
+      addOrderRow();
+      const rows = $('order-modal-rows').querySelectorAll('tr');
+      const last = rows[rows.length - 1];
+      const inputs = last.querySelectorAll('input');
+      if (inputs.length >= 4) {
+        inputs[0].value = r.code || '';     // 품목코드
+        inputs[1].value = r.name || '';     // 품목명
+        inputs[2].value = r.qty || 0;       // 수량
+        inputs[3].value = r.price || 0;     // 단가
+      }
+    });
+    calcOrderTotal();
+  }
+
+  // 원본 PDF 자동 저장
+  _orderPdfData = fileData;
+  _orderPdfName = fileName;
+  $('o-pdf-name').textContent = fileName;
+  $('o-pdf-preview').style.display = 'block';
+
+  // 결과 표시
+  const total = (parsed.rows||[]).reduce((s,r)=>s+(r.qty||0)*(r.price||0),0);
+  $('o-ai-result').innerHTML = `✅ <strong>자동 입력 완료!</strong> ${parsed.vendor||''} · ${(parsed.rows||[]).length}개 품목 · 합계 ${fmtW(total)}`;
+  $('o-ai-result').style.display = 'block';
+  $('o-ai-status').textContent = '✅ 분석 완료';
+  $('o-ai-status').style.color = 'var(--green-600)';
+  showNotif('발주서 데이터 자동 입력 완료!','success');
 }
 
 function saveOrder() {
@@ -2476,26 +2668,32 @@ function saveOrder() {
   const rows = [];
   $('order-modal-rows').querySelectorAll('tr').forEach(tr => {
     const inputs = tr.querySelectorAll('input');
-    if (inputs.length >= 3 && inputs[0].value.trim()) rows.push({name:inputs[0].value, qty:parseFloat(inputs[1].value)||0, price:parseFloat(inputs[2].value)||0});
+    if (inputs.length >= 4 && inputs[1].value.trim()) {
+      rows.push({code:inputs[0].value, name:inputs[1].value, qty:parseFloat(inputs[2].value)||0, price:parseFloat(inputs[3].value)||0});
+    }
   });
   if (!rows.length) { showNotif('품목을 추가하세요','warning'); return; }
   const id = editingId['add-order'];
+  const existing = id ? (DB.orders.find(o=>o.id===id)||{}) : {};
   const data = {
     vendorId, orderDate:$('o-date').value, inDate:$('o-in-date').value,
-    addr:$('o-addr').value, rows, note:$('o-note').value, status:'진행중',
-    pdfName: _orderPdfName || (id ? (DB.orders.find(o=>o.id===id)||{}).pdfName||'' : ''),
-    pdfData: _orderPdfData || (id ? (DB.orders.find(o=>o.id===id)||{}).pdfData||null : null),
+    addr:$('o-addr').value, serial:$('o-serial').value,
+    rows, note:$('o-note').value, status:$('o-status').value,
+    pdfName:  _orderPdfName  || existing.pdfName  || '',
+    pdfData:  _orderPdfData  || existing.pdfData  || null,
+    stampName:_orderStampName|| existing.stampName|| '',
+    stampData:_orderStampData|| existing.stampData|| null,
   };
   if (id) {
     const idx = DB.orders.findIndex(o=>o.id===id);
-    if (idx>=0) DB.orders[idx] = {...DB.orders[idx], ...data};
+    if (idx>=0) DB.orders[idx] = {...existing, ...data};
     showNotif('발주서가 수정되었습니다','success');
   } else {
     DB.orders.push({id:nextId('order'), ...data});
     showNotif('발주서가 저장되었습니다','success');
   }
   saveData(); closeModal('add-order'); renderOrderTable();
-  clearOrderFile();
+  _orderPdfData=null; _orderPdfName=null; _orderStampData=null; _orderStampName=null;
 }
 
 function editOrder(id) {
@@ -2503,26 +2701,32 @@ function editOrder(id) {
   if (!o) return;
   editingId['add-order'] = id;
   populateVendorSelect('o-vendor');
-  $('o-vendor').value=o.vendorId; $('o-date').value=o.orderDate||'';
-  $('o-in-date').value=o.inDate||''; $('o-addr').value=o.addr||''; $('o-note').value=o.note||'';
+  $('o-vendor').value=o.vendorId||''; $('o-date').value=o.orderDate||'';
+  $('o-in-date').value=o.inDate||''; $('o-addr').value=o.addr||'';
+  $('o-note').value=o.note||''; $('o-serial').value=o.serial||'';
+  $('o-status').value=o.status||'진행중';
   $('order-modal-rows').innerHTML='';
   o.rows.forEach(r => {
     addOrderRow();
     const rows = $('order-modal-rows').querySelectorAll('tr');
     const last = rows[rows.length-1];
     const inputs = last.querySelectorAll('input');
-    inputs[0].value=r.name; inputs[1].value=r.qty; inputs[2].value=r.price;
+    if (inputs.length >= 4) {
+      inputs[0].value=r.code||''; inputs[1].value=r.name||'';
+      inputs[2].value=r.qty||0;   inputs[3].value=r.price||0;
+    }
   });
   calcOrderTotal();
-  // PDF 기존 파일 표시
-  _orderPdfData = null; _orderPdfName = null;
-  $('o-pdf-preview').style.display = 'none';
-  if (o.pdfName) {
-    $('o-pdf-existing-name').textContent = o.pdfName;
-    $('o-pdf-existing').style.display = 'block';
-  } else {
-    $('o-pdf-existing').style.display = 'none';
-  }
+  _orderPdfData=null; _orderPdfName=null;
+  $('o-pdf-preview').style.display='none';
+  if (o.pdfName) { $('o-pdf-existing-name').textContent=o.pdfName; $('o-pdf-existing').style.display='block'; }
+  else { $('o-pdf-existing').style.display='none'; }
+  _orderStampData=null; _orderStampName=null;
+  $('o-stamp-preview').style.display='none';
+  if (o.stampName) { $('o-stamp-existing-name').textContent=o.stampName; $('o-stamp-existing').style.display='block'; }
+  else { $('o-stamp-existing').style.display='none'; }
+  $('o-ai-status').textContent='파일을 선택하세요'; $('o-ai-status').style.color='var(--gray-400)';
+  $('o-ai-result').style.display='none'; $('o-ai-pdf').value='';
   openModal('add-order');
 }
 
