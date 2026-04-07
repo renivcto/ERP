@@ -533,15 +533,13 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 
   <div class="nav-group">
     <div class="nav-group-title">문서</div>
-    <div class="nav-item" onclick="go('quote')"><span class="ico">📋</span>견적서</div>
     <div class="nav-item" onclick="go('order')"><span class="ico">📝</span>발주서</div>
+    <div class="nav-item" onclick="go('quote')"><span class="ico">📋</span>견적서</div>
   </div>
 
   <div class="nav-group">
     <div class="nav-group-title">시스템</div>
     <div class="nav-item" onclick="go('users')"><span class="ico">👥</span>사용자 관리<span class="nav-badge" id="nb-usr">2</span></div>
-    <div class="nav-item" onclick="go('qc')"><span class="ico">✅</span>품질 관리</div>
-    <div class="nav-item" onclick="go('cost')"><span class="ico">💰</span>원가 분석</div>
     <div class="nav-item" onclick="go('settings')"><span class="ico">⚙️</span>설정</div>
   </div>
 
@@ -581,7 +579,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="page active" id="page-dashboard">
       <div id="dash-alert"></div>
       <div class="stats-row" id="dash-stats"></div>
-      <div class="g31">
+      <div class="g2">
         <div class="card">
           <div class="card-hdr">
             <span class="card-title">📋 생산 현황</span>
@@ -601,49 +599,17 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           </div>
         </div>
       </div>
-      <div class="g2">
-        <div class="card">
-          <div class="card-hdr">
-            <span class="card-title">📊 월별 발주금액</span>
-            <select class="fi" style="width:100px;padding:4px 7px;font-size:11px" onchange="renderDashCharts()">
-              <option>2025</option><option>2024</option>
-            </select>
-          </div>
-          <div class="card-body"><div class="chart-wrap"><canvas id="chart-order"></canvas></div></div>
-        </div>
-        <div class="card">
-          <div class="card-hdr">
-            <span class="card-title">📦 재고 현황 (주요)</span>
-            <button class="btn btn-outline btn-sm" onclick="go('stock')">전체보기</button>
-          </div>
-          <div class="card-body p0 tbl-wrap">
-            <table>
-              <thead><tr><th>품목명</th><th>재고</th><th>최소</th><th>상태</th></tr></thead>
-              <tbody id="dash-stock-table"></tbody>
-            </table>
+      <div class="card" style="margin-top:14px">
+        <div class="card-hdr">
+          <span class="card-title">⚡ 워크플로우</span>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-outline btn-sm" onclick="aiAnalyzeWorkflow()">✨ AI 자동분류</button>
+            <button class="btn btn-outline btn-sm" onclick="if(requireWrite())openModal('add-task')">+ 태스크</button>
+            <button class="btn btn-outline btn-sm" onclick="go('workflow')">전체보기</button>
           </div>
         </div>
-      </div>
-      <div class="g2">
-        <div class="card">
-          <div class="card-hdr"><span class="card-title">🥧 품목 분류</span></div>
-          <div class="card-body"><div class="chart-wrap"><canvas id="chart-items"></canvas></div></div>
-        </div>
-        <div class="card">
-          <div class="card-hdr"><span class="card-title">⚡ 빠른 실행</span></div>
-          <div class="card-body">
-            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
-              <div class="chip" onclick="if(requireWrite())openModal('add-vendor')">+ 업체 등록</div>
-              <div class="chip" onclick="if(requireWrite())openModal('add-item')">+ 품목 등록</div>
-              <div class="chip" onclick="if(requireWrite())openModal('add-production')">+ 생산 등록</div>
-              <div class="chip" onclick="if(requireWrite())openModal('stock-in-modal')">📥 재고 입고</div>
-              <div class="chip" onclick="if(requireWrite())openModal('stock-out-modal')">📤 재고 출고</div>
-              <div class="chip" onclick="go('quote');openModal('add-quote')">견적서 작성</div>
-              <div class="chip" onclick="if(requireWrite()){go('order');openModal('add-order');}">발주서 작성</div>
-              <div class="chip" onclick="go('bom')">BOM 확인</div>
-            </div>
-            <div id="dash-kpi"></div>
-          </div>
+        <div class="card-body">
+          <div class="kanban" id="dash-kanban-board" style="grid-template-columns:repeat(4,1fr)"></div>
         </div>
       </div>
     </div>
@@ -1748,9 +1714,8 @@ function renderDashboard() {
   renderDashStats();
   renderDashProdTable();
   renderDashTimeline();
-  renderDashStockTable();
   renderDashKPI();
-  renderDashCharts();
+  renderDashKanban();
 }
 
 function renderDashAlerts() {
@@ -1769,9 +1734,9 @@ function renderDashStats() {
   }, 0);
   $('dash-stats').innerHTML = `
     <div class="stat c-sky"><div class="stat-lbl">등록 업체</div><div class="stat-val">${DB.vendors.length}</div><div class="stat-sub">원자재${DB.vendors.filter(v=>v.type==='원자재').length} · 부자재${DB.vendors.filter(v=>v.type==='부자재').length} · OEM${DB.vendors.filter(v=>v.type==='OEM').length}</div><div class="stat-ico">🏢</div></div>
-    <div class="stat c-green"><div class="stat-lbl">등록 품목</div><div class="stat-val">${DB.items.length}</div><div class="stat-sub">완제품${DB.items.filter(i=>i.type==='완제품').length} · 원자재${DB.items.filter(i=>i.type==='원자재').length}</div><div class="stat-ico">📦</div></div>
-    <div class="stat ${lateProds?'c-red':'c-amber'}"><div class="stat-lbl">진행중 생산</div><div class="stat-val">${DB.productions.filter(p=>p.status!=='입고완료').length}</div><div class="stat-sub">${lateProds?'지연 '+lateProds+'건 ⚠️':'정상 진행중'}</div><div class="stat-ico">🏭</div></div>
-    <div class="stat c-purple"><div class="stat-lbl">총 발주금액</div><div class="stat-val">${fmtW(Math.round(thisMonthAmt/10000)+'M').replace('₩','₩').split('M')[0]}M</div><div class="stat-sub">발주 ${DB.orders.length}건 누계</div><div class="stat-ico">💰</div></div>
+    <div class="stat c-green"><div class="stat-lbl">등록 품목</div><div class="stat-val">${DB.items.length}</div><div class="stat-sub">원자재 ${DB.items.filter(i=>i.type==='원자재').length} · 부자재 ${DB.items.filter(i=>i.type==='부자재').length} · OEM ${DB.items.filter(i=>i.type==='OEM').length} · 완제품 ${DB.items.filter(i=>i.type==='완제품').length}</div><div class="stat-ico">📦</div></div>
+    <div class="stat ${lateProds?'c-red':'c-amber'}"><div class="stat-lbl">진행중 생산</div><div class="stat-val">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').length}</div><div class="stat-sub">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').map(p=>{const it=getItem(p.productId);return (it.name||p.productName||'?').split(' ').slice(-1)[0]+' '+fmt(p.qty)+'EA';}).join(' · ')||'없음'}</div><div class="stat-ico">🏭</div></div>
+    <div class="stat c-purple"><div class="stat-lbl">총 발주금액 <span style="font-size:9px;opacity:.8">(VAT포함)</span></div><div class="stat-val" style="font-size:15px">${fmtW(Math.round(thisMonthAmt*1.1))}</div><div class="stat-sub">${(()=>{const vmap={};DB.orders.forEach(o=>{const v=getVendor(o.vendorId);const t=o.rows.reduce((s,r)=>s+r.qty*r.price,0);vmap[v.company||'-']=(vmap[v.company||'-']||0)+t;});return Object.entries(vmap).sort((a,b)=>b[1]-a[1]).slice(0,2).map(([c,t])=>c.replace('(주)','').replace('㈜','')+' '+fmtW(Math.round(t))).join(' · ');})()||'발주 없음'}</div><div class="stat-ico">💰</div></div>
   `;
 }
 
@@ -3889,6 +3854,30 @@ function renderCostPage() {
 const KANBAN_COLS = ['계획','진행중','검토','완료'];
 const PRIORITY_COLOR = {높음:'red',보통:'sky',낮음:'gray'};
 let dragTask = null;
+
+function renderDashKanban() {
+  const board = $('dash-kanban-board');
+  if (!board) return;
+  board.innerHTML = KANBAN_COLS.map(col => {
+    const tasks = DB.tasks.filter(t=>t.status===col);
+    const colColor = {계획:'var(--gray-400)',진행중:'var(--sky-500)',검토:'var(--amber-500)',완료:'var(--green-500)'}[col]||'var(--gray-400)';
+    return `
+      <div class="kanban-col" style="min-height:120px">
+        <div class="kb-col-hdr" style="border-top:3px solid ${colColor}">
+          <span>${col}</span><span class="kb-cnt">${tasks.length}</span>
+        </div>
+        ${tasks.slice(0,4).map(t=>`
+          <div class="kb-card">
+            <div class="kb-card-title">${t.title}</div>
+            <div class="kb-card-meta">
+              <span class="badge ${t.priority==='높음'?'red':t.priority==='낮음'?'gray':'amber'}" style="font-size:9px">${t.priority}</span>
+              <span style="font-size:10px;color:var(--gray-400)">${t.due||''}</span>
+            </div>
+          </div>`).join('')}
+        ${tasks.length > 4 ? `<div style="font-size:11px;color:var(--gray-400);text-align:center;padding:4px">+${tasks.length-4}건 더보기</div>` : ''}
+      </div>`;
+  }).join('');
+}
 
 function renderKanban() {
   const board = $('kanban-board');
