@@ -803,7 +803,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="card">
         <div class="card-body p0 tbl-wrap">
           <table>
-            <thead><tr><th>발주번호</th><th>업체명</th><th>품목</th><th>발주일</th><th>입고예정</th><th>금액</th><th>상태</th><th>관리</th></tr></thead>
+            <thead><tr><th>발주번호</th><th>업체명</th><th>품목</th><th>발주일</th><th>입고예정</th><th>금액</th><th>PDF</th><th>상태</th><th>관리</th></tr></thead>
             <tbody id="order-table"></tbody>
           </table>
         </div>
@@ -1154,7 +1154,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 <!-- ORDER -->
 <div class="overlay" id="overlay-add-order">
   <div class="modal wide">
-    <div class="modal-hdr"><span class="modal-ttl">📝 발주서 작성</span><button class="modal-x" onclick="closeModal('add-order')">✕</button></div>
+    <div class="modal-hdr"><span class="modal-ttl">📝 발주서 작성/수정</span><button class="modal-x" onclick="closeModal('add-order')">✕</button></div>
     <div class="modal-body">
       <div class="fg2">
         <div class="fg"><label>업체명<span class="req">*</span></label><select class="fs" id="o-vendor" onchange="fillOrderVendor()"></select></div>
@@ -1174,6 +1174,25 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <strong style="font-size:14px">합계: <span id="order-total" style="color:var(--sky-700)">₩0</span></strong>
       </div>
       <div class="fg" style="margin-top:12px"><label>특기사항</label><textarea class="fta" id="o-note"></textarea></div>
+      <div class="fg" style="margin-top:4px">
+        <label>📎 발주서 PDF 첨부</label>
+        <input type="file" id="o-pdf" accept=".pdf,.jpg,.jpeg,.png" onchange="handleOrderFile(this)">
+        <div id="o-pdf-preview" style="margin-top:8px;display:none">
+          <div style="display:flex;align-items:center;gap:8px;background:var(--sky-50);border:1px solid var(--sky-200);border-radius:7px;padding:8px 12px;font-size:12px;color:var(--sky-700)">
+            <span style="font-size:16px">📄</span>
+            <span id="o-pdf-name" style="flex:1"></span>
+            <button class="btn btn-outline btn-xs" onclick="clearOrderFile()">✕ 제거</button>
+          </div>
+        </div>
+        <div id="o-pdf-existing" style="margin-top:8px;display:none">
+          <div style="display:flex;align-items:center;gap:8px;background:var(--green-50);border:1px solid var(--green-400);border-radius:7px;padding:8px 12px;font-size:12px;color:var(--green-700)">
+            <span style="font-size:16px">📄</span>
+            <span id="o-pdf-existing-name" style="flex:1"></span>
+            <button class="btn btn-outline btn-xs" onclick="viewOrderPDF()">보기</button>
+            <button class="btn btn-outline btn-xs" onclick="clearOrderFile()">변경</button>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="modal-ft">
       <button class="btn btn-outline" onclick="closeModal('add-order')">취소</button>
@@ -1428,8 +1447,11 @@ const DEFAULT_DB = {
     {id:2, vendorId:2, date:'2025-03-28', valid:'2025-04-27', rows:[{name:'유리병 30ml', qty:5000, price:350},{name:'드로퍼캡', qty:5000, price:180}], note:'', status:'확정'},
   ],
   orders: [
-    {id:1, vendorId:3, orderDate:'2025-03-18', inDate:'2025-04-12', addr:'인천 남동구', rows:[{name:'나이아신아마이드 앰플 20ml', qty:2000, price:4300}], note:'', status:'진행중'},
-    {id:2, vendorId:1, orderDate:'2025-03-10', inDate:'2025-04-05', addr:'서울 강남구', rows:[{name:'레티놀 100g', qty:3, price:120000}], note:'', status:'완료'},
+    {id:1, vendorId:6, orderDate:'2025-03-10', inDate:'2025-04-05', addr:'', rows:[{name:'르니브 3중 장벽 20층 리뉴 크림 OEM 50g', qty:1000, price:2760}], note:'라멜라 제형 / 품질 검사 후 입고', status:'완료', pdfName:'발주서_바이오코스텍_250310.pdf', pdfData:null},
+    {id:2, vendorId:1, orderDate:'2025-03-15', inDate:'2025-04-10', addr:'', rows:[{name:'르니브 3중 장벽 20층 리뉴 크림 내용기+외용기 50g', qty:1000, price:1300},{name:'르니브 3중 장벽 20층 리뉴 크림 리드 50g', qty:1000, price:80},{name:'르니브 3중 장벽 20층 리뉴 크림 캡 50g', qty:1000, price:550}], note:'입고 시 먼지 확인 필요', status:'완료', pdfName:'발주서_미코글라스_250315.pdf', pdfData:null},
+    {id:3, vendorId:2, orderDate:'2025-03-18', inDate:'2025-04-15', addr:'', rows:[{name:'르니브 3중 장벽 20층 리뉴 크림 단상자 50g', qty:1000, price:340},{name:'르니브 3중 장벽 20층 리뉴 크림 카톤박스', qty:32, price:1500}], note:'', status:'진행중', pdfName:'발주서_아토즈_250318.pdf', pdfData:null},
+    {id:4, vendorId:4, orderDate:'2025-03-20', inDate:'2025-04-18', addr:'', rows:[{name:'르니브 스파츌러', qty:1000, price:50},{name:'르니브 스파츌러 비닐', qty:1000, price:0}], note:'검은 점/회색 점 불량 주의', status:'진행중', pdfName:'', pdfData:null},
+    {id:5, vendorId:1, orderDate:'2025-04-01', inDate:'2025-04-25', addr:'', rows:[{name:'르니브 글로우샷 용기 30ml', qty:500, price:1270}], note:'글로우샷 신제품 준비', status:'진행중', pdfName:'', pdfData:null},
   ],
   tasks: [
     {id:1, title:'신규 세럼 BOM 작성', due:'2025-04-15', category:'R&D', status:'계획', priority:'높음', progress:10, note:''},
@@ -2352,14 +2374,18 @@ function renderOrderTable() {
   $('order-table').innerHTML = DB.orders.map(o => {
     const v = getVendor(o.vendorId);
     const total = o.rows.reduce((s,r)=>s+r.qty*r.price,0);
-    const itemList = o.rows.map(r=>r.name).join(', ');
+    const itemList = o.rows.map(r=>r.name).slice(0,2).join(', ') + (o.rows.length>2?` 외 ${o.rows.length-2}건`:'');
+    const pdfBadge = o.pdfName
+      ? `<span class="badge green" style="cursor:pointer;font-size:10px" onclick="viewOrderPDFById(${o.id})" title="${o.pdfName}">📄 PDF</span>`
+      : `<span class="badge gray" style="font-size:10px">PDF 없음</span>`;
     return `<tr>
-      <td style="font-family:monospace">PO-2025-0${String(o.id).padStart(2,'0')}</td>
+      <td style="font-family:monospace">PO-2025-${String(o.id).padStart(3,'0')}</td>
       <td class="lnk" onclick="viewVendor(${o.vendorId})">${v.company||'-'}</td>
       <td>${itemList}</td>
       <td>${o.orderDate||'-'}</td>
       <td>${o.inDate||'-'}</td>
       <td>${fmtW(total)}</td>
+      <td>${pdfBadge}</td>
       <td>${statusBadge(o.status)}</td>
       <td style="display:flex;gap:4px">
         <button class="btn btn-outline btn-xs" onclick="previewOrderById(${o.id})">보기</button>
@@ -2367,7 +2393,7 @@ function renderOrderTable() {
         <button class="btn btn-danger btn-xs" onclick="deleteOrder(${o.id})">삭제</button>
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="8" class="empty">발주서가 없습니다</td></tr>';
+  }).join('') || '<tr><td colspan="9" class="empty">발주서가 없습니다</td></tr>';
 }
 
 function ensureOrderRows() {
@@ -2400,6 +2426,50 @@ function fillOrderVendor() {
   if (v.addr) $('o-addr').value = v.addr;
 }
 
+// ── PDF 파일 처리 ──────────────────────────────────────
+let _orderPdfData = null;
+let _orderPdfName = null;
+
+function handleOrderFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { showNotif('파일 크기는 5MB 이하여야 합니다', 'warning'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    _orderPdfData = e.target.result;
+    _orderPdfName = file.name;
+    $('o-pdf-name').textContent = file.name;
+    $('o-pdf-preview').style.display = 'block';
+    $('o-pdf-existing').style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearOrderFile() {
+  _orderPdfData = null;
+  _orderPdfName = null;
+  $('o-pdf').value = '';
+  $('o-pdf-preview').style.display = 'none';
+  $('o-pdf-existing').style.display = 'none';
+}
+
+function viewOrderPDF() {
+  if (_orderPdfData) {
+    const w = window.open();
+    w.document.write(`<iframe src="${_orderPdfData}" style="width:100%;height:100vh;border:none"></iframe>`);
+  }
+}
+
+function viewOrderPDFById(id) {
+  const o = DB.orders.find(x => x.id === id);
+  if (!o || !o.pdfData) {
+    showNotif('저장된 PDF 파일이 없습니다. 수정에서 파일을 첨부해주세요', 'warning');
+    return;
+  }
+  const w = window.open();
+  w.document.write(`<iframe src="${o.pdfData}" style="width:100%;height:100vh;border:none"></iframe>`);
+}
+
 function saveOrder() {
   const vendorId = parseInt($('o-vendor').value);
   if (!vendorId) { showNotif('업체를 선택하세요','warning'); return; }
@@ -2410,14 +2480,22 @@ function saveOrder() {
   });
   if (!rows.length) { showNotif('품목을 추가하세요','warning'); return; }
   const id = editingId['add-order'];
-  const data = {vendorId, orderDate:$('o-date').value, inDate:$('o-in-date').value, addr:$('o-addr').value, rows, note:$('o-note').value, status:'진행중'};
+  const data = {
+    vendorId, orderDate:$('o-date').value, inDate:$('o-in-date').value,
+    addr:$('o-addr').value, rows, note:$('o-note').value, status:'진행중',
+    pdfName: _orderPdfName || (id ? (DB.orders.find(o=>o.id===id)||{}).pdfName||'' : ''),
+    pdfData: _orderPdfData || (id ? (DB.orders.find(o=>o.id===id)||{}).pdfData||null : null),
+  };
   if (id) {
     const idx = DB.orders.findIndex(o=>o.id===id);
     if (idx>=0) DB.orders[idx] = {...DB.orders[idx], ...data};
+    showNotif('발주서가 수정되었습니다','success');
   } else {
     DB.orders.push({id:nextId('order'), ...data});
+    showNotif('발주서가 저장되었습니다','success');
   }
-  saveData(); closeModal('add-order'); renderOrderTable(); showNotif('발주서가 저장되었습니다','success');
+  saveData(); closeModal('add-order'); renderOrderTable();
+  clearOrderFile();
 }
 
 function editOrder(id) {
@@ -2436,6 +2514,15 @@ function editOrder(id) {
     inputs[0].value=r.name; inputs[1].value=r.qty; inputs[2].value=r.price;
   });
   calcOrderTotal();
+  // PDF 기존 파일 표시
+  _orderPdfData = null; _orderPdfName = null;
+  $('o-pdf-preview').style.display = 'none';
+  if (o.pdfName) {
+    $('o-pdf-existing-name').textContent = o.pdfName;
+    $('o-pdf-existing').style.display = 'block';
+  } else {
+    $('o-pdf-existing').style.display = 'none';
+  }
   openModal('add-order');
 }
 
