@@ -689,7 +689,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="card">
         <div class="card-body p0 tbl-wrap">
           <table>
-            <thead><tr><th>코드</th><th>품목명</th><th>분류</th><th>용량</th><th>단가</th><th>재고</th><th>업체</th><th>관리</th></tr></thead>
+            <thead><tr><th>코드</th><th>품목명</th><th>분류</th><th>용량</th><th>단가</th><th style="text-align:center">재고수량</th><th>업체</th><th>관리</th></tr></thead>
             <tbody id="item-table"></tbody>
           </table>
         </div>
@@ -717,7 +717,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           </div>
           <div class="card-body p0 tbl-wrap">
             <table>
-              <thead><tr><th>품목명</th><th>코드</th><th>분류</th><th>투입량</th><th>단가</th><th>소계</th><th>업체</th><th>비고</th></tr></thead>
+              <thead><tr><th>품목명</th><th>코드</th><th>분류</th><th>투입량</th><th>단가</th><th>업체</th><th>비고</th></tr></thead>
               <tbody id="bom-table"></tbody>
             </table>
           </div>
@@ -765,7 +765,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="card">
           <div class="card-body p0 tbl-wrap">
             <table>
-              <thead><tr><th>코드</th><th>품목명</th><th>분류</th><th>용량</th><th>재고 수량</th><th>최소</th><th>최대</th><th>유통기한</th><th>재고바</th><th>상태</th></tr></thead>
+              <thead><tr><th>코드</th><th>품목명</th><th>분류</th><th>용량</th><th style="text-align:center">재고 수량</th><th>재고바</th><th>상태</th></tr></thead>
               <tbody id="stock-table"></tbody>
             </table>
           </div>
@@ -1066,7 +1066,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="fg"><label>발주 수량</label><input class="fi" id="p-qty" type="number" placeholder="0"></div>
         <div class="fg"><label>예상금액(원)</label><input class="fi" id="p-amount" type="number" placeholder="0"></div>
         <div class="fg"><label>업체</label><select class="fs" id="p-vendor"></select></div>
-        <div class="fg"><label>상태</label><select class="fs" id="p-status"><option>생산대기</option><option>생산중</option><option>QC검사</option><option>입고완료</option><option>지연</option></select></div>
+        <div class="fg"><label>상태</label><select class="fs" id="p-status"><option>생산중</option><option>QC검사</option><option>입고완료</option><option>지연</option></select></div>
         <div class="fg"><label>진행률(%)</label><input class="fi" id="p-progress" type="number" min="0" max="100" value="0"></div>
       </div>
       <div class="sec-title">체크 사항</div>
@@ -1519,7 +1519,7 @@ const DEFAULT_DB = {
     {id:1, productId:10, orderDate:'2025-03-10', inDate:'2025-04-05', payDate:'2025-04-10', qty:3000, amount:12750000, vendorId:3, progress:100, status:'입고완료', checks:[true,true,true,true,true]},
     {id:2, productId:11, orderDate:'2025-03-18', inDate:'2025-04-12', payDate:'', qty:2000, amount:8600000, vendorId:3, progress:65, status:'생산중', checks:[true,true,true,true,false]},
     {id:3, productId:12, orderDate:'2025-03-25', inDate:'2025-04-08', payDate:'', qty:5000, amount:9500000, vendorId:5, progress:40, status:'지연', checks:[true,true,false,true,false]},
-    {id:4, productId:13, orderDate:'2025-03-28', inDate:'2025-04-20', payDate:'', qty:2000, amount:7200000, vendorId:3, progress:20, status:'생산대기', checks:[true,false,false,false,false]},
+    {id:4, productId:13, orderDate:'2025-03-28', inDate:'2025-04-20', payDate:'', qty:2000, amount:7200000, vendorId:3, progress:20, status:'생산중', checks:[true,false,false,false,false]},
   ],
   stockHistory: [
     {id:1, itemId:10, type:'in', qty:3000, price:4250, date:'2025-04-05', lot:'LOT250405', note:'생산입고'},
@@ -1971,7 +1971,7 @@ function renderItemTable() {
       <td><span class="badge ${typeBadge(i.type)}">${i.type}</span></td>
       <td>${i.spec||'-'}</td>
       <td>${fmtW(i.price)}</td>
-      <td><strong>${fmt(i.stock)}</strong> <span style="font-size:10px;color:var(--gray-400)">(재고관리에서 수정)</span></td>
+      <td style="text-align:center"><strong>${fmt(i.stock)}</strong></td>
       <td class="lnk" onclick="viewVendor(${i.vendorId})">${v.company||'-'}</td>
       <td style="display:flex;gap:4px">
         <button class="btn btn-outline btn-xs" onclick="editItem(${i.id})">수정</button>
@@ -2098,7 +2098,6 @@ function renderBOM() {
         <td><span class="badge ${item.type==='원자재'?'sky':'purple'}">${item.type}</span></td>
         <td>${row.qty}${row.unit}</td>
         <td>${fmtW(item.price)}/${row.unit}</td>
-        <td>${fmtW(Math.round(subtotal))}</td>
         <td class="lnk" onclick="viewVendor(${item.vendorId})">${vendor.company||'-'}</td>
         <td>${row.note||'-'}</td>
       </tr>`;
@@ -2109,9 +2108,9 @@ function renderBOM() {
   $('bom-total-cost').textContent = fmtW(Math.round(totalCost));
 
   let html = '';
-  if (rawRows.length) html += `<tr class="bom-section"><td colspan="8">▼ 내용물 (원자재)</td></tr>` + rawRows.join('');
-  if (pkgRows.length) html += `<tr class="bom-section purple"><td colspan="8">▼ 용기/포장 (부자재)</td></tr>` + pkgRows.join('');
-  if (!html) html = '<tr><td colspan="8" class="empty">BOM이 등록되지 않았습니다</td></tr>';
+  if (rawRows.length) html += `<tr class="bom-section"><td colspan="7">▼ 내용물 (원자재)</td></tr>` + rawRows.join('');
+  if (pkgRows.length) html += `<tr class="bom-section purple"><td colspan="7">▼ 용기/포장 (부자재)</td></tr>` + pkgRows.join('');
+  if (!html) html = '<tr><td colspan="7" class="empty">BOM이 등록되지 않았습니다</td></tr>';
   $('bom-table').innerHTML = html;
 
   // Cost breakdown chart
@@ -2129,12 +2128,48 @@ function renderBOM() {
       options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:11}}}}}
     });
   }
+  // 원가 구성 상세 테이블 생성
+  const bomTableRows = bom.map(row => {
+    const item = getItem(row.itemId);
+    const subtotal = item.price * row.qty;
+    const pct = totalCost > 0 ? Math.round(subtotal/totalCost*100) : 0;
+    return `<tr>
+      <td style="font-size:12px">${item.name}</td>
+      <td style="text-align:center;font-size:11px;font-family:monospace">${item.code||'-'}</td>
+      <td style="text-align:center;font-size:12px">${row.qty}${row.unit}</td>
+      <td style="text-align:right;font-size:12px">${fmtW(item.price)}</td>
+      <td style="text-align:right;font-size:12px;font-weight:500;color:var(--sky-700)">${fmtW(Math.round(subtotal))}</td>
+      <td style="text-align:center">
+        <div style="display:flex;align-items:center;gap:4px">
+          <div style="flex:1;height:6px;background:var(--gray-100);border-radius:3px">
+            <div style="width:${pct}%;height:100%;background:${item.type==='원자재'?'var(--sky-400)':'var(--purple-400)'};border-radius:3px"></div>
+          </div>
+          <span style="font-size:10px;color:var(--gray-400);min-width:28px">${pct}%</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+  const marginRate = product.price > 0 ? Math.round((product.price-totalCost)/product.price*100) : 0;
   $('bom-cost-breakdown').innerHTML = `
-    <div class="cost-row"><span>원자재</span><span>${fmtW(Math.round(rawCost))}</span></div>
-    <div class="cost-row"><span>부자재/포장</span><span>${fmtW(Math.round(pkgCost))}</span></div>
-    <div class="cost-row total"><span>제조원가</span><span>${fmtW(Math.round(totalCost))}</span></div>
-    <div class="cost-row" style="font-size:11px;color:var(--gray-400)"><span>판매가</span><span>${fmtW(product.price)}</span></div>
-    <div class="cost-row" style="font-size:11px;color:var(--green-600)"><span>예상 마진</span><span>${fmtW(product.price - Math.round(totalCost))} (${Math.round((product.price-totalCost)/product.price*100)}%)</span></div>
+    <div style="font-size:12px;font-weight:600;color:var(--gray-700);margin-bottom:10px">📋 원가 구성 상세</div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12px">
+      <thead><tr style="background:var(--gray-50)">
+        <th style="padding:7px 8px;text-align:left;border-bottom:1px solid var(--gray-200)">품목명</th>
+        <th style="padding:7px 8px;text-align:center;border-bottom:1px solid var(--gray-200)">코드</th>
+        <th style="padding:7px 8px;text-align:center;border-bottom:1px solid var(--gray-200)">투입량</th>
+        <th style="padding:7px 8px;text-align:right;border-bottom:1px solid var(--gray-200)">단가</th>
+        <th style="padding:7px 8px;text-align:right;border-bottom:1px solid var(--gray-200)">소계</th>
+        <th style="padding:7px 8px;text-align:center;border-bottom:1px solid var(--gray-200)">비율</th>
+      </tr></thead>
+      <tbody>${bomTableRows}</tbody>
+    </table>
+    <div style="background:var(--gray-50);border-radius:8px;padding:12px 14px">
+      <div class="cost-row"><span>원자재</span><span>${fmtW(Math.round(rawCost))}</span></div>
+      <div class="cost-row"><span>부자재/포장</span><span>${fmtW(Math.round(pkgCost))}</span></div>
+      <div class="cost-row total"><span>📦 제조원가</span><span>${fmtW(Math.round(totalCost))}</span></div>
+      <div class="cost-row" style="font-size:11px;color:var(--gray-400);margin-top:6px"><span>판매가</span><span>${fmtW(product.price)}</span></div>
+      <div class="cost-row" style="color:var(--green-600);font-weight:600"><span>💰 예상 마진</span><span>${fmtW(product.price - Math.round(totalCost))} (${marginRate}%)</span></div>
+    </div>
   `;
 }
 
@@ -2284,10 +2319,7 @@ function renderStockTable() {
       <td class="lnk" onclick="showItemDetail(${i.id})">${i.name}</td>
       <td><span class="badge ${typeBadge(i.type)}">${i.type}</span></td>
       <td style="font-size:11.5px;color:var(--gray-500)">${i.spec||'-'}</td>
-      <td><strong>${fmt(i.stock)}</strong></td>
-      <td>${fmt(i.minStock)}</td>
-      <td>${fmt(i.maxStock)||'-'}</td>
-      <td>${i.expiry||'-'}${dday!==null?` <span class="badge ${dDayColor(dday)}" style="font-size:9px">D${dday>=0?'-'+dday:'+'+Math.abs(dday)}</span>`:''}</td>
+      <td style="text-align:center"><strong>${fmt(i.stock)}</strong></td>
       <td><div class="stock-bar"><div style="height:100%;border-radius:4px;width:${pct}%;background:${stockBarColor(i)}"></div></div></td>
       <td><span class="badge ${ss.cls}">${ss.text}</span></td>
     </tr>`;
@@ -3008,9 +3040,40 @@ function saveOrder() {
     processOrderStockOut(rows, today(), data.serial || '');
   }
 
+  // ── 신규 발주서 저장 시 생산관리에 자동 등록 ──────────────
+  if (!id) {
+    autoRegisterProduction(rows, data);
+  }
+
   saveData(); closeModal('add-order'); renderOrderTable();
   updateBadges();
   _orderPdfData=null; _orderPdfName=null; _orderStampData=null; _orderStampName=null;
+}
+
+// 발주서 → 생산관리 자동 등록
+function autoRegisterProduction(rows, orderData) {
+  rows.forEach(row => {
+    if (!row.itemId && !row.name) return;
+    // 완제품이나 OEM 품목만 생산관리에 등록
+    const item = row.itemId ? DB.items.find(i => i.id === row.itemId) : DB.items.find(i => i.name === row.name);
+    if (!item) return;
+    if (item.type !== '완제품' && item.type !== 'OEM' && item.type !== '반제품') return;
+    const newProd = {
+      id: nextId('prod'),
+      productId: item.id,
+      orderDate: orderData.orderDate || today(),
+      inDate: orderData.inDate || '',
+      payDate: '',
+      qty: row.qty || 0,
+      amount: (row.qty || 0) * (item.price || 0),
+      vendorId: orderData.vendorId || null,
+      progress: 0,
+      status: '생산중',
+      checks: [false, false, false, false, false],
+      note: '발주서 자동등록 ' + (orderData.serial || '')
+    };
+    DB.productions.push(newProd);
+  });
 }
 
 // 발주서 입고완료 → 재고 자동 입고 처리
