@@ -587,7 +587,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           </div>
           <div class="card-body p0 tbl-wrap">
             <table>
-              <thead><tr><th>품목명</th><th>발주일</th><th>입고일</th><th>상태</th><th>진행률</th></tr></thead>
+              <thead><tr><th>품목명</th><th>발주일</th><th>입고일</th><th>상태</th></tr></thead>
               <tbody id="dash-prod-table"></tbody>
             </table>
           </div>
@@ -1786,7 +1786,7 @@ function renderDashStats() {
   $('dash-stats').innerHTML = `
     <div class="stat c-sky" style="cursor:pointer" onclick="go('vendor')"><div class="stat-lbl">등록 업체</div><div class="stat-val" style="text-decoration:underline dotted">${DB.vendors.length}</div><div class="stat-sub">원자재 ${DB.vendors.filter(v=>v.type==='원자재').length} · 부자재 ${DB.vendors.filter(v=>v.type==='부자재').length} · OEM ${DB.vendors.filter(v=>v.type==='OEM').length}</div><div class="stat-ico">🏢</div></div>
     <div class="stat c-green" style="cursor:pointer" onclick="go('item')"><div class="stat-lbl">등록 품목</div><div class="stat-val" style="text-decoration:underline dotted">${DB.items.length}</div><div class="stat-sub">원자재 ${DB.items.filter(i=>i.type==='원자재').length} · 부자재 ${DB.items.filter(i=>i.type==='부자재').length} · OEM ${DB.items.filter(i=>i.type==='OEM').length} · 완제품 ${DB.items.filter(i=>i.type==='완제품').length}</div><div class="stat-ico">📦</div></div>
-    <div class="stat ${lateProds?'c-red':'c-amber'}" style="cursor:pointer" onclick="go('production')"><div class="stat-lbl">진행중 생산</div><div class="stat-val" style="text-decoration:underline dotted">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').length}</div><div class="stat-sub" style="line-height:2">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').map(p=>{const it=getItem(p.productId);const nm=(it&&it.name?it.name:p.productName||'?').replace('르니브 3중 장벽 20층 ','').replace('르니브 ','');return '<span style="font-weight:500">'+nm+'</span> <span style="color:var(--sky-500);font-size:10px">'+fmt(p.qty)+'EA</span>';}).join('<br>') || '없음'}</div><div class="stat-ico">🏭</div></div>
+    <div class="stat ${lateProds?'c-red':'c-amber'}" style="cursor:pointer" onclick="go('production')"><div class="stat-lbl">진행중 생산</div><div class="stat-val" style="text-decoration:underline dotted">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').length}</div><div class="stat-sub" style="line-height:2">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').map(p=>{const it=getItem(p.productId);const nm=(it&&it.name?it.name:p.productName||'?').replace('르니브 3중 장벽 20층 ','').replace('르니브 ','').replace(/ \([^)]*\)/g,'');return '<span style="font-weight:500">'+nm+'</span> <span style="color:var(--sky-500);font-size:10px">'+fmt(p.qty)+'EA</span>';}).join('<br>') || '없음'}</div><div class="stat-ico">🏭</div></div>
     <div class="stat c-purple" style="cursor:pointer" onclick="go('order')"><div class="stat-lbl">총 발주금액 <span style="font-size:9px;opacity:.8">(VAT포함)</span></div><div class="stat-val" style="font-size:15px;text-decoration:underline dotted">${fmtW(Math.round(thisMonthAmt*1.1))}</div><div class="stat-sub" style="line-height:1.8">${(()=>{const vmap={};DB.orders.forEach(o=>{const v=getVendor(o.vendorId);const t=o.rows.reduce((s,r)=>s+r.qty*r.price,0);vmap[v.company||'-']=(vmap[v.company||'-']||0)+t;});return Object.entries(vmap).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,t])=>c.replace('(주)','').replace('㈜','')+' '+fmtW(Math.round(t*1.1))).join('<br>');})()||'발주 없음'}</div><div class="stat-ico">💰</div></div>
   `;
 }
@@ -1806,7 +1806,6 @@ function renderDashProdTable() {
       <td>${p.orderDate}</td>
       <td>${p.inDate||'-'}</td>
       <td>${statusBadge(p.status)}</td>
-      <td><div class="pbar" style="width:90px"><div class="pbar-fill" style="width:${p.progress}%;background:${col}"></div></div></td>
     </tr>`;
   }).join('');
 }
@@ -2828,21 +2827,22 @@ function addOrderRow() {
 function fillOrderRowFromItem(sel) {
   const tr = sel.closest('tr');
   if (!sel.value) return;
-  const opt = sel.options[sel.selectedIndex];
   const itemId = parseInt(sel.value);
   const item = DB.items.find(i => i.id === itemId);
   if (!item) return;
   tr.querySelector('.row-code').value = item.code || '';
   tr.querySelector('.row-name').value = item.name + (item.spec ? ' ('+item.spec+')' : '');
   tr.querySelector('.row-price').value = item.price || 0;
-  // itemId 저장 (재고 연동용)
   sel.dataset.itemId = itemId;
-  // 품목관리 이미지 자동 불러오기
-  if (item.image) {
-    const rowId = tr.querySelector('[id^="row-img-"]') ? tr.querySelector('[id^="row-img-"]').id : null;
-    if (rowId) {
-      const div = document.getElementById(rowId);
-      if (div) { div.innerHTML = `<img src="${item.image}" style="width:100%;height:100%;object-fit:cover;border-radius:4px">`; div.dataset.img = item.image; }
+  // 품목관리 이미지 자동 불러오기 - id^="img-" 로 찾기
+  const imgDiv = tr.querySelector('[id^="img-"]');
+  if (imgDiv) {
+    if (item.image) {
+      imgDiv.innerHTML = `<img src="${item.image}" style="width:100%;height:100%;object-fit:cover;border-radius:4px">`;
+      imgDiv.dataset.img = item.image;
+    } else {
+      imgDiv.innerHTML = '📷';
+      imgDiv.dataset.img = '';
     }
   }
   calcOrderTotal();
@@ -3187,7 +3187,9 @@ function saveOrder() {
     const qtyEl = tr.querySelector('.row-qty');
     const priceEl = tr.querySelector('.row-price');
     const imgInput = tr.querySelector('input[type=file]');
-    const imgData = imgInput ? (imgInput.dataset.imgData || '') : '';
+    const imgDiv = tr.querySelector('[id^="img-"]');
+    // 이미지: 직접 업로드 → imgDiv(품목관리 이미지) 순서로 우선
+    const imgData = (imgInput && imgInput.dataset.imgData) || (imgDiv && imgDiv.dataset.img) || '';
     const name = nameEl ? nameEl.value.trim() : '';
     const qty = parseFloat(qtyEl ? qtyEl.value : 0) || 0;
     if (!name || !qty) return;
@@ -3457,12 +3459,14 @@ function editOrder(id) {
     if (nameEl) nameEl.value = r.name || '';
     if (qtyEl) qtyEl.value = r.qty || 0;
     if (priceEl) priceEl.value = r.price || 0;
-    // 이미지 복원
-    if (r.image) {
-      const imgDiv = last.querySelector('[id^=img-]');
-      if (imgDiv) imgDiv.innerHTML = `<img src="${r.image}" style="width:100%;height:100%;object-fit:cover;border-radius:4px">`;
-      const fileInput = last.querySelector('input[type=file]');
-      if (fileInput) fileInput.dataset.imgData = r.image;
+    // 이미지 복원 - row 저장 이미지 우선, 없으면 품목관리 이미지 사용
+    const imgDiv = last.querySelector('[id^=img-]');
+    if (imgDiv) {
+      const imgSrc = r.image || (r.itemId ? (DB.items.find(i=>i.id===r.itemId)||{}).image : '') || '';
+      if (imgSrc) {
+        imgDiv.innerHTML = `<img src="${imgSrc}" style="width:100%;height:100%;object-fit:cover;border-radius:4px">`;
+        imgDiv.dataset.img = imgSrc;
+      }
     }
   });
   calcOrderTotal();
