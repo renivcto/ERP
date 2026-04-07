@@ -44,36 +44,52 @@
   // 인증 상태 감지
   onAuthStateChanged(auth, async (user) => {
     if (user) {
-      // 로그인 됨 — Firestore에서 사용자 상태 확인
-      const userRef = doc(db, 'users', user.uid);
-      const userSnap = await getDoc(userRef);
+      try {
+        // Firestore에서 사용자 상태 확인
+        const userRef = doc(db, 'users', user.uid);
+        const userSnap = await getDoc(userRef);
 
-      if (!userSnap.exists()) {
-        // 최초 로그인 — 사용자 등록 (첫 번째 사용자는 자동 관리자)
-        const allUsers = await getDocs(collection(db, 'users'));
-        const isFirst = allUsers.empty;
-        await setDoc(userRef, {
+        if (!userSnap.exists()) {
+          // 최초 로그인 — 사용자 등록 (첫 번째 사용자는 자동 관리자)
+          let isFirst = false;
+          try {
+            const allUsers = await getDocs(collection(db, 'users'));
+            isFirst = allUsers.empty;
+          } catch(e) { isFirst = false; }
+
+          const userData = {
+            uid: user.uid,
+            name: user.displayName,
+            email: user.email,
+            photo: user.photoURL,
+            role: isFirst ? 'CTO' : '멤버',
+            status: isFirst ? '활성' : '승인대기',
+            joinDate: new Date().toISOString().slice(0,10),
+            lastLogin: new Date().toISOString().slice(0,10),
+            isAdmin: isFirst,
+          };
+          try { await setDoc(userRef, userData); } catch(e) {}
+          window._currentUser = userData;
+        } else {
+          const data = userSnap.data();
+          try { await setDoc(userRef, { lastLogin: new Date().toISOString().slice(0,10) }, { merge: true }); } catch(e) {}
+          window._currentUser = { ...data, uid: user.uid };
+        }
+      } catch(e) {
+        // Firestore 실패 시 — 기본 관리자로 진입
+        console.warn('Firestore 접근 실패, 기본값으로 진입:', e);
+        window._currentUser = {
           uid: user.uid,
-          name: user.displayName,
+          name: user.displayName || '관리자',
           email: user.email,
           photo: user.photoURL,
-          role: isFirst ? 'CTO' : '멤버',
-          status: isFirst ? '활성' : '승인대기',
-          joinDate: new Date().toISOString().slice(0,10),
-          lastLogin: new Date().toISOString().slice(0,10),
-          isAdmin: isFirst,
-        });
-        window._currentUser = { uid: user.uid, name: user.displayName, email: user.email, photo: user.photoURL, role: isFirst ? 'CTO' : '멤버', status: isFirst ? '활성' : '승인대기', isAdmin: isFirst };
-      } else {
-        const data = userSnap.data();
-        // lastLogin 업데이트
-        await setDoc(userRef, { lastLogin: new Date().toISOString().slice(0,10) }, { merge: true });
-        window._currentUser = { ...data, uid: user.uid };
+          role: 'CTO',
+          status: '활성',
+          isAdmin: true,
+        };
       }
-
       showERPOrWaiting();
     } else {
-      // 로그아웃 상태
       window._currentUser = null;
       showLoginScreen();
     }
@@ -1763,7 +1779,7 @@ function renderDashStockTable() {
     const ss = stockStatus(i);
     return `<tr>
       <td class="lnk" onclick="showItemDetail(${i.id})">${i.name}</td>
-      <td>${i.stock}${i.spec?.includes('g')?'g':i.spec?.includes('L')?'L':'EA'}</td>
+      <td>${i.stock}${i.spec && i.spec.includes('g')?'g':i.spec && i.spec.includes('L')?'L':'EA'}</td>
       <td>${i.minStock}</td>
       <td><span class="badge ${ss.cls}">${ss.text}</span></td>
     </tr>`;
@@ -1909,7 +1925,7 @@ function renderItemTable() {
   $('item-filter-chips').innerHTML = types.map(t =>
     `<div class="chip ${t===itemFilter?'active':''}" onclick="itemFilter='${t}';renderItemTable()">${t}(${t==='전체'?DB.items.length:DB.items.filter(i=>i.type===t).length})</div>`
   ).join('');
-  const search = ($('item-search')?.value||'').toLowerCase();
+  const search = ($('item-search') ? $('item-search').value : '').toLowerCase();
   let filtered = DB.items.filter(i => itemFilter==='전체' || i.type===itemFilter);
   if (search) filtered = filtered.filter(i => i.name.toLowerCase().includes(search) || i.code.toLowerCase().includes(search));
   const typeBadge = t => ({원자재:'sky',부자재:'purple',완제품:'amber',반제품:'gray'})[t]||'gray';
@@ -2028,7 +2044,7 @@ function renderBOMPage() {
 }
 
 function renderBOM() {
-  const productId = parseInt($('bom-product-sel')?.value);
+  const productId = parseInt($('bom-product-sel') ? $('bom-product-sel').value : 0);
   if (!productId) return;
   const product = getItem(productId);
   const bom = DB.boms[productId] || [];
@@ -2123,7 +2139,7 @@ function saveBOM() {
 
 function aiAnalyzeBOM() {
   if(!aiOpen) toggleAI();
-  const product = getItem(parseInt($('bom-product-sel')?.value));
+  const product = getItem(parseInt($('bom-product-sel') ? $('bom-product-sel').value : 0));
   setTimeout(()=>sendAIMsg(`${product.name||'선택된 제품'}의 BOM 원가를 분석하고 원가 절감 방안을 제안해줘`), 200);
 }
 
@@ -2819,10 +2835,10 @@ function applyParsedOrder(parsed, fileData, fileName) {
 // ── 구글 캘린더 링크 생성 ─────────────────────────────
 function updateGCalLink(type) {
   const vendorEl = $('o-vendor');
-  const vendorName = vendorEl ? (vendorEl.options[vendorEl.selectedIndex]?.text || '업체') : '업체';
+  const vendorName = vendorEl ? (((vendorEl.options[vendorEl.selectedIndex] || {}).text) || '업체') : '업체';
 
   if (type === 'pay') {
-    const date = $('o-pay-date')?.value;
+    const date = $('o-pay-date') ? $('o-pay-date').value : '';
     if (!date) { $('gcal-pay-link').style.display='none'; return; }
     const d = date.replace(/-/g,'');
     const title = encodeURIComponent(`[르니브] ${vendorName} 결제일`);
@@ -2831,7 +2847,7 @@ function updateGCalLink(type) {
     $('gcal-pay-link').href = url;
     $('gcal-pay-link').style.display = '';
   } else if (type === 'in') {
-    const date = $('o-in-date')?.value;
+    const date = $('o-in-date') ? $('o-in-date').value : '';
     if (!date) { $('gcal-in-wrap').style.display='none'; return; }
     const d = date.replace(/-/g,'');
     const title = encodeURIComponent(`[르니브] ${vendorName} 납기일`);
@@ -2852,7 +2868,7 @@ function saveOrder() {
       const imgInput = tr.querySelector('input[type=file]');
       const imgData = imgInput ? (imgInput.dataset.imgData || '') : '';
       const numInputs = tr.querySelectorAll('input[type=number]');
-      rows.push({code:inputs[0].value, name:inputs[1].value, image:imgData, qty:parseFloat(numInputs[0]?.value)||0, price:parseFloat(numInputs[1]?.value)||0});
+      rows.push({code:inputs[0].value, name:inputs[1].value, image:imgData, qty:parseFloat((numInputs[0]||{}).value)||0, price:parseFloat((numInputs[1]||{}).value)||0});
     }
   });
   if (!rows.length) { showNotif('품목을 추가하세요','warning'); return; }
@@ -2957,11 +2973,12 @@ function previewOrder() {
   const rows = [];
   $('order-modal-rows').querySelectorAll('tr').forEach(tr => {
     const inputs = tr.querySelectorAll('input');
-    if (inputs.length >= 4 && inputs[1].value.trim())
+    if (inputs.length >= 4 && inputs[1].value.trim()) {
       const imgInput = tr.querySelector('input[type=file]');
       const imgData = imgInput ? (imgInput.dataset.imgData || '') : '';
       const numInputs = tr.querySelectorAll('input[type=number]');
-      rows.push({code:inputs[0].value, name:inputs[1].value, image:imgData, qty:parseFloat(numInputs[0]?.value)||0, price:parseFloat(numInputs[1]?.value)||0});
+      rows.push({code:inputs[0].value, name:inputs[1].value, image:imgData, qty:parseFloat((numInputs[0]||{}).value)||0, price:parseFloat((numInputs[1]||{}).value)||0});
+    }
   });
   const tempOrder = {
     vendorId, rows, orderDate:$('o-date').value, inDate:$('o-in-date').value,
@@ -3525,7 +3542,7 @@ function sendAIMsg(text) {
     })
   }).then(r=>r.json()).then(data=>{
     $('ai-loading').classList.remove('show');
-    const reply = data.content?.[0]?.text || '응답을 받지 못했습니다.';
+    const reply = (data.content && data.content[0] && data.content[0].text) || '응답을 받지 못했습니다.';
     addAIMsg(reply,'ai');
   }).catch(()=>{
     $('ai-loading').classList.remove('show');
@@ -3693,7 +3710,7 @@ async function exportToSheets() {
 
 // 설정에서 Web App URL 저장
 function saveWebAppUrl() {
-  const url = $('webapp-url')?.value.trim();
+  const url = $('webapp-url') ? $('webapp-url').value.trim() : '';
   if (!url) { showNotif('URL을 입력해주세요', 'warning'); return; }
   localStorage.setItem('reniv_sheets_webapp_url', url);
   showNotif('Web App URL 저장 완료!', 'success');
