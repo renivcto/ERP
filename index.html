@@ -5,6 +5,117 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RENIV ERP — 화장품 통합 관리 시스템</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.3/chart.umd.min.js" defer></script>
+<!-- Firebase -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { getFirestore, doc, getDoc, setDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDP8KBmUQzvH9iH9YQlFa-A87fcOIV09aM",
+    authDomain: "reniv-erp-135a3.firebaseapp.com",
+    projectId: "reniv-erp-135a3",
+    storageBucket: "reniv-erp-135a3.firebasestorage.app",
+    messagingSenderId: "462652770421",
+    appId: "1:462652770421:web:0ac37bf92ec724e70f903c"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const provider = new GoogleAuthProvider();
+
+  // 관리자 이메일 (본인 구글 계정)
+  const ADMIN_EMAIL = null; // 첫 로그인한 사람이 자동으로 관리자가 됩니다
+
+  // 전역으로 노출
+  window._firebaseAuth = auth;
+  window._firebaseDb = db;
+  window._firebaseProvider = provider;
+  window._signInWithPopup = signInWithPopup;
+  window._signOut = signOut;
+  window._onAuthStateChanged = onAuthStateChanged;
+  window._firestoreDoc = doc;
+  window._firestoreGetDoc = getDoc;
+  window._firestoreSetDoc = setDoc;
+  window._firestoreCollection = collection;
+  window._firestoreGetDocs = getDocs;
+
+  // 인증 상태 감지
+  onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      // 로그인 됨 — Firestore에서 사용자 상태 확인
+      const userRef = doc(db, 'users', user.uid);
+      const userSnap = await getDoc(userRef);
+
+      if (!userSnap.exists()) {
+        // 최초 로그인 — 사용자 등록 (첫 번째 사용자는 자동 관리자)
+        const allUsers = await getDocs(collection(db, 'users'));
+        const isFirst = allUsers.empty;
+        await setDoc(userRef, {
+          uid: user.uid,
+          name: user.displayName,
+          email: user.email,
+          photo: user.photoURL,
+          role: isFirst ? 'CTO' : '멤버',
+          status: isFirst ? '활성' : '승인대기',
+          joinDate: new Date().toISOString().slice(0,10),
+          lastLogin: new Date().toISOString().slice(0,10),
+          isAdmin: isFirst,
+        });
+        window._currentUser = { uid: user.uid, name: user.displayName, email: user.email, photo: user.photoURL, role: isFirst ? 'CTO' : '멤버', status: isFirst ? '활성' : '승인대기', isAdmin: isFirst };
+      } else {
+        const data = userSnap.data();
+        // lastLogin 업데이트
+        await setDoc(userRef, { lastLogin: new Date().toISOString().slice(0,10) }, { merge: true });
+        window._currentUser = { ...data, uid: user.uid };
+      }
+
+      showERPOrWaiting();
+    } else {
+      // 로그아웃 상태
+      window._currentUser = null;
+      showLoginScreen();
+    }
+  });
+
+  window._googleLogin = async function() {
+    try {
+      document.getElementById('login-btn-text').textContent = '로그인 중...';
+      document.getElementById('google-login-btn').disabled = true;
+      await signInWithPopup(auth, provider);
+    } catch(e) {
+      document.getElementById('login-btn-text').textContent = 'Google 계정으로 로그인';
+      document.getElementById('google-login-btn').disabled = false;
+      if (e.code !== 'auth/popup-closed-by-user') {
+        alert('로그인 오류: ' + e.message);
+      }
+    }
+  };
+
+  window._logout = async function() {
+    if (!confirm('로그아웃 하시겠습니까?')) return;
+    await signOut(auth);
+  };
+
+  // Firestore에서 사용자 목록 불러오기 (관리자용)
+  window._loadFirestoreUsers = async function() {
+    const snap = await getDocs(collection(db, 'users'));
+    return snap.docs.map(d => d.data());
+  };
+
+  // 사용자 승인
+  window._approveFirestoreUser = async function(uid) {
+    const userRef = doc(db, 'users', uid);
+    await setDoc(userRef, { status: '활성' }, { merge: true });
+  };
+
+  // 사용자 상태 변경
+  window._updateFirestoreUser = async function(uid, data) {
+    const userRef = doc(db, 'users', uid);
+    await setDoc(userRef, data, { merge: true });
+  };
+</script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
 :root {
@@ -306,9 +417,76 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 /* TOOLTIP */
 [data-tip]{position:relative;cursor:help}
 [data-tip]:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);background:var(--gray-800);color:#fff;font-size:10px;padding:3px 7px;border-radius:4px;white-space:nowrap;z-index:99;pointer-events:none}
+
+/* ── LOGIN SCREEN ── */
+#login-screen{display:none;position:fixed;inset:0;z-index:9999;background:linear-gradient(135deg,#075985 0%,#0c4a6e 50%,#075985 100%);align-items:center;justify-content:center;flex-direction:column}
+#login-screen.show{display:flex}
+.login-box{background:#fff;border-radius:20px;padding:48px 44px;width:380px;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.3)}
+.login-logo{font-size:32px;font-weight:700;letter-spacing:4px;color:#075985;margin-bottom:4px}
+.login-sub{font-size:11px;letter-spacing:2px;color:var(--gray-400);margin-bottom:8px}
+.login-divider{width:40px;height:3px;background:#0ea5e9;border-radius:2px;margin:0 auto 28px}
+.login-title{font-size:18px;font-weight:600;color:var(--gray-800);margin-bottom:6px}
+.login-desc{font-size:12.5px;color:var(--gray-500);margin-bottom:28px;line-height:1.6}
+#google-login-btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:13px 20px;border:1.5px solid var(--gray-200);border-radius:10px;background:#fff;cursor:pointer;font-size:13.5px;font-weight:500;color:var(--gray-700);transition:all .15s;font-family:var(--font)}
+#google-login-btn:hover{background:var(--gray-50);border-color:#0ea5e9;color:#0369a1;box-shadow:0 2px 8px rgba(14,165,233,.15)}
+#google-login-btn:disabled{opacity:.6;cursor:not-allowed}
+.google-icon{width:20px;height:20px;flex-shrink:0}
+.login-footer{font-size:11px;color:var(--gray-400);margin-top:20px;line-height:1.6}
+/* ── WAITING SCREEN ── */
+#waiting-screen{display:none;position:fixed;inset:0;z-index:9998;background:var(--gray-50);align-items:center;justify-content:center;flex-direction:column}
+#waiting-screen.show{display:flex}
+.waiting-box{background:#fff;border-radius:20px;padding:48px 44px;width:420px;text-align:center;box-shadow:var(--shadow-md);border:1px solid var(--gray-200)}
+.waiting-icon{font-size:48px;margin-bottom:16px}
+.waiting-title{font-size:20px;font-weight:600;color:var(--gray-800);margin-bottom:8px}
+.waiting-desc{font-size:13px;color:var(--gray-500);line-height:1.7;margin-bottom:24px}
+.waiting-user{display:flex;align-items:center;gap:10px;background:var(--sky-50);border:1px solid var(--sky-200);border-radius:10px;padding:12px 16px;margin-bottom:20px;text-align:left}
+.waiting-avatar{width:36px;height:36px;border-radius:50%;flex-shrink:0}
+.waiting-name{font-size:13px;font-weight:500;color:var(--gray-800)}
+.waiting-email{font-size:11.5px;color:var(--gray-500)}
+.waiting-status{display:inline-flex;align-items:center;gap:5px;background:var(--amber-100);color:var(--amber-700);font-size:11.5px;font-weight:500;padding:4px 12px;border-radius:20px;margin-bottom:20px}
 </style>
 </head>
 <body>
+<!-- ══ LOGIN SCREEN ══ -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">RENIV</div>
+    <div class="login-sub">COSMETICS ERP</div>
+    <div class="login-divider"></div>
+    <div class="login-title">로그인</div>
+    <div class="login-desc">RENIV ERP에 오신 것을 환영합니다.<br>구글 계정으로 간편하게 로그인하세요.</div>
+    <button id="google-login-btn" onclick="window._googleLogin()">
+      <svg class="google-icon" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+      <span id="login-btn-text">Google 계정으로 로그인</span>
+    </button>
+    <div class="login-footer">
+      로그인 시 관리자 승인 후 데이터에 접근할 수 있습니다.<br>
+      첫 번째 로그인 계정이 자동으로 관리자가 됩니다.
+    </div>
+  </div>
+</div>
+
+<!-- ══ WAITING SCREEN ══ -->
+<div id="waiting-screen">
+  <div class="waiting-box">
+    <div class="waiting-icon">⏳</div>
+    <div class="waiting-title">승인 대기 중</div>
+    <div class="waiting-desc">관리자가 계정을 승인하면 ERP에 접근할 수 있습니다.<br>승인 후 이 페이지를 새로고침 해주세요.</div>
+    <div class="waiting-user" id="waiting-user-info">
+      <img class="waiting-avatar" id="waiting-avatar" src="" alt="">
+      <div>
+        <div class="waiting-name" id="waiting-name">-</div>
+        <div class="waiting-email" id="waiting-email">-</div>
+      </div>
+    </div>
+    <div class="waiting-status">⏳ 승인 대기 중</div>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <button class="btn btn-outline" onclick="location.reload()" style="font-size:12px">🔄 새로고침</button>
+      <button class="btn btn-outline" onclick="window._logout()" style="font-size:12px">로그아웃</button>
+    </div>
+  </div>
+</div>
+
 <div id="app">
 
 <!-- ══ SIDEBAR ══ -->
@@ -354,11 +532,12 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 
   <div class="sidebar-bottom">
     <div class="user-chip">
-      <div class="user-av">CTO</div>
-      <div>
-        <div class="user-name">관리자</div>
-        <div class="user-role">R&D · 최고권한</div>
+      <div id="sb-avatar" class="user-av">?</div>
+      <div style="flex:1;min-width:0">
+        <div class="user-name" id="sb-name">로딩중...</div>
+        <div class="user-role" id="sb-role">-</div>
       </div>
+      <button onclick="window._logout()" title="로그아웃" style="background:none;border:none;cursor:pointer;color:rgba(255,255,255,.5);font-size:14px;padding:2px 4px;border-radius:4px" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='rgba(255,255,255,.5)'">⏻</button>
     </div>
   </div>
 </nav>
@@ -1370,7 +1549,7 @@ function go(page) {
     stock: renderStock,
     quote: renderQuoteTable,
     order: renderOrderTable,
-    users: renderUserTable,
+    users: () => renderUserTableFirestore(),
     qc: renderQCTable,
     cost: renderCostPage,
     settings: () => {
@@ -2879,9 +3058,98 @@ function init() {
   renderDashboard();
 }
 
-window.addEventListener('load', function() {
+// ═══════════════════════════════════════════════════════
+// 인증 화면 제어
+// ═══════════════════════════════════════════════════════
+function showLoginScreen() {
+  document.getElementById('login-screen').classList.add('show');
+  document.getElementById('waiting-screen').classList.remove('show');
+  document.getElementById('app').style.display = 'none';
+}
+
+function showERPOrWaiting() {
+  const user = window._currentUser;
+  document.getElementById('login-screen').classList.remove('show');
+
+  if (!user || user.status === '승인대기') {
+    // 승인 대기 화면
+    document.getElementById('waiting-screen').classList.add('show');
+    document.getElementById('app').style.display = 'none';
+    if (user) {
+      document.getElementById('waiting-name').textContent = user.name || '-';
+      document.getElementById('waiting-email').textContent = user.email || '-';
+      if (user.photo) document.getElementById('waiting-avatar').src = user.photo;
+    }
+  } else {
+    // ERP 진입
+    document.getElementById('waiting-screen').classList.remove('show');
+    document.getElementById('app').style.display = 'flex';
+    // 사이드바 사용자 정보 업데이트
+    const initials = (user.name||'U').split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2);
+    document.getElementById('sb-avatar').textContent = initials;
+    document.getElementById('sb-name').textContent = user.name || '-';
+    document.getElementById('sb-role').textContent = (user.role||'멤버') + (user.isAdmin ? ' · 관리자' : '');
+    // ERP 초기화
+    if (typeof updateBadges === 'function') {
+      updateBadges();
+      renderDashboard();
+    }
+  }
+}
+
+// ─── 사용자 관리 페이지 — Firestore 연동 ────────────────
+async function renderUserTableFirestore() {
+  if (!window._loadFirestoreUsers) { renderUserTable(); return; }
+  try {
+    const users = await window._loadFirestoreUsers();
+    $('user-table').innerHTML = users.map(u => `
+      <tr>
+        <td><strong>${u.name||'-'}</strong>${u.isAdmin?' 👑':''}</td>
+        <td>${u.email||'-'}</td>
+        <td><span class="badge ${u.isAdmin?'sky':'gray'}">${u.role||'멤버'}</span></td>
+        <td>${u.joinDate||'-'}</td>
+        <td>${u.lastLogin||'-'}</td>
+        <td>${statusBadge(u.status||'승인대기')}</td>
+        <td style="display:flex;gap:4px">
+          ${u.status==='승인대기'?`
+            <button class="btn btn-success btn-xs" onclick="approveFirestoreUser('${u.uid}')">✅ 승인</button>
+            <button class="btn btn-danger btn-xs" onclick="rejectFirestoreUser('${u.uid}','${u.name}')">거절</button>
+          `:`<button class="btn btn-outline btn-xs" onclick="toggleFirestoreUser('${u.uid}','${u.status}')">
+            ${u.status==='활성'?'비활성화':'활성화'}
+          </button>`}
+        </td>
+      </tr>
+    `).join('') || '<tr><td colspan="7" class="empty">사용자 없음</td></tr>';
+  } catch(e) {
+    renderUserTable(); // fallback
+  }
+}
+
+async function approveFirestoreUser(uid) {
+  await window._approveFirestoreUser(uid);
+  showNotif('승인 완료!', 'success');
+  renderUserTableFirestore();
   updateBadges();
-  renderDashboard();
+}
+
+async function rejectFirestoreUser(uid, name) {
+  if (!confirm(name + ' 사용자를 거절합니까?')) return;
+  await window._updateFirestoreUser(uid, { status: '거절' });
+  showNotif('거절 처리됨');
+  renderUserTableFirestore();
+}
+
+async function toggleFirestoreUser(uid, currentStatus) {
+  const newStatus = currentStatus === '활성' ? '비활성' : '활성';
+  await window._updateFirestoreUser(uid, { status: newStatus });
+  showNotif('상태 변경 완료', 'success');
+  renderUserTableFirestore();
+}
+
+window.addEventListener('load', function() {
+  // app은 처음엔 숨김 — Firebase 인증 후 표시
+  document.getElementById('app').style.display = 'none';
+  updateBadges();
 });</script>
 </body>
 </html>
