@@ -1441,9 +1441,9 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE
 // ═══════════════════════════════════════════════════════
-const STORE_KEY = 'reniv_erp_v4';
+const STORE_KEY = 'reniv_erp_v5';
 // 이전 버전 캐시 자동 삭제
-['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3'].forEach(k => localStorage.removeItem(k));
+['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4'].forEach(k => localStorage.removeItem(k));
 
 function loadData() {
   try {
@@ -1516,10 +1516,9 @@ const DEFAULT_DB = {
     ],
   },
   productions: [
-    {id:1, productId:10, orderDate:'2025-03-10', inDate:'2025-04-05', payDate:'2025-04-10', qty:3000, amount:12750000, vendorId:3, progress:100, status:'입고완료', checks:[true,true,true,true,true]},
-    {id:2, productId:11, orderDate:'2025-03-18', inDate:'2025-04-12', payDate:'', qty:2000, amount:8600000, vendorId:3, progress:65, status:'생산중', checks:[true,true,true,true,false]},
-    {id:3, productId:12, orderDate:'2025-03-25', inDate:'2025-04-08', payDate:'', qty:5000, amount:9500000, vendorId:5, progress:40, status:'지연', checks:[true,true,false,true,false]},
-    {id:4, productId:13, orderDate:'2025-03-28', inDate:'2025-04-20', payDate:'', qty:2000, amount:7200000, vendorId:3, progress:20, status:'생산중', checks:[true,false,false,false,false]},
+    {id:1, productId:11, productName:'르니브 글로우샷 용기 [30ml]', orderDate:'2025-12-29', inDate:'2026-01-23', payDate:'', qty:5000, amount:6350000, vendorId:1, progress:100, status:'생산완료', serial:'2025/12/29-1', orderId:7, checks:[true,true,true,true,true], note:'발주서 자동등록 (2025/12/29-1)'},
+    {id:2, productId:9,  productName:'르니브 3중 장벽 20층 리뉴 크림 용기 60g', orderDate:'2026-04-01', inDate:'2026-05-08', payDate:'', qty:2000, amount:6400000, vendorId:6, progress:10, status:'생산중', serial:'20260331-1', orderId:6, checks:[false,false,false,false,false], note:'발주서 자동등록 (20260331-1)'},
+    {id:3, productId:10, productName:'르니브 3중 장벽 20층 리뉴 크림 용기 30g', orderDate:'2026-04-01', inDate:'2026-05-08', payDate:'', qty:3000, amount:5655000, vendorId:6, progress:10, status:'생산중', serial:'20260331-1', orderId:6, checks:[false,false,false,false,false], note:'발주서 자동등록 (20260331-1)'},
   ],
   stockHistory: [
     {id:1, itemId:10, type:'in', qty:3000, price:4250, date:'2025-04-05', lot:'LOT250405', note:'생산입고'},
@@ -2116,58 +2115,56 @@ function renderBOM() {
   // Cost breakdown chart
   const rawCost = bom.filter(r=>getItem(r.itemId).type==='원자재').reduce((s,r)=>s+getItem(r.itemId).price*r.qty,0);
   const pkgCost = totalCost - rawCost;
-  if (bomChart) bomChart.destroy();
-  const ctx = $('chart-bom');
-  if (ctx && totalCost > 0) {
-    bomChart = new Chart(ctx, {
-      type:'doughnut',
-      data:{
-        labels:['원자재','부자재/포장'],
-        datasets:[{data:[Math.round(rawCost),Math.round(pkgCost)],backgroundColor:['#38bdf8','#a855f7'],borderWidth:0}]
-      },
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:11}}}}}
-    });
-  }
-  // 원가 구성 상세 테이블 생성
+  try {
+    if (bomChart) { bomChart.destroy(); bomChart = null; }
+    const ctx = $('chart-bom');
+    if (ctx && totalCost > 0 && typeof Chart !== 'undefined') {
+      bomChart = new Chart(ctx, {
+        type:'doughnut',
+        data:{
+          labels:['원자재','부자재/포장'],
+          datasets:[{data:[Math.round(rawCost),Math.round(pkgCost)],backgroundColor:['#38bdf8','#a855f7'],borderWidth:0}]
+        },
+        options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:11}}}}}
+      });
+    }
+  } catch(e) { console.warn('BOM chart error:', e); }
+
+  // 원가 구성 상세 테이블 — 항상 렌더링
   const bomTableRows = bom.map(row => {
     const item = getItem(row.itemId);
     const subtotal = item.price * row.qty;
     const pct = totalCost > 0 ? Math.round(subtotal/totalCost*100) : 0;
-    return `<tr>
-      <td style="font-size:12px">${item.name}</td>
-      <td style="text-align:center;font-size:11px;font-family:monospace">${item.code||'-'}</td>
-      <td style="text-align:center;font-size:12px">${row.qty}${row.unit}</td>
-      <td style="text-align:right;font-size:12px">${fmtW(item.price)}</td>
-      <td style="text-align:right;font-size:12px;font-weight:500;color:var(--sky-700)">${fmtW(Math.round(subtotal))}</td>
-      <td style="text-align:center">
-        <div style="display:flex;align-items:center;gap:4px">
-          <div style="flex:1;height:6px;background:var(--gray-100);border-radius:3px">
-            <div style="width:${pct}%;height:100%;background:${item.type==='원자재'?'var(--sky-400)':'var(--purple-400)'};border-radius:3px"></div>
-          </div>
-          <span style="font-size:10px;color:var(--gray-400);min-width:28px">${pct}%</span>
-        </div>
-      </td>
+    return `<tr style="border-bottom:1px solid var(--gray-100)">
+      <td style="padding:7px 8px;font-size:12px">${item.name}</td>
+      <td style="padding:7px 8px;text-align:center;font-size:11px;font-family:monospace;color:var(--gray-500)">${item.code||'-'}</td>
+      <td style="padding:7px 8px;text-align:center;font-size:12px">${row.qty}${row.unit}</td>
+      <td style="padding:7px 8px;text-align:right;font-size:12px">${fmtW(item.price)}</td>
+      <td style="padding:7px 8px;text-align:right;font-size:12px;font-weight:600;color:var(--sky-700)">${fmtW(Math.round(subtotal))}</td>
     </tr>`;
   }).join('');
   const marginRate = product.price > 0 ? Math.round((product.price-totalCost)/product.price*100) : 0;
   $('bom-cost-breakdown').innerHTML = `
-    <div style="font-size:12px;font-weight:600;color:var(--gray-700);margin-bottom:10px">📋 원가 구성 상세</div>
-    <table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12px">
-      <thead><tr style="background:var(--gray-50)">
+    <div style="font-size:12px;font-weight:600;color:var(--gray-700);margin-bottom:8px">📋 원가 구성 상세</div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12px;border:1px solid var(--gray-200)">
+      <thead><tr style="background:var(--gray-100)">
         <th style="padding:7px 8px;text-align:left;border-bottom:1px solid var(--gray-200)">품목명</th>
         <th style="padding:7px 8px;text-align:center;border-bottom:1px solid var(--gray-200)">코드</th>
         <th style="padding:7px 8px;text-align:center;border-bottom:1px solid var(--gray-200)">투입량</th>
         <th style="padding:7px 8px;text-align:right;border-bottom:1px solid var(--gray-200)">단가</th>
         <th style="padding:7px 8px;text-align:right;border-bottom:1px solid var(--gray-200)">소계</th>
-        <th style="padding:7px 8px;text-align:center;border-bottom:1px solid var(--gray-200)">비율</th>
       </tr></thead>
       <tbody>${bomTableRows}</tbody>
+      <tfoot><tr style="background:var(--sky-50)">
+        <td colspan="4" style="padding:8px;text-align:right;font-weight:700;font-size:13px">합계 (제조원가)</td>
+        <td style="padding:8px;text-align:right;font-weight:700;font-size:13px;color:var(--sky-700)">${fmtW(Math.round(totalCost))}</td>
+      </tr></tfoot>
     </table>
-    <div style="background:var(--gray-50);border-radius:8px;padding:12px 14px">
-      <div class="cost-row"><span>원자재</span><span>${fmtW(Math.round(rawCost))}</span></div>
-      <div class="cost-row"><span>부자재/포장</span><span>${fmtW(Math.round(pkgCost))}</span></div>
-      <div class="cost-row total"><span>📦 제조원가</span><span>${fmtW(Math.round(totalCost))}</span></div>
-      <div class="cost-row" style="font-size:11px;color:var(--gray-400);margin-top:6px"><span>판매가</span><span>${fmtW(product.price)}</span></div>
+    <div style="background:var(--gray-50);border-radius:8px;padding:12px 14px;border:1px solid var(--gray-200)">
+      <div class="cost-row"><span style="color:var(--gray-600)">원자재</span><span>${fmtW(Math.round(rawCost))}</span></div>
+      <div class="cost-row"><span style="color:var(--gray-600)">부자재/포장</span><span>${fmtW(Math.round(pkgCost))}</span></div>
+      <div class="cost-row total" style="border-top:1px solid var(--gray-300);margin-top:6px;padding-top:6px"><span>📦 제조원가</span><span>${fmtW(Math.round(totalCost))}</span></div>
+      <div class="cost-row" style="font-size:11px;color:var(--gray-400);margin-top:4px"><span>판매가</span><span>${fmtW(product.price)}</span></div>
       <div class="cost-row" style="color:var(--green-600);font-weight:600"><span>💰 예상 마진</span><span>${fmtW(product.price - Math.round(totalCost))} (${marginRate}%)</span></div>
     </div>
   `;
