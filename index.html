@@ -753,7 +753,6 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="tabs">
         <div class="tab active" onclick="switchTab(this,'stock-current')">📦 재고 현황</div>
         <div class="tab" onclick="switchTab(this,'stock-history')">📋 입출고 내역</div>
-        <div class="tab" onclick="switchTab(this,'stock-lot')">🏷️ LOT 관리</div>
       </div>
       <div id="stock-current">
         <div style="display:flex;justify-content:space-between;margin-bottom:12px;gap:8px">
@@ -766,7 +765,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="card">
           <div class="card-body p0 tbl-wrap">
             <table>
-              <thead><tr><th>코드</th><th>품목명</th><th>분류</th><th>용량</th><th>현재고</th><th>최소</th><th>최대</th><th>LOT</th><th>유통기한</th><th>재고바</th><th>상태</th></tr></thead>
+              <thead><tr><th>코드</th><th>품목명</th><th>분류</th><th>용량</th><th>재고 수량</th><th>최소</th><th>최대</th><th>유통기한</th><th>재고바</th><th>상태</th></tr></thead>
               <tbody id="stock-table"></tbody>
             </table>
           </div>
@@ -776,22 +775,13 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="card">
           <div class="card-body p0 tbl-wrap">
             <table>
-              <thead><tr><th>일자</th><th>품목명</th><th>구분</th><th>수량</th><th>단가</th><th>금액</th><th>LOT</th><th>비고</th></tr></thead>
+              <thead><tr><th>일자</th><th>품목명</th><th>구분</th><th>수량</th><th>단가</th><th>금액</th><th>재고 수량</th><th>비고</th></tr></thead>
               <tbody id="stock-history-table"></tbody>
             </table>
           </div>
         </div>
       </div>
-      <div id="stock-lot" style="display:none">
-        <div class="card">
-          <div class="card-body p0 tbl-wrap">
-            <table>
-              <thead><tr><th>LOT번호</th><th>품목명</th><th>입고일</th><th>수량</th><th>유통기한</th><th>D-day</th><th>상태</th></tr></thead>
-              <tbody id="lot-table"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+
     </div>
 
     <!-- ══════════════ QUOTE ══════════════ -->
@@ -1575,6 +1565,43 @@ const DEFAULT_DB = {
 
 let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
 
+// ── 초기화 시 입고완료 발주서 재고 자동 반영 ──────────────
+// localStorage에 저장된 DB가 없을 때(첫 로드) 또는 재고 처리 이력이 없을 때만 실행
+(function applyInitialStockIn() {
+  const processed = DB._processedOrders || [];
+  DB.orders.forEach(o => {
+    if (o.stockStatus === '입고완료' && processed.indexOf(o.id) === -1) {
+      (o.rows || []).forEach(row => {
+        if (!row.qty) return;
+        let item = null;
+        if (row.itemId) item = DB.items.find(i => i.id === row.itemId);
+        if (!item && row.code) item = DB.items.find(i => i.code && i.code === row.code);
+        if (!item) item = DB.items.find(i => i.name === row.name);
+        if (item) {
+          const idx = DB.items.findIndex(i => i.id === item.id);
+          if (idx >= 0) {
+            DB.items[idx].stock += row.qty;
+            // 입출고 이력 추가
+            const maxId = DB.stockHistory.length ? Math.max.apply(null, DB.stockHistory.map(h=>h.id||0)) : 0;
+            DB.stockHistory.push({
+              id: maxId + 1,
+              itemId: item.id,
+              type: 'in',
+              qty: row.qty,
+              price: row.price || item.price,
+              date: o.inDate || o.orderDate || '',
+              lot: o.serial || '',
+              note: '발주서 입고완료 반영 (' + (o.serial||'발주서 '+o.id) + ')'
+            });
+          }
+        }
+      });
+      processed.push(o.id);
+    }
+  });
+  DB._processedOrders = processed;
+})();
+
 // ═══════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════
@@ -2260,7 +2287,6 @@ function renderStockTable() {
       <td><strong>${fmt(i.stock)}</strong></td>
       <td>${fmt(i.minStock)}</td>
       <td>${fmt(i.maxStock)||'-'}</td>
-      <td style="font-family:monospace;font-size:11px">${i.lot||'-'}</td>
       <td>${i.expiry||'-'}${dday!==null?` <span class="badge ${dDayColor(dday)}" style="font-size:9px">D${dday>=0?'-'+dday:'+'+Math.abs(dday)}</span>`:''}</td>
       <td><div class="stock-bar"><div style="height:100%;border-radius:4px;width:${pct}%;background:${stockBarColor(i)}"></div></div></td>
       <td><span class="badge ${ss.cls}">${ss.text}</span></td>
@@ -2269,17 +2295,33 @@ function renderStockTable() {
 }
 
 function renderStockHistory() {
-  $('stock-history-table').innerHTML = DB.stockHistory.slice().reverse().map(h => {
+  // 품목별 누적 재고 계산 (시간순)
+  const sorted = DB.stockHistory.slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'') || a.id-b.id);
+  const runningStock = {};
+  sorted.forEach(h => {
+    if (!runningStock[h.itemId]) {
+      const item = DB.items.find(i=>i.id===h.itemId);
+      runningStock[h.itemId] = item ? item.stock : 0;
+    }
+  });
+  // 현재 재고에서 역산
+  const itemStockSnapshot = {};
+  DB.items.forEach(i => { itemStockSnapshot[i.id] = i.stock; });
+  const revHistory = DB.stockHistory.slice().reverse();
+  const tempStock = {...itemStockSnapshot};
+  revHistory.forEach(h => { h._snapStock = tempStock[h.itemId] || 0; tempStock[h.itemId] = h.type==='in' ? tempStock[h.itemId]-h.qty : tempStock[h.itemId]+h.qty; });
+
+  $('stock-history-table').innerHTML = revHistory.map(h => {
     const item = getItem(h.itemId);
     const total = h.qty * h.price;
     return `<tr>
       <td>${h.date||'-'}</td>
       <td class="lnk" onclick="showItemDetail(${h.itemId})">${item.name||'-'}</td>
-      <td><span class="badge ${h.type==='in'?'green':'red'}">${h.type==='in'?'입고':'출고'}</span></td>
-      <td>${fmt(h.qty)}</td>
+      <td><span class="badge ${h.type==='in'?'green':'red'}">${h.type==='in'?'📥 입고':'📤 출고'}</span></td>
+      <td style="color:${h.type==='in'?'var(--green-600)':'var(--red-600)'}"><strong>${h.type==='in'?'+':'-'}${fmt(h.qty)}</strong></td>
       <td>${fmtW(h.price)}</td>
       <td>${fmtW(total)}</td>
-      <td style="font-family:monospace;font-size:11px">${h.lot||'-'}</td>
+      <td style="color:var(--sky-700);font-weight:500">${fmt(h._snapStock)}</td>
       <td>${h.note||'-'}</td>
     </tr>`;
   }).join('') || '<tr><td colspan="8" class="empty">입출고 내역이 없습니다</td></tr>';
@@ -3804,7 +3846,7 @@ function addAIMsg(text, role) {
 function switchTab(el, targetId) {
   el.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
-  const tabIds = ['stock-current','stock-history','stock-lot'];
+  const tabIds = ['stock-current','stock-history'];
   tabIds.forEach(id=>{ const el2=$(id); if(el2) el2.style.display=id===targetId?'':'none'; });
 }
 
