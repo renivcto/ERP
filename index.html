@@ -670,7 +670,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div style="display:flex;gap:6px;flex-wrap:wrap" id="item-filter-chips"></div>
         <div style="display:flex;gap:7px">
           <input type="text" class="fi" id="item-search" placeholder="품목 검색..." style="width:170px" oninput="renderItemTable()">
-          <button class="btn btn-primary btn-sm" onclick="if(requireWrite())openModal('add-item')">+ 품목 등록</button>
+          <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-item']=null;const db=$('item-delete-btn');if(db)db.style.display='none';openModal('add-item')}">+ 품목 등록</button>
         </div>
       </div>
       <div class="card">
@@ -1020,9 +1020,12 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="fg full"><label>이미지</label><input type="file" accept="image/*" id="i-img"></div>
       </div>
     </div>
-    <div class="modal-ft">
-      <button class="btn btn-outline" onclick="closeModal('add-item')">취소</button>
-      <button class="btn btn-primary" onclick="saveItem()">저장</button>
+    <div class="modal-ft" style="justify-content:space-between">
+      <button class="btn btn-danger btn-sm" id="item-delete-btn" style="display:none" onclick="deleteItemFromModal()">🗑️ 삭제</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline" onclick="closeModal('add-item')">취소</button>
+        <button class="btn btn-primary" onclick="saveItem()">저장</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1580,6 +1583,7 @@ let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
 
 // ── 데이터 마이그레이션: 품목 타입/이름 수정 ────────────────
 (function migrateItemData() {
+  if (DB._migrated_v1) return; // 이미 마이그레이션 완료
   let changed = false;
   // id:9 → OEM, 이름 수정
   const idx9 = DB.items.findIndex(i => i.id === 9);
@@ -1614,7 +1618,8 @@ let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
       }
     });
   });
-  if (changed) saveData();
+  DB._migrated_v1 = true;
+  saveData();
 })();
 
 (function syncItemNamesFromOrders() {
@@ -2042,7 +2047,6 @@ function renderItemTable() {
       <td class="lnk" onclick="viewVendor(${i.vendorId})">${v.company||'-'}</td>
       <td style="display:flex;gap:4px">
         <button class="btn btn-outline btn-xs" onclick="editItem(${i.id})">수정</button>
-        <button class="btn btn-danger btn-xs" onclick="deleteItem(${i.id})">삭제</button>
       </td>
     </tr>`;
   }).join('') || '<tr><td colspan="8" class="empty">등록된 품목이 없습니다</td></tr>';
@@ -2051,6 +2055,16 @@ function renderItemTable() {
 function populateItemVendorSelect() {
   $('i-vendor').innerHTML = '<option value="">선택 안함</option>' +
     DB.vendors.map(v=>`<option value="${v.id}">${v.company}</option>`).join('');
+}
+
+function deleteItemFromModal() {
+  const id = editingId['add-item'];
+  if (!id) return;
+  const item = DB.items.find(i => i.id === id);
+  if (!item) return;
+  if (!confirm(`'${item.name}' 품목을 삭제합니까?\n연결된 BOM, 생산, 재고 데이터도 확인하세요.`)) return;
+  DB.items = DB.items.filter(i => i.id !== id);
+  saveData(); closeModal('add-item'); renderItemTable(); showNotif('품목이 삭제되었습니다');
 }
 
 function saveItem() {
@@ -2090,6 +2104,9 @@ function editItem(id) {
   $('i-spec').value=i.spec||''; $('i-price').value=i.price||''; $('i-stock').value=i.stock||0;
   $('i-max').value=i.maxStock||0;
   $('i-vendor').value=i.vendorId||''; $('i-material').value=i.material||''; $('i-note').value=i.note||'';
+  // 수정 시 삭제 버튼 표시
+  const delBtn = $('item-delete-btn');
+  if (delBtn) delBtn.style.display = '';
   openModal('add-item');
 }
 
