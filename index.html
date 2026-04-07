@@ -670,7 +670,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div style="display:flex;gap:6px;flex-wrap:wrap" id="item-filter-chips"></div>
         <div style="display:flex;gap:7px">
           <input type="text" class="fi" id="item-search" placeholder="품목 검색..." style="width:170px" oninput="renderItemTable()">
-          <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-item']=null;const db=$('item-delete-btn');if(db)db.style.display='none';openModal('add-item')}">+ 품목 등록</button>
+          <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-item']=null;const db=$('item-delete-btn');if(db)db.style.display='none';populateItemVendorSelect();openModal('add-item')}">+ 품목 등록</button>
         </div>
       </div>
       <div class="card">
@@ -1007,7 +1007,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="modal-hdr"><span class="modal-ttl">📦 품목 등록/수정</span><button class="modal-x" onclick="closeModal('add-item')">✕</button></div>
     <div class="modal-body">
       <div class="fg2">
-        <div class="fg"><label>분류<span class="req">*</span></label><select class="fs" id="i-type"><option>원자재</option><option>부자재</option><option>완제품</option><option>반제품</option></select></div>
+        <div class="fg"><label>분류<span class="req">*</span></label><select class="fs" id="i-type"><option>원자재</option><option>부자재</option><option>OEM</option><option>완제품</option><option>반제품</option></select></div>
         <div class="fg"><label>품목코드</label><input class="fi" id="i-code" placeholder="RM-001" style="font-family:monospace"></div>
         <div class="fg full"><label>품목명<span class="req">*</span></label><input class="fi" id="i-name"></div>
         <div class="fg"><label>용량/규격</label><input class="fi" id="i-spec"></div>
@@ -1737,7 +1737,7 @@ function openModal(id) {
   if (o) {
     o.classList.add('show');
     // Populate dropdowns when opening
-    if (id === 'add-item') populateItemVendorSelect();
+    // add-item: populateItemVendorSelect는 editItem/신규등록에서 직접 호출
     if (id === 'add-production') { populateProdProduct(); populateProdVendor(); }
     if (id === 'add-bom') { populateBOMProductModal(); populateBOMRows(); }
     if (id === 'stock-in-modal') { populateStockItemSelect('si-item'); $('si-date').value = today(); }
@@ -2052,14 +2052,23 @@ function editItem(id) {
   const i = getItem(id);
   editingId['add-item'] = id;
   populateItemVendorSelect();
-  $('i-type').value=i.type||'원자재'; $('i-code').value=i.code||''; $('i-name').value=i.name||'';
-  $('i-spec').value=i.spec||''; $('i-price').value=i.price||''; $('i-stock').value=i.stock||0;
+  $('i-type').value=i.type||'원자재';
+  $('i-code').value=i.code||'';
+  $('i-name').value=i.name||'';
+  $('i-spec').value=i.spec||'';
+  $('i-price').value=i.price||'';
+  $('i-stock').value=i.stock||0;
   $('i-max').value=i.maxStock||0;
-  $('i-vendor').value=i.vendorId||''; $('i-material').value=i.material||''; $('i-note').value=i.note||'';
+  $('i-material').value=i.material||'';
+  $('i-note').value=i.note||'';
+  // 업체 선택값 설정 (openModal 이전에 설정 후 이후 재확인)
+  if ($('i-vendor')) $('i-vendor').value = i.vendorId || '';
   // 수정 시 삭제 버튼 표시
   const delBtn = $('item-delete-btn');
   if (delBtn) delBtn.style.display = '';
   openModal('add-item');
+  // openModal 이후 vendor 값 재설정 (드롭다운 재생성 방지용)
+  setTimeout(() => { if ($('i-vendor')) $('i-vendor').value = i.vendorId || ''; }, 10);
 }
 
 function deleteItem(id) {
