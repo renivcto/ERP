@@ -1161,12 +1161,13 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div style="background:linear-gradient(135deg,var(--sky-50),#f0fdf4);border:1px solid var(--sky-200);border-radius:10px;padding:14px 16px;margin-bottom:16px">
         <div style="font-size:12.5px;font-weight:600;color:var(--sky-800);margin-bottom:8px;display:flex;align-items:center;gap:6px">
           ✨ AI 발주서 자동 입력
-          <span style="font-size:10px;font-weight:400;color:var(--sky-600)">PDF를 업로드하면 데이터를 자동으로 인식합니다</span>
+          <span style="font-size:10px;font-weight:400;color:var(--sky-600)">PDF 업로드 후 AI 분석 버튼을 누르세요</span>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <input type="file" id="o-ai-pdf" accept=".pdf,.jpg,.jpeg,.png" style="flex:1;font-size:12px" onchange="parseOrderPDF(this)">
-          <div id="o-ai-status" style="font-size:11px;color:var(--gray-400)">파일을 선택하세요</div>
+          <input type="file" id="o-ai-pdf" accept=".pdf,.jpg,.jpeg,.png" style="flex:1;font-size:12px" onchange="storeAIPdf(this)">
+          <button class="btn btn-primary btn-sm" onclick="requestAIAnalysis()" id="ai-analyze-btn" style="white-space:nowrap;display:none">✨ AI 분석 요청</button>
         </div>
+        <div id="o-ai-status" style="font-size:11px;color:var(--gray-400);margin-top:6px"></div>
         <div id="o-ai-result" style="display:none;margin-top:10px;padding:10px;background:white;border-radius:7px;border:1px solid var(--green-400);font-size:12px;color:var(--green-700)"></div>
       </div>
 
@@ -2544,28 +2545,77 @@ function viewOrderPDFById(id, type) {
 }
 
 // ── AI PDF 자동 파싱 ──────────────────────────────────
-async function parseOrderPDF(input) {
+// ── PDF 저장 및 AI 분석 요청 ──────────────────────────
+let _aiPdfFile = null;
+let _aiPdfDataUrl = null;
+
+function storeAIPdf(input) {
   const file = input.files[0];
   if (!file) return;
-
-  $('o-ai-status').textContent = '⏳ 파일 변환 중...';
+  _aiPdfFile = file;
+  $('o-ai-status').textContent = '📄 ' + file.name + ' — AI 분석 버튼을 눌러주세요';
   $('o-ai-status').style.color = 'var(--sky-600)';
+  $('ai-analyze-btn').style.display = '';
   $('o-ai-result').style.display = 'none';
+
+  // 원본 파일도 자동으로 첨부
+  const reader = new FileReader();
+  reader.onload = e => {
+    _aiPdfDataUrl = e.target.result;
+    _orderPdfData = e.target.result;
+    _orderPdfName = file.name;
+    $('o-pdf-name').textContent = file.name;
+    $('o-pdf-preview').style.display = 'block';
+    $('o-pdf-existing').style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+}
+
+function requestAIAnalysis() {
+  if (!_aiPdfFile) { showNotif('먼저 PDF 파일을 선택해주세요', 'warning'); return; }
+
+  // AI 채팅창에 분석 요청 — sendPrompt로 클로드에게 직접 물어보기
+  const msg = `발주서 PDF를 업로드했어. 아래 JSON 형식으로 데이터를 분석해서 applyOrderData() 함수를 호출해줘:
+
+파일명: ${_aiPdfFile.name}
+
+분석 완료되면 이 형식으로 알려줘:
+{
+  "vendor": "업체명",
+  "serial": "일련번호",
+  "orderDate": "YYYY-MM-DD",
+  "inDate": "납기일 YYYY-MM-DD",
+  "addr": "입고처 주소",
+  "note": "특기사항",
+  "rows": [{"code":"품목코드","name":"품목명","qty":수량,"price":단가}]
+}`;
+
+  // Claude Vision API로 이미지 분석
+  analyzeWithClaude();
+}
+
+async function analyzeWithClaude() {
+  if (!_aiPdfDataUrl) { showNotif('파일을 다시 선택해주세요','warning'); return; }
+
+  $('o-ai-status').textContent = '⏳ AI 분석 중...';
+  $('o-ai-status').style.color = 'var(--sky-600)';
+  $('ai-analyze-btn').disabled = true;
+  $('ai-analyze-btn').textContent = '⏳ 분석 중...';
 
   try {
     let imageBase64, mediaType;
 
-    if (file.type === 'application/pdf') {
-      $('o-ai-status').textContent = '⏳ PDF 이미지 변환 중...';
-      imageBase64 = await pdfToImage(file);
+    if (_aiPdfFile.type === 'application/pdf') {
+      // PDF → 이미지 변환
+      $('o-ai-status').textContent = '⏳ PDF 렌더링 중...';
+      imageBase64 = await convertPdfToImage(_aiPdfFile);
       mediaType = 'image/png';
     } else {
-      const dataUrl = await fileToDataUrl(file);
-      imageBase64 = dataUrl.split(',')[1];
-      mediaType = file.type || 'image/jpeg';
+      imageBase64 = _aiPdfDataUrl.split(',')[1];
+      mediaType = _aiPdfFile.type || 'image/jpeg';
     }
 
-    $('o-ai-status').textContent = '⏳ AI가 발주서를 분석 중...';
+    $('o-ai-status').textContent = '⏳ Claude가 발주서를 읽는 중...';
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -2575,12 +2625,29 @@ async function parseOrderPDF(input) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 1500,
+        max_tokens: 2000,
         messages: [{
           role: 'user',
           content: [
-            { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
-            { type: 'text', text: '이 발주서 이미지에서 정보를 추출해서 JSON으로만 응답해줘. 다른 텍스트 없이 순수 JSON만:\n{\n  "vendor": "수신 업체명(회사명만)",\n  "serial": "일련번호",\n  "orderDate": "발주일 YYYY-MM-DD",\n  "inDate": "납기일자 YYYY-MM-DD",\n  "addr": "입고처 주소",\n  "note": "비고 또는 특기사항",\n  "rows": [{"code": "품목코드", "name": "품목명", "qty": 수량숫자, "price": 단가숫자}]\n}' }
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: mediaType, data: imageBase64 }
+            },
+            {
+              type: 'text',
+              text: `이 발주서 이미지를 보고 아래 JSON 형식으로만 응답해줘. 마크다운, 설명 없이 순수 JSON만:
+{
+  "vendor": "수신 업체명",
+  "serial": "일련번호",
+  "orderDate": "발주일 YYYY-MM-DD 형식",
+  "inDate": "납기일자 YYYY-MM-DD 형식",
+  "addr": "입고처 주소",
+  "note": "비고/특기사항",
+  "rows": [
+    {"code": "품목코드", "name": "품목명", "qty": 수량숫자, "price": 단가숫자(원화기호쉼표제거)}
+  ]
+}`
+            }
           ]
         }]
       })
@@ -2588,31 +2655,27 @@ async function parseOrderPDF(input) {
 
     const data = await res.json();
     if (data.error) throw new Error(data.error.message);
-    const text = data.content?.[0]?.text || '';
-    const cleaned = text.replace(/```json|```/g, '').trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('JSON 추출 실패: ' + text.slice(0,100));
-    const parsed = JSON.parse(jsonMatch[0]);
-    const originalDataUrl = await fileToDataUrl(file);
-    applyParsedOrder(parsed, originalDataUrl, file.name);
+
+    const text = (data.content?.[0]?.text || '').replace(/```json|```/g, '').trim();
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('응답에서 JSON을 찾을 수 없습니다');
+
+    const parsed = JSON.parse(match[0]);
+    applyParsedOrder(parsed, _aiPdfDataUrl, _aiPdfFile.name);
 
   } catch(err) {
-    console.error('PDF 파싱 오류:', err);
-    $('o-ai-status').textContent = '❌ ' + (err.message||'분석 실패 — 다시 시도해주세요');
+    console.error(err);
+    $('o-ai-status').textContent = '❌ 분석 실패: ' + err.message;
     $('o-ai-status').style.color = 'var(--red-500)';
+  } finally {
+    $('ai-analyze-btn').disabled = false;
+    $('ai-analyze-btn').textContent = '✨ AI 분석 요청';
   }
 }
 
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = e => resolve(e.target.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-async function pdfToImage(file) {
+// PDF 첫 페이지를 PNG 이미지로 변환
+async function convertPdfToImage(file) {
+  // pdf.js 동적 로드
   if (!window.pdfjsLib) {
     await new Promise((resolve, reject) => {
       const s = document.createElement('script');
@@ -2622,15 +2685,14 @@ async function pdfToImage(file) {
           'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         resolve();
       };
-      s.onerror = reject;
+      s.onerror = () => reject(new Error('pdf.js 로드 실패'));
       document.head.appendChild(s);
     });
   }
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const buf = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
   const page = await pdf.getPage(1);
-  const scale = 2.0;
-  const viewport = page.getViewport({ scale });
+  const viewport = page.getViewport({ scale: 2.0 });
   const canvas = document.createElement('canvas');
   canvas.width = viewport.width;
   canvas.height = viewport.height;
@@ -2776,11 +2838,158 @@ function previewOrder() {
 function previewOrderById(id) {
   const o = DB.orders.find(x=>x.id===id);
   if (!o) return;
+  showRenivOrderPreview(o);
+}
+
+function previewOrder() {
+  const vendorId = parseInt($('o-vendor').value);
+  const v = getVendor(vendorId);
+  const rows = [];
+  $('order-modal-rows').querySelectorAll('tr').forEach(tr => {
+    const inputs = tr.querySelectorAll('input');
+    if (inputs.length >= 4 && inputs[1].value.trim())
+      rows.push({code:inputs[0].value, name:inputs[1].value, qty:parseFloat(inputs[2].value)||0, price:parseFloat(inputs[3].value)||0});
+  });
+  const tempOrder = {
+    vendorId, rows, orderDate:$('o-date').value, inDate:$('o-in-date').value,
+    serial:$('o-serial').value, note:$('o-note').value, addr:$('o-addr').value
+  };
+  showRenivOrderPreview(tempOrder);
+}
+
+// ── 르니브 발주서 양식 출력 ─────────────────────────────
+function showRenivOrderPreview(o) {
   const v = getVendor(o.vendorId);
-  showDocPreview('발주서', v, o.rows, `PO-2025-0${String(o.id).padStart(2,'0')}`, o.orderDate, o.inDate, o.note, true);
+  const supplyTotal = o.rows.reduce((s,r)=>s+(r.qty||0)*(r.price||0),0);
+  const vat = Math.round(supplyTotal * 0.1);
+  const grandTotal = supplyTotal + vat;
+  const toKorean = n => {
+    const units = ['','일','이','삼','사','오','육','칠','팔','구'];
+    const tens =  ['','십','백','천'];
+    const bigs =  ['','만','억','조'];
+    if (n === 0) return '영';
+    let result = '';
+    let bigIdx = 0;
+    while (n > 0) {
+      const chunk = n % 10000;
+      if (chunk > 0) {
+        let chunkStr = '';
+        const digits = String(chunk).padStart(4,'0').split('');
+        digits.forEach((d,i)=>{ if(d!=='0') chunkStr+=units[+d]+tens[3-i]; });
+        result = chunkStr + bigs[bigIdx] + result;
+      }
+      n = Math.floor(n/10000); bigIdx++;
+    }
+    return result;
+  };
+  const amtKor = toKorean(grandTotal) + '원 정';
+
+  $('doc-preview-title').textContent = '㈜르니브 발주서';
+  $('doc-preview-content').innerHTML = `
+    <div id="printable-doc" style="font-family:'Noto Sans KR',sans-serif;font-size:12px;max-width:700px;margin:0 auto">
+      <h2 style="text-align:center;font-size:20px;font-weight:700;margin-bottom:20px;letter-spacing:2px">㈜르니브 발주서</h2>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
+        <tr>
+          <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600;width:80px">일련번호</td>
+          <td style="border:1px solid #333;padding:7px 10px;width:180px">${o.serial||'-'}</td>
+          <td style="border:1px solid #333;padding:7px 10px;text-align:center;font-size:22px;font-weight:900;letter-spacing:3px;color:#075985" colspan="2" rowspan="2">RENIV</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600">수 신</td>
+          <td style="border:1px solid #333;padding:7px 10px;font-weight:600">${v.company||'-'}</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600">담당자</td>
+          <td style="border:1px solid #333;padding:7px 10px">${v.contact||'-'}</td>
+          <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600">사업자등록번호</td>
+          <td style="border:1px solid #333;padding:7px 10px">297-81-03973</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600">연락처</td>
+          <td style="border:1px solid #333;padding:7px 10px">${v.phone||'-'}</td>
+          <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600">회사명</td>
+          <td style="border:1px solid #333;padding:7px 10px">㈜르니브</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600">이메일</td>
+          <td style="border:1px solid #333;padding:7px 10px">${v.email||'-'}</td>
+          <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600">대 표</td>
+          <td style="border:1px solid #333;padding:7px 10px">이주연</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600">입고처</td>
+          <td style="border:1px solid #333;padding:7px 10px">㈜르니브</td>
+          <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600">주 소</td>
+          <td style="border:1px solid #333;padding:7px 10px">서울 성동구 성수동 2가 301-94 8층</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600">입고처 주소</td>
+          <td style="border:1px solid #333;padding:7px 10px">${o.addr||'-'}</td>
+          <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600">담당자</td>
+          <td style="border:1px solid #333;padding:7px 10px">송희강 이사 / 권다빈 이사</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="border:1px solid #333;padding:9px 10px;background:#fffde7;font-weight:700;text-align:center;font-size:13px">
+            납기일자 : ${o.inDate||'-'}
+          </td>
+        </tr>
+      </table>
+
+      <div style="border:1px solid #333;padding:9px 12px;margin-bottom:12px;font-weight:600;display:flex;justify-content:space-between">
+        <span>금 액 : 금 ${amtKor}</span>
+        <span>(₩ ${grandTotal.toLocaleString('ko-KR')} / VAT 포함)</span>
+      </div>
+
+      <table style="width:100%;border-collapse:collapse;margin-bottom:14px">
+        <thead>
+          <tr style="background:#f5f5f5">
+            <th style="border:1px solid #333;padding:7px 10px;text-align:center">품목코드</th>
+            <th style="border:1px solid #333;padding:7px 10px;text-align:center">품목명</th>
+            <th style="border:1px solid #333;padding:7px 10px;text-align:center">수량</th>
+            <th style="border:1px solid #333;padding:7px 10px;text-align:center">단가</th>
+            <th style="border:1px solid #333;padding:7px 10px;text-align:center">공급가액</th>
+            <th style="border:1px solid #333;padding:7px 10px;text-align:center">부가세</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${o.rows.map(r=>{
+            const supply = (r.qty||0)*(r.price||0);
+            const rvat = Math.round(supply*0.1);
+            return `<tr>
+              <td style="border:1px solid #333;padding:7px 10px;text-align:center;font-size:11px;font-family:monospace">${r.code||''}</td>
+              <td style="border:1px solid #333;padding:7px 10px;text-align:center;font-weight:500">${r.name||''}</td>
+              <td style="border:1px solid #333;padding:7px 10px;text-align:center">${(r.qty||0).toLocaleString()}EA</td>
+              <td style="border:1px solid #333;padding:7px 10px;text-align:right">₩${(r.price||0).toLocaleString()}</td>
+              <td style="border:1px solid #333;padding:7px 10px;text-align:right">₩${supply.toLocaleString()}</td>
+              <td style="border:1px solid #333;padding:7px 10px;text-align:right">₩${rvat.toLocaleString()}</td>
+            </tr>`;
+          }).join('')}
+          ${Array.from({length:Math.max(0,3-o.rows.length)}).map(()=>`
+            <tr><td style="border:1px solid #333;padding:12px">&nbsp;</td><td style="border:1px solid #333"></td><td style="border:1px solid #333"></td><td style="border:1px solid #333"></td><td style="border:1px solid #333"></td><td style="border:1px solid #333"></td></tr>
+          `).join('')}
+        </tbody>
+      </table>
+
+      <div style="border:1px solid #ccc;padding:10px 12px;font-size:11.5px;color:#555;line-height:1.8">
+        ※ 납기 일자 확인 및 준수를 부탁드립니다.<br>
+        납기 지연이 예상될 경우, 아래 연락처로 사전 공유해 주시면 감사하겠습니다.<br>
+        (송희강 이사 010-3328-3652 / 권다빈 이사 010-8874-5722)
+        ${o.note?'<br><br><strong>특기사항:</strong> '+o.note:''}
+      </div>
+
+      <div style="margin-top:14px;text-align:right;font-size:11px;color:#888">${o.orderDate||today()} ㈜르니브</div>
+    </div>
+  `;
+  openModal('doc-preview');
 }
 
 function showDocPreview(type, vendor, rows, docNo, date, date2, note, isOrder=false) {
+  if (isOrder) {
+    const tempO = { vendorId: vendor.id||0, rows, orderDate:date, inDate:date2, serial:docNo, note, addr:vendor.addr||'' };
+    showRenivOrderPreview(tempO);
+    return;
+  }
+  // 견적서용 기존 방식 유지
   const total = rows.reduce((s,r)=>s+r.qty*r.price,0);
   $('doc-preview-title').textContent = type + ' 미리보기';
   $('doc-preview-content').innerHTML = `
@@ -2793,27 +3002,15 @@ function showDocPreview(type, vendor, rows, docNo, date, date2, note, isOrder=fa
       <div class="doc-info">
         <div class="doc-info-item"><label>수신</label><span>${vendor.company||'미지정'}</span></div>
         <div class="doc-info-item"><label>담당자</label><span>${vendor.contact||'-'}</span></div>
-        <div class="doc-info-item"><label>${isOrder?'발주일':'작성일'}</label><span>${date||'-'}</span></div>
-        <div class="doc-info-item"><label>${isOrder?'납품예정일':'유효기간'}</label><span>${date2||'-'}</span></div>
+        <div class="doc-info-item"><label>작성일</label><span>${date||'-'}</span></div>
+        <div class="doc-info-item"><label>유효기간</label><span>${date2||'-'}</span></div>
       </div>
       <table style="margin-bottom:16px">
         <thead><tr><th>품목명</th><th style="text-align:right">수량</th><th style="text-align:right">단가</th><th style="text-align:right">소계</th></tr></thead>
-        <tbody>
-          ${rows.map(r=>`<tr><td>${r.name}</td><td style="text-align:right">${fmt(r.qty)}</td><td style="text-align:right">${fmtW(r.price)}</td><td style="text-align:right"><strong>${fmtW(r.qty*r.price)}</strong></td></tr>`).join('')}
-        </tbody>
-        <tfoot>
-          <tr style="border-top:2px solid var(--gray-300)">
-            <td colspan="3" style="text-align:right;font-weight:700;padding:10px 12px">합계</td>
-            <td style="text-align:right;font-weight:700;font-size:15px;padding:10px 12px;color:var(--sky-700)">${fmtW(total)}</td>
-          </tr>
-        </tfoot>
+        <tbody>${rows.map(r=>`<tr><td>${r.name}</td><td style="text-align:right">${fmt(r.qty)}</td><td style="text-align:right">${fmtW(r.price)}</td><td style="text-align:right"><strong>${fmtW(r.qty*r.price)}</strong></td></tr>`).join('')}</tbody>
+        <tfoot><tr style="border-top:2px solid var(--gray-300)"><td colspan="3" style="text-align:right;font-weight:700;padding:10px 12px">합계</td><td style="text-align:right;font-weight:700;font-size:15px;padding:10px 12px;color:var(--sky-700)">${fmtW(total)}</td></tr></tfoot>
       </table>
       ${note?`<div style="font-size:12px;color:var(--gray-600);border-top:1px solid var(--gray-200);padding-top:10px"><strong>비고:</strong> ${note}</div>`:''}
-      <div style="margin-top:24px;display:flex;justify-content:space-between;font-size:11px;color:var(--gray-400)">
-        <span>발신: RENIV Cosmetics</span>
-        <span>${date||today()}</span>
-      </div>
-      ${isOrder?`<div style="margin-top:14px;text-align:right"><span class="doc-stamp">발주확인</span></div>`:''}
     </div>
   `;
   openModal('doc-preview');
@@ -2823,7 +3020,24 @@ function printDoc() {
   const content = $('printable-doc');
   if (!content) return;
   const w = window.open('', '_blank');
-  w.document.write(`<html><head><title>문서</title><style>body{font-family:'Noto Sans KR',sans-serif;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:8px 10px;border:1px solid #ddd;font-size:12px}th{background:#f5f5f5}@media print{button{display:none}}</style></head><body>${content.innerHTML}<script>window.print()<\/script></body></html>`);
+  w.document.write(`<!DOCTYPE html><html><head><title>㈜르니브 발주서</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
+      body{font-family:'Noto Sans KR',sans-serif;padding:24px;margin:0;color:#222}
+      table{width:100%;border-collapse:collapse}
+      th,td{padding:7px 10px;border:1px solid #333;font-size:12px}
+      th{background:#f5f5f5;font-weight:600}
+      h2{text-align:center;font-size:20px;font-weight:700;margin-bottom:20px;letter-spacing:2px}
+      @media print{
+        body{padding:8px}
+        button{display:none!important}
+        @page{size:A4;margin:15mm}
+      }
+    </style>
+  </head><body>
+    <button onclick="window.print()" style="margin-bottom:14px;padding:8px 20px;background:#0ea5e9;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px">🖨️ 인쇄 / PDF 저장</button>
+    ${content.innerHTML}
+  </body></html>`);
   w.document.close();
 }
 
