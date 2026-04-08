@@ -743,7 +743,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="card">
         <div class="card-body p0 tbl-wrap">
           <table>
-            <thead><tr><th>분류</th><th>코드</th><th>품목명</th><th style="text-align:center">이미지</th><th style="max-width:80px">용량</th><th>바코드</th><th>단가</th><th style="text-align:center">재고수량</th><th style="text-align:right">재고평가액</th><th>업체</th><th>견적서</th><th>관리</th></tr></thead>
+            <colgroup><col style="width:60px"><col style="width:90px"><col style="min-width:200px"><col style="width:55px"><col style="width:70px"><col style="width:110px"><col style="width:70px"><col style="width:70px"><col style="width:100px"><col style="width:90px"><col style="width:80px"><col style="width:55px"></colgroup><thead><tr><th>분류</th><th>코드</th><th>품목명</th><th style="text-align:center">이미지</th><th>용량</th><th>바코드</th><th>단가</th><th style="text-align:center">재고수량</th><th style="text-align:right">재고평가액</th><th>업체</th><th>견적서</th><th>관리</th></tr></thead>
             <tbody id="item-table"></tbody>
           </table>
         </div>
@@ -2437,9 +2437,21 @@ function renderItemTable() {
   const fixedTypes = ['원자재','부자재','OEM','완제품'];
   const extraTypes = [...new Set(DB.items.map(i=>i.type))].filter(t => !fixedTypes.includes(t));
   const types = ['전체', ...fixedTypes, ...extraTypes];
-  $('item-filter-chips').innerHTML = types.map(t =>
-    `<div class="chip ${t===itemFilter?'active':''}" onclick="itemFilter='${t}';renderItemTable()">${t}(${t==='전체'?DB.items.length:(DB.items||[]).filter(i=>i.type===t).length})</div>`
-  ).join('');
+  const chipColors = {
+    '전체':   {bg:'var(--sky-500)',  border:'var(--sky-500)',  text:'#fff', activeBg:'var(--sky-600)'},
+    '원자재': {bg:'#dcfce7',        border:'#86efac',         text:'#166534', activeBg:'#16a34a', activeText:'#fff'},
+    '부자재': {bg:'#f3e8ff',        border:'#c084fc',         text:'#6b21a8', activeBg:'#9333ea', activeText:'#fff'},
+    'OEM':    {bg:'#e0f2fe',        border:'#7dd3fc',         text:'#075985', activeBg:'#0284c7', activeText:'#fff'},
+    '완제품': {bg:'#fef3c7',        border:'#fcd34d',         text:'#92400e', activeBg:'#d97706', activeText:'#fff'},
+  };
+  $('item-filter-chips').innerHTML = types.map(t => {
+    const c = chipColors[t] || chipColors['전체'];
+    const isActive = t === itemFilter;
+    const bg = isActive ? (c.activeBg||c.bg) : c.bg;
+    const txtColor = isActive ? (c.activeText||c.text) : c.text;
+    const border = isActive ? (c.activeBg||c.border) : c.border;
+    return `<div onclick="itemFilter='${t}';renderItemTable()" style="display:inline-flex;align-items:center;padding:4px 12px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:500;background:${bg};color:${txtColor};border:1px solid ${border};transition:all .15s">${t}(${t==='전체'?DB.items.length:(DB.items||[]).filter(i=>i.type===t).length})</div>`;
+  }).join('');
   const search = ($('item-search') ? $('item-search').value : '').toLowerCase();
   let filtered = DB.items.filter(i => itemFilter==='전체' || i.type===itemFilter);
   if (search) filtered = filtered.filter(i => i.name.toLowerCase().includes(search) || i.code.toLowerCase().includes(search));
@@ -2459,13 +2471,13 @@ function renderItemTable() {
     return `<tr>
       <td><span class="badge ${typeBadge(i.type)}" style="font-size:10px">${i.type}</span></td>
       <td style="font-family:monospace;font-size:12px;font-weight:500">${i.code}</td>
-      <td class="lnk" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="showItemDetail(${i.id})" title="${i.name}">${i.name}</td>
+      <td class="lnk" style="min-width:200px;word-break:keep-all;white-space:normal;line-height:1.5" onclick="showItemDetail(${i.id})">${i.name}</td>
       <td style="text-align:center">${imgHtml}</td>
-      <td style="font-size:11.5px;color:var(--gray-500);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.spec||'-'}</td>
+      <td style="font-size:11px;color:var(--gray-500);max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center">${i.spec||'-'}</td>
       <td style="text-align:center">${barcodeHtml}</td>
       <td>${fmtW(i.price)}</td>
-      <td style="text-align:center"><strong>${fmt(i.stock)}</strong></td>
-      <td style="text-align:right;color:var(--sky-700);font-weight:500">${fmtW(stockVal)}</td>
+      <td style="text-align:center;font-size:12px"><strong>${fmt(i.stock)}</strong></td>
+      <td style="text-align:right;color:var(--sky-700);font-weight:500;font-size:12px">${fmtW(stockVal)}</td>
       <td class="lnk" onclick="viewVendor(${i.vendorId})">${v.company||'-'}</td>
       <td style="text-align:center">${i.quoteFileName ? `<button onclick="openItemQuoteFile(${i.id})" title="${i.quoteFileName}" style="display:inline-flex;align-items:center;gap:5px;background:#fdf2f8;color:#c4708a;border:1px solid #f0c0d4;padding:4px 11px;border-radius:7px;font-size:11.5px;font-weight:400;cursor:pointer;margin:2px;white-space:nowrap"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d97b9a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg> 보기</button>` : '<span style="color:var(--gray-300);font-size:11px">-</span>'}</td>
       <td>
@@ -3161,9 +3173,9 @@ function renderStockTable() {
       <td><span class="badge ${typeBadge(i.type)}" style="font-size:10px">${i.type}</span></td>
       <td style="font-family:monospace;font-size:12px;font-weight:500">${i.code}</td>
       <td class="lnk" onclick="showItemDetail(${i.id})">${i.name}</td>
-      <td style="font-size:11.5px;color:var(--gray-500);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.spec||'-'}</td>
-      <td style="text-align:center"><strong>${fmt(i.stock)}</strong></td>
-      <td style="text-align:right;color:var(--sky-700);font-weight:500">${fmtW(stockVal)}</td>
+      <td style="font-size:11px;color:var(--gray-500);max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center">${i.spec||'-'}</td>
+      <td style="text-align:center;font-size:12px"><strong>${fmt(i.stock)}</strong></td>
+      <td style="text-align:right;color:var(--sky-700);font-weight:500;font-size:12px">${fmtW(stockVal)}</td>
       <td><div class="stock-bar"><div style="height:100%;border-radius:4px;width:${pct}%;background:${stockBarColor(i)}"></div></div></td>
     </tr>`;
   }).join('');
