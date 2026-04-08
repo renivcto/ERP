@@ -569,15 +569,10 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
   <!-- HEADER -->
   <div id="header">
     <div class="hdr-title" id="pageTitle">대시보드</div>
-    <div class="hdr-search">
-      <span style="font-size:13px">🔍</span>
-      <input id="globalSearch" type="text" placeholder="전체 검색..." oninput="globalSearchFn(this.value)">
-    </div>
     <button class="hdr-btn" onclick="exportToSheets()" title="ERP → Google Sheets 내보내기">
       <span class="sync-dot"></span>Sheets 연동
     </button>
     <button class="hdr-btn" onclick="showNotif('알림 없음','info')">🔔<span class="dot"></span></button>
-    <button class="hdr-btn primary" onclick="toggleAI()">✨ AI 분석</button>
   </div>
 
   <!-- CONTENT -->
@@ -652,8 +647,65 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         </a>
       </div>
 
-      <!-- Trello 카드 + ERP 태스크 컨테이너 (세로 배치) -->
+      <!-- 구글 문서 공유 박스 -->
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-hdr" style="justify-content:space-between">
+          <span class="card-title">🗂️ 구글 문서 공유</span>
+          <button class="btn btn-primary btn-sm" id="gdoc-add-btn" onclick="openGdocModal()" style="display:none">+ 문서 추가</button>
+        </div>
+        <div class="card-body" style="padding:12px">
+          <div id="gdoc-list" style="display:flex;flex-wrap:wrap;gap:10px;min-height:40px">
+            <div style="color:var(--gray-400);font-size:12px;display:flex;align-items:center;gap:6px">⏳ 불러오는 중...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Trello 카드 컨테이너 -->
       <div id="kanban-board"></div>
+
+      <!-- 구글 문서 추가/수정 모달 -->
+      <div class="overlay" id="overlay-gdoc-modal" style="z-index:400">
+        <div class="modal" style="max-width:440px">
+          <div class="modal-hdr">
+            <span class="modal-ttl" id="gdoc-modal-title">📄 문서 추가</span>
+            <button class="modal-x" onclick="closeGdocModal()">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="fg">
+              <label>문서 종류<span class="req">*</span></label>
+              <div style="display:flex;gap:8px;flex-wrap:wrap" id="gdoc-type-btns">
+                <button onclick="selectGdocType('sheets')" id="gdoc-type-sheets"
+                  style="display:flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;border:2px solid var(--gray-300);background:#fff;cursor:pointer;font-size:12.5px;transition:all .12s">
+                  <img src="https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_spreadsheet_x16.png" style="width:16px;height:16px"> Google 스프레드시트
+                </button>
+                <button onclick="selectGdocType('slides')" id="gdoc-type-slides"
+                  style="display:flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;border:2px solid var(--gray-300);background:#fff;cursor:pointer;font-size:12.5px;transition:all .12s">
+                  <img src="https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_presentation_x16.png" style="width:16px;height:16px"> Google 슬라이드
+                </button>
+                <button onclick="selectGdocType('docs')" id="gdoc-type-docs"
+                  style="display:flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;border:2px solid var(--gray-300);background:#fff;cursor:pointer;font-size:12.5px;transition:all .12s">
+                  <img src="https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_document_x16.png" style="width:16px;height:16px"> Google 문서
+                </button>
+              </div>
+            </div>
+            <div class="fg">
+              <label>제목<span class="req">*</span></label>
+              <input class="fi" id="gdoc-title-inp" placeholder="문서 제목 입력">
+            </div>
+            <div class="fg">
+              <label>구글 공유 링크<span class="req">*</span></label>
+              <input class="fi" id="gdoc-url-inp" placeholder="https://docs.google.com/...">
+            </div>
+          </div>
+          <div class="modal-ft" style="justify-content:space-between">
+            <button class="btn btn-danger btn-sm" id="gdoc-delete-btn" style="display:none" onclick="deleteGdoc()">🗑️ 삭제</button>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-outline" onclick="closeGdocModal()">취소</button>
+              <button class="btn btn-primary" onclick="saveGdoc()">저장</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ══════════════ VENDOR ══════════════ -->
@@ -702,7 +754,6 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         </div>
         <div style="display:flex;gap:7px">
           <button class="btn btn-outline btn-sm" onclick="openModal('add-bom')">+ BOM 등록</button>
-          <button class="btn btn-primary btn-sm" onclick="aiAnalyzeBOM()">✨ AI 분석</button>
         </div>
       </div>
       <div class="g2">
@@ -1031,18 +1082,23 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="fg"><label>품목코드</label><input class="fi" id="i-code" placeholder="RM-001" style="font-family:monospace"></div>
         <div class="fg full"><label>품목명<span class="req">*</span></label><input class="fi" id="i-name"></div>
         <div class="fg"><label>용량/규격</label><input class="fi" id="i-spec"></div>
-        <div class="fg"><label>바코드 번호</label><input class="fi" id="i-barcode" placeholder="8801234567890" style="font-family:monospace"></div>
         <div class="fg"><label>단가(원)<span class="req">*</span></label><input class="fi" id="i-price" type="number"></div>
         <div class="fg"><label>재고수량 <span style="font-size:10px;color:var(--gray-400);font-weight:400">(재고관리에서만 수정)</span></label><input class="fi" id="i-stock" type="number" value="0" readonly style="background:var(--gray-50);color:var(--gray-500);cursor:not-allowed"></div>
         <div class="fg"><label>최대수량</label><input class="fi" id="i-max" type="number" value="0"></div>
         <div class="fg"><label>업체</label><select class="fs" id="i-vendor"></select></div>
         <div class="fg"><label>재질</label><input class="fi" id="i-material" placeholder="유리, PP 등"></div>
         <div class="fg full"><label>비고</label><textarea class="fta" id="i-note"></textarea></div>
+        <!-- 바코드 번호 + 바코드 이미지 나란히 -->
         <div class="fg full">
-          <label>바코드 이미지</label>
-          <div style="display:flex;align-items:center;gap:10px">
-            <input type="file" accept="image/*" id="i-barcode-img" onchange="previewBarcodeImg(this)">
-            <div id="i-barcode-preview" style="height:44px;min-width:130px;border:1px dashed var(--gray-300);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--gray-400);overflow:hidden;background:var(--gray-50);padding:4px 8px;flex-shrink:0">바코드 이미지</div>
+          <label>바코드</label>
+          <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:160px">
+              <input class="fi" id="i-barcode" placeholder="8801234567890" style="font-family:monospace;margin-bottom:6px">
+              <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                <input type="file" accept="image/*" id="i-barcode-img" onchange="previewBarcodeImg(this)" style="font-size:11px;max-width:180px">
+              </div>
+            </div>
+            <div id="i-barcode-preview" style="height:60px;min-width:150px;max-width:200px;border:1px dashed var(--gray-300);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--gray-400);overflow:hidden;background:var(--gray-50);padding:4px 8px;flex-shrink:0">바코드 이미지</div>
           </div>
         </div>
         <div class="fg full">
@@ -1050,6 +1106,19 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div style="display:flex;align-items:center;gap:10px">
             <input type="file" accept="image/*" id="i-img" onchange="previewItemImg(this)">
             <div id="i-img-preview" style="width:60px;height:60px;border:1px dashed var(--gray-300);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:22px;overflow:hidden;background:var(--gray-50);flex-shrink:0">📷</div>
+          </div>
+        </div>
+        <!-- 견적서 파일 업로드 -->
+        <div class="fg full">
+          <label>📄 견적서 파일 <span style="font-size:10px;color:var(--gray-400);font-weight:400">(PDF, 이미지 등)</span></label>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <input type="file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx" id="i-quote-file" onchange="previewQuoteFile(this)" style="font-size:11px">
+            <div id="i-quote-preview" style="font-size:11.5px;color:var(--gray-500)"></div>
+          </div>
+          <div id="i-quote-existing" style="margin-top:6px;display:none">
+            <span style="font-size:11px;color:var(--sky-700)">📎 </span>
+            <span id="i-quote-filename" style="font-size:11px;color:var(--sky-700);text-decoration:underline;cursor:pointer" onclick="openQuoteFile()"></span>
+            <button onclick="clearQuoteFile()" style="background:none;border:none;color:var(--red-400);font-size:11px;cursor:pointer;margin-left:6px">✕ 삭제</button>
           </div>
         </div>
       </div>
@@ -1956,7 +2025,7 @@ function go(page) {
   // Render page-specific content
   const renders = {
     dashboard: renderDashboard,
-    workflow: renderKanban,
+    workflow: () => { renderKanban(); loadGdocs(); },
     vendor: renderVendorTable,
     item: renderItemTable,
     bom: renderBOMPage,
@@ -2066,7 +2135,7 @@ function renderDashStats() {
 
   $('dash-stats').innerHTML = `
     <div class="stat ${lateProds?'c-red':'c-amber'}" style="cursor:pointer" onclick="go('production')"><div class="stat-lbl">진행 중 생산</div><div class="stat-val" style="text-decoration:underline dotted">${(DB.productions||[]).filter(p=>p.status==='생산중'||p.status==='지연').length}</div><div class="stat-sub" style="line-height:2">${(DB.productions||[]).filter(p=>p.status==='생산중'||p.status==='지연').map(p=>{const it=getItem(p.productId);const nm=(it&&it.name?it.name:p.productName||'?').replace('르니브 3중 장벽 20층 ','').replace('르니브 ','').replace(/(\([^)]+\))\s*\1/g,'$1');return '<span style="font-weight:500">'+nm+'</span> <span style="color:var(--sky-500);font-size:10px">'+fmt(p.qty)+'EA</span>';}).join('<br>') || '없음'}</div><div class="stat-ico">🏭</div></div>
-    <div class="stat c-purple" style="cursor:pointer" onclick="go('order')"><div class="stat-lbl">총 발주금액 <span style="font-size:9px;opacity:.8">(VAT포함)</span></div><div class="stat-val" style="font-size:15px;text-decoration:underline dotted">${fmtW(Math.round(thisMonthAmt*1.1))}</div><div class="stat-sub" style="line-height:1.9">${vendorSubText}</div><div class="stat-ico">💰</div></div>
+    <div class="stat c-purple" style="cursor:pointer" onclick="go('order')"><div class="stat-lbl">총 발주금액 <span style="font-size:9px;opacity:.8">(VAT포함)</span></div><div class="stat-val" style="text-decoration:underline dotted">${fmtW(Math.round(thisMonthAmt*1.1))}</div><div class="stat-sub" style="line-height:1.9">${vendorSubText}</div><div class="stat-ico">💰</div></div>
     <div class="stat c-green" style="cursor:pointer" onclick="go('item')"><div class="stat-lbl">등록 품목</div><div class="stat-val" style="text-decoration:underline dotted">${DB.items.length}</div><div class="stat-sub">원자재 ${(DB.items||[]).filter(i=>i.type==='원자재').length} · 부자재 ${(DB.items||[]).filter(i=>i.type==='부자재').length} · OEM ${(DB.items||[]).filter(i=>i.type==='OEM').length} · 완제품 ${(DB.items||[]).filter(i=>i.type==='완제품').length}</div><div class="stat-ico">📦</div></div>
     <div class="stat c-sky" style="cursor:pointer" onclick="go('vendor')"><div class="stat-lbl">등록 업체</div><div class="stat-val" style="text-decoration:underline dotted">${DB.vendors.length}</div><div class="stat-sub">원자재 ${(DB.vendors||[]).filter(v=>v.type==='원자재').length} · 부자재 ${(DB.vendors||[]).filter(v=>v.type==='부자재').length} · OEM ${(DB.vendors||[]).filter(v=>v.type==='OEM').length}</div><div class="stat-ico">🏢</div></div>
   `;
@@ -2344,6 +2413,7 @@ function saveItem() {
   const existingItem = id ? DB.items.find(i=>i.id===id) : null;
   const imgFile = $('i-img');
   const bcImgFile = $('i-barcode-img');
+  const quoteFile = $('i-quote-file');
   const data = {
     type:$('i-type').value, code:$('i-code').value, name,
     spec:$('i-spec').value, price,
@@ -2354,8 +2424,12 @@ function saveItem() {
     maxStock:parseFloat($('i-max').value)||0,
     vendorId:parseInt($('i-vendor').value)||null, material:$('i-material').value,
     note:$('i-note').value,
-    image: existingItem ? (existingItem.image||'') : ''
+    image: existingItem ? (existingItem.image||'') : '',
+    quoteFile: existingItem ? (existingItem.quoteFile||'') : '',
+    quoteFileName: existingItem ? (existingItem.quoteFileName||'') : ''
   };
+  // 견적서 삭제 플래그 확인
+  if (window._clearQuoteFile) { data.quoteFile=''; data.quoteFileName=''; window._clearQuoteFile=false; }
   const doSave = () => {
     if (id) {
       const idx = DB.items.findIndex(i=>i.id===id);
@@ -2367,12 +2441,19 @@ function saveItem() {
     }
     saveData(); closeModal('add-item'); renderItemTable(); updateBadges();
   };
+  const saveWithQuote = (cb) => {
+    if (quoteFile && quoteFile.files && quoteFile.files[0]) {
+      const qr = new FileReader();
+      qr.onload = e3 => { data.quoteFile = e3.target.result; data.quoteFileName = quoteFile.files[0].name; cb(); };
+      qr.readAsDataURL(quoteFile.files[0]);
+    } else { cb(); }
+  };
   const saveAndClose = () => {
     if (bcImgFile && bcImgFile.files && bcImgFile.files[0]) {
       const bcReader = new FileReader();
-      bcReader.onload = e2 => { data.barcodeImg = e2.target.result; doSave(); };
+      bcReader.onload = e2 => { data.barcodeImg = e2.target.result; saveWithQuote(doSave); };
       bcReader.readAsDataURL(bcImgFile.files[0]);
-    } else { doSave(); }
+    } else { saveWithQuote(doSave); }
   };
   if (imgFile && imgFile.files && imgFile.files[0]) {
     const reader = new FileReader();
@@ -2407,6 +2488,7 @@ function editItem(id) {
   $('i-note').value=i.note||'';
   if ($('i-barcode')) $('i-barcode').value = i.barcode||'';
   if ($('i-vendor')) $('i-vendor').value = i.vendorId || '';
+  window._clearQuoteFile = false;
   const delBtn = $('item-delete-btn');
   if (delBtn) delBtn.style.display = '';
   openModal('add-item');
@@ -2416,6 +2498,18 @@ function editItem(id) {
     if (prev) prev.innerHTML = i.image ? `<img src="${i.image}" style="width:100%;height:100%;object-fit:cover;border-radius:6px">` : '📷';
     const bcPrev = $('i-barcode-preview');
     if (bcPrev) bcPrev.innerHTML = i.barcodeImg ? `<img src="${i.barcodeImg}" style="height:100%;max-width:100%;object-fit:contain">` : '바코드 이미지';
+    // 견적서 파일 복원
+    const qExist = $('i-quote-existing');
+    const qName = $('i-quote-filename');
+    const qPrev = $('i-quote-preview');
+    if (i.quoteFileName) {
+      if (qExist) qExist.style.display = '';
+      if (qName) qName.textContent = i.quoteFileName;
+      if (qPrev) qPrev.textContent = '';
+    } else {
+      if (qExist) qExist.style.display = 'none';
+      if (qPrev) qPrev.textContent = '';
+    }
   }, 10);
 }
 
@@ -2429,6 +2523,38 @@ function previewBarcodeImg(input) {
   };
   reader.readAsDataURL(file);
 }
+
+function previewQuoteFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const prev = $('i-quote-preview');
+  if (prev) prev.innerHTML = `<span style="color:var(--sky-700);font-size:11px">📎 ${file.name}</span>`;
+}
+
+function openQuoteFile() {
+  const id = editingId['add-item'];
+  const item = id ? DB.items.find(i=>i.id===id) : null;
+  if (item && item.quoteFile) {
+    const a = document.createElement('a');
+    a.href = item.quoteFile;
+    a.target = '_blank';
+    a.download = item.quoteFileName || '견적서';
+    a.click();
+  }
+}
+
+function clearQuoteFile() {
+  window._clearQuoteFile = true;
+  const qExist = $('i-quote-existing');
+  if (qExist) qExist.style.display = 'none';
+  const qPrev = $('i-quote-preview');
+  if (qPrev) qPrev.textContent = '';
+  const qf = $('i-quote-file');
+  if (qf) qf.value = '';
+  showNotif('견적서 파일이 삭제됩니다 (저장 시 반영)', 'info');
+}
+
+
 
 function deleteItem(id) {
   if (!confirm('이 품목을 삭제합니까?')) return;
@@ -4702,22 +4828,152 @@ function renderKanban() {
       </div>`;
   }).join('');
 
-  board.innerHTML = trelloHtml + `
-    <div style="margin-top:20px;border-top:1px solid var(--gray-200);padding-top:16px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;cursor:pointer" onclick="toggleErpTasks()">
-        <div style="font-size:12.5px;font-weight:600;color:var(--gray-600);display:flex;align-items:center;gap:6px">
-          📋 ERP 내부 태스크
-          <span style="background:var(--gray-200);color:var(--gray-600);border-radius:10px;padding:1px 8px;font-size:10.5px">${DB.tasks.length}개</span>
-        </div>
-        <span id="erp-task-toggle" style="font-size:11px;color:var(--gray-400)">▼ 펼치기</span>
-      </div>
-      <div id="erp-tasks-content" style="display:none">
-        <div class="kanban" style="margin:0">${erpCols}</div>
-      </div>
-    </div>`;
+  board.innerHTML = trelloHtml;
 }
 
-function toggleErpTasks() {
+// ═══════════════════════════════════════════
+// 구글 문서 공유 박스 (Firestore 연동)
+// ═══════════════════════════════════════════
+const GDOC_ICONS = {
+  sheets: 'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_spreadsheet_x16.png',
+  slides: 'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_presentation_x16.png',
+  docs:   'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_document_x16.png'
+};
+const GDOC_LABELS = { sheets:'스프레드시트', slides:'슬라이드', docs:'문서' };
+const GDOC_COLORS = { sheets:'#0f9d58', slides:'#f4b400', docs:'#4285f4' };
+
+let _gdocList = [];
+let _gdocEditId = null;
+let _gdocSelectedType = '';
+
+async function loadGdocs() {
+  try {
+    const snap = await window._firestoreGetDoc(
+      window._firestoreDoc(window._firebaseDb, 'shared', 'gdocs')
+    );
+    _gdocList = snap.exists() ? (snap.data().list || []) : [];
+  } catch(e) { _gdocList = JSON.parse(localStorage.getItem('reniv_gdocs')||'[]'); }
+  renderGdocList();
+}
+
+async function saveGdocsToFirestore() {
+  try {
+    await window._firestoreSetDoc(
+      window._firestoreDoc(window._firebaseDb, 'shared', 'gdocs'),
+      { list: _gdocList }, { merge: false }
+    );
+  } catch(e) {
+    localStorage.setItem('reniv_gdocs', JSON.stringify(_gdocList));
+  }
+}
+
+function renderGdocList() {
+  const el = document.getElementById('gdoc-list');
+  const addBtn = document.getElementById('gdoc-add-btn');
+  const canWrite = window._currentUser && (window._currentUser.isAdmin || window._currentUser.permission === 'write');
+  if (addBtn) addBtn.style.display = canWrite ? '' : 'none';
+  if (!el) return;
+  if (!_gdocList.length) {
+    el.innerHTML = canWrite
+      ? '<div style="color:var(--gray-400);font-size:12px">아직 공유된 문서가 없습니다. + 문서 추가 버튼을 눌러 추가해보세요.</div>'
+      : '<div style="color:var(--gray-400);font-size:12px">아직 공유된 문서가 없습니다.</div>';
+    return;
+  }
+  el.innerHTML = _gdocList.map(doc => `
+    <div style="display:flex;align-items:center;gap:8px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:9px;padding:9px 13px;cursor:pointer;transition:all .12s;min-width:200px;max-width:280px"
+      onclick="window.open('${doc.url}','_blank')"
+      onmouseover="this.style.borderColor='${GDOC_COLORS[doc.type]||'#4285f4'}';this.style.background='#fff'"
+      onmouseout="this.style.borderColor='var(--gray-200)';this.style.background='var(--gray-50)'">
+      <img src="${GDOC_ICONS[doc.type]||GDOC_ICONS.docs}" style="width:20px;height:20px;flex-shrink:0">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12.5px;font-weight:600;color:var(--gray-800);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${doc.title}</div>
+        <div style="font-size:10.5px;color:var(--gray-400)">${GDOC_LABELS[doc.type]||'문서'}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px">
+        <span style="font-size:10px;background:${GDOC_COLORS[doc.type]||'#4285f4'};color:#fff;padding:1px 6px;border-radius:8px;white-space:nowrap">열기 ↗</span>
+        ${canWrite ? `<span onclick="event.stopPropagation();editGdoc('${doc.id}')" style="font-size:11px;color:var(--gray-400);padding:2px 5px;border-radius:4px;cursor:pointer" title="수정">✏️</span>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function openGdocModal(editId) {
+  _gdocEditId = editId || null;
+  _gdocSelectedType = '';
+  document.getElementById('gdoc-title-inp').value = '';
+  document.getElementById('gdoc-url-inp').value = '';
+  ['sheets','slides','docs'].forEach(t => {
+    const b = document.getElementById('gdoc-type-'+t);
+    if (b) { b.style.borderColor='var(--gray-300)'; b.style.background='#fff'; }
+  });
+  if (editId) {
+    const doc = _gdocList.find(d=>d.id===editId);
+    if (doc) {
+      document.getElementById('gdoc-modal-title').textContent = '✏️ 문서 수정';
+      document.getElementById('gdoc-title-inp').value = doc.title;
+      document.getElementById('gdoc-url-inp').value = doc.url;
+      selectGdocType(doc.type);
+      document.getElementById('gdoc-delete-btn').style.display = '';
+    }
+  } else {
+    document.getElementById('gdoc-modal-title').textContent = '📄 문서 추가';
+    document.getElementById('gdoc-delete-btn').style.display = 'none';
+  }
+  document.getElementById('overlay-gdoc-modal').classList.add('show');
+}
+
+function closeGdocModal() {
+  document.getElementById('overlay-gdoc-modal').classList.remove('show');
+}
+
+function editGdoc(id) { openGdocModal(id); }
+
+function selectGdocType(type) {
+  _gdocSelectedType = type;
+  ['sheets','slides','docs'].forEach(t => {
+    const b = document.getElementById('gdoc-type-'+t);
+    if (!b) return;
+    if (t === type) {
+      b.style.borderColor = GDOC_COLORS[t];
+      b.style.background = GDOC_COLORS[t]+'15';
+    } else {
+      b.style.borderColor = 'var(--gray-300)';
+      b.style.background = '#fff';
+    }
+  });
+}
+
+async function saveGdoc() {
+  const title = document.getElementById('gdoc-title-inp').value.trim();
+  const url = document.getElementById('gdoc-url-inp').value.trim();
+  if (!_gdocSelectedType) { showNotif('문서 종류를 선택해주세요','warning'); return; }
+  if (!title) { showNotif('제목을 입력해주세요','warning'); return; }
+  if (!url) { showNotif('링크를 입력해주세요','warning'); return; }
+  if (_gdocEditId) {
+    const idx = _gdocList.findIndex(d=>d.id===_gdocEditId);
+    if (idx>=0) _gdocList[idx] = {..._gdocList[idx], type:_gdocSelectedType, title, url};
+    showNotif('문서가 수정되었습니다','success');
+  } else {
+    _gdocList.push({ id:'gdoc_'+Date.now(), type:_gdocSelectedType, title, url });
+    showNotif('문서가 추가되었습니다','success');
+  }
+  await saveGdocsToFirestore();
+  renderGdocList();
+  closeGdocModal();
+}
+
+async function deleteGdoc() {
+  if (!_gdocEditId) return;
+  const doc = _gdocList.find(d=>d.id===_gdocEditId);
+  if (!confirm(`'${doc?.title}' 문서를 삭제합니까?`)) return;
+  _gdocList = _gdocList.filter(d=>d.id!==_gdocEditId);
+  await saveGdocsToFirestore();
+  renderGdocList();
+  closeGdocModal();
+  showNotif('문서가 삭제되었습니다');
+}
+
+
   const content = document.getElementById('erp-tasks-content');
   const toggle = document.getElementById('erp-task-toggle');
   if (!content) return;
