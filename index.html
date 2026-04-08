@@ -1472,21 +1472,18 @@ const STORE_KEY = 'reniv_erp_v8';
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
 
 // ── Firestore DB 동기화 ──────────────────────────────────
-// 전체 DB를 Firestore에 저장/로드 (모든 사용자 공유)
-// 이미지/PDF는 IndexedDB (용량 제한 없음)
-
 let _saveTimer = null;
 
 function saveData() {
-  // 디바운스: 500ms 후 저장 (연속 호출 최적화)
   if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(_doSaveData, 500);
+  _saveTimer = setTimeout(_doSaveData, 800);
 }
 
 async function _doSaveData() {
   try {
     const dbToSave = JSON.parse(JSON.stringify(DB));
-    // 이미지/PDF → IndexedDB (공유 안됨, 각자 보관)
+
+    // 이미지/PDF → IndexedDB (바이너리 제외해서 Firestore 크기 절약)
     dbToSave.items.forEach((item, i) => {
       if (item.image && item.image.length > 100) {
         idbSet('item_img_' + item.id, item.image);
@@ -1494,40 +1491,54 @@ async function _doSaveData() {
       }
     });
     dbToSave.orders.forEach((o, i) => {
-      if (o.pdfData && o.pdfData !== '__stored__' && o.pdfData !== '__idb__') {
+      if (o.pdfData && o.pdfData.length > 10) {
         idbSet('order_pdf_' + o.id, o.pdfData);
         dbToSave.orders[i].pdfData = '__idb__';
       }
-      if (o.stampData && o.stampData !== '__stored__' && o.stampData !== '__idb__') {
+      if (o.stampData && o.stampData.length > 10) {
         idbSet('order_stamp_' + o.id, o.stampData);
         dbToSave.orders[i].stampData = '__idb__';
       }
     });
 
-    // 1차: Firestore (모든 사용자 공유)
+    // Firestore에 저장 (컬렉션별로 분리 저장)
     if (window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
-      const dbStr = JSON.stringify(dbToSave);
-      // 1MB 청크로 분할 저장
-      const CHUNK = 900000;
-      const chunks = Math.ceil(dbStr.length / CHUNK);
-      for (let c = 0; c < chunks; c++) {
-        const ref = window._firestoreDoc(window._firebaseDb, 'erp_data', 'db_chunk_' + c);
-        await window._firestoreSetDoc(ref, { data: dbStr.slice(c * CHUNK, (c+1) * CHUNK), total: chunks, ts: Date.now() });
-      }
-      // 청크 수 메타 저장
-      const metaRef = window._firestoreDoc(window._firebaseDb, 'erp_data', 'meta');
-      await window._firestoreSetDoc(metaRef, { chunks, ts: Date.now() });
+      const db = window._firebaseDb;
+      const setDoc = window._firestoreSetDoc;
+      const docRef = window._firestoreDoc;
+
+      // 각 컬렉션을 별도 문서로 저장 (1MB 제한 대응)
+      const saves = [
+        setDoc(docRef(db, 'erp_data', 'vendors'),    { data: JSON.stringify(dbToSave.vendors   || []), ts: Date.now() }),
+        setDoc(docRef(db, 'erp_data', 'items'),      { data: JSON.stringify(dbToSave.items     || []), ts: Date.now() }),
+        setDoc(docRef(db, 'erp_data', 'orders'),     { data: JSON.stringify(dbToSave.orders    || []), ts: Date.now() }),
+        setDoc(docRef(db, 'erp_data', 'productions'),{ data: JSON.stringify(dbToSave.productions||[]), ts: Date.now() }),
+        setDoc(docRef(db, 'erp_data', 'stockHistory'),{ data: JSON.stringify(dbToSave.stockHistory||[]), ts: Date.now() }),
+        setDoc(docRef(db, 'erp_data', 'quotes'),     { data: JSON.stringify(dbToSave.quotes    || []), ts: Date.now() }),
+        setDoc(docRef(db, 'erp_data', 'meta'), {
+          data: JSON.stringify({
+            _trelloKey:   dbToSave._trelloKey,
+            _trelloToken: dbToSave._trelloToken,
+            _trelloLists: dbToSave._trelloLists,
+            _trelloCards: dbToSave._trelloCards,
+            _bomMargin:   dbToSave._bomMargin,
+            _companyInfo: dbToSave._companyInfo,
+            _nextIds:     dbToSave._nextIds,
+          }),
+          ts: Date.now()
+        }),
+      ];
+      await Promise.all(saves);
     }
 
-    // 2차: localStorage 백업
+    // localStorage 백업
     try { localStorage.setItem(STORE_KEY, JSON.stringify(dbToSave)); } catch(e) {}
   } catch(e) {
     console.error('saveData 실패:', e);
-    // 백업만이라도 저장
     try {
       const dbMin = JSON.parse(JSON.stringify(DB));
-      dbMin.items.forEach((it, i) => { if (it.image && it.image.length > 100) dbMin.items[i].image = ''; });
-      dbMin.orders.forEach((o, i) => { dbMin.orders[i].pdfData = null; dbMin.orders[i].stampData = null; });
+      dbMin.items.forEach((it,i)=>{ if(it.image&&it.image.length>100) dbMin.items[i].image=''; });
+      dbMin.orders.forEach((o,i)=>{ dbMin.orders[i].pdfData=null; dbMin.orders[i].stampData=null; });
       localStorage.setItem(STORE_KEY, JSON.stringify(dbMin));
     } catch(e2) {}
   }
@@ -1536,18 +1547,26 @@ async function _doSaveData() {
 async function loadDataFromFirestore() {
   try {
     if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return null;
-    const metaRef = window._firestoreDoc(window._firebaseDb, 'erp_data', 'meta');
-    const metaSnap = await window._firestoreGetDoc(metaRef);
-    if (!metaSnap.exists()) return null;
-    const { chunks } = metaSnap.data();
-    let dbStr = '';
-    for (let c = 0; c < chunks; c++) {
-      const ref = window._firestoreDoc(window._firebaseDb, 'erp_data', 'db_chunk_' + c);
-      const snap = await window._firestoreGetDoc(ref);
-      if (!snap.exists()) return null;
-      dbStr += snap.data().data;
-    }
-    return JSON.parse(dbStr);
+    const db = window._firebaseDb;
+    const getDoc = window._firestoreGetDoc;
+    const docRef = window._firestoreDoc;
+
+    const keys = ['vendors','items','orders','productions','stockHistory','quotes','meta'];
+    const snaps = await Promise.all(keys.map(k => getDoc(docRef(db, 'erp_data', k))));
+
+    // meta가 없으면 아직 Firestore에 데이터 없음
+    if (!snaps[6].exists()) return null;
+
+    const result = {};
+    const collKeys = ['vendors','items','orders','productions','stockHistory','quotes'];
+    snaps.slice(0,6).forEach((snap, i) => {
+      result[collKeys[i]] = snap.exists() ? JSON.parse(snap.data().data) : [];
+    });
+    // meta
+    const meta = JSON.parse(snaps[6].data().data);
+    Object.assign(result, meta);
+
+    return result;
   } catch(e) {
     console.warn('Firestore 로드 실패:', e);
     return null;
@@ -4990,23 +5009,42 @@ function showERPOrWaiting() {
 }
 
 function initERPWhenReady() {
-  // 1. Firestore에서 최신 DB 로드 (공유 데이터)
+  // 로딩 표시
+  const showLoader = () => {
+    const app = document.getElementById('app');
+    if (app && !document.getElementById('erp-loader')) {
+      const div = document.createElement('div');
+      div.id = 'erp-loader';
+      div.style.cssText = 'position:fixed;inset:0;background:rgba(255,255,255,.8);z-index:9990;display:flex;align-items:center;justify-content:center;font-size:14px;color:#666';
+      div.innerHTML = '⏳ 데이터 불러오는 중...';
+      document.body.appendChild(div);
+    }
+  };
+  const hideLoader = () => {
+    const el = document.getElementById('erp-loader');
+    if (el) el.remove();
+  };
+
+  showLoader();
+
+  // Firestore에서 최신 DB 로드 후 렌더링
   loadDataFromFirestore().then(async (firestoreDB) => {
     if (firestoreDB) {
-      // Firestore 데이터가 있으면 덮어쓰기
-      Object.assign(DB, firestoreDB);
-      // localStorage도 업데이트
+      // Firestore 데이터로 전체 DB 교체
+      DB = firestoreDB;
+      // localStorage도 업데이트 (오프라인 백업)
       try { localStorage.setItem(STORE_KEY, JSON.stringify(firestoreDB)); } catch(e) {}
     }
-    // 2. IndexedDB에서 이미지/PDF/사진/로고 복원
+    // IndexedDB에서 이미지/PDF/사진/로고 복원
     await restoreIDBData();
-    // 3. 로고 Firestore에서도 로드 시도
+    // 로고 Firestore에서도 로드
     loadSharedSetting('logo_data').then(logoSrc => {
       if (logoSrc) { idbSet('reniv_logo', logoSrc); applyLogo(logoSrc); }
     });
-    // 4. 렌더링
+    hideLoader();
+    // 렌더링
+    updateBadges();
     if (typeof Chart !== 'undefined') {
-      updateBadges();
       renderDashboard();
     } else {
       let tries = 0;
@@ -5014,15 +5052,18 @@ function initERPWhenReady() {
         tries++;
         if (typeof Chart !== 'undefined') {
           clearInterval(wait);
-          updateBadges();
           renderDashboard();
         } else if (tries > 50) {
           clearInterval(wait);
-          updateBadges();
-          try { renderDashboard(); } catch(e) { console.warn('Dashboard init error:', e); }
+          try { renderDashboard(); } catch(e) {}
         }
       }, 100);
     }
+  }).catch(e => {
+    console.error('초기화 실패:', e);
+    hideLoader();
+    updateBadges();
+    try { renderDashboard(); } catch(e2) {}
   });
 }
 
