@@ -377,10 +377,9 @@ tbody tr:last-child{border-bottom:none}
 .kpi-chg.dn{color:var(--red-600)}
 
 /* SCROLLBAR */
-::-webkit-scrollbar{width:8px;height:8px}
-::-webkit-scrollbar-thumb{background:var(--gray-400);border-radius:4px}
-::-webkit-scrollbar-thumb:hover{background:var(--gray-500)}
-::-webkit-scrollbar-track{background:var(--gray-100);border-radius:4px}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-thumb{background:var(--gray-300);border-radius:2px}
+::-webkit-scrollbar-track{background:transparent}
 
 /* BOM indent */
 .bom-child td:first-child{padding-left:12px}
@@ -569,16 +568,15 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
   <!-- HEADER -->
   <div id="header">
     <div class="hdr-title" id="pageTitle">대시보드</div>
+    <div class="hdr-search">
+      <span style="font-size:13px">🔍</span>
+      <input id="globalSearch" type="text" placeholder="전체 검색..." oninput="globalSearchFn(this.value)">
+    </div>
     <button class="hdr-btn" onclick="exportToSheets()" title="ERP → Google Sheets 내보내기">
       <span class="sync-dot"></span>Sheets 연동
     </button>
-    <div style="position:relative">
-      <button class="hdr-btn" onclick="toggleNotifPanel()" id="notif-btn">🔔<span id="notif-dot" style="display:none;width:8px;height:8px;background:#ef4444;border-radius:50%;position:absolute;top:4px;right:4px"></span></button>
-      <div id="notif-panel" style="display:none;position:absolute;right:0;top:38px;width:320px;background:#fff;border:1px solid var(--gray-200);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:200;max-height:400px;overflow-y:auto">
-        <div style="padding:10px 14px;border-bottom:1px solid var(--gray-100);font-size:12.5px;font-weight:600;color:var(--gray-700);display:flex;justify-content:space-between">🔔 알림<button onclick="toggleNotifPanel()" style="background:none;border:none;cursor:pointer;color:var(--gray-400)">✕</button></div>
-        <div id="notif-list" style="padding:6px 0"></div>
-      </div>
-    </div>
+    <button class="hdr-btn" onclick="showNotif('알림 없음','info')">🔔<span class="dot"></span></button>
+    <button class="hdr-btn primary" onclick="toggleAI()">✨ AI 분석</button>
   </div>
 
   <!-- CONTENT -->
@@ -634,7 +632,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:#0052cc;color:#fff;border-radius:7px;font-size:12px;font-weight:500;text-decoration:none">
           📋 Trello 보드 열기
         </a>
-        <button class="btn btn-outline btn-sm" onclick="loadTrelloCards().then(()=>renderKanban())">🔄 새로고침</button>
+        <button class="btn btn-outline btn-sm" onclick="aiAnalyzeWorkflow()">✨ AI 자동 분류</button>
+        <button class="btn btn-primary btn-sm" onclick="openModal('add-task')">+ 태스크 추가</button>
       </div>
 
       <!-- 파란색 배너 — 전체 너비 -->
@@ -713,7 +712,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           </div>
           <div class="card-body p0 tbl-wrap">
             <table>
-              <thead><tr><th>품목명</th><th>코드</th><th>분류</th><th>투입량</th><th>단가</th><th>업체</th><th>비고</th></tr></thead>
+              <thead><tr><th>분류</th><th>코드</th><th>품목명</th><th>투입량</th><th>단가</th><th>업체</th><th>비고</th></tr></thead>
               <tbody id="bom-table"></tbody>
             </table>
           </div>
@@ -1031,20 +1030,20 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="fg"><label>품목코드</label><input class="fi" id="i-code" placeholder="RM-001" style="font-family:monospace"></div>
         <div class="fg full"><label>품목명<span class="req">*</span></label><input class="fi" id="i-name"></div>
         <div class="fg"><label>용량/규격</label><input class="fi" id="i-spec"></div>
-        <div class="fg"><label>바코드 번호</label><input class="fi" id="i-barcode" placeholder="8801234567890" style="font-family:monospace"></div>
+        <div class="fg full">
+          <label>바코드 번호 &amp; 이미지</label>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <input class="fi" id="i-barcode" placeholder="8801234567890" style="font-family:monospace;flex:1;min-width:160px">
+            <input type="file" accept="image/*" id="i-barcode-img" onchange="previewBarcodeImg(this)" style="flex-shrink:0">
+            <div id="i-barcode-preview" style="height:44px;min-width:130px;border:1px dashed var(--gray-300);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--gray-400);overflow:hidden;background:var(--gray-50);padding:4px 8px;flex-shrink:0">바코드 이미지</div>
+          </div>
+        </div>
         <div class="fg"><label>단가(원)<span class="req">*</span></label><input class="fi" id="i-price" type="number"></div>
         <div class="fg"><label>재고수량 <span style="font-size:10px;color:var(--gray-400);font-weight:400">(재고관리에서만 수정)</span></label><input class="fi" id="i-stock" type="number" value="0" readonly style="background:var(--gray-50);color:var(--gray-500);cursor:not-allowed"></div>
         <div class="fg"><label>최대수량</label><input class="fi" id="i-max" type="number" value="0"></div>
         <div class="fg"><label>업체</label><select class="fs" id="i-vendor"></select></div>
         <div class="fg"><label>재질</label><input class="fi" id="i-material" placeholder="유리, PP 등"></div>
         <div class="fg full"><label>비고</label><textarea class="fta" id="i-note"></textarea></div>
-        <div class="fg full">
-          <label>바코드 이미지</label>
-          <div style="display:flex;align-items:center;gap:10px">
-            <input type="file" accept="image/*" id="i-barcode-img" onchange="previewBarcodeImg(this)">
-            <div id="i-barcode-preview" style="height:44px;min-width:130px;border:1px dashed var(--gray-300);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--gray-400);overflow:hidden;background:var(--gray-50);padding:4px 8px;flex-shrink:0">바코드 이미지</div>
-          </div>
-        </div>
         <div class="fg full">
           <label>품목 이미지</label>
           <div style="display:flex;align-items:center;gap:10px">
@@ -1071,7 +1070,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="modal-body">
       <div class="fg">
         <label>완제품 선택<span class="req">*</span></label>
-        <select class="fs" id="bom-product-modal" style="max-width:300px"></select>
+        <select class="fs" id="bom-product-modal" style="max-width:300px"><option value="">— 완제품을 선택하세요 —</option></select>
       </div>
       <div class="sec-title" style="margin-top:8px">구성 품목</div>
       <div class="tbl-wrap" style="margin-bottom:10px">
@@ -1547,10 +1546,9 @@ async function _doSaveData() {
       _trelloToken: dbToSave._trelloToken || null,
       _trelloLists: dbToSave._trelloLists || null,
       _trelloCards: dbToSave._trelloCards || null,
-      _bomMargin:       dbToSave._bomMargin       || {},
-      _companyInfo:     dbToSave._companyInfo     || {},
-      _nextIds:         dbToSave._nextIds         || {},
-      _processedOrders: dbToSave._processedOrders || [],
+      _bomMargin:   dbToSave._bomMargin   || {},
+      _companyInfo: dbToSave._companyInfo || {},
+      _nextIds:     dbToSave._nextIds     || {},
     }),
     ts: Date.now()
   });
@@ -1833,22 +1831,6 @@ let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
   DB._processedOrders = processed;
 })();
 
-// 음수 재고를 0으로 초기화하고 Firestore에 저장
-function fixNegativeStock() {
-  let fixed = false;
-  (DB.items || []).forEach((item, idx) => {
-    if ((item.stock || 0) < 0) {
-      console.log(`음수 재고 수정: ${item.name} ${item.stock} → 0`);
-      DB.items[idx].stock = 0;
-      fixed = true;
-    }
-  });
-  if (fixed) {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
-    setTimeout(() => { try { _doSaveData(); } catch(e) {} }, 1000);
-  }
-}
-
 // Firestore 로드 후 미처리 입고완료 발주서 재고 반영
 function applyPendingStockIn() {
   const processed = DB._processedOrders || [];
@@ -1881,10 +1863,7 @@ function applyPendingStockIn() {
     }
   });
   DB._processedOrders = processed;
-  if (changed) {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
-    setTimeout(() => { try { _doSaveData(); } catch(e) {} }, 800);
-  }
+  if (changed) { try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {} }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2027,8 +2006,6 @@ document.addEventListener('click', e => {
   if (e.target.classList.contains('overlay')) {
     e.target.classList.remove('show');
   }
-  const panel=document.getElementById('notif-panel'),btn=document.getElementById('notif-btn');
-  if(panel&&panel.style.display!=='none'&&btn&&!panel.contains(e.target)&&!btn.contains(e.target)){panel.style.display='none';_notifOpen=false;}
 });
 
 // ═══════════════════════════════════════════════════════
@@ -2087,10 +2064,10 @@ function renderDashStats() {
     .join('<br>') || '발주 없음';
 
   $('dash-stats').innerHTML = `
-    <div class="stat ${lateProds?'c-red':'c-amber'}" style="cursor:pointer" onclick="go('production')"><div class="stat-lbl">진행 중 생산</div><div class="stat-val" >${(DB.productions||[]).filter(p=>p.status==='생산중'||p.status==='지연').length}</div><div class="stat-sub" style="line-height:2">${(DB.productions||[]).filter(p=>p.status==='생산중'||p.status==='지연').map(p=>{const it=getItem(p.productId);const nm=(it&&it.name?it.name:p.productName||'?').replace('르니브 3중 장벽 20층 ','').replace('르니브 ','').replace(/(\([^)]+\))\s*\1/g,'$1');return '<span style="font-weight:500">'+nm+'</span> <span style="color:var(--sky-500);font-size:10px">'+fmt(p.qty)+'EA</span>';}).join('<br>') || '없음'}</div><div class="stat-ico">🏭</div></div>
-    <div class="stat c-purple" style="cursor:pointer" onclick="go('order')"><div class="stat-lbl">총 발주금액 <span style="font-size:9px;opacity:.8">(VAT포함)</span></div><div class="stat-val" >${fmtW(Math.round(thisMonthAmt*1.1))}</div><div class="stat-sub" style="line-height:1.9">${vendorSubText}</div><div class="stat-ico">💰</div></div>
-    <div class="stat c-green" style="cursor:pointer" onclick="go('item')"><div class="stat-lbl">등록 품목</div><div class="stat-val" >${DB.items.length}</div><div class="stat-sub">원자재 ${(DB.items||[]).filter(i=>i.type==='원자재').length} · 부자재 ${(DB.items||[]).filter(i=>i.type==='부자재').length} · OEM ${(DB.items||[]).filter(i=>i.type==='OEM').length} · 완제품 ${(DB.items||[]).filter(i=>i.type==='완제품').length}</div><div class="stat-ico">📦</div></div>
-    <div class="stat c-sky" style="cursor:pointer" onclick="go('vendor')"><div class="stat-lbl">등록 업체</div><div class="stat-val" >${DB.vendors.length}</div><div class="stat-sub">원자재 ${(DB.vendors||[]).filter(v=>v.type==='원자재').length} · 부자재 ${(DB.vendors||[]).filter(v=>v.type==='부자재').length} · OEM ${(DB.vendors||[]).filter(v=>v.type==='OEM').length}</div><div class="stat-ico">🏢</div></div>
+    <div class="stat ${lateProds?'c-red':'c-amber'}" style="cursor:pointer" onclick="go('production')"><div class="stat-lbl">진행 중 생산</div><div class="stat-val" style="text-decoration:underline dotted">${(DB.productions||[]).filter(p=>p.status==='생산중'||p.status==='지연').length}</div><div class="stat-sub" style="line-height:2">${(DB.productions||[]).filter(p=>p.status==='생산중'||p.status==='지연').map(p=>{const it=getItem(p.productId);const nm=(it&&it.name?it.name:p.productName||'?').replace('르니브 3중 장벽 20층 ','').replace('르니브 ','').replace(/(\([^)]+\))\s*\1/g,'$1');return '<span style="font-weight:500">'+nm+'</span> <span style="color:var(--sky-500);font-size:10px">'+fmt(p.qty)+'EA</span>';}).join('<br>') || '없음'}</div><div class="stat-ico">🏭</div></div>
+    <div class="stat c-purple" style="cursor:pointer" onclick="go('order')"><div class="stat-lbl">총 발주금액 <span style="font-size:9px;opacity:.8">(VAT포함)</span></div><div class="stat-val" style="font-size:15px;text-decoration:underline dotted">${fmtW(Math.round(thisMonthAmt*1.1))}</div><div class="stat-sub" style="line-height:1.9">${vendorSubText}</div><div class="stat-ico">💰</div></div>
+    <div class="stat c-green" style="cursor:pointer" onclick="go('item')"><div class="stat-lbl">등록 품목</div><div class="stat-val" style="text-decoration:underline dotted">${DB.items.length}</div><div class="stat-sub">원자재 ${(DB.items||[]).filter(i=>i.type==='원자재').length} · 부자재 ${(DB.items||[]).filter(i=>i.type==='부자재').length} · OEM ${(DB.items||[]).filter(i=>i.type==='OEM').length} · 완제품 ${(DB.items||[]).filter(i=>i.type==='완제품').length}</div><div class="stat-ico">📦</div></div>
+    <div class="stat c-sky" style="cursor:pointer" onclick="go('vendor')"><div class="stat-lbl">등록 업체</div><div class="stat-val" style="text-decoration:underline dotted">${DB.vendors.length}</div><div class="stat-sub">원자재 ${(DB.vendors||[]).filter(v=>v.type==='원자재').length} · 부자재 ${(DB.vendors||[]).filter(v=>v.type==='부자재').length} · OEM ${(DB.vendors||[]).filter(v=>v.type==='OEM').length}</div><div class="stat-ico">🏢</div></div>
   `;
 }
 
@@ -2520,9 +2497,9 @@ function renderBOM() {
     const typeCls = ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray'})[item.type]||'gray';
     const tr = `
       <tr class="bom-child">
-        <td class="lnk" onclick="showItemDetail(${item.id})" style="padding-left:12px">${item.name}</td>
-        <td style="font-family:monospace;font-size:11px;white-space:nowrap">${item.code||'-'}</td>
         <td><span class="badge ${typeCls}">${item.type}</span></td>
+        <td style="font-family:monospace;font-size:11px;white-space:nowrap">${item.code||'-'}</td>
+        <td class="lnk" onclick="showItemDetail(${item.id})">${item.name}</td>
         <td style="text-align:center">${row.qtyDisplay||row.qty}${row.unit}</td>
         <td style="text-align:right">${fmtW(item.price)}</td>
         <td class="lnk" onclick="viewVendor(${item.vendorId})">${vendor.company||'-'}</td>
@@ -2566,7 +2543,7 @@ function renderBOM() {
     return `<tr style="border-bottom:1px solid var(--gray-100)">
       <td style="padding:7px 8px;font-size:12px">${item.name}</td>
       <td style="padding:7px 8px;text-align:center;font-size:11px;font-family:monospace;color:var(--gray-500)">${item.code||'-'}</td>
-      <td style="padding:7px 8px;text-align:center;font-size:12px">${row.qtyDisplay||row.qty}${row.unit}</td>
+      <td style="padding:7px 8px;text-align:center;font-size:12px">${row.qty}${row.unit}</td>
       <td style="padding:7px 8px;text-align:right;font-size:12px">${fmtW(item.price)}</td>
       <td style="padding:7px 8px;text-align:right;font-size:12px;font-weight:600;color:var(--sky-700)">${fmtW(Math.round(subtotal))}</td>
     </tr>`;
@@ -2726,7 +2703,7 @@ function populateBOMRows() {
 function parseFraction(str) {
   if (!str && str !== 0) return 0;
   str = String(str).trim();
-  if (str.includes('/')) { const p = str.split('/'); return parseFloat(p[0]) / (parseFloat(p[1])||1); }
+  if (str.includes('/')) { const pts = str.split('/'); return parseFloat(pts[0]) / (parseFloat(pts[1])||1); }
   return parseFloat(str) || 0;
 }
 function formatQty(val) {
@@ -2735,7 +2712,7 @@ function formatQty(val) {
   return val % 1 === 0 ? String(val) : parseFloat(val.toFixed(4)).toString();
 }
 function getBOMItemOptions(typeFilter, searchQ) {
-  return DB.items.filter(i => {
+  return '<option value="">— 구성 품목을 선택하세요 —</option>' + DB.items.filter(i => {
     const mt = !typeFilter || i.type === typeFilter;
     const ms = !searchQ || i.name.toLowerCase().includes(searchQ.toLowerCase()) || (i.code||'').toLowerCase().includes(searchQ.toLowerCase());
     return mt && ms;
@@ -2757,7 +2734,7 @@ function addBOMRow(itemId, qty, unit, note) {
     </div>
     <select id="${selId}" class="fs bom-item-sel" style="width:100%;font-size:12px">${getBOMItemOptions('','')}</select>
   </td>
-  <td><input class="fi bom-qty" value="${qty!==undefined?qty:1}" style="width:75px;font-size:12px" placeholder="예: 1/32"></td>
+  <td><input class="fi bom-qty" value="${qty!==undefined?qty:''}" style="width:75px;font-size:12px" placeholder="예: 1 또는 1/32"></td>
   <td><input class="fi bom-unit" value="${unit||'EA'}" style="width:55px;font-size:12px"></td>
   <td><input class="fi bom-note" value="${note||''}" placeholder="비고" style="width:100px;font-size:12px"></td>
   <td><button class="btn btn-danger btn-xs" onclick="this.closest('tr').remove()">✕</button></td>`;
@@ -2800,10 +2777,9 @@ function editCurrentBOM() {
     if (ttl) ttl.textContent = '✏️ BOM 수정';
   }, 80);
 }
-
 function aiAnalyzeBOM() {
   if(!aiOpen) toggleAI();
-  const product = getItem(parseInt($('bom-product-sel') ? $('bom-product-sel').value : 0));
+  const product = getItem(parseInt($(''bom-product-sel') ? $('bom-product-sel').value : 0));
   setTimeout(()=>sendAIMsg(`${product.name||'선택된 제품'}의 BOM 원가를 분석하고 원가 절감 방안을 제안해줘`), 200);
 }
 
@@ -4725,30 +4701,60 @@ function renderKanban() {
       </div>`;
   }).join('');
 
-  const googleDocs = JSON.parse(localStorage.getItem('reniv_google_docs') || '[]');
+  // 구글 공유 문서 (Firestore에서 로드)
   const gdIcon={sheet:'📊',slide:'📑',doc:'📄'}, gdName={sheet:'구글 시트',slide:'구글 슬라이드',doc:'구글 문서'}, gdColor={sheet:'#0f9d58',slide:'#f4b400',doc:'#4285f4'};
-  const gdListHtml = googleDocs.length ? '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px">' +
-    googleDocs.map((d,i)=>`<div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;padding:12px;display:flex;align-items:center;gap:10px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
-      <div style="width:36px;height:36px;border-radius:8px;background:${gdColor[d.type]||'#4285f4'};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${gdIcon[d.type]||'📎'}</div>
-      <div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600;color:var(--gray-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.title}</div><div style="font-size:10.5px;color:var(--gray-400)">${gdName[d.type]||'문서'}</div></div>
-      <div style="display:flex;gap:4px;flex-shrink:0">
-        <button onclick="window.open('${d.url}','_blank')" style="background:${gdColor[d.type]||'#4285f4'};color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;cursor:pointer;font-weight:600">열기</button>
-        <button onclick="deleteGoogleDoc(${i})" style="background:var(--gray-100);color:var(--gray-500);border:none;border-radius:6px;padding:4px 7px;font-size:11px;cursor:pointer">✕</button>
-      </div>
-    </div>`).join('') + '</div>'
-    : '<div style="background:var(--gray-50);border:1px dashed var(--gray-300);border-radius:10px;padding:16px;text-align:center;color:var(--gray-400);font-size:12px">📎 구글 시트, 슬라이드, 문서 링크를 추가하면 바로 열 수 있어요</div>';
+  const renderGdCards = (docs) => {
+    if (!docs || !docs.length) return '<div style="background:var(--gray-50);border:1px dashed var(--gray-300);border-radius:10px;padding:16px;text-align:center;color:var(--gray-400);font-size:12px">📎 구글 시트, 슬라이드, 문서 링크를 추가하면 바로 열 수 있어요</div>';
+    return '<div style="display:flex;flex-wrap:wrap;gap:10px">' +
+      docs.map((d,i)=>`<div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 1px 4px rgba(0,0,0,.06);min-width:220px;max-width:300px">
+        <div style="width:36px;height:36px;border-radius:8px;background:${gdColor[d.type]||'#4285f4'};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${gdIcon[d.type]||'📎'}</div>
+        <div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600;color:var(--gray-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.title}</div><div style="font-size:10.5px;color:var(--gray-400)">${gdName[d.type]||'문서'}</div></div>
+        <div style="display:flex;gap:4px;flex-shrink:0">
+          <a href="${d.url}" target="_blank" style="background:${gdColor[d.type]||'#4285f4'};color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;cursor:pointer;font-weight:600;text-decoration:none;display:inline-block">열기</a>
+          ${window._canWrite ? `<button onclick="deleteGoogleDoc(${i})" style="background:var(--gray-100);color:var(--gray-500);border:none;border-radius:6px;padding:4px 7px;font-size:11px;cursor:pointer">✕</button>` : ''}
+        </div>
+      </div>`).join('') + '</div>';
+  };
+  const addBtn = window._canWrite ? '<button class="btn btn-outline btn-sm" onclick="openGoogleDocsModal()" style="color:var(--sky-700);border-color:var(--sky-300)">+ 문서 추가</button>' : '';
 
   board.innerHTML = `
-    <div style="background:#fff;border:1px solid var(--gray-200);border-radius:12px;padding:16px;margin-bottom:16px">
+    <div style="background:#fff;border:1px solid var(--gray-200);border-radius:12px;padding:16px;margin-bottom:16px" id="google-docs-section">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
         <div style="font-size:13px;font-weight:600;color:var(--gray-700)">🗂️ 구글 공유 문서</div>
-        <button class="btn btn-outline btn-sm" onclick="openGoogleDocsModal()" style="color:var(--sky-700);border-color:var(--sky-300)">+ 문서 추가</button>
+        ${addBtn}
       </div>
-      ${gdListHtml}
+      <div id="google-docs-list"><div style="color:var(--gray-400);font-size:12px;padding:8px">로드 중...</div></div>
     </div>` + trelloHtml;
+
+  // Firestore에서 구글문서 로드
+  loadGoogleDocsFromFirestore().then(docs => {
+    const el = document.getElementById('google-docs-list');
+    if (el) el.innerHTML = renderGdCards(docs);
+  });
 }
 
-function renderGoogleDocsList() { renderKanban(); }
+async function loadGoogleDocsFromFirestore() {
+  try {
+    if (window._firestoreGetDoc && window._firestoreDoc && window._firebaseDb) {
+      const ref = window._firestoreDoc(window._firebaseDb, 'erp_data', 'settings');
+      const snap = await window._firestoreGetDoc(ref);
+      if (snap.exists() && snap.data().google_docs) return JSON.parse(snap.data().google_docs);
+    }
+  } catch(e) {}
+  // fallback: localStorage
+  try { const s = localStorage.getItem('reniv_google_docs'); if (s) return JSON.parse(s); } catch(e) {}
+  return [];
+}
+
+async function saveGoogleDocsToFirestore(docs) {
+  localStorage.setItem('reniv_google_docs', JSON.stringify(docs));
+  try {
+    if (window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
+      const ref = window._firestoreDoc(window._firebaseDb, 'erp_data', 'settings');
+      await window._firestoreSetDoc(ref, { google_docs: JSON.stringify(docs) }, { merge: true });
+    }
+  } catch(e) { console.warn('구글문서 Firestore 저장 실패:', e); }
+}
 
 function openGoogleDocsModal() {
   if (!$('overlay-google-docs')) {
@@ -4786,17 +4792,19 @@ function selectGdType(type) {
     btn.querySelector('div:last-child').style.color=v===type?colors[v]:'var(--gray-500)';
   });
 }
-function saveGoogleDoc() {
+async function saveGoogleDoc() {
   const title=$('gd-title').value.trim(), url=$('gd-url').value.trim();
   if (!title){showNotif('제목을 입력하세요','warning');return;} if (!url){showNotif('URL을 입력하세요','warning');return;}
-  const docs=JSON.parse(localStorage.getItem('reniv_google_docs')||'[]');
-  docs.push({type:_gdSelectedType,title,url}); localStorage.setItem('reniv_google_docs',JSON.stringify(docs));
+  const docs = await loadGoogleDocsFromFirestore();
+  docs.push({type:_gdSelectedType,title,url});
+  await saveGoogleDocsToFirestore(docs);
   closeModal('google-docs'); showNotif('문서가 추가되었습니다 ✅','success'); renderKanban();
 }
-function deleteGoogleDoc(idx) {
+async function deleteGoogleDoc(idx) {
   if (!confirm('이 문서 링크를 삭제합니까?')) return;
-  const docs=JSON.parse(localStorage.getItem('reniv_google_docs')||'[]');
-  docs.splice(idx,1); localStorage.setItem('reniv_google_docs',JSON.stringify(docs));
+  const docs = await loadGoogleDocsFromFirestore();
+  docs.splice(idx,1);
+  await saveGoogleDocsToFirestore(docs);
   showNotif('삭제되었습니다'); renderKanban();
 }
 function toggleErpTasks(){}
@@ -5099,39 +5107,14 @@ function resetData() {
 // BADGES UPDATE
 // ═══════════════════════════════════════════════════════
 function updateBadges() {
-  const late=(DB.productions||[]).filter(p=>p.status==='지연').length;
-  const lowStk=(DB.items||[]).filter(i=>i.minStock>0&&i.stock<i.minStock).length;
-  const pendingUsr=(DB.users||[]).filter(u=>u.status==='승인대기').length;
-  if($('nb-prod')){$('nb-prod').textContent=late>0?'지연'+late:'';$('nb-prod').style.display=late>0?'':'none';}
-  if($('nb-stk')){$('nb-stk').textContent=lowStk>0?'부족'+lowStk:'';$('nb-stk').style.display=lowStk>0?'':'none';}
-  if($('nb-usr')){$('nb-usr').textContent=pendingUsr>0?pendingUsr:'';$('nb-usr').style.display=pendingUsr>0?'':'none';}
-  if($('nb-wf'))$('nb-wf').textContent=(DB.tasks||[]).filter(t=>t.status!=='완료').length;
-  updateNotifBadge();
-}
-function buildNotifList(){
-  const today=new Date(), alerts=[];
-  (DB.orders||[]).forEach(o=>{
-    if(!o.payDate||o.stockStatus==='입고완료')return;
-    const days=Math.ceil((new Date(o.payDate)-today)/86400000);
-    if(days<=14){const color=days<0?'#ef4444':days<=7?'#f59e0b':'#3b82f6';alerts.push({icon:days<0?'⚠️':'💳',color,title:(days<0?'결제일 초과':'결제일 임박')+' — '+(getVendor(o.vendorId).company||'').replace('(주)','').replace('㈜',''),desc:`${o.serial||'발주서'} · ${o.payDate} (${days<0?'D+'+Math.abs(days):'D-'+days})`,days,onclick:`go('order')`});}
-  });
-  (DB.productions||[]).forEach(p=>{
-    if(!p.inDate||p.status==='생산완료'||p.status==='입고완료')return;
-    const days=Math.ceil((new Date(p.inDate)-today)/86400000);
-    if(days<=14){const item=getItem(p.productId),nm=(item&&item.name?item.name:p.productName||'?').replace('르니브 ',''),color=days<0?'#ef4444':days<=7?'#f59e0b':'#22c55e';alerts.push({icon:days<0?'🚨':'📦',color,title:(days<0?'납기 지연':'입고 예정')+' — '+nm,desc:`${p.inDate} (${days<0?'D+'+Math.abs(days):'D-'+days})`,days,onclick:`go('production')`});}
-  });
-  return alerts.sort((a,b)=>a.days-b.days);
-}
-function updateNotifBadge(){const dot=$('notif-dot');if(dot)dot.style.display=buildNotifList().length>0?'inline-block':'none';}
-let _notifOpen=false;
-function toggleNotifPanel(){
-  const panel=$('notif-panel');if(!panel)return;
-  _notifOpen=!_notifOpen;
-  if(_notifOpen){
-    const alerts=buildNotifList(),list=$('notif-list');
-    if(list)list.innerHTML=alerts.length===0?'<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:12px">📭 임박한 알림이 없습니다</div>':alerts.map(a=>`<div onclick="${a.onclick}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--gray-50);display:flex;gap:10px;align-items:flex-start" onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background=''"><span style="font-size:18px;flex-shrink:0">${a.icon}</span><div style="flex:1"><div style="font-size:12px;font-weight:600;color:var(--gray-800)">${a.title}</div><div style="font-size:11px;color:var(--gray-500)">${a.desc}</div></div><span style="background:${a.color};color:#fff;font-size:9px;padding:2px 6px;border-radius:8px;font-weight:700;flex-shrink:0">${a.days<0?'D+'+Math.abs(a.days):'D-'+a.days}</span></div>`).join('');
-    panel.style.display='block';
-  }else{panel.style.display='none';}
+  const late = (DB.productions||[]).filter(p=>p.status==='지연').length;
+  const lowStk = (DB.items||[]).filter(i => i.minStock > 0 && i.stock < i.minStock).length;
+  const pendingUsr = (DB.users||[]).filter(u=>u.status==='승인대기').length;
+  const activeTasks = (DB.tasks||[]).filter(t=>t.status!=='완료').length;
+  $('nb-prod').textContent = late>0 ? '지연'+late : ''; $('nb-prod').style.display = late>0?'':'none';
+  $('nb-stk').textContent = lowStk>0 ? '부족'+lowStk : ''; $('nb-stk').style.display = lowStk>0?'':'none';
+  $('nb-usr').textContent = pendingUsr>0 ? pendingUsr : ''; $('nb-usr').style.display = pendingUsr>0?'':'none';
+  $('nb-wf').textContent = activeTasks;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -5205,25 +5188,27 @@ async function exportToSheets() {
 // 설정에서 Web App URL 저장
 // ── Firestore 공유 설정 (회사정보, BOM마진, Trello) ───────────
 async function saveSharedSetting(key, value) {
-  // erp_data/settings 문서에 저장 (모든 로그인 사용자 읽기 가능)
+  // 1차: Firestore (있으면)
   if (window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
     try {
-      const ref = window._firestoreDoc(window._firebaseDb, 'erp_data', 'settings');
-      await window._firestoreSetDoc(ref, { [key]: JSON.stringify(value) }, { merge: true });
+      const ref = window._firestoreDoc(window._firebaseDb, 'settings', key);
+      await window._firestoreSetDoc(ref, { value: JSON.stringify(value) }, { merge: true });
     } catch(e) { console.warn('Firestore 저장 실패:', e); }
   }
+  // 2차: localStorage 백업
   try { localStorage.setItem('reniv_shared_' + key, JSON.stringify(value)); } catch(e) {}
 }
 
 async function loadSharedSetting(key) {
-  // erp_data/settings 문서에서 로드
+  // 1차: Firestore
   if (window._firestoreGetDoc && window._firestoreDoc && window._firebaseDb) {
     try {
-      const ref = window._firestoreDoc(window._firebaseDb, 'erp_data', 'settings');
+      const ref = window._firestoreDoc(window._firebaseDb, 'settings', key);
       const snap = await window._firestoreGetDoc(ref);
-      if (snap.exists() && snap.data()[key]) return JSON.parse(snap.data()[key]);
+      if (snap.exists()) return JSON.parse(snap.data().value);
     } catch(e) {}
   }
+  // 2차: localStorage 백업
   try {
     const s = localStorage.getItem('reniv_shared_' + key);
     if (s) return JSON.parse(s);
@@ -5281,9 +5266,10 @@ function deleteStockHistory(id) {
   const h = DB.stockHistory.find(x => x.id === id);
   if (!h) return;
   if (!confirm('이 입출고 내역을 삭제합니까?\n재고 수량이 역산됩니다.')) return;
+  // 재고 역산
   const itemIdx = DB.items.findIndex(i => i.id === h.itemId);
   if (itemIdx >= 0) {
-    if (h.type === 'in') DB.items[itemIdx].stock = Math.max(0, DB.items[itemIdx].stock - h.qty);
+    if (h.type === 'in') DB.items[itemIdx].stock -= h.qty;
     else DB.items[itemIdx].stock += h.qty;
   }
   DB.stockHistory = DB.stockHistory.filter(x => x.id !== id);
@@ -5406,7 +5392,6 @@ function initERPWhenReady() {
       });
       DB = merged;
       applyPendingStockIn();
-      fixNegativeStock();
       try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
       console.log('✅ Firestore 데이터 로드 완료');
     } else {
