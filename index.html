@@ -4740,17 +4740,54 @@ async function forceUploadToFirestore() {
 
 async function resetToDefaultAndUpload() {
   if (!confirm('⚠️ HTML에 내장된 기본 데이터로 초기화하고 Firestore에 업로드합니까?\n현재 Firestore의 데이터는 덮어씁니다.')) return;
+
+  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) {
+    alert('Firestore가 초기화되지 않았습니다.\n잠시 기다렸다가 다시 시도해주세요.');
+    return;
+  }
+
   DB = JSON.parse(JSON.stringify(DEFAULT_DB));
   localStorage.setItem(STORE_KEY, JSON.stringify(DB));
-  showNotif('초기화 중...', 'info');
+  showNotif('Firestore에 업로드 중...', 'info');
+
   try {
-    await _doSaveData();
+    const db = window._firebaseDb;
+    const setDoc = window._firestoreSetDoc;
+    const docRef = window._firestoreDoc;
+
+    // 하나씩 순차 저장 (Promise.all 실패 시 원인 파악 어려움)
+    await setDoc(docRef(db, 'erp_data', 'vendors'),     { data: JSON.stringify(DB.vendors||[]),     ts: Date.now() });
+    await setDoc(docRef(db, 'erp_data', 'items'),       { data: JSON.stringify(DB.items||[]),       ts: Date.now() });
+    await setDoc(docRef(db, 'erp_data', 'orders'),      { data: JSON.stringify(DB.orders||[]),      ts: Date.now() });
+    await setDoc(docRef(db, 'erp_data', 'productions'), { data: JSON.stringify(DB.productions||[]), ts: Date.now() });
+    await setDoc(docRef(db, 'erp_data', 'stockHistory'),{ data: JSON.stringify(DB.stockHistory||[]),ts: Date.now() });
+    await setDoc(docRef(db, 'erp_data', 'quotes'),      { data: JSON.stringify(DB.quotes||[]),      ts: Date.now() });
+    await setDoc(docRef(db, 'erp_data', 'meta'), {
+      data: JSON.stringify({
+        _trelloKey:   DB._trelloKey||'',
+        _trelloToken: DB._trelloToken||'',
+        _trelloLists: DB._trelloLists||null,
+        _trelloCards: DB._trelloCards||null,
+        _bomMargin:   DB._bomMargin||{},
+        _companyInfo: DB._companyInfo||{},
+        _nextIds:     DB._nextIds||{},
+      }),
+      ts: Date.now()
+    });
+
     updateBadges();
     renderDashboard();
     go('dashboard');
-    showNotif('✅ 기본 데이터로 초기화 후 Firestore 업로드 완료!', 'success');
+    showNotif('✅ 데이터 초기화 및 Firestore 업로드 완료! 다른 사용자도 동일하게 볼 수 있습니다.', 'success');
   } catch(e) {
-    showNotif('업로드 실패: ' + e.message, 'warning');
+    console.error('Firestore 업로드 에러:', e);
+    const msg = '업로드 실패!\n오류: ' + (e.message||e) + '\n코드: ' + (e.code||'없음');
+    alert(msg);
+    // 화면에도 고정 표시
+    const errDiv = document.createElement('div');
+    errDiv.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#fee2e2;border:2px solid #ef4444;border-radius:10px;padding:16px 24px;z-index:99999;max-width:500px;font-size:13px;color:#7f1d1d;box-shadow:0 4px 20px rgba(0,0,0,.2)';
+    errDiv.innerHTML = '<strong>❌ Firestore 업로드 실패</strong><br><br>오류: ' + (e.message||String(e)) + '<br>코드: ' + (e.code||'없음') + '<br><br><button onclick="this.parentElement.remove()" style="padding:4px 12px;background:#ef4444;color:#fff;border:none;border-radius:5px;cursor:pointer">닫기</button>';
+    document.body.appendChild(errDiv);
   }
 }
 
