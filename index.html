@@ -572,7 +572,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <span style="font-size:13px">🔍</span>
       <input id="globalSearch" type="text" placeholder="전체 검색..." oninput="globalSearchFn(this.value)">
     </div>
-    <button class="hdr-btn" onclick="exportToSheets()" title="ERP → Google Sheets 내보내기">
+    <button class="hdr-btn" onclick="syncGSheets()" title="Google Sheets 동기화">
       <span class="sync-dot"></span>Sheets 연동
     </button>
     <button class="hdr-btn" onclick="if(requireWrite()){go('order');openModal('add-order');}" title="빠른 발주">📝 발주</button>
@@ -761,7 +761,6 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div class="chip active" onclick="setStockFilter('전체',this)">전체</div>
           <div class="chip" onclick="setStockFilter('원자재',this)">원자재</div>
           <div class="chip" onclick="setStockFilter('부자재',this)">부자재</div>
-          <div class="chip" onclick="setStockFilter('OEM',this)">OEM</div>
           <div class="chip" onclick="setStockFilter('완제품',this)">완제품</div>
         </div>
         <div class="card">
@@ -777,7 +776,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="card">
           <div class="card-body p0 tbl-wrap">
             <table>
-              <thead><tr><th>일자</th><th>품목명</th><th>구분</th><th>수량</th><th>단가</th><th>금액</th><th>재고 수량</th><th>비고</th><th>관리</th></tr></thead>
+              <thead><tr><th>일자</th><th>품목명</th><th>구분</th><th>수량</th><th>단가</th><th>금액</th><th>이전 재고수량</th><th>비고</th><th>관리</th></tr></thead>
               <tbody id="stock-history-table"></tbody>
             </table>
           </div>
@@ -894,6 +893,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             </div>
             <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
               <button class="btn btn-primary" onclick="saveWebAppUrl()">💾 URL 저장</button>
+              <button class="btn btn-outline" onclick="importFromSheets()">📥 시트 → ERP 가져오기</button>
               <button class="btn btn-outline" onclick="exportToSheets()">📤 ERP → 시트 내보내기</button>
             </div>
             <div style="background:var(--gray-50);border-radius:8px;padding:12px;font-size:11.5px;color:var(--gray-600)">
@@ -1149,6 +1149,30 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="modal-ft">
       <button class="btn btn-outline" onclick="closeModal('stock-out-modal')">취소</button>
       <button class="btn btn-danger" onclick="saveStockOut()">출고 처리</button>
+    </div>
+  </div>
+</div>
+
+<!-- STOCK HISTORY EDIT -->
+<div class="overlay" id="overlay-edit-stock-history">
+  <div class="modal">
+    <div class="modal-hdr"><span class="modal-ttl">✏️ 입출고 내역 수정</span><button class="modal-x" onclick="closeModal('edit-stock-history')">✕</button></div>
+    <div class="modal-body">
+      <div class="fg2">
+        <div class="fg full"><label>품목명</label><input class="fi" id="sh-item-name" readonly style="background:var(--gray-50);color:var(--gray-500)"></div>
+        <div class="fg"><label>구분</label><select class="fs" id="sh-type"><option value="in">📥 입고</option><option value="out">📤 출고</option></select></div>
+        <div class="fg"><label>수량<span class="req">*</span></label><input class="fi" id="sh-qty" type="number" min="1"></div>
+        <div class="fg"><label>단가(원)</label><input class="fi" id="sh-price" type="number" min="0"></div>
+        <div class="fg"><label>일자<span class="req">*</span></label><input class="fi" id="sh-date" type="date"></div>
+        <div class="fg full"><label>비고</label><input class="fi" id="sh-note" placeholder="비고"></div>
+      </div>
+    </div>
+    <div class="modal-ft" style="justify-content:space-between">
+      <button class="btn btn-danger btn-sm" onclick="deleteStockHistoryFromModal()">🗑️ 삭제</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline" onclick="closeModal('edit-stock-history')">취소</button>
+        <button class="btn btn-primary" onclick="saveStockHistory()">저장</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2756,7 +2780,9 @@ function setStockFilter(type, el) {
 
 function renderStockTable() {
   const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray'})[t]||'gray';
-  const items = _stockTypeFilter === '전체' ? DB.items : DB.items.filter(i => i.type === _stockTypeFilter);
+  // OEM 품목은 재고관리에서 항상 제외
+  const baseItems = DB.items.filter(i => i.type !== 'OEM');
+  const items = _stockTypeFilter === '전체' ? baseItems : baseItems.filter(i => i.type === _stockTypeFilter);
   $('stock-table').innerHTML = items.map(i => {
     const ss = stockStatus(i);
     const pct = stockPct(i);
@@ -2802,7 +2828,7 @@ function renderStockHistory() {
       <td style="color:var(--sky-700);font-weight:500">${fmt(h._snapStock)}</td>
       <td>${h.note||'-'}</td>
       <td style="display:flex;gap:4px">
-        <button class="btn btn-danger btn-xs" onclick="deleteStockHistory(${h.id})">삭제</button>
+        <button class="btn btn-outline btn-xs" onclick="editStockHistory(${h.id})">수정</button>
       </td>
     </tr>`;
   }).join('') || '<tr><td colspan="9" class="empty">입출고 내역이 없습니다</td></tr>';
@@ -4726,7 +4752,8 @@ function globalSearchFn(q) {
 // GOOGLE SHEETS SYNC
 // ═══════════════════════════════════════════════════════
 function syncGSheets() {
-  exportToSheets();
+  showNotif('Google Sheets 동기화 중...', 'info');
+  setTimeout(()=>showNotif('Google Sheets 동기화 완료 — 품목/재고 데이터 업데이트됨','success'), 1500);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -5024,6 +5051,69 @@ function applyUserPhoto(src) {
 }
 
 
+function editStockHistory(id) {
+  const h = DB.stockHistory.find(x => x.id === id);
+  if (!h) return;
+  const item = getItem(h.itemId);
+  editingId['edit-stock-history'] = id;
+  $('sh-item-name').value = item.name || '-';
+  $('sh-type').value = h.type || 'in';
+  $('sh-qty').value = h.qty || 0;
+  $('sh-price').value = h.price || 0;
+  $('sh-date').value = h.date || today();
+  $('sh-note').value = h.note || '';
+  openModal('edit-stock-history');
+}
+
+function saveStockHistory() {
+  const id = editingId['edit-stock-history'];
+  const idx = DB.stockHistory.findIndex(x => x.id === id);
+  if (idx < 0) return;
+  const h = DB.stockHistory[idx];
+  const oldType = h.type;
+  const oldQty = h.qty;
+  const newType = $('sh-type').value;
+  const newQty = parseFloat($('sh-qty').value) || 0;
+  if (!newQty) { showNotif('수량을 입력하세요', 'warning'); return; }
+
+  // 재고 역산 후 재반영
+  const itemIdx = DB.items.findIndex(i => i.id === h.itemId);
+  if (itemIdx >= 0) {
+    // 기존 내역 되돌리기
+    if (oldType === 'in') DB.items[itemIdx].stock -= oldQty;
+    else DB.items[itemIdx].stock += oldQty;
+    // 새 내역 반영
+    if (newType === 'in') DB.items[itemIdx].stock += newQty;
+    else DB.items[itemIdx].stock -= newQty;
+  }
+
+  DB.stockHistory[idx] = {
+    ...h,
+    type: newType,
+    qty: newQty,
+    price: parseFloat($('sh-price').value) || 0,
+    date: $('sh-date').value || today(),
+    note: $('sh-note').value || '',
+  };
+  saveData(); closeModal('edit-stock-history'); renderStock();
+  showNotif('입출고 내역이 수정되었습니다', 'success');
+}
+
+function deleteStockHistoryFromModal() {
+  const id = editingId['edit-stock-history'];
+  const h = DB.stockHistory.find(x => x.id === id);
+  if (!h) return;
+  if (!confirm('이 입출고 내역을 삭제합니까?\n재고 수량이 역산됩니다.')) return;
+  const itemIdx = DB.items.findIndex(i => i.id === h.itemId);
+  if (itemIdx >= 0) {
+    if (h.type === 'in') DB.items[itemIdx].stock -= h.qty;
+    else DB.items[itemIdx].stock += h.qty;
+  }
+  DB.stockHistory = DB.stockHistory.filter(x => x.id !== id);
+  saveData(); closeModal('edit-stock-history'); renderStock();
+  showNotif('삭제되었습니다');
+}
+
 function deleteStockHistory(id) {
   const h = DB.stockHistory.find(x => x.id === id);
   if (!h) return;
@@ -5076,7 +5166,7 @@ function saveWebAppUrl() {
 function syncGSheets() {
   const webAppUrl = localStorage.getItem('reniv_sheets_webapp_url');
   if (webAppUrl) {
-    exportToSheets();
+    importFromSheets();
   } else {
     showNotif('설정에서 Google Sheets Web App URL을 먼저 입력해주세요', 'warning');
     go('settings');
