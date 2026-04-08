@@ -1881,43 +1881,9 @@ let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
 
 
 
-
 // ── 초기화 시 입고완료 발주서 재고 자동 반영 ──────────────
-// localStorage에 저장된 DB가 없을 때(첫 로드) 또는 재고 처리 이력이 없을 때만 실행
-(function applyInitialStockIn() {
-  const processed = DB._processedOrders || [];
-  DB.orders.forEach(o => {
-    if (o.stockStatus === '입고완료' && processed.indexOf(o.id) === -1) {
-      (o.rows || []).forEach(row => {
-        if (!row.qty) return;
-        let item = null;
-        if (row.itemId) item = DB.items.find(i => i.id === row.itemId);
-        if (!item && row.code) item = DB.items.find(i => i.code && i.code === row.code);
-        if (!item) item = DB.items.find(i => i.name === row.name);
-        if (item) {
-          const idx = DB.items.findIndex(i => i.id === item.id);
-          if (idx >= 0) {
-            DB.items[idx].stock += row.qty;
-            // 입출고 이력 추가
-            const maxId = DB.stockHistory.length ? Math.max.apply(null, DB.stockHistory.map(h=>h.id||0)) : 0;
-            DB.stockHistory.push({
-              id: maxId + 1,
-              itemId: item.id,
-              type: 'in',
-              qty: row.qty,
-              price: row.price || item.price,
-              date: o.inDate || o.orderDate || '',
-              lot: o.serial || '',
-              note: '발주서 입고완료 반영 (' + (o.serial||'발주서 '+o.id) + ')'
-            });
-          }
-        }
-      });
-      processed.push(o.id);
-    }
-  });
-  DB._processedOrders = processed;
-})();
+// 비활성화: Firestore에서 이미 처리된 데이터를 로드하므로 중복 실행 불필요
+// (function applyInitialStockIn() { ... })();
 
 // Firestore 로드 후 미처리 입고완료 발주서 재고 반영
 function applyPendingStockIn() {
