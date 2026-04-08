@@ -570,7 +570,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="hdr-title" id="pageTitle">대시보드</div>
     <div class="hdr-search">
       <span style="font-size:13px">🔍</span>
-      <input id="globalSearch" type="text" placeholder="전체 검색..." oninput="globalSearchFn(this.value)" onkeydown="if(event.key==='Enter')globalSearchFn(this.value)">
+      <input id="globalSearch" type="text" placeholder="전체 검색..." oninput="globalSearchFn(this.value)">
     </div>
     <button class="hdr-btn" onclick="exportToSheets()" title="ERP → Google Sheets 내보내기">
       <span class="sync-dot"></span>Sheets 연동
@@ -700,6 +700,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         </div>
         <div style="display:flex;gap:7px">
           <button class="btn btn-outline btn-sm" onclick="openModal('add-bom')">+ BOM 등록</button>
+          <button class="btn btn-outline btn-sm" onclick="editCurrentBOM()" style="color:var(--sky-700);border-color:var(--sky-300)">✏️ BOM 수정</button>
           <button class="btn btn-primary btn-sm" onclick="aiAnalyzeBOM()">✨ AI 분석</button>
         </div>
       </div>
@@ -805,7 +806,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="page" id="page-order">
       <div style="display:flex;justify-content:space-between;margin-bottom:14px">
         <div style="font-size:12px;color:var(--gray-500)">발주서 작성 · 업체 자동 연결 · PDF 출력</div>
-        <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-order']=null;const b=$('order-delete-btn');if(b)b.style.display='none';populateVendorSelect('o-vendor');$('o-date').value=today();$('o-in-date').value='';$('o-pay-date').value='';$('o-serial').value='';$('o-note').value='';$('o-addr').value='';$('order-modal-rows').innerHTML='';ensureOrderRows();openModal('add-order')}">+ 발주서 작성</button>
+        <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-order']=null;const b=$('order-delete-btn');if(b)b.style.display='none';populateVendorSelect('o-vendor');$('o-date').value=today();openModal('add-order')}">+ 발주서 작성</button>
       </div>
       <div class="card">
         <div class="card-body p0 tbl-wrap">
@@ -1065,13 +1066,24 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 <!-- BOM -->
 <div class="overlay" id="overlay-add-bom">
   <div class="modal wide">
-    <div class="modal-hdr"><span class="modal-ttl">🔧 BOM 등록</span><button class="modal-x" onclick="closeModal('add-bom')">✕</button></div>
+    <div class="modal-hdr"><span class="modal-ttl" id="bom-modal-title">🔧 BOM 등록/수정</span><button class="modal-x" onclick="closeModal('add-bom')">✕</button></div>
     <div class="modal-body">
       <div class="fg">
         <label>완제품 선택<span class="req">*</span></label>
         <select class="fs" id="bom-product-modal" style="max-width:300px"></select>
       </div>
       <div class="sec-title" style="margin-top:8px">구성 품목</div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <select class="fs" id="bom-item-type-filter" style="width:90px;font-size:11px" onchange="refreshBOMItemOptions()">
+          <option value="">전체</option>
+          <option value="원자재">원자재</option>
+          <option value="부자재">부자재</option>
+          <option value="OEM">OEM</option>
+          <option value="완제품">완제품</option>
+        </select>
+        <input class="fi" id="bom-item-search" placeholder="품목 검색..." style="width:160px;font-size:11px" oninput="refreshBOMItemOptions()">
+        <span style="font-size:11px;color:var(--gray-400);align-self:center">※ 수량에 분수 입력 가능 (예: 1/32)</span>
+      </div>
       <div class="tbl-wrap" style="margin-bottom:10px">
         <table>
           <thead><tr><th>품목</th><th>투입량</th><th>단위</th><th>비고</th><th></th></tr></thead>
@@ -2499,7 +2511,7 @@ function renderBOM() {
         <td class="lnk" onclick="showItemDetail(${item.id})" style="padding-left:12px">${item.name}</td>
         <td style="font-family:monospace;font-size:11px;white-space:nowrap">${item.code||'-'}</td>
         <td><span class="badge ${typeCls}">${item.type}</span></td>
-        <td style="text-align:center">${row.qty}${row.unit}</td>
+        <td style="text-align:center">${row.qtyDisplay || formatQty(row.qty)}${row.unit}</td>
         <td style="text-align:right">${fmtW(item.price)}</td>
         <td class="lnk" onclick="viewVendor(${item.vendorId})">${vendor.company||'-'}</td>
         <td>${row.note||'-'}</td>
@@ -2542,7 +2554,7 @@ function renderBOM() {
     return `<tr style="border-bottom:1px solid var(--gray-100)">
       <td style="padding:7px 8px;font-size:12px">${item.name}</td>
       <td style="padding:7px 8px;text-align:center;font-size:11px;font-family:monospace;color:var(--gray-500)">${item.code||'-'}</td>
-      <td style="padding:7px 8px;text-align:center;font-size:12px">${row.qty}${row.unit}</td>
+      <td style="padding:7px 8px;text-align:center;font-size:12px">${row.qtyDisplay || formatQty(row.qty)}${row.unit}</td>
       <td style="padding:7px 8px;text-align:right;font-size:12px">${fmtW(item.price)}</td>
       <td style="padding:7px 8px;text-align:right;font-size:12px;font-weight:600;color:var(--sky-700)">${fmtW(Math.round(subtotal))}</td>
     </tr>`;
@@ -2695,30 +2707,123 @@ function populateBOMProductModal() {
   $('bom-product-modal').innerHTML = fgItems.map(i=>`<option value="${i.id}">${i.name}</option>`).join('');
 }
 
-function populateBOMRows() {
-  $('bom-modal-rows').innerHTML = `<tr><td><select class="fs" style="min-width:160px">${DB.items.map(i=>`<option value="${i.id}">${i.name}</option>`).join('')}</select></td><td><input class="fi" type="number" value="1" style="width:70px"></td><td><input class="fi" value="g" style="width:50px"></td><td><input class="fi" placeholder="비고" style="width:100px"></td><td><button class="btn btn-danger btn-xs" onclick="this.closest('tr').remove()">✕</button></td></tr>`;
+function getBOMItemOptions() {
+  const typeFilter = $('bom-item-type-filter') ? $('bom-item-type-filter').value : '';
+  const searchQ = $('bom-item-search') ? $('bom-item-search').value.toLowerCase() : '';
+  const filtered = DB.items.filter(i => {
+    const matchType = !typeFilter || i.type === typeFilter;
+    const matchSearch = !searchQ || i.name.toLowerCase().includes(searchQ) || (i.code||'').toLowerCase().includes(searchQ);
+    return matchType && matchSearch;
+  });
+  return filtered.map(i => `<option value="${i.id}">${i.code ? '['+i.code+'] ' : ''}${i.name}${i.spec?' ('+i.spec+')':''}</option>`).join('');
 }
 
-function addBOMRow() {
-  const tbody = $('bom-modal-rows');
+function refreshBOMItemOptions() {
+  $('bom-modal-rows').querySelectorAll('select.bom-item-sel').forEach(sel => {
+    const curVal = sel.value;
+    sel.innerHTML = getBOMItemOptions();
+    if (curVal) sel.value = curVal;
+  });
+}
+
+function populateBOMRows() {
+  $('bom-modal-rows').innerHTML = makeBOMRowHTML();
+}
+
+function makeBOMRowHTML(itemId, qty, unit, note) {
+  const opts = getBOMItemOptions();
   const tr = document.createElement('tr');
-  tr.innerHTML = `<td><select class="fs" style="min-width:160px">${DB.items.map(i=>`<option value="${i.id}">${i.name}</option>`).join('')}</select></td><td><input class="fi" type="number" value="1" style="width:70px"></td><td><input class="fi" value="g" style="width:50px"></td><td><input class="fi" placeholder="비고" style="width:100px"></td><td><button class="btn btn-danger btn-xs" onclick="this.closest('tr').remove()">✕</button></td>`;
-  tbody.appendChild(tr);
+  tr.innerHTML = `
+    <td><select class="fs bom-item-sel" style="min-width:200px;font-size:12px">${opts}</select></td>
+    <td><input class="fi bom-qty" value="${qty||1}" style="width:80px;font-size:12px" placeholder="예: 1/32 또는 1.5"></td>
+    <td><input class="fi bom-unit" value="${unit||'EA'}" style="width:55px;font-size:12px"></td>
+    <td><input class="fi bom-note" value="${note||''}" placeholder="비고" style="width:100px;font-size:12px"></td>
+    <td><button class="btn btn-danger btn-xs" onclick="this.closest('tr').remove()">✕</button></td>`;
+  if (itemId) {
+    setTimeout(() => { tr.querySelector('select').value = itemId; }, 0);
+  }
+  return tr;
+}
+
+function addBOMRow(itemId, qty, unit, note) {
+  $('bom-modal-rows').appendChild(makeBOMRowHTML(itemId, qty, unit, note));
+}
+
+// 분수 문자열 파싱 (예: "1/32" → 0.03125, "1.5" → 1.5)
+function parseFraction(str) {
+  if (!str) return 0;
+  str = String(str).trim();
+  if (str.includes('/')) {
+    const parts = str.split('/');
+    const num = parseFloat(parts[0]);
+    const den = parseFloat(parts[1]);
+    return den ? num / den : 0;
+  }
+  return parseFloat(str) || 0;
+}
+
+// 수량을 표시할 때 분수로 보여주기 (예: 0.03125 → 1/32)
+function formatQty(val) {
+  if (!val && val !== 0) return '0';
+  // 분수인지 체크 (소수점 있고 역수가 정수면)
+  if (val < 1 && val > 0) {
+    const inv = Math.round(1 / val);
+    if (Math.abs(1/inv - val) < 0.0001) return `1/${inv}`;
+  }
+  // 소수 자리가 있으면 최대 4자리
+  return val % 1 === 0 ? String(val) : parseFloat(val.toFixed(4)).toString();
 }
 
 function saveBOM() {
   const productId = parseInt($('bom-product-modal').value);
+  if (!productId) { showNotif('완제품을 선택하세요','warning'); return; }
   const rows = [];
   $('bom-modal-rows').querySelectorAll('tr').forEach(tr => {
-    const sel = tr.querySelector('select');
-    const inputs = tr.querySelectorAll('input');
-    if (sel && inputs.length >= 3) {
-      rows.push({itemId:parseInt(sel.value), qty:parseFloat(inputs[0].value)||0, unit:inputs[1].value, note:inputs[2].value});
+    const sel = tr.querySelector('select.bom-item-sel');
+    const qtyInput = tr.querySelector('.bom-qty');
+    const unitInput = tr.querySelector('.bom-unit');
+    const noteInput = tr.querySelector('.bom-note');
+    if (sel && sel.value) {
+      const qty = parseFraction(qtyInput ? qtyInput.value : 1);
+      rows.push({
+        itemId: parseInt(sel.value),
+        qty: qty,
+        qtyDisplay: qtyInput ? qtyInput.value.trim() : String(qty),
+        unit: unitInput ? unitInput.value : 'EA',
+        note: noteInput ? noteInput.value : ''
+      });
     }
   });
+  if (!DB.boms) DB.boms = {};
   DB.boms[productId] = rows;
   saveData(); closeModal('add-bom'); showNotif('BOM이 저장되었습니다','success');
-  if ($('page-bom').classList.contains('active')) renderBOM();
+  if ($('page-bom') && $('page-bom').classList.contains('active')) renderBOM();
+}
+
+// 현재 선택된 제품의 BOM 수정
+function editCurrentBOM() {
+  const productId = parseInt($('bom-product-sel') ? $('bom-product-sel').value : 0);
+  if (!productId) { showNotif('먼저 제품을 선택하세요','warning'); return; }
+  populateBOMProductModal();
+  setTimeout(() => {
+    $('bom-product-modal').value = productId;
+    // 검색/필터 초기화
+    if ($('bom-item-type-filter')) $('bom-item-type-filter').value = '';
+    if ($('bom-item-search')) $('bom-item-search').value = '';
+    // 기존 BOM 행 불러오기
+    const bom = (DB.boms && DB.boms[productId]) || [];
+    $('bom-modal-rows').innerHTML = '';
+    if (bom.length) {
+      bom.forEach(row => {
+        const displayQty = row.qtyDisplay || formatQty(row.qty);
+        addBOMRow(row.itemId, displayQty, row.unit, row.note);
+      });
+    } else {
+      addBOMRow();
+    }
+    if ($('bom-modal-title')) $('bom-modal-title').textContent = '✏️ BOM 수정';
+  }, 50);
+  openModal('add-bom');
 }
 
 function aiAnalyzeBOM() {
@@ -3172,36 +3277,15 @@ function addOrderRow() {
   const tbody = $('order-modal-rows');
   const tr = document.createElement('tr');
   const rowId = 'img-' + Date.now();
-  const selId = 'sel-' + Date.now();
-  const searchId = 'search-' + Date.now();
-  const filterId = 'filter-' + Date.now();
-
-  const buildOptions = (typeFilter, searchQ) => {
-    const filtered = DB.items.filter(i => {
-      const matchType = !typeFilter || i.type === typeFilter;
-      const matchSearch = !searchQ || i.name.toLowerCase().includes(searchQ.toLowerCase()) || (i.code||'').toLowerCase().includes(searchQ.toLowerCase());
-      return matchType && matchSearch;
-    });
-    return '<option value="">직접 입력</option>' +
-      filtered.map(i => `<option value="${i.id}" data-code="${i.code}" data-name="${i.name}" data-price="${i.price}" data-spec="${i.spec||''}">${i.code ? '['+i.code+'] ' : ''}${i.name}${i.spec?' ('+i.spec+')':''}</option>`).join('');
-  };
+  const itemOptions = '<option value="">직접 입력</option>' +
+    DB.items.map(i => `<option value="${i.id}" data-code="${i.code}" data-name="${i.name}" data-price="${i.price}" data-spec="${i.spec||''}">${i.code ? '['+i.code+'] ' : ''}${i.name}${i.spec?' ('+i.spec+')':''}</option>`).join('');
 
   tr.innerHTML = `
     <td colspan="6" style="padding:6px 4px">
       <div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap">
         <div style="flex:1;min-width:220px">
-          <div style="display:flex;gap:4px;margin-bottom:4px">
-            <select id="${filterId}" class="fs" style="width:90px;font-size:11px" onchange="(function(){const s=$('${selId}');s.innerHTML=buildOrderOptions(this.value,$('${searchId}').value);})()">
-              <option value="">전체</option>
-              <option value="원자재">원자재</option>
-              <option value="부자재">부자재</option>
-              <option value="OEM">OEM</option>
-              <option value="완제품">완제품</option>
-            </select>
-            <input id="${searchId}" class="fi" placeholder="품목 검색..." style="flex:1;font-size:11px" oninput="(function(){const s=$('${selId}');s.innerHTML=buildOrderOptions($('${filterId}').value,this.value);})()">
-          </div>
-          <select id="${selId}" class="fs row-item-sel" style="width:100%;font-size:12px;margin-bottom:4px" onchange="fillOrderRowFromItem(this)">
-            ${buildOptions('', '')}
+          <select class="fs row-item-sel" style="width:100%;font-size:12px;margin-bottom:4px" onchange="fillOrderRowFromItem(this)">
+            ${itemOptions}
           </select>
           <div style="display:flex;gap:4px">
             <input class="fi row-code" placeholder="품목코드" style="width:100px;font-family:monospace;font-size:11px" oninput="calcOrderTotal()">
@@ -3219,16 +3303,6 @@ function addOrderRow() {
       </div>
     </td>`;
   tbody.appendChild(tr);
-}
-
-function buildOrderOptions(typeFilter, searchQ) {
-  const filtered = DB.items.filter(i => {
-    const matchType = !typeFilter || i.type === typeFilter;
-    const matchSearch = !searchQ || i.name.toLowerCase().includes(searchQ.toLowerCase()) || (i.code||'').toLowerCase().includes(searchQ.toLowerCase());
-    return matchType && matchSearch;
-  });
-  return '<option value="">직접 입력</option>' +
-    filtered.map(i => `<option value="${i.id}" data-code="${i.code}" data-name="${i.name}" data-price="${i.price}" data-spec="${i.spec||''}">${i.code ? '['+i.code+'] ' : ''}${i.name}${i.spec?' ('+i.spec+')':''}</option>`).join('');
 }
 
 // 품목 선택 시 코드/이름/단가 자동 입력
