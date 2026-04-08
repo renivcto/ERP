@@ -1545,8 +1545,17 @@ async function _doSaveData() {
 }
 
 async function loadDataFromFirestore() {
+  // Firestore API 준비 대기 (최대 5초)
+  let waited = 0;
+  while ((!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) && waited < 50) {
+    await new Promise(r => setTimeout(r, 100));
+    waited++;
+  }
   try {
-    if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return null;
+    if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) {
+      console.warn('Firestore API 준비 안됨');
+      return null;
+    }
     const db = window._firebaseDb;
     const getDoc = window._firestoreGetDoc;
     const docRef = window._firestoreDoc;
@@ -1555,7 +1564,7 @@ async function loadDataFromFirestore() {
     const snaps = await Promise.all(keys.map(k => getDoc(docRef(db, 'erp_data', k))));
 
     // meta가 없으면 아직 Firestore에 데이터 없음
-    if (!snaps[6].exists()) return null;
+    if (!snaps[6].exists()) { console.log('Firestore meta 없음'); return null; }
 
     const result = {};
     const collKeys = ['vendors','items','orders','productions','stockHistory','quotes'];
@@ -1566,6 +1575,7 @@ async function loadDataFromFirestore() {
     const meta = JSON.parse(snaps[6].data().data);
     Object.assign(result, meta);
 
+    console.log('Firestore 로드 완료 - items:', result.items?.length, 'orders:', result.orders?.length);
     return result;
   } catch(e) {
     console.warn('Firestore 로드 실패:', e);
@@ -5128,18 +5138,23 @@ function initERPWhenReady() {
     }
   };
   const hideLoader = () => { const el = document.getElementById('erp-loader'); if (el) el.remove(); };
-  const doRender = () => { try { updateBadges(); } catch(e){} try { renderDashboard(); } catch(e){} };
+  const doRender = () => {
+    try { updateBadges(); } catch(e) { console.warn('updateBadges 실패:', e); }
+    try { go('dashboard'); } catch(e) {}
+    try { renderDashboard(); } catch(e) { console.warn('renderDashboard 실패:', e); }
+  };
 
   showLoader();
 
-  // Firestore에서 로드 시도
   loadDataFromFirestore().then(async (firestoreDB) => {
     if (firestoreDB && firestoreDB.items && firestoreDB.items.length > 0) {
       // Firestore 데이터 사용
       DB = firestoreDB;
       try { localStorage.setItem(STORE_KEY, JSON.stringify(firestoreDB)); } catch(e) {}
+      console.log('✅ Firestore 데이터 로드 완료');
     } else {
-      // Firestore 없음 → 현재 DB(localStorage or DEFAULT_DB) 유지, 업로드
+      // Firestore 없음 → localStorage or DEFAULT_DB 유지
+      console.log('ℹ️ Firestore 데이터 없음 → 로컬 데이터 사용, Firestore에 업로드 중...');
       _doSaveData().catch(e => console.warn('초기 업로드 실패:', e));
     }
     await restoreIDBData();
@@ -5147,7 +5162,7 @@ function initERPWhenReady() {
     hideLoader();
     doRender();
   }).catch(async (e) => {
-    console.warn('Firestore 로드 실패, localStorage 사용:', e);
+    console.warn('Firestore 로드 실패, 로컬 데이터 사용:', e);
     await restoreIDBData();
     hideLoader();
     doRender();
