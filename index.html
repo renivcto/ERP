@@ -723,7 +723,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="card">
         <div class="card-body p0 tbl-wrap">
           <table>
-            <thead><tr><th>업체명</th><th>분류</th><th>담당자</th><th>전화번호</th><th>이메일</th><th>주소</th><th>공급품목</th><th>관리</th></tr></thead>
+            <thead><tr><th>업체명</th><th>분류</th><th>담당자</th><th>전화번호</th><th>이메일</th><th>주소</th><th>공급품목</th><th>견적서</th><th>관리</th></tr></thead>
             <tbody id="vendor-table"></tbody>
           </table>
         </div>
@@ -1064,10 +1064,11 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="fg"><label>전화번호</label><input class="fi" id="v-phone"></div>
         <div class="fg full"><label>이메일</label><input class="fi" id="v-email" type="email"></div>
         <div class="fg full"><label>주소</label><input class="fi" id="v-addr"></div>
+        <div class="fg full"><label>사업자등록번호</label><input class="fi" id="v-bizno" placeholder="000-00-00000" style="font-family:monospace"></div>
         <div class="fg full"><label>거래처 설명</label><textarea class="fta" id="v-desc"></textarea></div>
         <!-- 견적서 다중 파일 -->
         <div class="fg full">
-          <label>📄 견적서 파일 <span style="font-size:10px;color:var(--gray-400);font-weight:400">(여러 개 등록 가능)</span></label>
+          <label style="font-size:13px;font-weight:600;color:var(--gray-700)"><span style="font-size:16px">📄</span> 견적서 파일 <span style="font-size:11px;color:var(--gray-400);font-weight:400">(여러 개 등록 가능)</span></label>
           <div id="v-quote-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--gray-50);border:1px dashed var(--gray-300);border-radius:7px;padding:8px 10px">
             <input class="fi" id="v-quote-name-inp" placeholder="견적서 이름 (예: 25년 1분기 견적)" style="flex:1;min-width:140px">
@@ -1108,7 +1109,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <label>바코드</label>
           <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap">
             <div style="flex:1;min-width:160px">
-              <input class="fi" id="i-barcode" placeholder="8801234567890" style="font-family:monospace;margin-bottom:6px">
+              <input class="fi" id="i-barcode" placeholder="" style="font-family:monospace;margin-bottom:6px">
               <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
                 <input type="file" accept="image/*" id="i-barcode-img" onchange="previewBarcodeImg(this)" style="font-size:11px;max-width:180px">
               </div>
@@ -2282,11 +2283,16 @@ function renderVendorTable() {
       <td style="color:var(--sky-600)">${v.email||'-'}</td>
       <td>${v.addr||'-'}</td>
       <td>${(DB.items||[]).filter(i=>i.vendorId===v.id).slice(0,2).map(i=>`<span class="chip" onclick="showItemDetail(${i.id})">${i.name}</span>`).join('')}</td>
+      <td style="text-align:center">
+        ${(v.quotes&&v.quotes.length) ? v.quotes.map((q,idx)=>`
+          <button onclick="openVendorQuoteById(${v.id},${idx})" title="${q.name}" style="display:inline-flex;align-items:center;gap:3px;background:#f472b6;color:#fff;border:none;padding:3px 9px;border-radius:7px;font-size:11.5px;font-weight:600;cursor:pointer;margin:1px">📄 ${q.name}</button>
+        `).join('') : '<span style="color:var(--gray-300);font-size:11px">-</span>'}
+      </td>
       <td style="display:flex;gap:5px">
         <button class="btn btn-outline btn-xs" onclick="editVendor(${v.id})">수정</button>
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="8" class="empty">등록된 업체가 없습니다</td></tr>';
+  `).join('') || '<tr><td colspan="9" class="empty">등록된 업체가 없습니다</td></tr>';
 }
 
 // 업체 견적서 임시 목록
@@ -2301,10 +2307,21 @@ function renderVendorQuoteList() {
       <span style="font-size:14px">📄</span>
       <span style="flex:1;font-size:12.5px;font-weight:500;color:var(--gray-800)">${q.name}</span>
       <span style="font-size:11px;color:var(--gray-400)">${q.fileName}</span>
-      <button class="btn btn-outline btn-xs" onclick="openVendorQuote(${idx})">보기</button>
+      <button onclick="openVendorQuote(${idx})" style="background:#f472b6;color:#fff;border:none;padding:4px 12px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer">보기</button>
       <button onclick="_vendorQuotes.splice(${idx},1);renderVendorQuoteList()" style="background:none;border:none;cursor:pointer;color:var(--red-400);font-size:13px">✕</button>
     </div>
   `).join('');
+}
+
+function openVendorQuoteById(vendorId, idx) {
+  const v = DB.vendors.find(v=>v.id===vendorId);
+  if (!v || !v.quotes || !v.quotes[idx]) return;
+  const q = v.quotes[idx];
+  const a = document.createElement('a');
+  a.href = q.data;
+  a.target = '_blank';
+  a.download = q.fileName || q.name;
+  a.click();
 }
 
 function openVendorQuote(idx) {
@@ -2344,6 +2361,7 @@ function saveVendor() {
     company, type:$('v-type').value, contact:$('v-contact').value,
     phone:$('v-phone').value, email:$('v-email').value,
     addr:$('v-addr').value, desc:$('v-desc').value,
+    bizno:$('v-bizno')?$('v-bizno').value.trim():'',
     quotes: _vendorQuotes.length ? _vendorQuotes : (existing ? (existing.quotes||[]) : [])
   };
   if (id) {
@@ -2364,6 +2382,7 @@ function editVendor(id) {
   $('v-contact').value = v.contact||''; $('v-phone').value = v.phone||'';
   $('v-email').value = v.email||''; $('v-addr').value = v.addr||'';
   $('v-desc').value = v.desc||'';
+  if ($('v-bizno')) $('v-bizno').value = v.bizno||'';
   _vendorQuotes = v.quotes ? JSON.parse(JSON.stringify(v.quotes)) : [];
   const delBtn = $('vendor-delete-btn');
   if (delBtn) delBtn.style.display = '';
