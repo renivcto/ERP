@@ -156,7 +156,7 @@ body{font-family:var(--font);background:var(--gray-50);color:var(--gray-800);hei
 /* SIDEBAR */
 #sidebar{width:var(--sidebar);background:linear-gradient(170deg,var(--sky-800),var(--sky-900));display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto;z-index:20}
 .logo-area{padding:18px 16px 14px;border-bottom:1px solid rgba(255,255,255,.1)}
-.logo-brand{color:#fff;font-size:22px;font-weight:700;letter-spacing:3px}
+.logo-brand{color:#fff;font-size:22px;font-weight:700;letter-spacing:3px;background:none!important}
 .logo-sub{color:var(--sky-200);font-size:9.5px;letter-spacing:1.5px;margin-top:1px}
 .logo-ver{display:inline-block;background:var(--sky-500);color:#fff;font-size:9px;padding:2px 7px;border-radius:10px;margin-top:5px}
 .nav-group{padding:10px 8px 2px}
@@ -1552,6 +1552,12 @@ async function restoreIDBData() {
       DB.orders[i].stampData = stamp || null;
     }
   }
+  // 프로필 사진 복원
+  const photo = await idbGet('reniv_user_photo');
+  if (photo) applyUserPhoto(photo);
+  // 로고 복원
+  const logo = await idbGet('reniv_logo');
+  if (logo) applyLogo(logo);
 }
 
 function loadData() {
@@ -2389,12 +2395,12 @@ function renderBOM() {
   `;
 
   // 판매가 / 마진 계산 박스 (별도)
-  // BOM 마진 localStorage에서 복원
-  try {
-    const saved = localStorage.getItem('reniv_bom_margin');
-    if (saved && !DB._bomMargin) DB._bomMargin = JSON.parse(saved);
-    else if (saved) { const parsed = JSON.parse(saved); Object.assign(DB._bomMargin, parsed); }
-  } catch(e) {}
+  // BOM 마진 Firestore에서 복원 후 렌더링
+  if (!DB._bomMargin) {
+    loadSharedSetting('bom_margin').then(saved => {
+      if (saved) { DB._bomMargin = saved; renderBOM(); }
+    });
+  }
   const savedMargin = DB._bomMargin && DB._bomMargin[product.id] || {};
   $('bom-margin-box').innerHTML = `
     <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:10px;padding:14px 16px;margin-top:4px">
@@ -2478,8 +2484,7 @@ function calcBOMMargin(productId) {
   // 저장
   if (!DB._bomMargin) DB._bomMargin = {};
   DB._bomMargin[productId] = {price, ad, mkt, logi, etc};
-  // localStorage에 별도 저장 (안정적 유지)
-  try { localStorage.setItem('reniv_bom_margin', JSON.stringify(DB._bomMargin)); } catch(e) {}
+  saveSharedSetting('bom_margin', DB._bomMargin);
   saveData();
 }
 
@@ -4242,11 +4247,11 @@ function saveTrelloSettings() {
   const key   = document.getElementById('trello-api-key')?.value.trim();
   const token = document.getElementById('trello-token')?.value.trim();
   if (!key || !token) { showNotif('API Key와 Token을 모두 입력하세요','warning'); return; }
-  // 버전과 무관한 별도 키로 영구 저장
   localStorage.setItem('reniv_trello_key',   key);
   localStorage.setItem('reniv_trello_token', token);
   DB._trelloKey   = key;
   DB._trelloToken = token;
+  saveSharedSetting('trello_config', { key, token });
   saveData();
   showNotif('Trello 설정이 저장되었습니다','success');
   const el = document.getElementById('trello-status');
@@ -4254,12 +4259,14 @@ function saveTrelloSettings() {
 }
 
 async function loadTrelloCards() {
-  // 별도 저장된 키 우선, 없으면 DB 참조
-  const key   = localStorage.getItem('reniv_trello_key')   || DB._trelloKey;
-  const token = localStorage.getItem('reniv_trello_token') || DB._trelloToken;
-  // DB에도 최신화
-  if (key)   DB._trelloKey   = key;
-  if (token) DB._trelloToken = token;
+  let key   = localStorage.getItem('reniv_trello_key')   || DB._trelloKey;
+  let token = localStorage.getItem('reniv_trello_token') || DB._trelloToken;
+  if (!key || !token) {
+    const cfg = await loadSharedSetting('trello_config').catch(()=>null);
+    if (cfg) { key = cfg.key; token = cfg.token; }
+  }
+  if (key)   { DB._trelloKey = key;   localStorage.setItem('reniv_trello_key', key); }
+  if (token) { DB._trelloToken = token; localStorage.setItem('reniv_trello_token', token); }
   if (!key || !token) {
     showNotif('설정 메뉴에서 Trello API Key와 Token을 먼저 입력하세요','warning');
     go('settings');
@@ -4745,6 +4752,36 @@ async function exportToSheets() {
 }
 
 // 설정에서 Web App URL 저장
+// ── Firestore 공유 설정 (회사정보, BOM마진, Trello) ───────────
+async function saveSharedSetting(key, value) {
+  // 1차: Firestore (있으면)
+  if (window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
+    try {
+      const ref = window._firestoreDoc(window._firebaseDb, 'settings', key);
+      await window._firestoreSetDoc(ref, { value: JSON.stringify(value) }, { merge: true });
+    } catch(e) { console.warn('Firestore 저장 실패:', e); }
+  }
+  // 2차: localStorage 백업
+  try { localStorage.setItem('reniv_shared_' + key, JSON.stringify(value)); } catch(e) {}
+}
+
+async function loadSharedSetting(key) {
+  // 1차: Firestore
+  if (window._firestoreGetDoc && window._firestoreDoc && window._firebaseDb) {
+    try {
+      const ref = window._firestoreDoc(window._firebaseDb, 'settings', key);
+      const snap = await window._firestoreGetDoc(ref);
+      if (snap.exists()) return JSON.parse(snap.data().value);
+    } catch(e) {}
+  }
+  // 2차: localStorage 백업
+  try {
+    const s = localStorage.getItem('reniv_shared_' + key);
+    if (s) return JSON.parse(s);
+  } catch(e) {}
+  return null;
+}
+
 function saveCompanyInfo() {
   const info = {
     company: $('s-company')?.value.trim() || '',
@@ -4754,25 +4791,20 @@ function saveCompanyInfo() {
     tel:     $('s-tel')?.value.trim()     || '',
   };
   DB._companyInfo = info;
-  // localStorage에도 별도 저장 (항상 유지)
-  localStorage.setItem('reniv_company_info', JSON.stringify(info));
+  saveSharedSetting('company_info', info);
   saveData();
   showNotif('회사 정보가 저장되었습니다', 'success');
 }
 
 function loadCompanyInfo() {
-  // localStorage 별도 키 우선 (가장 안정적)
-  let info = {};
-  try {
-    const saved = localStorage.getItem('reniv_company_info');
-    if (saved) info = JSON.parse(saved);
-    else info = DB._companyInfo || {};
-  } catch(e) { info = DB._companyInfo || {}; }
-  if ($('s-company')) $('s-company').value = info.company || 'RENIV Cosmetics';
-  if ($('s-bizno'))   $('s-bizno').value   = info.bizno   || '';
-  if ($('s-ceo'))     $('s-ceo').value     = info.ceo     || '';
-  if ($('s-addr'))    $('s-addr').value     = info.addr    || '';
-  if ($('s-tel'))     $('s-tel').value      = info.tel     || '';
+  loadSharedSetting('company_info').then(info => {
+    if (!info) info = DB._companyInfo || {};
+    if ($('s-company')) $('s-company').value = info.company || 'RENIV Cosmetics';
+    if ($('s-bizno'))   $('s-bizno').value   = info.bizno   || '';
+    if ($('s-ceo'))     $('s-ceo').value     = info.ceo     || '';
+    if ($('s-addr'))    $('s-addr').value     = info.addr    || '';
+    if ($('s-tel'))     $('s-tel').value      = info.tel     || '';
+  });
 }
 
 function previewUserPhoto(input) {
@@ -4795,8 +4827,6 @@ function applyUserPhoto(src) {
   }
 }
 
-// 사용자 사진 복원
-idbGet('reniv_user_photo').then(src => { if (src) applyUserPhoto(src); });
 
 function deleteStockHistory(id) {
   const h = DB.stockHistory.find(x => x.id === id);
@@ -4835,8 +4865,6 @@ function applyLogo(src) {
   }
 }
 
-// 로고 복원 (앱 시작 시)
-idbGet('reniv_logo').then(src => { if (src) applyLogo(src); });
 
 function saveWebAppUrl() {
   const url = $('webapp-url') ? $('webapp-url').value.trim() : '';
