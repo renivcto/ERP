@@ -5135,7 +5135,20 @@ async function loadGdocs() {
       window._firestoreDoc(window._firebaseDb, 'shared', 'gdocs')
     );
     _gdocList = snap.exists() ? (snap.data().list || []) : [];
-  } catch(e) { _gdocList = JSON.parse(localStorage.getItem('reniv_gdocs')||'[]'); }
+  } catch(e) {
+    // shared 컬렉션 접근 실패 시 → erp_data/meta에서 시도 (일반 유저)
+    try {
+      const metaSnap = await window._firestoreGetDoc(
+        window._firestoreDoc(window._firebaseDb, 'erp_data', 'meta')
+      );
+      if (metaSnap.exists()) {
+        const meta = JSON.parse(metaSnap.data().data || '{}');
+        _gdocList = meta.gdocs || [];
+      }
+    } catch(e2) {
+      _gdocList = JSON.parse(localStorage.getItem('reniv_gdocs')||'[]');
+    }
+  }
   renderGdocList();
 }
 
@@ -5148,6 +5161,16 @@ async function saveGdocsToFirestore() {
   } catch(e) {
     localStorage.setItem('reniv_gdocs', JSON.stringify(_gdocList));
   }
+  // erp_data/meta에도 저장 (일반 유저도 읽을 수 있도록)
+  try {
+    const metaRef = window._firestoreDoc(window._firebaseDb, 'erp_data', 'meta');
+    const metaSnap = await window._firestoreGetDoc(metaRef);
+    if (metaSnap.exists()) {
+      const meta = JSON.parse(metaSnap.data().data || '{}');
+      meta.gdocs = _gdocList;
+      await window._firestoreSetDoc(metaRef, { data: JSON.stringify(meta), ts: Date.now() }, { merge: true });
+    }
+  } catch(e2) {}
 }
 
 function renderGdocList() {
