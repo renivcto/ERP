@@ -570,7 +570,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="hdr-title" id="pageTitle">대시보드</div>
     <div class="hdr-search">
       <span style="font-size:13px">🔍</span>
-      <input id="globalSearch" type="text" placeholder="전체 검색..." oninput="globalSearchFn(this.value)">
+      <input id="globalSearch" type="text" placeholder="전체 검색..." oninput="globalSearchFn(this.value)" onkeydown="if(event.key==='Enter')globalSearchFn(this.value)">
     </div>
     <button class="hdr-btn" onclick="exportToSheets()" title="ERP → Google Sheets 내보내기">
       <span class="sync-dot"></span>Sheets 연동
@@ -805,7 +805,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="page" id="page-order">
       <div style="display:flex;justify-content:space-between;margin-bottom:14px">
         <div style="font-size:12px;color:var(--gray-500)">발주서 작성 · 업체 자동 연결 · PDF 출력</div>
-        <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-order']=null;const b=$('order-delete-btn');if(b)b.style.display='none';populateVendorSelect('o-vendor');$('o-date').value=today();openModal('add-order')}">+ 발주서 작성</button>
+        <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-order']=null;const b=$('order-delete-btn');if(b)b.style.display='none';populateVendorSelect('o-vendor');$('o-date').value=today();$('o-in-date').value='';$('o-pay-date').value='';$('o-serial').value='';$('o-note').value='';$('o-addr').value='';$('order-modal-rows').innerHTML='';ensureOrderRows();openModal('add-order')}">+ 발주서 작성</button>
       </div>
       <div class="card">
         <div class="card-body p0 tbl-wrap">
@@ -1829,24 +1829,6 @@ let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
   });
   DB._processedOrders = processed;
 })();
-
-// 음수 재고를 0으로 초기화하고 Firestore에 저장
-function fixNegativeStock() {
-  let fixed = false;
-  (DB.items || []).forEach((item, idx) => {
-    if ((item.stock || 0) < 0) {
-      console.log(`음수 재고 수정: ${item.name} ${item.stock} → 0`);
-      DB.items[idx].stock = 0;
-      fixed = true;
-    }
-  });
-  if (fixed) {
-    // Firestore에도 즉시 반영
-    setTimeout(() => {
-      try { _doSaveData(); } catch(e) {}
-    }, 1000);
-  }
-}
 
 // Firestore 로드 후 미처리 입고완료 발주서 재고 반영
 function applyPendingStockIn() {
@@ -3190,15 +3172,36 @@ function addOrderRow() {
   const tbody = $('order-modal-rows');
   const tr = document.createElement('tr');
   const rowId = 'img-' + Date.now();
-  const itemOptions = '<option value="">직접 입력</option>' +
-    DB.items.map(i => `<option value="${i.id}" data-code="${i.code}" data-name="${i.name}" data-price="${i.price}" data-spec="${i.spec||''}">${i.code ? '['+i.code+'] ' : ''}${i.name}${i.spec?' ('+i.spec+')':''}</option>`).join('');
+  const selId = 'sel-' + Date.now();
+  const searchId = 'search-' + Date.now();
+  const filterId = 'filter-' + Date.now();
+
+  const buildOptions = (typeFilter, searchQ) => {
+    const filtered = DB.items.filter(i => {
+      const matchType = !typeFilter || i.type === typeFilter;
+      const matchSearch = !searchQ || i.name.toLowerCase().includes(searchQ.toLowerCase()) || (i.code||'').toLowerCase().includes(searchQ.toLowerCase());
+      return matchType && matchSearch;
+    });
+    return '<option value="">직접 입력</option>' +
+      filtered.map(i => `<option value="${i.id}" data-code="${i.code}" data-name="${i.name}" data-price="${i.price}" data-spec="${i.spec||''}">${i.code ? '['+i.code+'] ' : ''}${i.name}${i.spec?' ('+i.spec+')':''}</option>`).join('');
+  };
 
   tr.innerHTML = `
     <td colspan="6" style="padding:6px 4px">
       <div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap">
         <div style="flex:1;min-width:220px">
-          <select class="fs row-item-sel" style="width:100%;font-size:12px;margin-bottom:4px" onchange="fillOrderRowFromItem(this)">
-            ${itemOptions}
+          <div style="display:flex;gap:4px;margin-bottom:4px">
+            <select id="${filterId}" class="fs" style="width:90px;font-size:11px" onchange="(function(){const s=$('${selId}');s.innerHTML=buildOrderOptions(this.value,$('${searchId}').value);})()">
+              <option value="">전체</option>
+              <option value="원자재">원자재</option>
+              <option value="부자재">부자재</option>
+              <option value="OEM">OEM</option>
+              <option value="완제품">완제품</option>
+            </select>
+            <input id="${searchId}" class="fi" placeholder="품목 검색..." style="flex:1;font-size:11px" oninput="(function(){const s=$('${selId}');s.innerHTML=buildOrderOptions($('${filterId}').value,this.value);})()">
+          </div>
+          <select id="${selId}" class="fs row-item-sel" style="width:100%;font-size:12px;margin-bottom:4px" onchange="fillOrderRowFromItem(this)">
+            ${buildOptions('', '')}
           </select>
           <div style="display:flex;gap:4px">
             <input class="fi row-code" placeholder="품목코드" style="width:100px;font-family:monospace;font-size:11px" oninput="calcOrderTotal()">
@@ -3216,6 +3219,16 @@ function addOrderRow() {
       </div>
     </td>`;
   tbody.appendChild(tr);
+}
+
+function buildOrderOptions(typeFilter, searchQ) {
+  const filtered = DB.items.filter(i => {
+    const matchType = !typeFilter || i.type === typeFilter;
+    const matchSearch = !searchQ || i.name.toLowerCase().includes(searchQ.toLowerCase()) || (i.code||'').toLowerCase().includes(searchQ.toLowerCase());
+    return matchType && matchSearch;
+  });
+  return '<option value="">직접 입력</option>' +
+    filtered.map(i => `<option value="${i.id}" data-code="${i.code}" data-name="${i.name}" data-price="${i.price}" data-spec="${i.spec||''}">${i.code ? '['+i.code+'] ' : ''}${i.name}${i.spec?' ('+i.spec+')':''}</option>`).join('');
 }
 
 // 품목 선택 시 코드/이름/단가 자동 입력
@@ -5274,8 +5287,6 @@ function initERPWhenReady() {
       });
       DB = merged;
       applyPendingStockIn();
-      // 음수 재고 자동 수정 (한 번만 실행)
-      fixNegativeStock();
       try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
       console.log('✅ Firestore 데이터 로드 완료');
     } else {
