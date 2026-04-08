@@ -572,7 +572,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <span style="font-size:13px">🔍</span>
       <input id="globalSearch" type="text" placeholder="전체 검색..." oninput="globalSearchFn(this.value)">
     </div>
-    <button class="hdr-btn" onclick="syncGSheets()" title="Google Sheets 동기화">
+    <button class="hdr-btn" onclick="exportToSheets()" title="ERP → Google Sheets 내보내기">
       <span class="sync-dot"></span>Sheets 연동
     </button>
     <button class="hdr-btn" onclick="if(requireWrite()){go('order');openModal('add-order');}" title="빠른 발주">📝 발주</button>
@@ -761,6 +761,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div class="chip active" onclick="setStockFilter('전체',this)">전체</div>
           <div class="chip" onclick="setStockFilter('원자재',this)">원자재</div>
           <div class="chip" onclick="setStockFilter('부자재',this)">부자재</div>
+          <div class="chip" onclick="setStockFilter('OEM',this)">OEM</div>
           <div class="chip" onclick="setStockFilter('완제품',this)">완제품</div>
         </div>
         <div class="card">
@@ -776,7 +777,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="card">
           <div class="card-body p0 tbl-wrap">
             <table>
-              <thead><tr><th>일자</th><th>품목명</th><th>구분</th><th>수량</th><th>단가</th><th>금액</th><th>이전 재고수량</th><th>비고</th><th>관리</th></tr></thead>
+              <thead><tr><th>일자</th><th>품목명</th><th>구분</th><th>수량</th><th>단가</th><th>금액</th><th>재고 수량</th><th>비고</th><th>관리</th></tr></thead>
               <tbody id="stock-history-table"></tbody>
             </table>
           </div>
@@ -893,7 +894,6 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             </div>
             <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
               <button class="btn btn-primary" onclick="saveWebAppUrl()">💾 URL 저장</button>
-              <button class="btn btn-outline" onclick="importFromSheets()">📥 시트 → ERP 가져오기</button>
               <button class="btn btn-outline" onclick="exportToSheets()">📤 ERP → 시트 내보내기</button>
             </div>
             <div style="background:var(--gray-50);border-radius:8px;padding:12px;font-size:11.5px;color:var(--gray-600)">
@@ -1149,30 +1149,6 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="modal-ft">
       <button class="btn btn-outline" onclick="closeModal('stock-out-modal')">취소</button>
       <button class="btn btn-danger" onclick="saveStockOut()">출고 처리</button>
-    </div>
-  </div>
-</div>
-
-<!-- STOCK HISTORY EDIT -->
-<div class="overlay" id="overlay-edit-stock-history">
-  <div class="modal">
-    <div class="modal-hdr"><span class="modal-ttl">✏️ 입출고 내역 수정</span><button class="modal-x" onclick="closeModal('edit-stock-history')">✕</button></div>
-    <div class="modal-body">
-      <div class="fg2">
-        <div class="fg full"><label>품목명</label><input class="fi" id="sh-item-name" readonly style="background:var(--gray-50);color:var(--gray-500)"></div>
-        <div class="fg"><label>구분</label><select class="fs" id="sh-type"><option value="in">📥 입고</option><option value="out">📤 출고</option></select></div>
-        <div class="fg"><label>수량<span class="req">*</span></label><input class="fi" id="sh-qty" type="number" min="1"></div>
-        <div class="fg"><label>단가(원)</label><input class="fi" id="sh-price" type="number" min="0"></div>
-        <div class="fg"><label>일자<span class="req">*</span></label><input class="fi" id="sh-date" type="date"></div>
-        <div class="fg full"><label>비고</label><input class="fi" id="sh-note" placeholder="비고"></div>
-      </div>
-    </div>
-    <div class="modal-ft" style="justify-content:space-between">
-      <button class="btn btn-danger btn-sm" onclick="deleteStockHistoryFromModal()">🗑️ 삭제</button>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-outline" onclick="closeModal('edit-stock-history')">취소</button>
-        <button class="btn btn-primary" onclick="saveStockHistory()">저장</button>
-      </div>
     </div>
   </div>
 </div>
@@ -1844,9 +1820,32 @@ let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
   DB._processedOrders = processed;
 })();
 
-// ═══════════════════════════════════════════════════════
-// HELPERS
-// ═══════════════════════════════════════════════════════
+// 분류명 정규화 (구글 시트 등 외부 데이터 유입 시 잘못된 명칭 교정)
+function normalizeItemType(t) {
+  const map = {
+    '부재료':'부자재', '보조재료':'부자재', '부자료':'부자재',
+    '원재료':'원자재', '원료':'원자재', '원자재료':'원자재',
+    '완성품':'완제품', '완성제품':'완제품',
+    '반제':'반제품',
+  };
+  return map[t] || t;
+}
+
+// DB 전체 items type 정규화 실행
+function normalizeAllItemTypes() {
+  let fixed = 0;
+  (DB.items || []).forEach((item, i) => {
+    const normalized = normalizeItemType(item.type);
+    if (normalized !== item.type) {
+      DB.items[i].type = normalized;
+      fixed++;
+    }
+  });
+  if (fixed > 0) {
+    saveData();
+    console.log(`✅ 분류명 정규화: ${fixed}건 수정`);
+  }
+}
 const $ = id => document.getElementById(id);
 const fmt = n => typeof n === 'number' ? n.toLocaleString('ko-KR') : n;
 const fmtW = n => '₩' + fmt(n);
@@ -2143,7 +2142,7 @@ function renderVendorTable() {
   $('vendor-table').innerHTML = filtered.map(v => `
     <tr>
       <td class="lnk" onclick="viewVendor(${v.id})"><strong>${v.company}</strong></td>
-      <td>${`<span class="badge ${({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber'})[v.type]||'gray'}">${v.type}</span>`}</td>
+      <td>${`<span class="badge ${({원자재:'green',부자재:'purple',부재료:'purple',원재료:'green',OEM:'sky',완제품:'amber',완성품:'amber'})[normalizeItemType(v.type)]||'gray'}">${v.type}</span>`}</td>
       <td>${v.contact||'-'}</td>
       <td>${v.phone||'-'}</td>
       <td style="color:var(--sky-600)">${v.email||'-'}</td>
@@ -2199,7 +2198,7 @@ function viewVendor(id) {
   $('item-detail-ttl').textContent = '🏢 ' + v.company;
   $('item-detail-body').innerHTML = `
     <div class="fg2" style="margin-bottom:12px">
-      <div><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">분류</div><span class="badge ${({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber'})[v.type]||'gray'}">${v.type}</span></div>
+      <div><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">분류</div><span class="badge ${({원자재:'green',부자재:'purple',부재료:'purple',원재료:'green',OEM:'sky',완제품:'amber',완성품:'amber'})[normalizeItemType(v.type)]||'gray'}">${v.type}</span></div>
       <div><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">담당자</div>${v.contact||'-'}</div>
       <div><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">전화</div>${v.phone||'-'}</div>
       <div><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">이메일</div><span style="color:var(--sky-600)">${v.email||'-'}</span></div>
@@ -2228,7 +2227,7 @@ function renderItemTable() {
   const search = ($('item-search') ? $('item-search').value : '').toLowerCase();
   let filtered = DB.items.filter(i => itemFilter==='전체' || i.type===itemFilter);
   if (search) filtered = filtered.filter(i => i.name.toLowerCase().includes(search) || i.code.toLowerCase().includes(search));
-  const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray'})[t]||'gray';
+  const typeBadge = t => ({원자재:'green',부자재:'purple',부재료:'purple',원재료:'green',OEM:'sky',완제품:'amber',완성품:'amber',반제품:'gray'})[normalizeItemType(t)]||'gray';
   $('item-table').innerHTML = filtered.map(i => {
     const v = getVendor(i.vendorId);
     const imgHtml = i.image
@@ -2360,7 +2359,7 @@ function showItemDetail(id) {
   if (!i.id) return;
   const v = getVendor(i.vendorId);
   const ss = stockStatus(i);
-  const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray'})[t]||'gray';
+  const typeBadge = t => ({원자재:'green',부자재:'purple',부재료:'purple',원재료:'green',OEM:'sky',완제품:'amber',완성품:'amber',반제품:'gray'})[normalizeItemType(t)]||'gray';
   const dday = calcDday(i.expiry);
   $('item-detail-ttl').textContent = '📦 ' + i.name;
   $('item-detail-body').innerHTML = `
@@ -2414,7 +2413,7 @@ function renderBOM() {
     const vendor = getVendor(item.vendorId);
     const subtotal = item.price * row.qty;
     totalCost += subtotal;
-    const typeCls = ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray'})[item.type]||'gray';
+    const typeCls = ({원자재:'green',부자재:'purple',부재료:'purple',원재료:'green',OEM:'sky',완제품:'amber',완성품:'amber',반제품:'gray'})[normalizeItemType(item.type)]||'gray';
     const tr = `
       <tr class="bom-child">
         <td class="lnk" onclick="showItemDetail(${item.id})" style="padding-left:12px">${item.name}</td>
@@ -2663,7 +2662,7 @@ function renderProdTable() {
     const col = statusColor[p.status]||'var(--gray-400)';
     const checkCount = (p.checks||[]).filter(Boolean).length;
     const displayName = (item && item.name) ? item.name : (p.productName || '-');
-    const typeCls = item ? ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray'}[item.type]||'gray') : 'gray';
+    const typeCls = item ? ({원자재:'green',부자재:'purple',부재료:'purple',원재료:'green',OEM:'sky',완제품:'amber',완성품:'amber',반제품:'gray'}[normalizeItemType(item.type)]||'gray') : 'gray';
     const typeLabel = item ? (item.type||'-') : '-';
     // 결제일: 생산 데이터 → 발주서 순으로 조회
     let payDate = p.payDate || '';
@@ -2779,10 +2778,8 @@ function setStockFilter(type, el) {
 }
 
 function renderStockTable() {
-  const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray'})[t]||'gray';
-  // OEM 품목은 재고관리에서 항상 제외
-  const baseItems = DB.items.filter(i => i.type !== 'OEM');
-  const items = _stockTypeFilter === '전체' ? baseItems : baseItems.filter(i => i.type === _stockTypeFilter);
+  const typeBadge = t => ({원자재:'green',부자재:'purple',부재료:'purple',원재료:'green',OEM:'sky',완제품:'amber',완성품:'amber',반제품:'gray'})[normalizeItemType(t)]||'gray';
+  const items = _stockTypeFilter === '전체' ? DB.items : DB.items.filter(i => i.type === _stockTypeFilter);
   $('stock-table').innerHTML = items.map(i => {
     const ss = stockStatus(i);
     const pct = stockPct(i);
@@ -2828,7 +2825,7 @@ function renderStockHistory() {
       <td style="color:var(--sky-700);font-weight:500">${fmt(h._snapStock)}</td>
       <td>${h.note||'-'}</td>
       <td style="display:flex;gap:4px">
-        <button class="btn btn-outline btn-xs" onclick="editStockHistory(${h.id})">수정</button>
+        <button class="btn btn-danger btn-xs" onclick="deleteStockHistory(${h.id})">삭제</button>
       </td>
     </tr>`;
   }).join('') || '<tr><td colspan="9" class="empty">입출고 내역이 없습니다</td></tr>';
@@ -4341,7 +4338,7 @@ function renderCostPage() {
     const star = score>=85?'⭐⭐⭐⭐⭐':score>=70?'⭐⭐⭐⭐':score>=60?'⭐⭐⭐':'⭐⭐';
     return `<tr>
       <td class="lnk" onclick="viewVendor(${d.v.id})">${d.v.company}</td>
-      <td><span class="badge ${({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber'})[d.v.type]||'gray'}">${d.v.type}</span></td>
+      <td><span class="badge ${({원자재:'green',부자재:'purple',부재료:'purple',원재료:'green',OEM:'sky',완제품:'amber',완성품:'amber'})[normalizeItemType(d.v.type)]||'gray'}">${d.v.type}</span></td>
       <td><div class="pbar" style="width:80px;display:inline-block"><div class="pbar-fill" style="width:${d.delivery}%"></div></div> ${d.delivery}%</td>
       <td><div class="pbar" style="width:80px;display:inline-block"><div class="pbar-fill" style="width:${d.quality}%;background:var(--green-400)"></div></div> ${d.quality}</td>
       <td><div class="pbar" style="width:80px;display:inline-block"><div class="pbar-fill" style="width:${d.price}%;background:var(--amber-500)"></div></div> ${d.price}</td>
@@ -4752,8 +4749,7 @@ function globalSearchFn(q) {
 // GOOGLE SHEETS SYNC
 // ═══════════════════════════════════════════════════════
 function syncGSheets() {
-  showNotif('Google Sheets 동기화 중...', 'info');
-  setTimeout(()=>showNotif('Google Sheets 동기화 완료 — 품목/재고 데이터 업데이트됨','success'), 1500);
+  exportToSheets();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -5051,69 +5047,6 @@ function applyUserPhoto(src) {
 }
 
 
-function editStockHistory(id) {
-  const h = DB.stockHistory.find(x => x.id === id);
-  if (!h) return;
-  const item = getItem(h.itemId);
-  editingId['edit-stock-history'] = id;
-  $('sh-item-name').value = item.name || '-';
-  $('sh-type').value = h.type || 'in';
-  $('sh-qty').value = h.qty || 0;
-  $('sh-price').value = h.price || 0;
-  $('sh-date').value = h.date || today();
-  $('sh-note').value = h.note || '';
-  openModal('edit-stock-history');
-}
-
-function saveStockHistory() {
-  const id = editingId['edit-stock-history'];
-  const idx = DB.stockHistory.findIndex(x => x.id === id);
-  if (idx < 0) return;
-  const h = DB.stockHistory[idx];
-  const oldType = h.type;
-  const oldQty = h.qty;
-  const newType = $('sh-type').value;
-  const newQty = parseFloat($('sh-qty').value) || 0;
-  if (!newQty) { showNotif('수량을 입력하세요', 'warning'); return; }
-
-  // 재고 역산 후 재반영
-  const itemIdx = DB.items.findIndex(i => i.id === h.itemId);
-  if (itemIdx >= 0) {
-    // 기존 내역 되돌리기
-    if (oldType === 'in') DB.items[itemIdx].stock -= oldQty;
-    else DB.items[itemIdx].stock += oldQty;
-    // 새 내역 반영
-    if (newType === 'in') DB.items[itemIdx].stock += newQty;
-    else DB.items[itemIdx].stock -= newQty;
-  }
-
-  DB.stockHistory[idx] = {
-    ...h,
-    type: newType,
-    qty: newQty,
-    price: parseFloat($('sh-price').value) || 0,
-    date: $('sh-date').value || today(),
-    note: $('sh-note').value || '',
-  };
-  saveData(); closeModal('edit-stock-history'); renderStock();
-  showNotif('입출고 내역이 수정되었습니다', 'success');
-}
-
-function deleteStockHistoryFromModal() {
-  const id = editingId['edit-stock-history'];
-  const h = DB.stockHistory.find(x => x.id === id);
-  if (!h) return;
-  if (!confirm('이 입출고 내역을 삭제합니까?\n재고 수량이 역산됩니다.')) return;
-  const itemIdx = DB.items.findIndex(i => i.id === h.itemId);
-  if (itemIdx >= 0) {
-    if (h.type === 'in') DB.items[itemIdx].stock -= h.qty;
-    else DB.items[itemIdx].stock += h.qty;
-  }
-  DB.stockHistory = DB.stockHistory.filter(x => x.id !== id);
-  saveData(); closeModal('edit-stock-history'); renderStock();
-  showNotif('삭제되었습니다');
-}
-
 function deleteStockHistory(id) {
   const h = DB.stockHistory.find(x => x.id === id);
   if (!h) return;
@@ -5166,7 +5099,7 @@ function saveWebAppUrl() {
 function syncGSheets() {
   const webAppUrl = localStorage.getItem('reniv_sheets_webapp_url');
   if (webAppUrl) {
-    importFromSheets();
+    exportToSheets();
   } else {
     showNotif('설정에서 Google Sheets Web App URL을 먼저 입력해주세요', 'warning');
     go('settings');
@@ -5245,6 +5178,7 @@ function initERPWhenReady() {
       DB = merged;
       try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
       console.log('✅ Firestore 데이터 로드 완료');
+      normalizeAllItemTypes(); // 분류명 정규화
     } else {
       console.log('ℹ️ Firestore 데이터 없음 → 로컬 데이터 사용, Firestore에 업로드 중...');
       _doSaveData().catch(e => console.warn('초기 업로드 실패:', e));
