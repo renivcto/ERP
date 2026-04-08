@@ -776,7 +776,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="card">
           <div class="card-body p0 tbl-wrap">
             <table>
-              <thead><tr><th>일자</th><th>품목명</th><th>구분</th><th>수량</th><th>단가</th><th>금액</th><th>이전 재고수량</th><th>비고</th><th>관리</th></tr></thead>
+              <thead><tr><th>일자</th><th>품목명</th><th>구분</th><th>수량</th><th>단가</th><th>금액</th><th>비고</th><th>관리</th></tr></thead>
               <tbody id="stock-history-table"></tbody>
             </table>
           </div>
@@ -2891,18 +2891,7 @@ function renderStockTable() {
 }
 
 function renderStockHistory() {
-  // 현재 재고에서 역산 — "이전 재고수량" = 해당 거래 직전의 재고
-  const itemStockSnapshot = {};
-  DB.items.forEach(i => { itemStockSnapshot[i.id] = i.stock; });
   const revHistory = DB.stockHistory.slice().reverse();
-  const tempStock = {...itemStockSnapshot};
-  revHistory.forEach(h => {
-    if (tempStock[h.itemId] === undefined) tempStock[h.itemId] = 0;
-    const prevStock = h.type === 'in' ? tempStock[h.itemId] - h.qty : tempStock[h.itemId] + h.qty;
-    h._snapStock = prevStock;
-    tempStock[h.itemId] = prevStock;
-  });
-
   $('stock-history-table').innerHTML = revHistory.map(h => {
     const item = getItem(h.itemId);
     const total = h.qty * h.price;
@@ -2913,13 +2902,12 @@ function renderStockHistory() {
       <td style="color:${h.type==='in'?'var(--green-600)':'var(--red-600)'}"><strong>${h.type==='in'?'+':'-'}${fmt(h.qty)}</strong></td>
       <td>${fmtW(h.price)}</td>
       <td>${fmtW(total)}</td>
-      <td style="color:var(--sky-700);font-weight:500">${fmt(h._snapStock)}</td>
       <td>${h.note||'-'}</td>
       <td style="display:flex;gap:4px">
         <button class="btn btn-danger btn-xs" onclick="deleteStockHistory(${h.id})">삭제</button>
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="9" class="empty">입출고 내역이 없습니다</td></tr>';
+  }).join('') || '<tr><td colspan="8" class="empty">입출고 내역이 없습니다</td></tr>';
 }
 
 function renderLotTable() {
