@@ -572,7 +572,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <span style="font-size:13px">🔍</span>
       <input id="globalSearch" type="text" placeholder="전체 검색..." oninput="globalSearchFn(this.value)">
     </div>
-    <button class="hdr-btn" onclick="syncGSheets()" title="Google Sheets 동기화">
+    <button class="hdr-btn" onclick="exportToSheets()" title="ERP → Google Sheets 내보내기">
       <span class="sync-dot"></span>Sheets 연동
     </button>
     <button class="hdr-btn" onclick="if(requireWrite()){go('order');openModal('add-order');}" title="빠른 발주">📝 발주</button>
@@ -894,7 +894,6 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             </div>
             <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
               <button class="btn btn-primary" onclick="saveWebAppUrl()">💾 URL 저장</button>
-              <button class="btn btn-outline" onclick="importFromSheets()">📥 시트 → ERP 가져오기</button>
               <button class="btn btn-outline" onclick="exportToSheets()">📤 ERP → 시트 내보내기</button>
             </div>
             <div style="background:var(--gray-50);border-radius:8px;padding:12px;font-size:11.5px;color:var(--gray-600)">
@@ -5078,7 +5077,7 @@ function saveWebAppUrl() {
 function syncGSheets() {
   const webAppUrl = localStorage.getItem('reniv_sheets_webapp_url');
   if (webAppUrl) {
-    importFromSheets();
+    exportToSheets();
   } else {
     showNotif('설정에서 Google Sheets Web App URL을 먼저 입력해주세요', 'warning');
     go('settings');
@@ -5162,12 +5161,19 @@ function initERPWhenReady() {
       _doSaveData().catch(e => console.warn('초기 업로드 실패:', e));
     }
     await restoreIDBData();
-    loadSharedSetting('logo_data').then(s => { if (s) { idbSet('reniv_logo', s); applyLogo(s); } });
+    try {
+      const logoSrc = await loadSharedSetting('logo_data');
+      if (logoSrc) { try { idbSet('reniv_logo', logoSrc); } catch(e) {} applyLogo(logoSrc); }
+    } catch(e) {}
     hideLoader();
     doRender();
   }).catch(async (e) => {
     console.warn('Firestore 로드 실패, 로컬 데이터 사용:', e);
     await restoreIDBData();
+    try {
+      const logoSrc = await loadSharedSetting('logo_data');
+      if (logoSrc) { try { idbSet('reniv_logo', logoSrc); } catch(e) {} applyLogo(logoSrc); }
+    } catch(e) {}
     hideLoader();
     doRender();
   });
