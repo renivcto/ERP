@@ -954,10 +954,12 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div class="card-hdr"><span class="card-title">📊 데이터 관리</span></div>
           <div class="card-body">
             <div style="display:flex;flex-direction:column;gap:9px">
+              <button class="btn btn-primary" onclick="forceUploadToFirestore()">☁️ Firestore에 현재 데이터 업로드 (공유)</button>
+              <button class="btn btn-primary" style="background:var(--amber-500);border-color:var(--amber-600)" onclick="resetToDefaultAndUpload()">🔄 HTML 내장 데이터로 초기화 후 업로드</button>
+              <button class="btn btn-outline" onclick="forceLoadFromFirestore()">⬇️ Firestore에서 최신 데이터 불러오기</button>
               <button class="btn btn-outline" onclick="exportAllData()">📥 전체 데이터 내보내기 (JSON)</button>
               <button class="btn btn-outline" onclick="document.getElementById('import-file').click()">📤 데이터 가져오기 (JSON)</button>
               <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
-              <button class="btn btn-outline" onclick="showNotif('구글 드라이브 백업 완료','success')">☁️ 구글 드라이브 백업</button>
               <button class="btn btn-danger btn-sm" onclick="if(confirm('모든 데이터를 초기화합니까?'))resetData()">🗑️ 데이터 초기화</button>
             </div>
           </div>
@@ -4718,6 +4720,54 @@ function syncGSheets() {
 // ═══════════════════════════════════════════════════════
 // DATA EXPORT/IMPORT
 // ═══════════════════════════════════════════════════════
+async function forceUploadToFirestore() {
+  if (!confirm('현재 ERP 데이터를 Firestore에 업로드합니까?\n모든 사용자가 이 데이터를 보게 됩니다.')) return;
+  showNotif('업로드 중...', 'info');
+  try {
+    await _doSaveData();
+    showNotif('✅ Firestore 업로드 완료!', 'success');
+  } catch(e) {
+    showNotif('업로드 실패: ' + e.message, 'warning');
+  }
+}
+
+async function resetToDefaultAndUpload() {
+  if (!confirm('⚠️ HTML에 내장된 기본 데이터로 초기화하고 Firestore에 업로드합니까?\n현재 Firestore의 데이터는 덮어씁니다.')) return;
+  DB = JSON.parse(JSON.stringify(DEFAULT_DB));
+  localStorage.setItem(STORE_KEY, JSON.stringify(DB));
+  showNotif('초기화 중...', 'info');
+  try {
+    await _doSaveData();
+    updateBadges();
+    renderDashboard();
+    go('dashboard');
+    showNotif('✅ 기본 데이터로 초기화 후 Firestore 업로드 완료!', 'success');
+  } catch(e) {
+    showNotif('업로드 실패: ' + e.message, 'warning');
+  }
+}
+
+async function forceLoadFromFirestore() {
+  if (!confirm('Firestore에서 최신 데이터를 불러옵니까?\n현재 로컬 데이터는 덮어씁니다.')) return;
+  showNotif('불러오는 중...', 'info');
+  try {
+    const firestoreDB = await loadDataFromFirestore();
+    if (firestoreDB) {
+      DB = firestoreDB;
+      await restoreIDBData();
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(firestoreDB)); } catch(e) {}
+      updateBadges();
+      renderDashboard();
+      go('dashboard');
+      showNotif('✅ Firestore에서 최신 데이터를 불러왔습니다', 'success');
+    } else {
+      showNotif('Firestore에 저장된 데이터가 없습니다', 'warning');
+    }
+  } catch(e) {
+    showNotif('불러오기 실패: ' + e.message, 'warning');
+  }
+}
+
 function exportAllData() {
   const blob = new Blob([JSON.stringify(DB, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
@@ -5030,10 +5080,21 @@ function initERPWhenReady() {
   // Firestore에서 최신 DB 로드 후 렌더링
   loadDataFromFirestore().then(async (firestoreDB) => {
     if (firestoreDB) {
-      // Firestore 데이터로 전체 DB 교체
-      DB = firestoreDB;
-      // localStorage도 업데이트 (오프라인 백업)
-      try { localStorage.setItem(STORE_KEY, JSON.stringify(firestoreDB)); } catch(e) {}
+      // Firestore 데이터 검증: 핵심 데이터가 충분히 있는지 확인
+      const hasEnoughData = firestoreDB.items && firestoreDB.items.length >= 10
+                         && firestoreDB.vendors && firestoreDB.vendors.length >= 5;
+      if (hasEnoughData) {
+        DB = firestoreDB;
+        try { localStorage.setItem(STORE_KEY, JSON.stringify(firestoreDB)); } catch(e) {}
+      } else {
+        // Firestore 데이터가 부족하면 현재 DB(HTML 내장) 사용 후 업로드
+        console.log('Firestore 데이터 부족 - 현재 DB 업로드 중...');
+        setTimeout(async () => { await _doSaveData(); }, 1000);
+      }
+    } else {
+      // Firestore가 비어있으면 현재 DB 업로드
+      console.log('Firestore 비어있음 - 현재 DB 업로드 중...');
+      setTimeout(async () => { await _doSaveData(); }, 1000);
     }
     // IndexedDB에서 이미지/PDF/사진/로고 복원
     await restoreIDBData();
