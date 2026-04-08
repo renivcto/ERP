@@ -1628,13 +1628,15 @@ async function _doSaveData() {
   // meta 저장
   await setDoc(docRef(db, 'erp_data', 'meta'), {
     data: JSON.stringify({
-      _trelloKey:   dbToSave._trelloKey   || null,
-      _trelloToken: dbToSave._trelloToken || null,
-      _trelloLists: dbToSave._trelloLists || null,
-      _trelloCards: dbToSave._trelloCards || null,
-      _bomMargin:   dbToSave._bomMargin   || {},
-      _companyInfo: dbToSave._companyInfo || {},
-      _nextIds:     dbToSave._nextIds     || {},
+      _trelloKey:       dbToSave._trelloKey       || null,
+      _trelloToken:     dbToSave._trelloToken     || null,
+      _trelloLists:     dbToSave._trelloLists     || null,
+      _trelloCards:     dbToSave._trelloCards     || null,
+      _bomMargin:       dbToSave._bomMargin       || {},
+      _companyInfo:     dbToSave._companyInfo     || {},
+      _nextIds:         dbToSave._nextIds         || {},
+      _processedOrders: dbToSave._processedOrders || [],
+      boms:             dbToSave.boms             || {},
     }),
     ts: Date.now()
   });
@@ -5340,6 +5342,8 @@ async function resetToDefaultAndUpload() {
         _trelloLists: DB._trelloLists||null, _trelloCards: DB._trelloCards||null,
         _bomMargin: DB._bomMargin||{}, _companyInfo: DB._companyInfo||{},
         _nextIds: DB._nextIds||{},
+        _processedOrders: DB._processedOrders||[],
+        boms: DB.boms||{},
       }), ts: Date.now()
     });
 
@@ -5691,6 +5695,9 @@ function initERPWhenReady() {
       ['vendors','items','orders','productions','stockHistory','quotes','tasks','users'].forEach(k => {
         if (firestoreDB[k] && firestoreDB[k].length > 0) merged[k] = firestoreDB[k];
       });
+      // boms (객체)와 _processedOrders (배열) 는 Firestore 것을 우선
+      if (firestoreDB.boms && Object.keys(firestoreDB.boms).length > 0) merged.boms = firestoreDB.boms;
+      if (firestoreDB._processedOrders && firestoreDB._processedOrders.length > 0) merged._processedOrders = firestoreDB._processedOrders;
       DB = merged;
       applyPendingStockIn();
       try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
