@@ -672,12 +672,29 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div class="modal-body">
             <div class="fg">
               <label>문서 종류<span class="req">*</span></label>
-              <select class="fs" id="gdoc-type-sel" onchange="selectGdocType(this.value)" style="max-width:260px">
-                <option value="">— 선택해주세요 —</option>
-                <option value="sheets">📊 Google 스프레드시트</option>
-                <option value="slides">📽️ Google 슬라이드</option>
-                <option value="docs">📄 Google 문서</option>
-              </select>
+              <!-- 커스텀 드롭다운 -->
+              <div id="gdoc-type-custom" style="position:relative;user-select:none">
+                <div id="gdoc-type-selected" onclick="toggleGdocDropdown()"
+                  style="display:flex;align-items:center;gap:9px;padding:7px 11px;border:1px solid var(--gray-300);border-radius:7px;cursor:pointer;background:#fff;font-size:12.5px;color:var(--gray-500);transition:border .12s">
+                  <span id="gdoc-type-selected-ico" style="width:18px;height:18px;flex-shrink:0"></span>
+                  <span id="gdoc-type-selected-txt">— 선택해주세요 —</span>
+                  <span style="margin-left:auto;color:var(--gray-400);font-size:10px">▼</span>
+                </div>
+                <div id="gdoc-type-dropdown" style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid var(--gray-200);border-radius:9px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:500;overflow:hidden">
+                  <div onclick="chooseGdocType('sheets')" style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;transition:background .1s" onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background='#fff'">
+                    <img src="https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_spreadsheet_x32.png" style="width:22px;height:22px;flex-shrink:0">
+                    <span style="font-size:13px;color:var(--gray-800)">Google 스프레드시트</span>
+                  </div>
+                  <div onclick="chooseGdocType('slides')" style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;transition:background .1s;border-top:1px solid var(--gray-100)" onmouseover="this.style.background='#fffbeb'" onmouseout="this.style.background='#fff'">
+                    <img src="https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_presentation_x32.png" style="width:22px;height:22px;flex-shrink:0">
+                    <span style="font-size:13px;color:var(--gray-800)">Google 슬라이드</span>
+                  </div>
+                  <div onclick="chooseGdocType('docs')" style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;transition:background .1s;border-top:1px solid var(--gray-100)" onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='#fff'">
+                    <img src="https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_document_x32.png" style="width:22px;height:22px;flex-shrink:0">
+                    <span style="font-size:13px;color:var(--gray-800)">Google 문서</span>
+                  </div>
+                </div>
+              </div>
             </div>
             <div class="fg">
               <label>제목<span class="req">*</span></label>
@@ -4893,8 +4910,14 @@ function openGdocModal(editId) {
   _gdocSelectedType = '';
   document.getElementById('gdoc-title-inp').value = '';
   document.getElementById('gdoc-url-inp').value = '';
-  const sel = document.getElementById('gdoc-type-sel');
-  if (sel) sel.value = '';
+  const dd = document.getElementById('gdoc-type-dropdown');
+  if (dd) dd.style.display = 'none';
+  const ico = document.getElementById('gdoc-type-selected-ico');
+  const txt = document.getElementById('gdoc-type-selected-txt');
+  const box = document.getElementById('gdoc-type-selected');
+  if (ico) ico.innerHTML = '';
+  if (txt) { txt.textContent = '— 선택해주세요 —'; txt.style.color = 'var(--gray-500)'; }
+  if (box) box.style.borderColor = 'var(--gray-300)';
   if (editId) {
     const doc = _gdocList.find(d=>d.id===editId);
     if (doc) {
@@ -4917,10 +4940,33 @@ function closeGdocModal() {
 
 function editGdoc(id) { openGdocModal(id); }
 
+const GDOC_SEL_ICONS = {
+  sheets: 'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_spreadsheet_x32.png',
+  slides: 'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_presentation_x32.png',
+  docs:   'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_document_x32.png'
+};
+const GDOC_SEL_LABELS = { sheets:'Google 스프레드시트', slides:'Google 슬라이드', docs:'Google 문서' };
+
+function toggleGdocDropdown() {
+  const dd = document.getElementById('gdoc-type-dropdown');
+  if (!dd) return;
+  dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+}
+
+function chooseGdocType(type) {
+  selectGdocType(type);
+  const dd = document.getElementById('gdoc-type-dropdown');
+  if (dd) dd.style.display = 'none';
+}
+
 function selectGdocType(type) {
   _gdocSelectedType = type;
-  const sel = document.getElementById('gdoc-type-sel');
-  if (sel && sel.value !== type) sel.value = type;
+  const ico = document.getElementById('gdoc-type-selected-ico');
+  const txt = document.getElementById('gdoc-type-selected-txt');
+  const box = document.getElementById('gdoc-type-selected');
+  if (ico) ico.innerHTML = type ? `<img src="${GDOC_SEL_ICONS[type]}" style="width:18px;height:18px">` : '';
+  if (txt) { txt.textContent = GDOC_SEL_LABELS[type] || '— 선택해주세요 —'; txt.style.color = type ? 'var(--gray-800)' : 'var(--gray-500)'; }
+  if (box) box.style.borderColor = type ? 'var(--sky-400)' : 'var(--gray-300)';
 }
 
 async function saveGdoc() {
@@ -5634,6 +5680,13 @@ window.addEventListener('load', function() {
   // 이전 버전 캐시 정리
   ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3'].forEach(k => localStorage.removeItem(k));
   updateBadges();
+});
+
+// 커스텀 드롭다운 외부 클릭 시 닫기
+document.addEventListener('click', function(e) {
+  const wrap = document.getElementById('gdoc-type-custom');
+  const dd = document.getElementById('gdoc-type-dropdown');
+  if (dd && wrap && !wrap.contains(e.target)) dd.style.display = 'none';
 });</script>
 </body>
 </html>
