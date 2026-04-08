@@ -1986,8 +1986,8 @@ function renderDashAlerts() {
 function renderDashStats() {
   if (!$('dash-stats')) return;
   const lateProds = DB.productions.filter(p => p.status === '지연').length;
-  const pendingUsers = DB.users.filter(u => u.status === '승인대기').length;
-  const thisMonthAmt = DB.orders.reduce((s,o) => {
+  const pendingUsers = (DB.users||[]).filter(u => u.status === '승인대기').length;
+  const thisMonthAmt = (DB.orders||[]).reduce((s,o) => {
     const total = o.rows.reduce((a,r) => a + r.qty * r.price, 0);
     return s + total;
   }, 0);
@@ -2006,10 +2006,10 @@ function renderDashStats() {
     .join('<br>') || '발주 없음';
 
   $('dash-stats').innerHTML = `
-    <div class="stat ${lateProds?'c-red':'c-amber'}" style="cursor:pointer" onclick="go('production')"><div class="stat-lbl">진행 중 생산</div><div class="stat-val" style="text-decoration:underline dotted">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').length}</div><div class="stat-sub" style="line-height:2">${DB.productions.filter(p=>p.status==='생산중'||p.status==='지연').map(p=>{const it=getItem(p.productId);const nm=(it&&it.name?it.name:p.productName||'?').replace('르니브 3중 장벽 20층 ','').replace('르니브 ','').replace(/(\([^)]+\))\s*\1/g,'$1');return '<span style="font-weight:500">'+nm+'</span> <span style="color:var(--sky-500);font-size:10px">'+fmt(p.qty)+'EA</span>';}).join('<br>') || '없음'}</div><div class="stat-ico">🏭</div></div>
+    <div class="stat ${lateProds?'c-red':'c-amber'}" style="cursor:pointer" onclick="go('production')"><div class="stat-lbl">진행 중 생산</div><div class="stat-val" style="text-decoration:underline dotted">${(DB.productions||[]).filter(p=>p.status==='생산중'||p.status==='지연').length}</div><div class="stat-sub" style="line-height:2">${(DB.productions||[]).filter(p=>p.status==='생산중'||p.status==='지연').map(p=>{const it=getItem(p.productId);const nm=(it&&it.name?it.name:p.productName||'?').replace('르니브 3중 장벽 20층 ','').replace('르니브 ','').replace(/(\([^)]+\))\s*\1/g,'$1');return '<span style="font-weight:500">'+nm+'</span> <span style="color:var(--sky-500);font-size:10px">'+fmt(p.qty)+'EA</span>';}).join('<br>') || '없음'}</div><div class="stat-ico">🏭</div></div>
     <div class="stat c-purple" style="cursor:pointer" onclick="go('order')"><div class="stat-lbl">총 발주금액 <span style="font-size:9px;opacity:.8">(VAT포함)</span></div><div class="stat-val" style="font-size:15px;text-decoration:underline dotted">${fmtW(Math.round(thisMonthAmt*1.1))}</div><div class="stat-sub" style="line-height:1.9">${vendorSubText}</div><div class="stat-ico">💰</div></div>
-    <div class="stat c-green" style="cursor:pointer" onclick="go('item')"><div class="stat-lbl">등록 품목</div><div class="stat-val" style="text-decoration:underline dotted">${DB.items.length}</div><div class="stat-sub">원자재 ${DB.items.filter(i=>i.type==='원자재').length} · 부자재 ${DB.items.filter(i=>i.type==='부자재').length} · OEM ${DB.items.filter(i=>i.type==='OEM').length} · 완제품 ${DB.items.filter(i=>i.type==='완제품').length}</div><div class="stat-ico">📦</div></div>
-    <div class="stat c-sky" style="cursor:pointer" onclick="go('vendor')"><div class="stat-lbl">등록 업체</div><div class="stat-val" style="text-decoration:underline dotted">${DB.vendors.length}</div><div class="stat-sub">원자재 ${DB.vendors.filter(v=>v.type==='원자재').length} · 부자재 ${DB.vendors.filter(v=>v.type==='부자재').length} · OEM ${DB.vendors.filter(v=>v.type==='OEM').length}</div><div class="stat-ico">🏢</div></div>
+    <div class="stat c-green" style="cursor:pointer" onclick="go('item')"><div class="stat-lbl">등록 품목</div><div class="stat-val" style="text-decoration:underline dotted">${DB.items.length}</div><div class="stat-sub">원자재 ${(DB.items||[]).filter(i=>i.type==='원자재').length} · 부자재 ${(DB.items||[]).filter(i=>i.type==='부자재').length} · OEM ${(DB.items||[]).filter(i=>i.type==='OEM').length} · 완제품 ${(DB.items||[]).filter(i=>i.type==='완제품').length}</div><div class="stat-ico">📦</div></div>
+    <div class="stat c-sky" style="cursor:pointer" onclick="go('vendor')"><div class="stat-lbl">등록 업체</div><div class="stat-val" style="text-decoration:underline dotted">${DB.vendors.length}</div><div class="stat-sub">원자재 ${(DB.vendors||[]).filter(v=>v.type==='원자재').length} · 부자재 ${(DB.vendors||[]).filter(v=>v.type==='부자재').length} · OEM ${(DB.vendors||[]).filter(v=>v.type==='OEM').length}</div><div class="stat-ico">🏢</div></div>
   `;
 }
 
@@ -2036,10 +2036,10 @@ function renderDashProdTable() {
 function renderDashTimeline() {
   if (!$('dash-timeline')) return;
   const events = [
-    ...DB.productions.filter(p=>p.status==='입고완료').map(p=>({title:(getItem(p.productId).name||p.productName||'?')+' 입고 완료', date:p.inDate, dot:'done'})),
-    ...DB.productions.filter(p=>p.status==='지연').map(p=>({title:(getItem(p.productId).name||p.productName||'?')+' 납기 지연', date:p.inDate, dot:'late'})),
-    ...DB.productions.filter(p=>p.status==='생산중').map(p=>({title:(getItem(p.productId).name||p.productName||'?')+' 입고 예정', date:p.inDate, dot:''})),
-    ...DB.productions.filter(p=>p.status==='생산대기').map(p=>({title:getItem(p.productId).name+' 생산 예정', date:p.inDate, dot:'plan'})),
+    ...(DB.productions||[]).filter(p=>p.status==='입고완료').map(p=>({title:(getItem(p.productId).name||p.productName||'?')+' 입고 완료', date:p.inDate, dot:'done'})),
+    ...(DB.productions||[]).filter(p=>p.status==='지연').map(p=>({title:(getItem(p.productId).name||p.productName||'?')+' 납기 지연', date:p.inDate, dot:'late'})),
+    ...(DB.productions||[]).filter(p=>p.status==='생산중').map(p=>({title:(getItem(p.productId).name||p.productName||'?')+' 입고 예정', date:p.inDate, dot:''})),
+    ...(DB.productions||[]).filter(p=>p.status==='생산대기').map(p=>({title:getItem(p.productId).name+' 생산 예정', date:p.inDate, dot:'plan'})),
   ].slice(0,6);
   $('dash-timeline').innerHTML = events.map(e=>`
     <div class="tl-item">
@@ -2050,7 +2050,7 @@ function renderDashTimeline() {
 }
 
 function renderDashStockTable() {
-  const raw = DB.items.filter(i=>i.type==='원자재').slice(0,6);
+  const raw = (DB.items||[]).filter(i=>i.type==='원자재').slice(0,6);
   $('dash-stock-table').innerHTML = raw.map(i => {
     const ss = stockStatus(i);
     return `<tr>
@@ -2064,7 +2064,7 @@ function renderDashStockTable() {
 
 function renderDashKPI() {
   if (!$('dash-kpi')) return;
-  const lateCount = DB.productions.filter(p=>p.status==='지연').length;
+  const lateCount = (DB.productions||[]).filter(p=>p.status==='지연').length;
   const pendingQuotes = DB.quotes.filter(q=>q.status==='검토중').length;
   const pendingUsers = DB.users.filter(u=>u.status==='승인대기').length;
   $('dash-kpi').innerHTML = `
@@ -2114,9 +2114,9 @@ let vendorFilter = '전체';
 function renderVendorTable() {
   const types = ['전체',...new Set(DB.vendors.map(v=>v.type))];
   $('vendor-filter-chips').innerHTML = types.map(t =>
-    `<div class="chip ${t===vendorFilter?'active':''}" onclick="vendorFilter='${t}';renderVendorTable()">${t}(${t==='전체'?DB.vendors.length:DB.vendors.filter(v=>v.type===t).length})</div>`
+    `<div class="chip ${t===vendorFilter?'active':''}" onclick="vendorFilter='${t}';renderVendorTable()">${t}(${t==='전체'?DB.vendors.length:(DB.vendors||[]).filter(v=>v.type===t).length})</div>`
   ).join('');
-  const filtered = vendorFilter==='전체' ? DB.vendors : DB.vendors.filter(v=>v.type===vendorFilter);
+  const filtered = vendorFilter==='전체' ? DB.vendors : (DB.vendors||[]).filter(v=>v.type===vendorFilter);
   $('vendor-table').innerHTML = filtered.map(v => `
     <tr>
       <td class="lnk" onclick="viewVendor(${v.id})"><strong>${v.company}</strong></td>
@@ -2125,7 +2125,7 @@ function renderVendorTable() {
       <td>${v.phone||'-'}</td>
       <td style="color:var(--sky-600)">${v.email||'-'}</td>
       <td>${v.addr||'-'}</td>
-      <td>${DB.items.filter(i=>i.vendorId===v.id).slice(0,2).map(i=>`<span class="chip" onclick="showItemDetail(${i.id})">${i.name}</span>`).join('')}</td>
+      <td>${(DB.items||[]).filter(i=>i.vendorId===v.id).slice(0,2).map(i=>`<span class="chip" onclick="showItemDetail(${i.id})">${i.name}</span>`).join('')}</td>
       <td style="display:flex;gap:5px">
         <button class="btn btn-outline btn-xs" onclick="editVendor(${v.id})">수정</button>
         <button class="btn btn-danger btn-xs" onclick="deleteVendor(${v.id})">삭제</button>
@@ -2166,13 +2166,13 @@ function editVendor(id) {
 
 function deleteVendor(id) {
   if (!confirm('이 업체를 삭제합니까?')) return;
-  DB.vendors = DB.vendors.filter(v=>v.id!==id);
+  DB.vendors = (DB.vendors||[]).filter(v=>v.id!==id);
   saveData(); renderVendorTable(); showNotif('업체가 삭제되었습니다');
 }
 
 function viewVendor(id) {
   const v = getVendor(id);
-  const items = DB.items.filter(i=>i.vendorId===id);
+  const items = (DB.items||[]).filter(i=>i.vendorId===id);
   $('item-detail-ttl').textContent = '🏢 ' + v.company;
   $('item-detail-body').innerHTML = `
     <div class="fg2" style="margin-bottom:12px">
@@ -2200,7 +2200,7 @@ let itemFilter = '전체';
 function renderItemTable() {
   const types = ['전체',...new Set(DB.items.map(i=>i.type))];
   $('item-filter-chips').innerHTML = types.map(t =>
-    `<div class="chip ${t===itemFilter?'active':''}" onclick="itemFilter='${t}';renderItemTable()">${t}(${t==='전체'?DB.items.length:DB.items.filter(i=>i.type===t).length})</div>`
+    `<div class="chip ${t===itemFilter?'active':''}" onclick="itemFilter='${t}';renderItemTable()">${t}(${t==='전체'?DB.items.length:(DB.items||[]).filter(i=>i.type===t).length})</div>`
   ).join('');
   const search = ($('item-search') ? $('item-search').value : '').toLowerCase();
   let filtered = DB.items.filter(i => itemFilter==='전체' || i.type===itemFilter);
@@ -2328,7 +2328,7 @@ function editItem(id) {
 
 function deleteItem(id) {
   if (!confirm('이 품목을 삭제합니까?')) return;
-  DB.items = DB.items.filter(i=>i.id!==id);
+  DB.items = (DB.items||[]).filter(i=>i.id!==id);
   saveData(); renderItemTable(); showNotif('품목이 삭제되었습니다');
 }
 
@@ -2371,7 +2371,7 @@ function showItemDetail(id) {
 let bomChart;
 
 function renderBOMPage() {
-  const fgItems = DB.items.filter(i=>i.type==='완제품'||i.type==='반제품');
+  const fgItems = (DB.items||[]).filter(i=>i.type==='완제품'||i.type==='반제품');
   const sel = $('bom-product-sel');
   sel.innerHTML = fgItems.map(i=>`<option value="${i.id}">${i.name}</option>`).join('');
   renderBOM();
@@ -2584,7 +2584,7 @@ function calcBOMMargin(productId) {
 }
 
 function populateBOMProductModal() {
-  const fgItems = DB.items.filter(i=>i.type==='완제품'||i.type==='반제품');
+  const fgItems = (DB.items||[]).filter(i=>i.type==='완제품'||i.type==='반제품');
   $('bom-product-modal').innerHTML = fgItems.map(i=>`<option value="${i.id}">${i.name}</option>`).join('');
 }
 
@@ -2628,7 +2628,7 @@ let prodFilter = '전체';
 function renderProdTable() {
   const statuses = ['전체',...new Set(DB.productions.map(p=>p.status))];
   $('prod-filter-chips').innerHTML = statuses.map(s =>
-    `<div class="chip ${s===prodFilter?'active':''}" onclick="prodFilter='${s}';renderProdTable()">${s}(${s==='전체'?DB.productions.length:DB.productions.filter(p=>p.status===s).length})</div>`
+    `<div class="chip ${s===prodFilter?'active':''}" onclick="prodFilter='${s}';renderProdTable()">${s}(${s==='전체'?DB.productions.length:(DB.productions||[]).filter(p=>p.status===s).length})</div>`
   ).join('');
   const statusOrder = {생산중:0, 지연:1, QC검사:2, 생산완료:3, 입고완료:4};
   const allSorted = [...DB.productions].sort((a,b)=>(statusOrder[a.status]??5)-(statusOrder[b.status]??5));
@@ -2666,7 +2666,7 @@ function renderProdTable() {
 }
 
 function populateProdProduct() {
-  const items = DB.items.filter(i=>i.type==='완제품'||i.type==='반제품');
+  const items = (DB.items||[]).filter(i=>i.type==='완제품'||i.type==='반제품');
   $('p-product').innerHTML = items.map(i=>`<option value="${i.id}">${i.name}</option>`).join('');
 }
 
@@ -2733,7 +2733,7 @@ function editProd(id) {
 
 function deleteProd(id) {
   if (!confirm('이 생산 항목을 삭제합니까?')) return;
-  DB.productions = DB.productions.filter(p=>p.id!==id);
+  DB.productions = (DB.productions||[]).filter(p=>p.id!==id);
   saveData(); renderProdTable(); updateBadges(); showNotif('삭제되었습니다');
 }
 
@@ -2810,7 +2810,7 @@ function renderStockHistory() {
 }
 
 function renderLotTable() {
-  const items = DB.items.filter(i=>i.lot||i.expiry);
+  const items = (DB.items||[]).filter(i=>i.lot||i.expiry);
   $('lot-table').innerHTML = items.map(i => {
     const dday = calcDday(i.expiry);
     return `<tr>
@@ -4231,7 +4231,7 @@ function renderQCTable() {
 }
 
 function populateQCProductSelect() {
-  $('qc-product').innerHTML = DB.items.filter(i=>i.type==='완제품').map(i=>`<option value="${i.id}">${i.name}</option>`).join('');
+  $('qc-product').innerHTML = (DB.items||[]).filter(i=>i.type==='완제품').map(i=>`<option value="${i.id}">${i.name}</option>`).join('');
 }
 
 function saveQC() {
@@ -4277,7 +4277,7 @@ function deleteQC(id) {
 // ═══════════════════════════════════════════════════════
 function renderCostPage() {
   // Cost bar chart
-  const fgItems = DB.items.filter(i=>i.type==='완제품');
+  const fgItems = (DB.items||[]).filter(i=>i.type==='완제품');
   const costs = fgItems.map(item => {
     const bom = DB.boms[item.id]||[];
     return bom.reduce((s,r)=>s+getItem(r.itemId).price*r.qty,0);
@@ -4655,14 +4655,14 @@ function sendAIMsg(text) {
   addAIMsg(text, 'user');
   $('ai-loading').classList.add('show');
   // Build context
-  const lowStock = DB.items.filter(i=>stockStatus(i).cls==='red'&&i.type!=='완제품').map(i=>i.name+'(재고:'+i.stock+'/최소:'+i.minStock+')').join(', ');
-  const lateProds = DB.productions.filter(p=>p.status==='지연').map(p=>getItem(p.productId).name||'미상').join(', ');
+  const lowStock = (DB.items||[]).filter(i=>stockStatus(i).cls==='red'&&i.type!=='완제품').map(i=>i.name+'(재고:'+i.stock+'/최소:'+i.minStock+')').join(', ');
+  const lateProds = (DB.productions||[]).filter(p=>p.status==='지연').map(p=>getItem(p.productId).name||'미상').join(', ');
   const context = `RENIV 소규모 화장품 회사 ERP 데이터:
 - 업체: ${DB.vendors.length}개 (${DB.vendors.map(v=>v.company+'('+v.type+')').slice(0,4).join(', ')})
-- 품목: ${DB.items.length}개 (완제품${DB.items.filter(i=>i.type==='완제품').length}, 원자재${DB.items.filter(i=>i.type==='원자재').length}, 부자재${DB.items.filter(i=>i.type==='부자재').length})
+- 품목: ${DB.items.length}개 (완제품${(DB.items||[]).filter(i=>i.type==='완제품').length}, 원자재${(DB.items||[]).filter(i=>i.type==='원자재').length}, 부자재${(DB.items||[]).filter(i=>i.type==='부자재').length})
 - 재고부족: ${lowStock||'없음'}
 - 생산지연: ${lateProds||'없음'}
-- 진행중 생산: ${DB.productions.filter(p=>p.status!=='입고완료').map(p=>getItem(p.productId).name+'('+p.progress+'%)').join(', ')||'없음'}
+- 진행중 생산: ${(DB.productions||[]).filter(p=>p.status!=='입고완료').map(p=>getItem(p.productId).name+'('+p.progress+'%)').join(', ')||'없음'}
 - 승인대기 사용자: ${DB.users.filter(u=>u.status==='승인대기').map(u=>u.name).join(', ')||'없음'}
 당신은 RENIV ERP AI 어시스턴트. CTO의 R&D, 생산관리, 원자재/부자재 관리를 도와줍니다. 한국어로 실용적이고 구체적으로 답변하세요.`;
 
@@ -4715,8 +4715,8 @@ function globalSearchFn(q) {
   if (!q.trim()) return;
   const lower = q.toLowerCase();
   const results = [
-    ...DB.vendors.filter(v=>v.company.toLowerCase().includes(lower)).map(v=>({type:'업체',name:v.company,action:()=>{ go('vendor'); }})),
-    ...DB.items.filter(i=>i.name.toLowerCase().includes(lower)||i.code.toLowerCase().includes(lower)).map(i=>({type:'품목',name:i.name,action:()=>showItemDetail(i.id)})),
+    ...(DB.vendors||[]).filter(v=>v.company.toLowerCase().includes(lower)).map(v=>({type:'업체',name:v.company,action:()=>{ go('vendor'); }})),
+    ...(DB.items||[]).filter(i=>i.name.toLowerCase().includes(lower)||i.code.toLowerCase().includes(lower)).map(i=>({type:'품목',name:i.name,action:()=>showItemDetail(i.id)})),
     ...DB.productions.map(p=>({...p,name:getItem(p.productId).name})).filter(p=>p.name?.toLowerCase().includes(lower)).map(p=>({type:'생산',name:p.name,action:()=>go('production')})),
   ].slice(0,5);
   // Could show results in dropdown here - for now show notif
@@ -4871,10 +4871,10 @@ function resetData() {
 // BADGES UPDATE
 // ═══════════════════════════════════════════════════════
 function updateBadges() {
-  const late = DB.productions.filter(p=>p.status==='지연').length;
-  const lowStk = DB.items.filter(i => i.minStock > 0 && i.stock < i.minStock).length;
-  const pendingUsr = DB.users.filter(u=>u.status==='승인대기').length;
-  const activeTasks = DB.tasks.filter(t=>t.status!=='완료').length;
+  const late = (DB.productions||[]).filter(p=>p.status==='지연').length;
+  const lowStk = (DB.items||[]).filter(i => i.minStock > 0 && i.stock < i.minStock).length;
+  const pendingUsr = (DB.users||[]).filter(u=>u.status==='승인대기').length;
+  const activeTasks = (DB.tasks||[]).filter(t=>t.status!=='완료').length;
   $('nb-prod').textContent = late>0 ? '지연'+late : ''; $('nb-prod').style.display = late>0?'':'none';
   $('nb-stk').textContent = lowStk>0 ? '부족'+lowStk : ''; $('nb-stk').style.display = lowStk>0?'':'none';
   $('nb-usr').textContent = pendingUsr>0 ? pendingUsr : ''; $('nb-usr').style.display = pendingUsr>0?'':'none';
@@ -5148,12 +5148,16 @@ function initERPWhenReady() {
 
   loadDataFromFirestore().then(async (firestoreDB) => {
     if (firestoreDB && firestoreDB.items && firestoreDB.items.length > 0) {
-      // Firestore 데이터 사용
-      DB = firestoreDB;
-      try { localStorage.setItem(STORE_KEY, JSON.stringify(firestoreDB)); } catch(e) {}
+      // Firestore 데이터 + DEFAULT_DB 누락 필드 보완
+      const merged = Object.assign({}, JSON.parse(JSON.stringify(DEFAULT_DB)), firestoreDB);
+      // 배열 필드는 Firestore 것을 우선 (비어있지 않으면)
+      ['vendors','items','orders','productions','stockHistory','quotes','tasks','users'].forEach(k => {
+        if (firestoreDB[k] && firestoreDB[k].length > 0) merged[k] = firestoreDB[k];
+      });
+      DB = merged;
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
       console.log('✅ Firestore 데이터 로드 완료');
     } else {
-      // Firestore 없음 → localStorage or DEFAULT_DB 유지
       console.log('ℹ️ Firestore 데이터 없음 → 로컬 데이터 사용, Firestore에 업로드 중...');
       _doSaveData().catch(e => console.warn('초기 업로드 실패:', e));
     }
