@@ -377,9 +377,10 @@ tbody tr:last-child{border-bottom:none}
 .kpi-chg.dn{color:var(--red-600)}
 
 /* SCROLLBAR */
-::-webkit-scrollbar{width:4px;height:4px}
-::-webkit-scrollbar-thumb{background:var(--gray-300);border-radius:2px}
-::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--gray-400);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--gray-500)}
+::-webkit-scrollbar-track{background:var(--gray-100);border-radius:4px}
 
 /* BOM indent */
 .bom-child td:first-child{padding-left:12px}
@@ -568,19 +569,15 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
   <!-- HEADER -->
   <div id="header">
     <div class="hdr-title" id="pageTitle">대시보드</div>
+    <div class="hdr-search">
+      <span style="font-size:13px">🔍</span>
+      <input id="globalSearch" type="text" placeholder="전체 검색..." oninput="globalSearchFn(this.value)">
+    </div>
     <button class="hdr-btn" onclick="exportToSheets()" title="ERP → Google Sheets 내보내기">
       <span class="sync-dot"></span>Sheets 연동
     </button>
-    <div style="position:relative">
-      <button class="hdr-btn" onclick="toggleNotifPanel()" id="notif-btn">🔔<span class="dot" id="notif-dot" style="display:none"></span><span id="notif-count" style="display:none;position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;font-size:9px;font-weight:700;border-radius:50%;width:16px;height:16px;display:none;align-items:center;justify-content:center"></span></button>
-      <div id="notif-panel" style="display:none;position:absolute;right:0;top:38px;width:320px;background:#fff;border:1px solid var(--gray-200);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:200;max-height:400px;overflow-y:auto">
-        <div style="padding:10px 14px;border-bottom:1px solid var(--gray-100);font-size:12.5px;font-weight:600;color:var(--gray-700);display:flex;justify-content:space-between;align-items:center">
-          🔔 알림 <button onclick="toggleNotifPanel()" style="background:none;border:none;cursor:pointer;color:var(--gray-400);font-size:14px">✕</button>
-        </div>
-        <div id="notif-list" style="padding:6px 0"></div>
-      </div>
-    </div>
-
+    <button class="hdr-btn" onclick="showNotif('알림 없음','info')">🔔<span class="dot"></span></button>
+    <button class="hdr-btn primary" onclick="toggleAI()">✨ AI 분석</button>
   </div>
 
   <!-- CONTENT -->
@@ -636,7 +633,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:#0052cc;color:#fff;border-radius:7px;font-size:12px;font-weight:500;text-decoration:none">
           📋 Trello 보드 열기
         </a>
-        <button class="btn btn-outline btn-sm" onclick="loadTrelloCards().then(()=>renderKanban())">🔄 새로고침</button>
+        <button class="btn btn-outline btn-sm" onclick="aiAnalyzeWorkflow()">✨ AI 자동 분류</button>
+        <button class="btn btn-primary btn-sm" onclick="openModal('add-task')">+ 태스크 추가</button>
       </div>
 
       <!-- 파란색 배너 — 전체 너비 -->
@@ -703,6 +701,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         </div>
         <div style="display:flex;gap:7px">
           <button class="btn btn-outline btn-sm" onclick="openModal('add-bom')">+ BOM 등록</button>
+          <button class="btn btn-outline btn-sm" onclick="editCurrentBOM()" style="color:var(--sky-700);border-color:var(--sky-300)">✏️ BOM 수정</button>
           <button class="btn btn-primary btn-sm" onclick="aiAnalyzeBOM()">✨ AI 분석</button>
         </div>
       </div>
@@ -1544,13 +1543,14 @@ async function _doSaveData() {
   // meta 저장
   await setDoc(docRef(db, 'erp_data', 'meta'), {
     data: JSON.stringify({
-      _trelloKey:   dbToSave._trelloKey   || null,
-      _trelloToken: dbToSave._trelloToken || null,
-      _trelloLists: dbToSave._trelloLists || null,
-      _trelloCards: dbToSave._trelloCards || null,
-      _bomMargin:   dbToSave._bomMargin   || {},
-      _companyInfo: dbToSave._companyInfo || {},
-      _nextIds:     dbToSave._nextIds     || {},
+      _trelloKey:       dbToSave._trelloKey       || null,
+      _trelloToken:     dbToSave._trelloToken     || null,
+      _trelloLists:     dbToSave._trelloLists     || null,
+      _trelloCards:     dbToSave._trelloCards     || null,
+      _bomMargin:       dbToSave._bomMargin       || {},
+      _companyInfo:     dbToSave._companyInfo     || {},
+      _nextIds:         dbToSave._nextIds         || {},
+      _processedOrders: dbToSave._processedOrders || [],
     }),
     ts: Date.now()
   });
@@ -1753,7 +1753,15 @@ const DEFAULT_DB = {
     {id:6, vendorId:6, orderDate:'2026-04-01', inDate:'2026-05-08', addr:'경기도 용인시 처인구 백암면 죽양대로 912번길 54 백암물류센터 (창고담당: 김석주 부장 010-2999-9822)', serial:'20260331-1', rows:[{itemId:18, code:'O-3X-02', name:'르니브 3중 장벽 20층 리뉴 크림 OEM (60g)', qty:2000, price:3200, image:''},{itemId:19, code:'O-3X-03', name:'르니브 3중 장벽 20층 리뉴 크림 OEM (30g)', qty:3000, price:1885, image:''}], note:'납기 지연 시 사전 연락 요망 (송희강 이사 010-3328-3652 / 권다빈 이사 010-8874-5722)', status:'진행중', pdfName:'르니브_발주서_20260401.pdf', pdfData:null, stampName:'', stampData:null, payDate:'', stockStatus:'입고전'},
     {id:7, vendorId:1, orderDate:'2025-12-29', inDate:'2026-01-23', addr:'인천광역시 서구 도담5로 53(오류동) 황윤태 주임 010-2999-1421', serial:'2025/12/29-1', rows:[{itemId:11, code:'M-GS-01', name:'르니브 글로우샷 용기 [30ml] <최종 인쇄 전 문구 수정 확인 必>', qty:5000, price:1270, image:''}], note:'납기 지연 시 사전 연락 요망', status:'완료', pdfName:'글로우샷용기_미코글라스_20251229.pdf', pdfData:null, stampName:'', stampData:null, payDate:'', stockStatus:'입고완료'},
   ],
-  tasks: [],
+  tasks: [
+    {id:1, title:'신규 세럼 BOM 작성', due:'2025-04-15', category:'R&D', status:'계획', priority:'높음', progress:10, note:''},
+    {id:2, title:'호박씨 오일 긴급 발주', due:'2025-04-08', category:'구매', status:'계획', priority:'높음', progress:0, note:'재고 부족'},
+    {id:3, title:'나이아신아마이드 앰플 생산관리', due:'2025-04-12', category:'생산', status:'진행중', priority:'보통', progress:65, note:''},
+    {id:4, title:'히알루론산 토너 납기 확인', due:'2025-04-08', category:'생산', status:'진행중', priority:'높음', progress:40, note:'지연'},
+    {id:5, title:'레티놀 세럼 QC 검사', due:'2025-04-07', category:'품질', status:'검토', priority:'보통', progress:85, note:''},
+    {id:6, title:'신규 거래처 계약서 검토', due:'2025-04-09', category:'거래처', status:'검토', priority:'낮음', progress:90, note:''},
+    {id:7, title:'레티놀 세럼 3,000개 입고', due:'2025-04-05', category:'생산', status:'완료', priority:'보통', progress:100, note:''},
+  ],
   users: [
     {id:1, name:'관리자', email:'admin@reniv.com', role:'CTO', joinDate:'2024-01-01', lastLogin:'2025-04-07', status:'활성'},
     {id:2, name:'이연구', email:'lee@reniv.com', role:'R&D 연구원', joinDate:'2024-03-15', lastLogin:'2025-04-06', status:'활성'},
@@ -1791,7 +1799,9 @@ let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
 // ── 초기화 시 입고완료 발주서 재고 자동 반영 ──────────────
 // localStorage에 저장된 DB가 없을 때(첫 로드) 또는 재고 처리 이력이 없을 때만 실행
 (function applyInitialStockIn() {
+  // 로컬 DB 로드 시 한 번만 실행 — Firestore에서 덮어쓰면 applyPendingStockIn이 처리
   const processed = DB._processedOrders || [];
+  let changed = false;
   DB.orders.forEach(o => {
     if (o.stockStatus === '입고완료' && processed.indexOf(o.id) === -1) {
       (o.rows || []).forEach(row => {
@@ -1804,50 +1814,13 @@ let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
           const idx = DB.items.findIndex(i => i.id === item.id);
           if (idx >= 0) {
             DB.items[idx].stock += row.qty;
-            // 입출고 이력 추가
             const maxId = DB.stockHistory.length ? Math.max.apply(null, DB.stockHistory.map(h=>h.id||0)) : 0;
-            DB.stockHistory.push({
-              id: maxId + 1,
-              itemId: item.id,
-              type: 'in',
-              qty: row.qty,
-              price: row.price || item.price,
-              date: o.inDate || o.orderDate || '',
-              lot: o.serial || '',
-              note: '발주서 입고완료 반영 (' + (o.serial||'발주서 '+o.id) + ')'
-            });
-          }
-        }
-      });
-      processed.push(o.id);
-    }
-  });
-  DB._processedOrders = processed;
-})();
-
-// Firestore 로드 후 미처리 입고완료 발주서 재고 반영
-function applyPendingStockIn() {
-  const processed = DB._processedOrders || [];
-  let changed = false;
-  (DB.orders || []).forEach(o => {
-    if (o.stockStatus === '입고완료' && processed.indexOf(o.id) === -1) {
-      (o.rows || []).forEach(row => {
-        if (!row.qty) return;
-        let item = null;
-        if (row.itemId) item = DB.items.find(i => i.id === row.itemId);
-        if (!item && row.code) item = DB.items.find(i => i.code === row.code);
-        if (!item) item = DB.items.find(i => i.name === row.name);
-        if (item) {
-          const idx = DB.items.findIndex(i => i.id === item.id);
-          if (idx >= 0) {
-            DB.items[idx].stock += row.qty;
-            const maxId = DB.stockHistory.length ? Math.max(...DB.stockHistory.map(h=>h.id||0)) : 0;
             DB.stockHistory.push({
               id: maxId + 1, itemId: item.id, type: 'in',
               qty: row.qty, price: row.price || item.price,
               date: o.inDate || o.orderDate || '',
               lot: o.serial || '',
-              note: '발주서 입고완료 반영 (' + (o.serial || '발주서 ' + o.id) + ')'
+              note: '발주서 입고완료 반영 (' + (o.serial||'발주서 '+o.id) + ')'
             });
             changed = true;
           }
@@ -1857,7 +1830,45 @@ function applyPendingStockIn() {
     }
   });
   DB._processedOrders = processed;
-  if (changed) { try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {} }
+})();
+
+// Firestore 로드 후 — 미처리 발주서만 안전하게 반영 (중복 방지 강화)
+function applyPendingStockIn() {
+  const processed = DB._processedOrders || [];
+  let changed = false;
+  (DB.orders || []).forEach(o => {
+    if (o.stockStatus !== '입고완료') return;
+    if (processed.indexOf(o.id) !== -1) return; // 이미 처리됨 → 절대 스킵
+    (o.rows || []).forEach(row => {
+      if (!row.qty) return;
+      let item = null;
+      if (row.itemId) item = DB.items.find(i => i.id === row.itemId);
+      if (!item && row.code) item = DB.items.find(i => i.code === row.code);
+      if (!item) item = DB.items.find(i => i.name === row.name);
+      if (item) {
+        const idx = DB.items.findIndex(i => i.id === item.id);
+        if (idx >= 0) {
+          DB.items[idx].stock += row.qty;
+          const maxId = DB.stockHistory.length ? Math.max(...DB.stockHistory.map(h=>h.id||0)) : 0;
+          DB.stockHistory.push({
+            id: maxId + 1, itemId: item.id, type: 'in',
+            qty: row.qty, price: row.price || item.price,
+            date: o.inDate || o.orderDate || '',
+            lot: o.serial || '',
+            note: '발주서 입고완료 반영 (' + (o.serial || '발주서 ' + o.id) + ')'
+          });
+          changed = true;
+        }
+      }
+    });
+    processed.push(o.id);
+  });
+  DB._processedOrders = processed;
+  if (changed) {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
+    // _processedOrders도 Firestore에 저장해서 다음 로드 시 중복 방지
+    setTimeout(() => { try { _doSaveData(); } catch(e) {} }, 500);
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2000,15 +2011,6 @@ document.addEventListener('click', e => {
   if (e.target.classList.contains('overlay')) {
     e.target.classList.remove('show');
   }
-  // 알림 패널 외부 클릭 시 닫기
-  const panel = document.getElementById('notif-panel');
-  const btn = document.getElementById('notif-btn');
-  if (panel && panel.style.display !== 'none') {
-    if (!panel.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
-      panel.style.display = 'none';
-      _notifOpen = false;
-    }
-  }
 });
 
 // ═══════════════════════════════════════════════════════
@@ -2067,10 +2069,10 @@ function renderDashStats() {
     .join('<br>') || '발주 없음';
 
   $('dash-stats').innerHTML = `
-    <div class="stat ${lateProds?'c-red':'c-amber'}" style="cursor:pointer" onclick="go('production')"><div class="stat-lbl">진행 중 생산</div><div class="stat-val">${(DB.productions||[]).filter(p=>p.status==='생산중'||p.status==='지연').length}</div><div class="stat-sub" style="line-height:2">${(DB.productions||[]).filter(p=>p.status==='생산중'||p.status==='지연').map(p=>{const it=getItem(p.productId);const nm=(it&&it.name?it.name:p.productName||'?').replace('르니브 3중 장벽 20층 ','').replace('르니브 ','').replace(/(\([^)]+\))\s*\1/g,'$1');return '<span style="font-weight:500">'+nm+'</span> <span style="color:var(--sky-500);font-size:10px">'+fmt(p.qty)+'EA</span>';}).join('<br>') || '없음'}</div><div class="stat-ico">🏭</div></div>
-    <div class="stat c-purple" style="cursor:pointer" onclick="go('order')"><div class="stat-lbl">총 발주금액 <span style="font-size:9px;opacity:.8">(VAT포함)</span></div><div class="stat-val">${fmtW(Math.round(thisMonthAmt*1.1))}</div><div class="stat-sub" style="line-height:1.9">${vendorSubText}</div><div class="stat-ico">💰</div></div>
-    <div class="stat c-green" style="cursor:pointer" onclick="go('item')"><div class="stat-lbl">등록 품목</div><div class="stat-val">${DB.items.length}</div><div class="stat-sub">원자재 ${(DB.items||[]).filter(i=>i.type==='원자재').length} · 부자재 ${(DB.items||[]).filter(i=>i.type==='부자재').length} · OEM ${(DB.items||[]).filter(i=>i.type==='OEM').length} · 완제품 ${(DB.items||[]).filter(i=>i.type==='완제품').length}</div><div class="stat-ico">📦</div></div>
-    <div class="stat c-sky" style="cursor:pointer" onclick="go('vendor')"><div class="stat-lbl">등록 업체</div><div class="stat-val">${DB.vendors.length}</div><div class="stat-sub">원자재 ${(DB.vendors||[]).filter(v=>v.type==='원자재').length} · 부자재 ${(DB.vendors||[]).filter(v=>v.type==='부자재').length} · OEM ${(DB.vendors||[]).filter(v=>v.type==='OEM').length}</div><div class="stat-ico">🏢</div></div>
+    <div class="stat ${lateProds?'c-red':'c-amber'}" style="cursor:pointer" onclick="go('production')"><div class="stat-lbl">진행 중 생산</div><div class="stat-val" style="text-decoration:underline dotted">${(DB.productions||[]).filter(p=>p.status==='생산중'||p.status==='지연').length}</div><div class="stat-sub" style="line-height:2">${(DB.productions||[]).filter(p=>p.status==='생산중'||p.status==='지연').map(p=>{const it=getItem(p.productId);const nm=(it&&it.name?it.name:p.productName||'?').replace('르니브 3중 장벽 20층 ','').replace('르니브 ','').replace(/(\([^)]+\))\s*\1/g,'$1');return '<span style="font-weight:500">'+nm+'</span> <span style="color:var(--sky-500);font-size:10px">'+fmt(p.qty)+'EA</span>';}).join('<br>') || '없음'}</div><div class="stat-ico">🏭</div></div>
+    <div class="stat c-purple" style="cursor:pointer" onclick="go('order')"><div class="stat-lbl">총 발주금액 <span style="font-size:9px;opacity:.8">(VAT포함)</span></div><div class="stat-val" style="font-size:15px;text-decoration:underline dotted">${fmtW(Math.round(thisMonthAmt*1.1))}</div><div class="stat-sub" style="line-height:1.9">${vendorSubText}</div><div class="stat-ico">💰</div></div>
+    <div class="stat c-green" style="cursor:pointer" onclick="go('item')"><div class="stat-lbl">등록 품목</div><div class="stat-val" style="text-decoration:underline dotted">${DB.items.length}</div><div class="stat-sub">원자재 ${(DB.items||[]).filter(i=>i.type==='원자재').length} · 부자재 ${(DB.items||[]).filter(i=>i.type==='부자재').length} · OEM ${(DB.items||[]).filter(i=>i.type==='OEM').length} · 완제품 ${(DB.items||[]).filter(i=>i.type==='완제품').length}</div><div class="stat-ico">📦</div></div>
+    <div class="stat c-sky" style="cursor:pointer" onclick="go('vendor')"><div class="stat-lbl">등록 업체</div><div class="stat-val" style="text-decoration:underline dotted">${DB.vendors.length}</div><div class="stat-sub">원자재 ${(DB.vendors||[]).filter(v=>v.type==='원자재').length} · 부자재 ${(DB.vendors||[]).filter(v=>v.type==='부자재').length} · OEM ${(DB.vendors||[]).filter(v=>v.type==='OEM').length}</div><div class="stat-ico">🏢</div></div>
   `;
 }
 
@@ -2729,6 +2731,28 @@ function aiAnalyzeBOM() {
   if(!aiOpen) toggleAI();
   const product = getItem(parseInt($('bom-product-sel') ? $('bom-product-sel').value : 0));
   setTimeout(()=>sendAIMsg(`${product.name||'선택된 제품'}의 BOM 원가를 분석하고 원가 절감 방안을 제안해줘`), 200);
+}
+
+function editCurrentBOM() {
+  const productId = parseInt($('bom-product-sel') ? $('bom-product-sel').value : 0);
+  if (!productId) { showNotif('먼저 제품을 선택하세요','warning'); return; }
+  populateBOMProductModal();
+  openModal('add-bom');
+  setTimeout(() => {
+    $('bom-product-modal').value = productId;
+    const bom = (DB.boms && DB.boms[productId]) || [];
+    $('bom-modal-rows').innerHTML = '';
+    if (bom.length) {
+      bom.forEach(row => {
+        const displayQty = row.qtyDisplay || formatQty(row.qty);
+        addBOMRow(row.itemId, displayQty, row.unit, row.note);
+      });
+    } else {
+      addBOMRow();
+    }
+    const ttl = document.querySelector('#overlay-add-bom .modal-ttl');
+    if (ttl) ttl.textContent = '✏️ BOM 수정';
+  }, 80);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -4626,7 +4650,7 @@ function renderKanban() {
       </div>`;
   }
 
-  // ② 구글 공유 문서 섹션
+  // ② ERP 내부 태스크 — Trello 아래 별도 섹션 (접기/펼치기)
   const erpCols = KANBAN_COLS.map(col => {
     const tasks = DB.tasks.filter(t=>t.status===col);
     return `
@@ -4649,58 +4673,126 @@ function renderKanban() {
       </div>`;
   }).join('');
 
-  // ② 구글 공유 문서 섹션
-  const googleDocs = JSON.parse(localStorage.getItem('reniv_google_docs') || '[]');
-  const docTypeIcon = {sheet:'📊', slide:'📑', doc:'📄'};
-  const docTypeName = {sheet:'구글 시트', slide:'구글 슬라이드', doc:'구글 문서'};
-  const docTypeColor = {sheet:'#0f9d58', slide:'#f4b400', doc:'#4285f4'};
-
-  const googleDocsHtml = `
+  board.innerHTML = trelloHtml + `
     <div style="margin-top:20px;border-top:1px solid var(--gray-200);padding-top:16px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
         <div style="font-size:13px;font-weight:600;color:var(--gray-700);display:flex;align-items:center;gap:7px">
           🗂️ 구글 공유 문서
-          <span style="background:var(--gray-200);color:var(--gray-600);border-radius:10px;padding:1px 8px;font-size:10.5px">${googleDocs.length}개</span>
         </div>
-        <button class="btn btn-outline btn-sm" onclick="openGoogleDocModal()" style="color:var(--sky-700);border-color:var(--sky-300)">+ 문서 추가</button>
+        <button class="btn btn-outline btn-sm" onclick="openGoogleDocsModal()" style="color:var(--sky-700);border-color:var(--sky-300)">+ 문서 추가</button>
       </div>
-      ${googleDocs.length === 0 ? `
-        <div style="background:var(--gray-50);border:1px dashed var(--gray-300);border-radius:10px;padding:20px;text-align:center;color:var(--gray-400);font-size:12px">
-          📎 구글 시트, 슬라이드, 문서 링크를 추가하면 바로 열 수 있어요
-        </div>` :
-        `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">
-          ${googleDocs.map((d,i) => `
-            <div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
-              <div style="width:38px;height:38px;border-radius:8px;background:${docTypeColor[d.type]||'#4285f4'};display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">${docTypeIcon[d.type]||'📎'}</div>
-              <div style="flex:1;min-width:0">
-                <div style="font-size:12.5px;font-weight:600;color:var(--gray-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.title}</div>
-                <div style="font-size:11px;color:var(--gray-400);margin-top:1px">${docTypeName[d.type]||'문서'}</div>
-              </div>
-              <div style="display:flex;gap:4px;flex-shrink:0">
-                <button onclick="window.open('${d.url}','_blank')" style="background:${docTypeColor[d.type]||'#4285f4'};color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;font-weight:600">열기</button>
-                <button onclick="deleteGoogleDoc(${i})" style="background:var(--gray-100);color:var(--gray-500);border:none;border-radius:6px;padding:5px 8px;font-size:11px;cursor:pointer">✕</button>
-              </div>
-            </div>`).join('')}
-        </div>`}
+      <div id="google-docs-list">${renderGoogleDocsList()}</div>
     </div>`;
-
-  board.innerHTML = trelloHtml + googleDocsHtml;
 }
 
-function openGoogleDocModal() {
-  const type = prompt('문서 종류를 입력하세요:\n1 = 구글 시트\n2 = 구글 슬라이드\n3 = 구글 문서');
-  if (!type) return;
-  const typeMap = {'1':'sheet','2':'slide','3':'doc'};
-  const docType = typeMap[type.trim()] || 'doc';
-  const title = prompt('문서 제목을 입력하세요:');
-  if (!title || !title.trim()) return;
-  const url = prompt('구글 문서 URL을 입력하세요:');
-  if (!url || !url.trim()) return;
+function renderGoogleDocsList() {
   const docs = JSON.parse(localStorage.getItem('reniv_google_docs') || '[]');
-  docs.push({type: docType, title: title.trim(), url: url.trim()});
+  const typeIcon  = {sheet:'📊', slide:'📑', doc:'📄'};
+  const typeName  = {sheet:'구글 시트', slide:'구글 슬라이드', doc:'구글 문서'};
+  const typeColor = {sheet:'#0f9d58', slide:'#f4b400', doc:'#4285f4'};
+  if (!docs.length) return `
+    <div style="background:var(--gray-50);border:1px dashed var(--gray-300);border-radius:10px;padding:20px;text-align:center;color:var(--gray-400);font-size:12px">
+      📎 구글 시트, 슬라이드, 문서 링크를 추가하면 바로 열 수 있어요
+    </div>`;
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">
+    ${docs.map((d,i) => `
+      <div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+        <div style="width:38px;height:38px;border-radius:8px;background:${typeColor[d.type]||'#4285f4'};display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">${typeIcon[d.type]||'📎'}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12.5px;font-weight:600;color:var(--gray-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.title}</div>
+          <div style="font-size:11px;color:var(--gray-400);margin-top:1px">${typeName[d.type]||'문서'}</div>
+        </div>
+        <div style="display:flex;gap:4px;flex-shrink:0">
+          <button onclick="window.open('${d.url}','_blank')" style="background:${typeColor[d.type]||'#4285f4'};color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;font-weight:600">열기</button>
+          <button onclick="deleteGoogleDoc(${i})" style="background:var(--gray-100);color:var(--gray-500);border:none;border-radius:6px;padding:5px 8px;font-size:11px;cursor:pointer">✕</button>
+        </div>
+      </div>`).join('')}
+  </div>`;
+}
+
+function openGoogleDocsModal() {
+  // 모달이 없으면 동적 생성
+  if (!$('overlay-google-docs')) {
+    const el = document.createElement('div');
+    el.className = 'overlay';
+    el.id = 'overlay-google-docs';
+    el.innerHTML = `
+      <div class="modal" style="max-width:480px">
+        <div class="modal-hdr"><span class="modal-ttl">🗂️ 구글 문서 추가</span><button class="modal-x" onclick="closeModal('google-docs')">✕</button></div>
+        <div class="modal-body">
+          <div class="fg2">
+            <div class="fg full">
+              <label>문서 종류</label>
+              <div style="display:flex;gap:8px;margin-top:4px">
+                <label style="flex:1;cursor:pointer">
+                  <input type="radio" name="gd-type" value="sheet" checked style="display:none">
+                  <div class="gd-type-btn" data-val="sheet" onclick="selectGdType('sheet')" style="border:2px solid #0f9d58;border-radius:8px;padding:8px;text-align:center;background:#f0fdf4">
+                    <div style="font-size:22px">📊</div><div style="font-size:11px;font-weight:600;color:#0f9d58;margin-top:2px">구글 시트</div>
+                  </div>
+                </label>
+                <label style="flex:1;cursor:pointer">
+                  <input type="radio" name="gd-type" value="slide" style="display:none">
+                  <div class="gd-type-btn" data-val="slide" onclick="selectGdType('slide')" style="border:2px solid var(--gray-200);border-radius:8px;padding:8px;text-align:center;background:#fff">
+                    <div style="font-size:22px">📑</div><div style="font-size:11px;font-weight:600;color:var(--gray-500);margin-top:2px">구글 슬라이드</div>
+                  </div>
+                </label>
+                <label style="flex:1;cursor:pointer">
+                  <input type="radio" name="gd-type" value="doc" style="display:none">
+                  <div class="gd-type-btn" data-val="doc" onclick="selectGdType('doc')" style="border:2px solid var(--gray-200);border-radius:8px;padding:8px;text-align:center;background:#fff">
+                    <div style="font-size:22px">📄</div><div style="font-size:11px;font-weight:600;color:var(--gray-500);margin-top:2px">구글 문서</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+            <div class="fg full"><label>문서 제목<span class="req">*</span></label><input class="fi" id="gd-title" placeholder="예: 르니브 원가 계산 시트"></div>
+            <div class="fg full"><label>URL<span class="req">*</span></label><input class="fi" id="gd-url" placeholder="https://docs.google.com/..."></div>
+          </div>
+        </div>
+        <div class="modal-ft">
+          <button class="btn btn-outline" onclick="closeModal('google-docs')">취소</button>
+          <button class="btn btn-primary" onclick="saveGoogleDoc()">추가</button>
+        </div>
+      </div>`;
+    document.body.appendChild(el);
+    _gdSelectedType = 'sheet';
+  }
+  $('gd-title').value = '';
+  $('gd-url').value = '';
+  selectGdType('sheet');
+  openModal('google-docs');
+}
+
+let _gdSelectedType = 'sheet';
+function selectGdType(type) {
+  _gdSelectedType = type;
+  const colors = {sheet:'#0f9d58', slide:'#f4b400', doc:'#4285f4'};
+  const bgs    = {sheet:'#f0fdf4', slide:'#fefce8', doc:'#eff6ff'};
+  document.querySelectorAll('.gd-type-btn').forEach(btn => {
+    const val = btn.dataset.val;
+    if (val === type) {
+      btn.style.border = `2px solid ${colors[val]}`;
+      btn.style.background = bgs[val];
+      btn.querySelector('div:last-child').style.color = colors[val];
+    } else {
+      btn.style.border = '2px solid var(--gray-200)';
+      btn.style.background = '#fff';
+      btn.querySelector('div:last-child').style.color = 'var(--gray-500)';
+    }
+  });
+}
+
+function saveGoogleDoc() {
+  const title = $('gd-title').value.trim();
+  const url = $('gd-url').value.trim();
+  if (!title) { showNotif('제목을 입력하세요','warning'); return; }
+  if (!url) { showNotif('URL을 입력하세요','warning'); return; }
+  const docs = JSON.parse(localStorage.getItem('reniv_google_docs') || '[]');
+  docs.push({type: _gdSelectedType, title, url});
   localStorage.setItem('reniv_google_docs', JSON.stringify(docs));
-  showNotif('문서가 추가되었습니다 ✅', 'success');
-  renderKanban();
+  closeModal('google-docs');
+  showNotif('문서가 추가되었습니다 ✅','success');
+  const listEl = $('google-docs-list');
+  if (listEl) listEl.innerHTML = renderGoogleDocsList();
 }
 
 function deleteGoogleDoc(idx) {
@@ -4708,8 +4800,9 @@ function deleteGoogleDoc(idx) {
   const docs = JSON.parse(localStorage.getItem('reniv_google_docs') || '[]');
   docs.splice(idx, 1);
   localStorage.setItem('reniv_google_docs', JSON.stringify(docs));
+  const listEl = $('google-docs-list');
+  if (listEl) listEl.innerHTML = renderGoogleDocsList();
   showNotif('삭제되었습니다');
-  renderKanban();
 }
 
 function toggleErpTasks() {}
@@ -5016,115 +5109,10 @@ function updateBadges() {
   const lowStk = (DB.items||[]).filter(i => i.minStock > 0 && i.stock < i.minStock).length;
   const pendingUsr = (DB.users||[]).filter(u=>u.status==='승인대기').length;
   const activeTasks = (DB.tasks||[]).filter(t=>t.status!=='완료').length;
-  if ($('nb-prod')) { $('nb-prod').textContent = late>0 ? '지연'+late : ''; $('nb-prod').style.display = late>0?'':'none'; }
-  if ($('nb-stk')) { $('nb-stk').textContent = lowStk>0 ? '부족'+lowStk : ''; $('nb-stk').style.display = lowStk>0?'':'none'; }
-  if ($('nb-usr')) { $('nb-usr').textContent = pendingUsr>0 ? pendingUsr : ''; $('nb-usr').style.display = pendingUsr>0?'':'none'; }
-  if ($('nb-wf')) $('nb-wf').textContent = activeTasks;
-  updateNotifBadge();
-}
-
-function buildNotifList() {
-  const today = new Date();
-  const alerts = [];
-
-  // 결제일 임박 (14일 이내)
-  (DB.orders||[]).forEach(o => {
-    if (!o.payDate || o.stockStatus === '입고완료') return;
-    const days = Math.ceil((new Date(o.payDate) - today) / 86400000);
-    if (days >= 0 && days <= 14) {
-      const color = days <= 3 ? '#ef4444' : days <= 7 ? '#f59e0b' : '#3b82f6';
-      alerts.push({
-        icon: '💳', color,
-        title: `결제일 임박 — ${(getVendor(o.vendorId).company||'').replace('(주)','').replace('㈜','')}`,
-        desc: `${o.serial||'발주서'} · 결제일 ${o.payDate} (D-${days})`,
-        days,
-        onclick: `go('order')`
-      });
-    } else if (days < 0) {
-      alerts.push({
-        icon: '⚠️', color: '#ef4444',
-        title: `결제일 초과 — ${(getVendor(o.vendorId).company||'').replace('(주)','').replace('㈜','')}`,
-        desc: `${o.serial||'발주서'} · 결제일 ${o.payDate} (D+${Math.abs(days)})`,
-        days,
-        onclick: `go('order')`
-      });
-    }
-  });
-
-  // 입고일 임박 (14일 이내, 생산중/지연)
-  (DB.productions||[]).forEach(p => {
-    if (!p.inDate || p.status === '생산완료' || p.status === '입고완료') return;
-    const days = Math.ceil((new Date(p.inDate) - today) / 86400000);
-    if (days >= 0 && days <= 14) {
-      const item = getItem(p.productId);
-      const nm = (item&&item.name ? item.name : p.productName||'?').replace('르니브 ','');
-      const color = days <= 3 ? '#ef4444' : days <= 7 ? '#f59e0b' : '#22c55e';
-      alerts.push({
-        icon: '📦', color,
-        title: `입고 예정 — ${nm}`,
-        desc: `입고일 ${p.inDate} (D-${days})`,
-        days,
-        onclick: `go('production')`
-      });
-    } else if (days < 0) {
-      const item = getItem(p.productId);
-      const nm = (item&&item.name ? item.name : p.productName||'?').replace('르니브 ','');
-      alerts.push({
-        icon: '🚨', color: '#ef4444',
-        title: `납기 지연 — ${nm}`,
-        desc: `입고예정일 ${p.inDate} (D+${Math.abs(days)})`,
-        days,
-        onclick: `go('production')`
-      });
-    }
-  });
-
-  alerts.sort((a,b) => a.days - b.days);
-  return alerts;
-}
-
-function updateNotifBadge() {
-  const alerts = buildNotifList();
-  const dot = $('notif-dot');
-  const cnt = $('notif-count');
-  if (dot) dot.style.display = alerts.length > 0 ? 'inline-block' : 'none';
-  if (cnt) {
-    if (alerts.length > 0) {
-      cnt.style.display = 'flex';
-      cnt.textContent = alerts.length > 9 ? '9+' : alerts.length;
-    } else {
-      cnt.style.display = 'none';
-    }
-  }
-}
-
-let _notifOpen = false;
-function toggleNotifPanel() {
-  const panel = $('notif-panel');
-  if (!panel) return;
-  _notifOpen = !_notifOpen;
-  if (_notifOpen) {
-    const alerts = buildNotifList();
-    const list = $('notif-list');
-    if (list) {
-      if (alerts.length === 0) {
-        list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:12px">📭 임박한 알림이 없습니다</div>';
-      } else {
-        list.innerHTML = alerts.map(a => `
-          <div onclick="${a.onclick}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--gray-50);display:flex;gap:10px;align-items:flex-start" onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background=''">
-            <span style="font-size:18px;flex-shrink:0">${a.icon}</span>
-            <div style="flex:1">
-              <div style="font-size:12px;font-weight:600;color:var(--gray-800);margin-bottom:2px">${a.title}</div>
-              <div style="font-size:11px;color:var(--gray-500)">${a.desc}</div>
-            </div>
-            <span style="background:${a.color};color:#fff;font-size:9px;padding:2px 6px;border-radius:8px;font-weight:700;flex-shrink:0;align-self:center">${a.days < 0 ? 'D+'+Math.abs(a.days) : 'D-'+a.days}</span>
-          </div>`).join('');
-      }
-    }
-    panel.style.display = 'block';
-  } else {
-    panel.style.display = 'none';
-  }
+  $('nb-prod').textContent = late>0 ? '지연'+late : ''; $('nb-prod').style.display = late>0?'':'none';
+  $('nb-stk').textContent = lowStk>0 ? '부족'+lowStk : ''; $('nb-stk').style.display = lowStk>0?'':'none';
+  $('nb-usr').textContent = pendingUsr>0 ? pendingUsr : ''; $('nb-usr').style.display = pendingUsr>0?'':'none';
+  $('nb-wf').textContent = activeTasks;
 }
 
 // ═══════════════════════════════════════════════════════
