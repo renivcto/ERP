@@ -4747,49 +4747,61 @@ async function resetToDefaultAndUpload() {
   }
 
   DB = JSON.parse(JSON.stringify(DEFAULT_DB));
-  localStorage.setItem(STORE_KEY, JSON.stringify(DB));
-  showNotif('Firestore에 업로드 중...', 'info');
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
+
+  const prog = document.createElement('div');
+  prog.id = 'upload-progress';
+  prog.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#0ea5e9;color:#fff;text-align:center;padding:12px;font-size:14px;font-weight:600;z-index:99999';
+  prog.textContent = '⏳ Firestore에 업로드 중... 잠시 기다려주세요';
+  document.body.appendChild(prog);
 
   try {
     const db = window._firebaseDb;
     const setDoc = window._firestoreSetDoc;
     const docRef = window._firestoreDoc;
 
-    // 하나씩 순차 저장 (Promise.all 실패 시 원인 파악 어려움)
-    await setDoc(docRef(db, 'erp_data', 'vendors'),     { data: JSON.stringify(DB.vendors||[]),     ts: Date.now() });
-    await setDoc(docRef(db, 'erp_data', 'items'),       { data: JSON.stringify(DB.items||[]),       ts: Date.now() });
-    await setDoc(docRef(db, 'erp_data', 'orders'),      { data: JSON.stringify(DB.orders||[]),      ts: Date.now() });
+    prog.textContent = '⏳ 1/7 업체 저장 중...';
+    await setDoc(docRef(db, 'erp_data', 'vendors'), { data: JSON.stringify(DB.vendors||[]), ts: Date.now() });
+
+    prog.textContent = '⏳ 2/7 품목 저장 중...';
+    await setDoc(docRef(db, 'erp_data', 'items'), { data: JSON.stringify(DB.items||[]), ts: Date.now() });
+
+    prog.textContent = '⏳ 3/7 발주서 저장 중...';
+    await setDoc(docRef(db, 'erp_data', 'orders'), { data: JSON.stringify(DB.orders||[]), ts: Date.now() });
+
+    prog.textContent = '⏳ 4/7 생산관리 저장 중...';
     await setDoc(docRef(db, 'erp_data', 'productions'), { data: JSON.stringify(DB.productions||[]), ts: Date.now() });
-    await setDoc(docRef(db, 'erp_data', 'stockHistory'),{ data: JSON.stringify(DB.stockHistory||[]),ts: Date.now() });
-    await setDoc(docRef(db, 'erp_data', 'quotes'),      { data: JSON.stringify(DB.quotes||[]),      ts: Date.now() });
+
+    prog.textContent = '⏳ 5/7 재고내역 저장 중...';
+    await setDoc(docRef(db, 'erp_data', 'stockHistory'), { data: JSON.stringify(DB.stockHistory||[]), ts: Date.now() });
+
+    prog.textContent = '⏳ 6/7 견적서 저장 중...';
+    await setDoc(docRef(db, 'erp_data', 'quotes'), { data: JSON.stringify(DB.quotes||[]), ts: Date.now() });
+
+    prog.textContent = '⏳ 7/7 설정 저장 중...';
     await setDoc(docRef(db, 'erp_data', 'meta'), {
       data: JSON.stringify({
-        _trelloKey:   DB._trelloKey||'',
-        _trelloToken: DB._trelloToken||'',
-        _trelloLists: DB._trelloLists||null,
-        _trelloCards: DB._trelloCards||null,
-        _bomMargin:   DB._bomMargin||{},
-        _companyInfo: DB._companyInfo||{},
-        _nextIds:     DB._nextIds||{},
-      }),
-      ts: Date.now()
+        _trelloKey: DB._trelloKey||'', _trelloToken: DB._trelloToken||'',
+        _trelloLists: DB._trelloLists||null, _trelloCards: DB._trelloCards||null,
+        _bomMargin: DB._bomMargin||{}, _companyInfo: DB._companyInfo||{},
+        _nextIds: DB._nextIds||{},
+      }), ts: Date.now()
     });
 
-    updateBadges();
-    try { renderDashboard(); } catch(re) {}
-    go('dashboard');
-    showNotif('✅ 데이터 초기화 및 Firestore 업로드 완료! 다른 사용자도 동일하게 볼 수 있습니다.', 'success');
+    prog.style.background = '#16a34a';
+    prog.textContent = '✅ Firestore 업로드 완료! 3초 후 페이지를 새로고침합니다...';
+    setTimeout(() => { location.reload(); }, 3000);
+
   } catch(e) {
-    console.error('Firestore 업로드 에러:', e);
-    const msg = '업로드 실패!\n오류: ' + (e.message||e) + '\n코드: ' + (e.code||'없음');
-    alert(msg);
-    // 화면에도 고정 표시
+    prog.remove();
+    console.error('Firestore 에러:', e);
     const errDiv = document.createElement('div');
     errDiv.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#fee2e2;border:2px solid #ef4444;border-radius:10px;padding:16px 24px;z-index:99999;max-width:500px;font-size:13px;color:#7f1d1d;box-shadow:0 4px 20px rgba(0,0,0,.2)';
-    errDiv.innerHTML = '<strong>❌ Firestore 업로드 실패</strong><br><br>오류: ' + (e.message||String(e)) + '<br>코드: ' + (e.code||'없음') + '<br><br><button onclick="this.parentElement.remove()" style="padding:4px 12px;background:#ef4444;color:#fff;border:none;border-radius:5px;cursor:pointer">닫기</button>';
+    errDiv.innerHTML = '<strong>❌ 업로드 실패</strong><br><br>오류: ' + (e.message||String(e)) + '<br>코드: ' + (e.code||'없음') + '<br><br><button onclick="this.parentElement.remove()" style="padding:4px 12px;background:#ef4444;color:#fff;border:none;border-radius:5px;cursor:pointer">닫기</button>';
     document.body.appendChild(errDiv);
   }
 }
+
 
 async function forceLoadFromFirestore() {
   if (!confirm('Firestore에서 최신 데이터를 불러옵니까?\n현재 로컬 데이터는 덮어씁니다.')) return;
@@ -5103,72 +5115,39 @@ function showERPOrWaiting() {
 }
 
 function initERPWhenReady() {
-  // 로딩 표시
   const showLoader = () => {
-    const app = document.getElementById('app');
-    if (app && !document.getElementById('erp-loader')) {
+    if (!document.getElementById('erp-loader')) {
       const div = document.createElement('div');
       div.id = 'erp-loader';
-      div.style.cssText = 'position:fixed;inset:0;background:rgba(255,255,255,.8);z-index:9990;display:flex;align-items:center;justify-content:center;font-size:14px;color:#666';
-      div.innerHTML = '⏳ 데이터 불러오는 중...';
+      div.style.cssText = 'position:fixed;inset:0;background:rgba(255,255,255,.85);z-index:9990;display:flex;align-items:center;justify-content:center;font-size:14px;color:#666;flex-direction:column;gap:8px';
+      div.innerHTML = '<div style="font-size:28px">⏳</div><div>데이터 불러오는 중...</div>';
       document.body.appendChild(div);
     }
   };
-  const hideLoader = () => {
-    const el = document.getElementById('erp-loader');
-    if (el) el.remove();
-  };
+  const hideLoader = () => { const el = document.getElementById('erp-loader'); if (el) el.remove(); };
+  const doRender = () => { try { updateBadges(); } catch(e){} try { renderDashboard(); } catch(e){} };
 
   showLoader();
 
-  // Firestore에서 최신 DB 로드 후 렌더링
+  // Firestore에서 로드 시도
   loadDataFromFirestore().then(async (firestoreDB) => {
-    if (firestoreDB) {
-      // Firestore 데이터 검증: 핵심 데이터가 충분히 있는지 확인
-      const hasEnoughData = firestoreDB.items && firestoreDB.items.length >= 10
-                         && firestoreDB.vendors && firestoreDB.vendors.length >= 5;
-      if (hasEnoughData) {
-        DB = firestoreDB;
-        try { localStorage.setItem(STORE_KEY, JSON.stringify(firestoreDB)); } catch(e) {}
-      } else {
-        // Firestore 데이터가 부족하면 현재 DB(HTML 내장) 사용 후 업로드
-        console.log('Firestore 데이터 부족 - 현재 DB 업로드 중...');
-        setTimeout(async () => { await _doSaveData(); }, 1000);
-      }
+    if (firestoreDB && firestoreDB.items && firestoreDB.items.length > 0) {
+      // Firestore 데이터 사용
+      DB = firestoreDB;
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(firestoreDB)); } catch(e) {}
     } else {
-      // Firestore가 비어있으면 현재 DB 업로드
-      console.log('Firestore 비어있음 - 현재 DB 업로드 중...');
-      setTimeout(async () => { await _doSaveData(); }, 1000);
+      // Firestore 없음 → 현재 DB(localStorage or DEFAULT_DB) 유지, 업로드
+      _doSaveData().catch(e => console.warn('초기 업로드 실패:', e));
     }
-    // IndexedDB에서 이미지/PDF/사진/로고 복원
     await restoreIDBData();
-    // 로고 Firestore에서도 로드
-    loadSharedSetting('logo_data').then(logoSrc => {
-      if (logoSrc) { idbSet('reniv_logo', logoSrc); applyLogo(logoSrc); }
-    });
+    loadSharedSetting('logo_data').then(s => { if (s) { idbSet('reniv_logo', s); applyLogo(s); } });
     hideLoader();
-    // 렌더링
-    updateBadges();
-    if (typeof Chart !== 'undefined') {
-      renderDashboard();
-    } else {
-      let tries = 0;
-      const wait = setInterval(() => {
-        tries++;
-        if (typeof Chart !== 'undefined') {
-          clearInterval(wait);
-          renderDashboard();
-        } else if (tries > 50) {
-          clearInterval(wait);
-          try { renderDashboard(); } catch(e) {}
-        }
-      }, 100);
-    }
-  }).catch(e => {
-    console.error('초기화 실패:', e);
+    doRender();
+  }).catch(async (e) => {
+    console.warn('Firestore 로드 실패, localStorage 사용:', e);
+    await restoreIDBData();
     hideLoader();
-    updateBadges();
-    try { renderDashboard(); } catch(e2) {}
+    doRender();
   });
 }
 
