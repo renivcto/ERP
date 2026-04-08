@@ -1956,6 +1956,7 @@ document.addEventListener('click', e => {
 let chartOrder, chartItems, chartBOM, chartCost;
 
 function renderDashboard() {
+  if (!$('dash-alert')) return; // 대시보드 페이지가 활성화되지 않은 경우
   renderDashAlerts();
   renderDashStats();
   renderDashProdTable();
@@ -1965,6 +1966,7 @@ function renderDashboard() {
 }
 
 function renderDashAlerts() {
+  if (!$('dash-alert')) return;
   const lowStock = DB.items.filter(i => i.type !== '완제품' && i.minStock > 0 && i.stock < i.minStock);
   if (lowStock.length) {
     $('dash-alert').innerHTML = `<div class="alert warning">⚠️ <strong>재고 알림:</strong> ${lowStock.map(i=>i.name+'('+i.stock+'/최소'+i.minStock+')').join(' · ')} — 즉시 발주 필요</div>`;
@@ -1972,6 +1974,7 @@ function renderDashAlerts() {
 }
 
 function renderDashStats() {
+  if (!$('dash-stats')) return;
   const lateProds = DB.productions.filter(p => p.status === '지연').length;
   const pendingUsers = DB.users.filter(u => u.status === '승인대기').length;
   const thisMonthAmt = DB.orders.reduce((s,o) => {
@@ -2001,6 +2004,7 @@ function renderDashStats() {
 }
 
 function renderDashProdTable() {
+  if (!$('dash-prod-table')) return;
   const statusColor = {입고완료:'var(--green-500)',생산중:'var(--sky-400)',생산대기:'var(--amber-500)',지연:'var(--red-500)',QC검사:'var(--purple-500)'};
   const dashProdSorted = [...DB.productions].sort((a,b)=>{
     const o={생산중:0,지연:1,QC검사:2,생산완료:3,입고완료:4};
@@ -2020,6 +2024,7 @@ function renderDashProdTable() {
 }
 
 function renderDashTimeline() {
+  if (!$('dash-timeline')) return;
   const events = [
     ...DB.productions.filter(p=>p.status==='입고완료').map(p=>({title:(getItem(p.productId).name||p.productName||'?')+' 입고 완료', date:p.inDate, dot:'done'})),
     ...DB.productions.filter(p=>p.status==='지연').map(p=>({title:(getItem(p.productId).name||p.productName||'?')+' 납기 지연', date:p.inDate, dot:'late'})),
@@ -2048,6 +2053,7 @@ function renderDashStockTable() {
 }
 
 function renderDashKPI() {
+  if (!$('dash-kpi')) return;
   const lateCount = DB.productions.filter(p=>p.status==='지연').length;
   const pendingQuotes = DB.quotes.filter(q=>q.status==='검토중').length;
   const pendingUsers = DB.users.filter(u=>u.status==='승인대기').length;
@@ -4810,12 +4816,9 @@ async function forceLoadFromFirestore() {
     const firestoreDB = await loadDataFromFirestore();
     if (firestoreDB) {
       DB = firestoreDB;
-      await restoreIDBData();
       try { localStorage.setItem(STORE_KEY, JSON.stringify(firestoreDB)); } catch(e) {}
-      updateBadges();
-      renderDashboard();
-      go('dashboard');
-      showNotif('✅ Firestore에서 최신 데이터를 불러왔습니다', 'success');
+      showNotif('✅ Firestore 데이터 로드 완료! 새로고침합니다...', 'success');
+      setTimeout(() => location.reload(), 1500);
     } else {
       showNotif('Firestore에 저장된 데이터가 없습니다', 'warning');
     }
