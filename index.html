@@ -723,7 +723,17 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="card">
         <div class="card-body p0 tbl-wrap">
           <table>
-            <thead><tr><th>업체명</th><th>분류</th><th>담당자</th><th>전화번호</th><th>이메일</th><th>주소</th><th>공급품목</th><th>견적서</th><th>관리</th></tr></thead>
+            <colgroup>
+  <col style="width:60px">
+  <col style="min-width:130px">
+  <col style="width:90px">
+  <col style="width:150px">
+  <col style="width:160px">
+  <col style="min-width:180px;max-width:220px">
+  <col style="min-width:150px;max-width:180px">
+  <col style="width:60px">
+</colgroup>
+<thead><tr><th>분류</th><th>업체명</th><th>담당자</th><th>전화번호</th><th>이메일</th><th>공급품목</th><th>견적서</th><th>관리</th></tr></thead>
             <tbody id="vendor-table"></tbody>
           </table>
         </div>
@@ -2268,19 +2278,30 @@ function renderDashCharts() {
 let vendorFilter = '전체';
 
 function renderVendorTable() {
-  const types = ['전체',...new Set(DB.vendors.map(v=>v.type))];
-  $('vendor-filter-chips').innerHTML = types.map(t =>
-    `<div class="chip ${t===vendorFilter?'active':''}" onclick="vendorFilter='${t}';renderVendorTable()">${t}(${t==='전체'?DB.vendors.length:(DB.vendors||[]).filter(v=>v.type===t).length})</div>`
-  ).join('');
+  const fixedTypes = ['전체','원자재','부자재','OEM','완제품'];
+  const extraTypes = [...new Set(DB.vendors.map(v=>v.type))].filter(t => !fixedTypes.includes(t));
+  const types = [...fixedTypes, ...extraTypes];
+  const chipColors = {
+    '전체':   {bg:'var(--sky-500)', border:'var(--sky-500)', text:'#fff', activeBg:'var(--sky-600)'},
+    '원자재': {bg:'#dcfce7', border:'#86efac', text:'#166534', activeBg:'#16a34a', activeText:'#fff'},
+    '부자재': {bg:'#f3e8ff', border:'#c084fc', text:'#6b21a8', activeBg:'#9333ea', activeText:'#fff'},
+    'OEM':    {bg:'#e0f2fe', border:'#7dd3fc', text:'#075985', activeBg:'#0284c7', activeText:'#fff'},
+    '완제품': {bg:'#fef3c7', border:'#fcd34d', text:'#92400e', activeBg:'#d97706', activeText:'#fff'},
+  };
+  $('vendor-filter-chips').innerHTML = types.map(t => {
+    const c = chipColors[t] || {bg:'var(--gray-100)',border:'var(--gray-300)',text:'var(--gray-600)',activeBg:'var(--gray-500)',activeText:'#fff'};
+    const isActive = t === vendorFilter;
+    const cnt = t==='전체' ? DB.vendors.length : (DB.vendors||[]).filter(v=>v.type===t).length;
+    return `<div onclick="vendorFilter='${t}';renderVendorTable()" style="display:inline-flex;align-items:center;padding:4px 12px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:500;background:${isActive?(c.activeBg||c.bg):c.bg};color:${isActive?(c.activeText||c.text):c.text};border:1px solid ${isActive?(c.activeBg||c.border):c.border};transition:all .15s">${t}(${cnt})</div>`;
+  }).join('');
   const filtered = vendorFilter==='전체' ? DB.vendors : (DB.vendors||[]).filter(v=>v.type===vendorFilter);
   $('vendor-table').innerHTML = filtered.map(v => `
     <tr>
-      <td class="lnk" onclick="viewVendor(${v.id})"><strong>${v.company}</strong></td>
       <td>${`<span class="badge ${({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber'})[v.type]||'gray'}">${v.type}</span>`}</td>
+      <td class="lnk" onclick="viewVendor(${v.id})" style="font-weight:600;white-space:normal;word-break:keep-all">${v.company}</td>
       <td>${v.contact||'-'}</td>
       <td>${v.phone||'-'}</td>
       <td style="color:var(--sky-600)">${v.email||'-'}</td>
-      <td>${v.addr||'-'}</td>
       <td>${(DB.items||[]).filter(i=>i.vendorId===v.id).slice(0,2).map(i=>`<span class="chip" onclick="showItemDetail(${i.id})">${i.name}</span>`).join('')}</td>
       <td style="text-align:center">
         ${(v.quotes&&v.quotes.length) ? v.quotes.map((q,idx)=>`
@@ -2291,7 +2312,7 @@ function renderVendorTable() {
         <button class="btn btn-outline btn-xs" onclick="editVendor(${v.id})">수정</button>
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="9" class="empty">등록된 업체가 없습니다</td></tr>';
+  `).join('') || '<tr><td colspan="8" class="empty">등록된 업체가 없습니다</td></tr>';
 }
 
 // 업체 견적서 임시 목록
