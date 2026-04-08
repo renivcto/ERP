@@ -1730,7 +1730,13 @@ const DEFAULT_DB = {
     {id:2, productId:18, productName:'르니브 3중 장벽 20층 리뉴 크림 OEM (60g)', orderDate:'2026-04-01', inDate:'2026-05-08', payDate:'', qty:2000, amount:6400000, vendorId:6, progress:10, status:'생산중', serial:'20260331-1', orderId:6, checks:[false,false,false,false,false], note:'발주서 자동등록 (20260331-1)'},
     {id:3, productId:19, productName:'르니브 3중 장벽 20층 리뉴 크림 OEM (30g)', orderDate:'2026-04-01', inDate:'2026-05-08', payDate:'', qty:3000, amount:5655000, vendorId:6, progress:10, status:'생산중', serial:'20260331-1', orderId:6, checks:[false,false,false,false,false], note:'발주서 자동등록 (20260331-1)'},
   ],
-  stockHistory: [],
+  stockHistory: [
+    {id:1, itemId:10, type:'in', qty:3000, price:4250, date:'2025-04-05', lot:'LOT250405', note:'생산입고'},
+    {id:2, itemId:2, type:'out', qty:5, price:85000, date:'2025-04-03', lot:'LOT250301', note:'나이아신앰플 생산투입'},
+    {id:3, itemId:7, type:'in', qty:3000, price:350, date:'2025-03-28', lot:'LOT250310', note:'정기발주'},
+    {id:4, itemId:1, type:'in', qty:100, price:120000, date:'2025-03-15', lot:'LOT250315', note:''},
+    {id:5, itemId:3, type:'out', qty:3, price:60000, date:'2025-03-20', lot:'LOT250218', note:'세럼 생산투입'},
+  ],
   quotes: [
     {id:1, vendorId:1, date:'2025-04-01', valid:'2025-04-30', rows:[{name:'레티놀 100g', qty:30, price:120000}], note:'', status:'검토중'},
     {id:2, vendorId:2, date:'2025-03-28', valid:'2025-04-27', rows:[{name:'유리병 30ml', qty:5000, price:350},{name:'드로퍼캡', qty:5000, price:180}], note:'', status:'확정'},
@@ -1763,8 +1769,7 @@ const DEFAULT_DB = {
     {id:1, productId:10, lot:'LOT250405', date:'2025-04-06', appearance:'합격', content:'합격', ph:'6.2', viscosity:'1200', micro:'합격', result:'합격', note:''},
     {id:2, productId:11, lot:'LOT250412', date:'', appearance:'보류', content:'보류', ph:'-', viscosity:'-', micro:'진행중', result:'조건부합격', note:'생산중'},
   ],
-  _nextId: {vendor:8, item:24, prod:5, stock:1, quote:3, order:8, task:8, qc:3},
-  _processedOrders: []
+  _nextId: {vendor:8, item:24, prod:5, stock:6, quote:3, order:8, task:8, qc:3}
 };
 
 let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
@@ -1824,6 +1829,24 @@ let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
   });
   DB._processedOrders = processed;
 })();
+
+// 음수 재고를 0으로 초기화하고 Firestore에 저장
+function fixNegativeStock() {
+  let fixed = false;
+  (DB.items || []).forEach((item, idx) => {
+    if ((item.stock || 0) < 0) {
+      console.log(`음수 재고 수정: ${item.name} ${item.stock} → 0`);
+      DB.items[idx].stock = 0;
+      fixed = true;
+    }
+  });
+  if (fixed) {
+    // Firestore에도 즉시 반영
+    setTimeout(() => {
+      try { _doSaveData(); } catch(e) {}
+    }, 1000);
+  }
+}
 
 // Firestore 로드 후 미처리 입고완료 발주서 재고 반영
 function applyPendingStockIn() {
@@ -5251,6 +5274,8 @@ function initERPWhenReady() {
       });
       DB = merged;
       applyPendingStockIn();
+      // 음수 재고 자동 수정 (한 번만 실행)
+      fixNegativeStock();
       try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
       console.log('✅ Firestore 데이터 로드 완료');
     } else {
