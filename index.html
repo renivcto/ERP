@@ -1482,68 +1482,66 @@ function saveData() {
 }
 
 async function _doSaveData() {
-  try {
-    const dbToSave = JSON.parse(JSON.stringify(DB));
+  const dbToSave = JSON.parse(JSON.stringify(DB));
 
-    // 이미지/PDF → IndexedDB (바이너리 제외해서 Firestore 크기 절약)
-    dbToSave.items.forEach((item, i) => {
-      if (item.image && item.image.length > 100) {
-        idbSet('item_img_' + item.id, item.image);
-        dbToSave.items[i].image = '__idb__';
-      }
-    });
-    dbToSave.orders.forEach((o, i) => {
-      if (o.pdfData && o.pdfData.length > 10) {
-        idbSet('order_pdf_' + o.id, o.pdfData);
-        dbToSave.orders[i].pdfData = '__idb__';
-      }
-      if (o.stampData && o.stampData.length > 10) {
-        idbSet('order_stamp_' + o.id, o.stampData);
-        dbToSave.orders[i].stampData = '__idb__';
-      }
-    });
-
-    // Firestore에 저장 (컬렉션별로 분리 저장)
-    if (window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
-      const db = window._firebaseDb;
-      const setDoc = window._firestoreSetDoc;
-      const docRef = window._firestoreDoc;
-
-      // 각 컬렉션을 별도 문서로 저장 (1MB 제한 대응)
-      const saves = [
-        setDoc(docRef(db, 'erp_data', 'vendors'),    { data: JSON.stringify(dbToSave.vendors   || []), ts: Date.now() }),
-        setDoc(docRef(db, 'erp_data', 'items'),      { data: JSON.stringify(dbToSave.items     || []), ts: Date.now() }),
-        setDoc(docRef(db, 'erp_data', 'orders'),     { data: JSON.stringify(dbToSave.orders    || []), ts: Date.now() }),
-        setDoc(docRef(db, 'erp_data', 'productions'),{ data: JSON.stringify(dbToSave.productions||[]), ts: Date.now() }),
-        setDoc(docRef(db, 'erp_data', 'stockHistory'),{ data: JSON.stringify(dbToSave.stockHistory||[]), ts: Date.now() }),
-        setDoc(docRef(db, 'erp_data', 'quotes'),     { data: JSON.stringify(dbToSave.quotes    || []), ts: Date.now() }),
-        setDoc(docRef(db, 'erp_data', 'meta'), {
-          data: JSON.stringify({
-            _trelloKey:   dbToSave._trelloKey,
-            _trelloToken: dbToSave._trelloToken,
-            _trelloLists: dbToSave._trelloLists,
-            _trelloCards: dbToSave._trelloCards,
-            _bomMargin:   dbToSave._bomMargin,
-            _companyInfo: dbToSave._companyInfo,
-            _nextIds:     dbToSave._nextIds,
-          }),
-          ts: Date.now()
-        }),
-      ];
-      await Promise.all(saves);
+  // 바이너리 데이터 → IndexedDB 분리
+  dbToSave.items.forEach((item, i) => {
+    if (item.image && item.image.length > 100) {
+      idbSet('item_img_' + item.id, item.image);
+      dbToSave.items[i].image = '__idb__';
     }
+  });
+  dbToSave.orders.forEach((o, i) => {
+    if (o.pdfData && o.pdfData.length > 10) {
+      idbSet('order_pdf_' + o.id, o.pdfData);
+      dbToSave.orders[i].pdfData = '__idb__';
+    }
+    if (o.stampData && o.stampData.length > 10) {
+      idbSet('order_stamp_' + o.id, o.stampData);
+      dbToSave.orders[i].stampData = '__idb__';
+    }
+  });
 
-    // localStorage 백업
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(dbToSave)); } catch(e) {}
-  } catch(e) {
-    console.error('saveData 실패:', e);
-    try {
-      const dbMin = JSON.parse(JSON.stringify(DB));
-      dbMin.items.forEach((it,i)=>{ if(it.image&&it.image.length>100) dbMin.items[i].image=''; });
-      dbMin.orders.forEach((o,i)=>{ dbMin.orders[i].pdfData=null; dbMin.orders[i].stampData=null; });
-      localStorage.setItem(STORE_KEY, JSON.stringify(dbMin));
-    } catch(e2) {}
+  // localStorage 항상 저장 (백업)
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(dbToSave)); } catch(e) {}
+
+  // Firestore 저장 (공유) - 순차적으로 저장해서 에러 추적
+  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) {
+    console.warn('Firestore 미준비 - localStorage만 저장');
+    return;
   }
+
+  const db = window._firebaseDb;
+  const setDoc = window._firestoreSetDoc;
+  const docRef = window._firestoreDoc;
+
+  const collections = {
+    vendors:     dbToSave.vendors     || [],
+    items:       dbToSave.items       || [],
+    orders:      dbToSave.orders      || [],
+    productions: dbToSave.productions || [],
+    stockHistory:dbToSave.stockHistory|| [],
+    quotes:      dbToSave.quotes      || [],
+  };
+
+  // 순차 저장 (병렬 저장 시 Firestore 권한 오류 발생 가능)
+  for (const [key, val] of Object.entries(collections)) {
+    await setDoc(docRef(db, 'erp_data', key), { data: JSON.stringify(val), ts: Date.now() });
+  }
+
+  // meta 저장
+  await setDoc(docRef(db, 'erp_data', 'meta'), {
+    data: JSON.stringify({
+      _trelloKey:   dbToSave._trelloKey   || null,
+      _trelloToken: dbToSave._trelloToken || null,
+      _trelloLists: dbToSave._trelloLists || null,
+      _trelloCards: dbToSave._trelloCards || null,
+      _bomMargin:   dbToSave._bomMargin   || {},
+      _companyInfo: dbToSave._companyInfo || {},
+      _nextIds:     dbToSave._nextIds     || {},
+    }),
+    ts: Date.now()
+  });
 }
 
 async function loadDataFromFirestore() {
@@ -4722,12 +4720,21 @@ function syncGSheets() {
 // ═══════════════════════════════════════════════════════
 async function forceUploadToFirestore() {
   if (!confirm('현재 ERP 데이터를 Firestore에 업로드합니까?\n모든 사용자가 이 데이터를 보게 됩니다.')) return;
+
+  // Firestore 준비 확인
+  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) {
+    showNotif('⚠️ Firestore가 아직 초기화되지 않았습니다. 잠시 후 다시 시도하세요.', 'warning');
+    return;
+  }
+
   showNotif('업로드 중...', 'info');
   try {
     await _doSaveData();
-    showNotif('✅ Firestore 업로드 완료!', 'success');
+    showNotif('✅ Firestore 업로드 완료! 다른 사용자 로그인 시 동일하게 보입니다.', 'success');
   } catch(e) {
-    showNotif('업로드 실패: ' + e.message, 'warning');
+    console.error('Firestore 업로드 실패:', e);
+    showNotif('❌ 업로드 실패: ' + (e.code || e.message || '권한 오류'), 'warning');
+    alert('Firestore 오류 상세:\n' + (e.message || e));
   }
 }
 
