@@ -919,7 +919,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="card">
         <div class="card-body p0 tbl-wrap">
           <table>
-            <thead><tr><th>이름</th><th>이메일</th><th>역할</th><th>권한</th><th>가입일</th><th>최근접속</th><th>상태</th><th>관리</th></tr></thead>
+            <thead id="user-table-head"><tr><th>이름</th><th>이메일</th><th>역할</th><th>권한</th><th>가입일</th><th>최근접속</th><th>상태</th><th id="user-mgmt-th">관리</th></tr></thead>
             <tbody id="user-table"></tbody>
           </table>
         </div>
@@ -6051,16 +6051,24 @@ async function renderUserTableFirestore() {
   if (!window._loadFirestoreUsers) { renderUserTable(); return; }
   try {
     const users = await window._loadFirestoreUsers();
+    const isAdmin = window._currentUser && window._currentUser.isAdmin;
+    // 관리 열 헤더 표시/숨김
+    const mgmtTh = document.getElementById('user-mgmt-th');
+    if (mgmtTh) mgmtTh.style.display = isAdmin ? '' : 'none';
+    const colspan = isAdmin ? 8 : 7;
     $('user-table').innerHTML = users.map(u => `
       <tr>
-        <td><span class="lnk" style="font-weight:600" onclick="editFirestoreUser('${u.uid}','${u.name||''}','${u.email||''}','${u.role||'멤버'}','${u.permission||'read'}')">${u.name||'-'}${u.isAdmin?' 👑':''}</span></td>
+        <td>${isAdmin
+          ? `<span class="lnk" style="font-weight:600" onclick="editFirestoreUser('${u.uid}','${u.name||''}','${u.email||''}','${u.role||'멤버'}','${u.permission||'read'}')">${u.name||'-'}${u.isAdmin?' 👑':''}</span>`
+          : `<span style="font-weight:600;color:var(--gray-800)">${u.name||'-'}${u.isAdmin?' 👑':''}</span>`
+        }</td>
         <td>${u.email||'-'}</td>
         <td><span class="badge ${u.isAdmin?'sky':'gray'}">${u.role||'멤버'}</span></td>
         <td>${u.isAdmin ? '<span class=\"badge sky\">✏️ 쓰기</span>' : u.permission==='write' ? '<span class=\"badge sky\">✏️ 쓰기</span>' : '<span class=\"badge gray\">👁️ 보기</span>'}</td>
         <td>${u.joinDate||'-'}</td>
         <td>${u.lastLogin||'-'}</td>
         <td>${statusBadge(u.status||'승인대기')}</td>
-        <td style="white-space:nowrap">
+        ${isAdmin ? `<td style="white-space:nowrap">
           ${u.status==='승인대기'?`
             <button class="btn btn-success btn-xs" onclick="approveFirestoreUser('${u.uid}','write')">✅ 쓰기승인</button>
             <button class="btn btn-outline btn-xs" onclick="approveFirestoreUser('${u.uid}','read')">👁️ 보기승인</button>
@@ -6068,9 +6076,9 @@ async function renderUserTableFirestore() {
           `:`<button class="btn btn-outline btn-xs" onclick="toggleFirestoreUser('${u.uid}','${u.status}')">
             ${u.status==='활성'?'비활성화':'활성화'}
           </button>`}
-        </td>
+        </td>` : ''}
       </tr>
-    `).join('') || '<tr><td colspan="8" class="empty">사용자 없음</td></tr>';
+    `).join('') || `<tr><td colspan="${colspan}" class="empty">사용자 없음</td></tr>`;
   } catch(e) {
     renderUserTable(); // fallback
   }
