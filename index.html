@@ -2375,8 +2375,9 @@ function renderVendorTable() {
   }).join('');
   const filtered = vendorFilter==='전체' ? DB.vendors : (DB.vendors||[]).filter(v=>v.type===vendorFilter);
   const typeRowBg = {원자재:'#f7fef9', 부자재:'#fdf8ff', OEM:'#f7fcff', 완제품:'#fffef5'};
-  $('vendor-table').innerHTML = filtered.map(v => {
+  $('vendor-table').innerHTML = filtered.map((v, filteredIdx) => {
     const rowBg = typeRowBg[v.type] || '#fff';
+    const totalLen = filtered.length;
     return `
     <tr style="background:${rowBg}">
       <td>${`<span class="badge ${({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber'})[v.type]||'gray'}">${v.type}</span>`}</td>
@@ -2390,8 +2391,14 @@ function renderVendorTable() {
           <button onclick="openVendorQuoteById(${v.id},${idx})" title="${q.name}" style="display:inline-flex;align-items:center;gap:5px;background:#fdf2f8;color:#c4708a;border:1px solid #f0c0d4;padding:4px 11px;border-radius:7px;font-size:11.5px;font-weight:400;cursor:pointer;margin:2px;white-space:nowrap"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d97b9a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg> ${q.name}</button>
         `).join('') : '<span style="color:var(--gray-300);font-size:11px">-</span>'}
       </td>
-      <td>
-        <button class="btn btn-outline btn-xs" onclick="editVendor(${v.id})">수정</button>
+      <td style="white-space:nowrap">
+        <div style="display:inline-flex;align-items:center;gap:4px">
+          <button class="btn btn-outline btn-xs" onclick="editVendor(${v.id})" style="white-space:nowrap">수정</button>
+          <div style="display:inline-flex;flex-direction:column;gap:2px">
+            <button onclick="moveVendor('${v.id}','${filteredIdx > 0 ? filtered[filteredIdx-1].id : ''}')" ${filteredIdx===0?'disabled':''} style="background:${filteredIdx===0?'var(--gray-100)':'var(--sky-50)'};border:1px solid ${filteredIdx===0?'var(--gray-200)':'var(--sky-200)'};color:${filteredIdx===0?'var(--gray-300)':'var(--sky-500)'};border-radius:4px;width:20px;height:18px;cursor:${filteredIdx===0?'default':'pointer'};font-size:9px;display:flex;align-items:center;justify-content:center;padding:0">▲</button>
+            <button onclick="moveVendor('${v.id}','${filteredIdx < totalLen-1 ? filtered[filteredIdx+1].id : ''}')" ${filteredIdx===totalLen-1?'disabled':''} style="background:${filteredIdx===totalLen-1?'var(--gray-100)':'var(--sky-50)'};border:1px solid ${filteredIdx===totalLen-1?'var(--gray-200)':'var(--sky-200)'};color:${filteredIdx===totalLen-1?'var(--gray-300)':'var(--sky-500)'};border-radius:4px;width:20px;height:18px;cursor:${filteredIdx===totalLen-1?'default':'pointer'};font-size:9px;display:flex;align-items:center;justify-content:center;padding:0">▼</button>
+          </div>
+        </div>
       </td>
     </tr>
     `;
@@ -2476,6 +2483,19 @@ function saveVendor() {
     showNotif('업체가 등록되었습니다','success');
   }
   saveData(); closeModal('add-vendor'); renderVendorTable();
+}
+
+function moveVendor(idA, idB) {
+  if (!DB.vendors || !idA || !idB) return;
+  idA = parseInt(idA); idB = parseInt(idB);
+  const iA = DB.vendors.findIndex(v=>v.id===idA);
+  const iB = DB.vendors.findIndex(v=>v.id===idB);
+  if (iA < 0 || iB < 0) return;
+  const tmp = DB.vendors[iA];
+  DB.vendors[iA] = DB.vendors[iB];
+  DB.vendors[iB] = tmp;
+  saveData();
+  renderVendorTable();
 }
 
 function editVendor(id) {
