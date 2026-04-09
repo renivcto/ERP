@@ -3271,7 +3271,10 @@ function renderProdTable() {
       <td style="text-align:center">${fmt(p.qty)}개</td>
       <td style="text-align:center">${fmtW(p.amount)}</td>
       <td class="lnk" style="text-align:center" onclick="viewVendor(${p.vendorId})">${vendor.company||'-'}</td>
-      <td style="text-align:center"><button class="btn btn-outline btn-xs" onclick="editProd(${p.id})">수정</button></td>
+      <td style="text-align:center;white-space:nowrap">
+        ${(p.status==='생산중'||p.status==='지연'||p.status==='QC검사') ? `<button class="btn btn-success btn-xs" style="margin-right:4px;background:var(--green-500);border-color:var(--green-600);color:#fff" onclick="completeProd(${p.id})">✅ 완료</button>` : ''}
+        <button class="btn btn-outline btn-xs" onclick="editProd(${p.id})">수정</button>
+      </td>
     </tr>`;
   }).join('') || '<tr><td colspan="10" class="empty">등록된 생산이 없습니다</td></tr>';
 }
@@ -3346,6 +3349,16 @@ function editProd(id) {
       };
     }
   }, 50);
+}
+
+function completeProd(id) {
+  if (!confirm('생산완료 처리하시겠습니까?')) return;
+  const idx = DB.productions.findIndex(p => p.id === id);
+  if (idx < 0) return;
+  DB.productions[idx].status = '생산완료';
+  DB.productions[idx].progress = 100;
+  saveData(); renderProdTable(); renderDashboard(); updateBadges();
+  showNotif('생산완료 처리되었습니다', 'success');
 }
 
 function deleteProd(id) {
