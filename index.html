@@ -3816,7 +3816,7 @@ function renderOrderTable() {
       <td style="text-align:center">${o.inDate||'-'}</td>
       <td style="text-align:center">${payDisplay}</td>
       <td style="text-align:center">${fmtW(total)}</td>
-      <td style="text-align:center">${stockStatusBadge(o.stockStatus, dbIdx)}</td>
+      <td style="text-align:center">${stockStatusBadge(o.stockStatus, o.id)}</td>
       <td style="text-align:center">${stampBadge}</td>
       <td style="text-align:center">${statusBadge(o.status)}</td>
       <td style="white-space:nowrap;text-align:center">
@@ -3828,9 +3828,10 @@ function renderOrderTable() {
 }
 
 // 발주서 목록에서 원클릭 입고완료 처리
-function quickStockIn(idx) {
+function quickStockIn(orderId) {
+  const idx = DB.orders.findIndex(o => o.id === orderId);
+  if (idx < 0) { showNotif('발주서를 찾을 수 없습니다', 'warning'); return; }
   const o = DB.orders[idx];
-  if (!o) return;
   if (o.stockStatus === '입고완료') { showNotif('이미 입고완료 처리된 발주서입니다', 'info'); return; }
   if (!confirm(`[${o.serial||'발주서'}] 입고완료 처리하시겠습니까?\n재고가 자동으로 반영됩니다.`)) return;
 
@@ -3842,6 +3843,7 @@ function quickStockIn(idx) {
   completeRelatedProductions(o.rows, o.serial || '');
   saveData();
   renderOrderTable();
+  renderProdTable();
   updateBadges();
 }
 
@@ -4300,9 +4302,10 @@ function saveOrder() {
     showNotif('발주서가 저장되었습니다','success');
   }
 
-  // ── 입고완료로 변경 시 재고 자동 반영 ──────────────────
+  // ── 입고완료로 변경 시 재고 자동 반영 + 생산완료 처리 ─────
   if (newStockStatus === '입고완료' && prevStockStatus !== '입고완료') {
     processOrderStockIn(rows, $('o-inDate') ? $('o-in-date').value : today(), data.serial || '');
+    completeRelatedProductions(rows, data.serial || '');
   }
   // ── 입고완료 → 다른 상태로 되돌릴 시 재고 차감 ──────────
   if (prevStockStatus === '입고완료' && newStockStatus !== '입고완료') {
