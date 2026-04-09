@@ -3625,6 +3625,25 @@ function previewQuoteById(id) {
 // ═══════════════════════════════════════════════════════
 // ORDER
 // ═══════════════════════════════════════════════════════
+// 인덱스 기반 발주서 함수 (id 타입 불일치 문제 완전 해결)
+function editOrderByIdx(idx) {
+  const o = DB.orders[idx];
+  if (!o) { showNotif('발주서를 찾을 수 없습니다', 'warning'); return; }
+  editOrder(o.id);
+}
+function previewOrderByIdx(idx) {
+  const o = DB.orders[idx];
+  if (!o) return;
+  showRenivOrderPreview(o);
+}
+function viewOrderPDFByIdx(idx, type) {
+  const o = DB.orders[idx];
+  if (!o) return;
+  const data = type === 'stamp' ? o.stampData : o.pdfData;
+  if (!data) { showNotif(type==='stamp'?'도장 날인본이 없습니다':'원본 PDF가 없습니다','warning'); return; }
+  openDataUrlInNewTab(data, type==='stamp'?o.stampName:o.pdfName);
+}
+
 function renderOrderTable() {
   const stockStatusBadge = (s, orderId) => {
     const map = {'입고전':'gray','입고완료':'green','부분입고':'amber','입고반려':'red'};
@@ -3643,12 +3662,14 @@ function renderOrderTable() {
     return (b.orderDate||'').localeCompare(a.orderDate||'');
   });
   $('order-table').innerHTML = sorted.map(o => {
+    // DB.orders에서의 실제 인덱스를 사용 (id 타입 불일치 문제 방지)
+    const dbIdx = DB.orders.indexOf(o);
     const v = getVendor(o.vendorId);
     const supplyTotal = o.rows.reduce((s,r)=>s+r.qty*r.price,0);
     const total = Math.round(supplyTotal * 1.1);
     const itemList = o.rows.map(r=>r.name).slice(0,2).join(', ') + (o.rows.length>2?` 외 ${o.rows.length-2}건`:'');
     const stampBadge = o.stampName
-      ? `<span class="badge red" style="cursor:pointer;font-size:10px" onclick="viewOrderPDFById(${o.id},'stamp')" title="${o.stampName}">🔴 보기</span>`
+      ? `<span class="badge red" style="cursor:pointer;font-size:10px" onclick="viewOrderPDFByIdx(${dbIdx},'stamp')" title="${o.stampName}">🔴 보기</span>`
       : `<span class="badge gray" style="font-size:10px">없음</span>`;
     const payDday = o.payDate ? calcDday(o.payDate) : null;
     const payDisplay = o.payDate
@@ -3662,21 +3683,20 @@ function renderOrderTable() {
       <td>${o.inDate||'-'}</td>
       <td>${payDisplay}</td>
       <td>${fmtW(total)}</td>
-      <td>${stockStatusBadge(o.stockStatus, o.id)}</td>
+      <td>${stockStatusBadge(o.stockStatus, dbIdx)}</td>
       <td>${stampBadge}</td>
       <td>${statusBadge(o.status)}</td>
       <td style="white-space:nowrap">
-        <button class="btn btn-outline btn-xs" onclick="previewOrderById(${o.id})">보기</button>
-        <button class="btn btn-outline btn-xs" onclick="editOrder(${o.id})">수정</button>
+        <button class="btn btn-outline btn-xs" onclick="previewOrderByIdx(${dbIdx})">보기</button>
+        <button class="btn btn-outline btn-xs" onclick="editOrderByIdx(${dbIdx})">수정</button>
       </td>
     </tr>`;
   }).join('') || '<tr><td colspan="11" class="empty">발주서가 없습니다</td></tr>';
 }
 
 // 발주서 목록에서 원클릭 입고완료 처리
-function quickStockIn(orderId) {
-  orderId = parseInt(orderId);
-  const o = DB.orders.find(x => parseInt(x.id) === orderId || x.id == orderId);
+function quickStockIn(idx) {
+  const o = DB.orders[idx];
   if (!o) return;
   if (o.stockStatus === '입고완료') { showNotif('이미 입고완료 처리된 발주서입니다', 'info'); return; }
   if (!confirm(`[${o.serial||'발주서'}] 입고완료 처리하시겠습니까?\n재고가 자동으로 반영됩니다.`)) return;
