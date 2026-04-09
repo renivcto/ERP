@@ -6198,16 +6198,17 @@ async function renderUserTableFirestore() {
   if (!window._loadFirestoreUsers) { renderUserTable(); return; }
   try {
     const users = await window._loadFirestoreUsers();
-    // 저장된 순서 적용
-    if (window._firestoreUserUids && window._firestoreUserUids.length === users.length) {
-      users.sort((a, b) => {
-        const ai = window._firestoreUserUids.indexOf(a.uid);
-        const bi = window._firestoreUserUids.indexOf(b.uid);
-        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-      });
-    } else {
+    // 최초 1회만 순서 초기화, 이후엔 기존 순서 유지
+    if (!window._firestoreUserUids || window._firestoreUserUids.length !== users.length) {
       window._firestoreUserUids = users.map(u => u.uid);
     }
+    // 저장된 순서대로 정렬
+    users.sort((a, b) => {
+      const ai = window._firestoreUserUids.indexOf(a.uid);
+      const bi = window._firestoreUserUids.indexOf(b.uid);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
+    window._cachedFirestoreUsers = [...users];
     _renderUserTableFromList(users);
   } catch(e) {
     renderUserTable();
@@ -6219,7 +6220,8 @@ function _renderUserTableFromList(users) {
   const mgmtTh = document.getElementById('user-mgmt-th');
   if (mgmtTh) mgmtTh.style.display = isAdmin ? '' : 'none';
   const colspan = isAdmin ? 9 : 7;
-  window._firestoreUserUids = users.map(u => u.uid);
+  // ※ _firestoreUserUids 는 여기서 덮어쓰지 않음 — moveFirestoreUser가 관리
+  const total = users.length;
   $('user-table').innerHTML = users.map((u, idx) => `
       <tr>
         <td style="text-align:center">${isAdmin
@@ -6243,8 +6245,8 @@ function _renderUserTableFromList(users) {
         </td>
         <td style="text-align:center;white-space:nowrap">
           <div style="display:inline-flex;flex-direction:column;gap:1px">
-            <button onclick="moveFirestoreUser(${idx},-1)" ${idx===0?'disabled':''} style="background:${idx===0?'var(--gray-100)':'var(--sky-50)'};border:1px solid ${idx===0?'var(--gray-200)':'var(--sky-200)'};color:${idx===0?'var(--gray-300)':'var(--sky-500)'};border-radius:3px;width:14px;height:13px;cursor:${idx===0?'default':'pointer'};font-size:7px;display:flex;align-items:center;justify-content:center;padding:0">▲</button>
-            <button onclick="moveFirestoreUser(${idx},1)" ${idx===users.length-1?'disabled':''} style="background:${idx===users.length-1?'var(--gray-100)':'var(--sky-50)'};border:1px solid ${idx===users.length-1?'var(--gray-200)':'var(--sky-200)'};color:${idx===users.length-1?'var(--gray-300)':'var(--sky-500)'};border-radius:3px;width:14px;height:13px;cursor:${idx===users.length-1?'default':'pointer'};font-size:7px;display:flex;align-items:center;justify-content:center;padding:0">▼</button>
+            <button ${idx===0?'disabled':''} onclick="moveFirestoreUser(${idx},-1)" style="background:${idx===0?'var(--gray-100)':'var(--sky-50)'};border:1px solid ${idx===0?'var(--gray-200)':'var(--sky-200)'};color:${idx===0?'var(--gray-300)':'var(--sky-500)'};border-radius:3px;width:14px;height:13px;cursor:${idx===0?'default':'pointer'};font-size:7px;display:flex;align-items:center;justify-content:center;padding:0">▲</button>
+            <button ${idx===total-1?'disabled':''} onclick="moveFirestoreUser(${idx},1)" style="background:${idx===total-1?'var(--gray-100)':'var(--sky-50)'};border:1px solid ${idx===total-1?'var(--gray-200)':'var(--sky-200)'};color:${idx===total-1?'var(--gray-300)':'var(--sky-500)'};border-radius:3px;width:14px;height:13px;cursor:${idx===total-1?'default':'pointer'};font-size:7px;display:flex;align-items:center;justify-content:center;padding:0">▼</button>
           </div>
         </td>` : ''}
       </tr>
