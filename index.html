@@ -3218,7 +3218,9 @@ function aiAnalyzeBOM() {
 let prodFilter = '전체';
 
 function renderProdTable() {
-  const statuses = ['전체',...new Set(DB.productions.map(p=>p.status))];
+  // 전체/생산중/생산완료는 항상 고정, 나머지(지연/QC검사 등)는 데이터 있을 때만
+  const extraStatuses = [...new Set(DB.productions.map(p=>p.status))].filter(s=>s!=='생산중'&&s!=='생산완료');
+  const statuses = ['전체','생산중','생산완료',...extraStatuses];
   const prodChipColors = {
     '전체':   {bg:'var(--sky-500)',border:'var(--sky-500)',text:'#fff',activeBg:'var(--sky-600)'},
     '생산중': {bg:'#fbcfe8',border:'#f9a8d4',text:'#9d174d',activeBg:'#ec4899',activeText:'#fff'},
@@ -3255,8 +3257,9 @@ function renderProdTable() {
       if (!dateStr) return '';
       if (onlyActive && p.status !== '생산중' && p.status !== '지연' && p.status !== 'QC검사') return '';
       const days = Math.ceil((new Date(dateStr) - new Date()) / 86400000);
-      const color = days < 0 ? '#ef4444' : days <= 2 ? '#ef4444' : days <= 9 ? '#f59e0b' : '#22c55e';
-      const text = days < 0 ? `D+${Math.abs(days)}` : days === 0 ? 'D-Day' : `D-${days}`;
+      if (days < 0) return ''; // D-day 지난 것은 표시 안 함
+      const color = days <= 2 ? '#ef4444' : days <= 9 ? '#f59e0b' : '#22c55e';
+      const text = days === 0 ? 'D-Day' : `D-${days}`;
       return `<br><span style="display:inline-block;background:${color};color:#fff;font-size:9px;padding:0 5px;border-radius:8px;font-weight:700;line-height:18px;margin-top:2px">${text}</span>`;
     };
     const typeRowBg = {원자재:'#f7fef9', 부자재:'#fdf8ff', OEM:'#f7fcff', 완제품:'#fffef5', 외주가공:'#f8f9fa'};
@@ -3265,8 +3268,12 @@ function renderProdTable() {
       <td style="text-align:center"><span class="badge ${typeCls}" style="font-size:10px">${typeLabel}</span></td>
       <td class="lnk" onclick="showItemDetail(${p.productId})">${displayName}</td>
       <td style="text-align:center">
-        ${statusBadge(p.status)}
-        ${(p.status==='생산중'||p.status==='지연'||p.status==='QC검사') ? `<button class="btn btn-success btn-xs" style="margin-left:4px;background:var(--green-500);border-color:var(--green-600);color:#fff;white-space:nowrap;font-size:10px" onclick="completeProd(${p.id})">생산완료</button>` : ''}
+        ${(p.status==='생산중'||p.status==='지연'||p.status==='QC검사')
+          ? `<button class="btn btn-xs" style="background:#fbcfe8;border:1px solid #f9a8d4;color:#9d174d;font-size:11px;font-weight:600;cursor:pointer;border-radius:20px;padding:2px 10px" onclick="completeProd(${p.id})" title="클릭하면 생산완료 처리">생산중</button>`
+          : p.status==='생산완료'
+            ? `<span style="display:inline-block;background:#22c55e;color:#fff;font-size:11px;font-weight:600;border-radius:20px;padding:2px 10px">생산완료</span>`
+            : statusBadge(p.status)
+        }
       </td>
       <td style="white-space:nowrap;text-align:center">${p.inDate||'-'}${ddayBadge(p.inDate, true)}</td>
       <td style="text-align:center">${p.orderDate||'-'}</td>
