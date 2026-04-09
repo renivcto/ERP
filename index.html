@@ -2423,17 +2423,41 @@ function renderVendorQuoteList() {
   `).join('');
 }
 
+// data: URL을 Blob URL로 변환해 새 탭에서 열기
+function openDataUrlInNewTab(dataUrl, fileName) {
+  try {
+    // data:[mime];base64,[data] 파싱
+    const arr = dataUrl.split(',');
+    const mime = arr[0].match(/:(.*?);/)[1];
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) u8arr[n] = bstr.charCodeAt(n);
+    const blob = new Blob([u8arr], {type: mime});
+    const blobUrl = URL.createObjectURL(blob);
+    const win = window.open(blobUrl, '_blank');
+    // 새 탭이 열린 후 URL 해제 (메모리 관리)
+    if (win) setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+  } catch(e) {
+    // 변환 실패 시 다운로드로 fallback
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = fileName || '파일';
+    a.click();
+  }
+}
+
 function openVendorQuoteById(vendorId, idx) {
   const v = DB.vendors.find(v=>v.id===vendorId);
   if (!v || !v.quotes || !v.quotes[idx]) return;
   const q = v.quotes[idx];
-  window.open(q.data, '_blank');
+  openDataUrlInNewTab(q.data, q.fileName || q.name);
 }
 
 function openVendorQuote(idx) {
   const q = _vendorQuotes[idx];
   if (!q || !q.data) return;
-  window.open(q.data, '_blank');
+  openDataUrlInNewTab(q.data, q.fileName || q.name);
 }
 
 function addVendorQuote() {
@@ -2741,7 +2765,7 @@ function previewBarcodeImg(input) {
 function openItemQuoteFile(id) {
   const item = DB.items.find(i=>i.id===id);
   if (item && item.quoteFile) {
-    window.open(item.quoteFile, '_blank');
+    openDataUrlInNewTab(item.quoteFile, item.quoteFileName || '견적서');
   }
 }
 
@@ -2756,7 +2780,7 @@ function openQuoteFile() {
   const id = editingId['add-item'];
   const item = id ? DB.items.find(i=>i.id===id) : null;
   if (item && item.quoteFile) {
-    window.open(item.quoteFile, '_blank');
+    openDataUrlInNewTab(item.quoteFile, item.quoteFileName || '견적서');
   }
 }
 
