@@ -2210,27 +2210,26 @@ function renderDashStats() {
     const v = getVendor(o.vendorId);
     const t = o.rows.reduce((s,r)=>s+r.qty*r.price,0);
     const key = v.company||'-';
-    if (!vendorOrderMap[key]) vendorOrderMap[key] = {total:0, payDate:'', payDone: true};
+    if (!vendorOrderMap[key]) vendorOrderMap[key] = {total:0, orders:[]};
     vendorOrderMap[key].total += t;
-    // 결제일은 항상 최신으로 저장
-    if (o.payDate && o.payDate > vendorOrderMap[key].payDate) {
-      vendorOrderMap[key].payDate = o.payDate;
-      // 해당 결제일의 발주가 완료인지 여부
-      vendorOrderMap[key].payDone = (o.status === '완료');
-    }
+    vendorOrderMap[key].orders.push(o);
   });
   const vendorSubText = Object.entries(vendorOrderMap).sort((a,b)=>b[1].total-a[1].total).slice(0,3)
     .map(([c,v]) => {
+      // 업체명 + 총금액
+      const namePart = c.replace('(주)','').replace('㈜','') + ' ' + fmtW(Math.round(v.total*1.1));
+      // 발주 중 결제일이 있는 것만, 최신 결제일 발주 1건 표시
+      const latestOrder = v.orders.filter(o=>o.payDate).sort((a,b)=>b.payDate.localeCompare(a.payDate))[0];
+      if (!latestOrder) return namePart;
+      const isDone = latestOrder.status === '완료';
       let ddayHtml = '';
-      // 결제완료가 아닐 때만 D-day 표시
-      if (v.payDate && !v.payDone) {
-        const days = Math.ceil((new Date(v.payDate) - new Date()) / 86400000);
-        const bg = days < 0 ? '#ef4444' : days <= 14 ? '#f59e0b' : '#22c55e';
+      if (!isDone && latestOrder.payDate) {
+        const days = Math.ceil((new Date(latestOrder.payDate) - new Date()) / 86400000);
+        const bg = '#ef4444'; // 항상 빨간색
         const text = days < 0 ? `D+${Math.abs(days)}` : days === 0 ? 'D-Day' : `D-${days}`;
         ddayHtml = ` <span style="display:inline-block;background:${bg};color:#fff;font-size:9px;padding:0 5px;border-radius:8px;font-weight:700;line-height:18px;vertical-align:middle">${text}</span>`;
       }
-      return c.replace('(주)','').replace('㈜','') + ' ' + fmtW(Math.round(v.total*1.1)) +
-        (v.payDate ? ` <span style="font-size:9.5px;opacity:.8">(결제일 ${v.payDate.replace(/-/g,'.')})</span>${ddayHtml}` : '');
+      return namePart + ` <span style="font-size:9.5px;opacity:.8">(결제일 ${latestOrder.payDate.replace(/-/g,'.')})</span>${ddayHtml}`;
     })
     .join('<br>') || '발주 없음';
 
