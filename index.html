@@ -748,7 +748,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <!-- ══════════════ ITEM ══════════════ -->
     <div class="page" id="page-item">
       <div style="display:flex;justify-content:space-between;margin-bottom:14px;gap:8px;flex-wrap:wrap">
-        <div style="display:flex;gap:6px;flex-wrap:wrap" id="item-filter-chips"></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center" id="item-filter-chips"></div>
         <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
           <div style="background:var(--sky-50);border:1px solid var(--sky-200);border-radius:7px;padding:5px 12px;font-size:12px;color:var(--sky-800);white-space:nowrap">📦 총 재고평가: <strong id="item-total-stock-value">-</strong></div>
           <input type="text" class="fi" id="item-search" placeholder="품목 검색..." style="width:150px" oninput="renderItemTable()" onkeydown="if(event.key==='Enter')renderItemTable()"><button class="btn btn-outline btn-sm" onclick="renderItemTable()" style="padding:6px 10px">🔍</button>
@@ -1132,7 +1132,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="modal-hdr"><span class="modal-ttl">📦 품목 등록/수정</span><button class="modal-x" onclick="closeModal('add-item')">✕</button></div>
     <div class="modal-body">
       <div class="fg2">
-        <div class="fg"><label>분류<span class="req">*</span></label><select class="fs" id="i-type"><option>원자재</option><option>부자재</option><option>OEM</option><option>완제품</option><option>반제품</option></select></div>
+        <div class="fg"><label>분류<span class="req">*</span></label><select class="fs" id="i-type"><option>원자재</option><option>부자재</option><option>OEM</option><option>완제품</option><option>반제품</option><option>외주가공</option></select></div>
         <div class="fg"><label>품목코드</label><input class="fi" id="i-code" placeholder="RM-001" style="font-family:monospace"></div>
         <div class="fg full"><label>품목명<span class="req">*</span></label><input class="fi" id="i-name"></div>
         <div class="fg full"><label>업체</label><select class="fs" id="i-vendor"></select></div>
@@ -2387,7 +2387,7 @@ function renderVendorTable() {
     return `<div onclick="vendorFilter='${t}';renderVendorTable()" style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;cursor:pointer;font-size:11px;font-weight:500;background:${isActive?(c.activeBg||c.bg):c.bg};color:${isActive?(c.activeText||c.text):c.text};border:1px solid ${isActive?(c.activeBg||c.border):c.border};transition:all .15s">${t}(${cnt})</div>`;
   }).join('');
   const filtered = vendorFilter==='전체' ? DB.vendors : (DB.vendors||[]).filter(v=>v.type===vendorFilter);
-  const typeRowBg = {원자재:'#f7fef9', 부자재:'#fdf8ff', OEM:'#f7fcff', 완제품:'#fffef5'};
+  const typeRowBg = {원자재:'#f7fef9', 부자재:'#fdf8ff', OEM:'#f7fcff', 완제품:'#fffef5', 외주가공:'#f8f9fa'};
   $('vendor-table').innerHTML = filtered.map((v, filteredIdx) => {
     const rowBg = typeRowBg[v.type] || '#fff';
     const totalLen = filtered.length;
@@ -2586,7 +2586,7 @@ function viewVendor(id) {
 let itemFilter = '전체';
 
 function renderItemTable() {
-  const fixedTypes = ['원자재','부자재','OEM','완제품'];
+  const fixedTypes = ['원자재','부자재','OEM','완제품','외주가공'];
   const extraTypes = [...new Set(DB.items.map(i=>i.type))].filter(t => !fixedTypes.includes(t));
   const types = ['전체', ...fixedTypes, ...extraTypes];
   const chipColors = {
@@ -2595,6 +2595,7 @@ function renderItemTable() {
     '부자재': {bg:'#f3e8ff',        border:'#c084fc',         text:'#6b21a8', activeBg:'#9333ea', activeText:'#fff'},
     'OEM':    {bg:'#e0f2fe',        border:'#7dd3fc',         text:'#075985', activeBg:'#0284c7', activeText:'#fff'},
     '완제품': {bg:'#fef3c7',        border:'#fcd34d',         text:'#92400e', activeBg:'#d97706', activeText:'#fff'},
+    '외주가공':{bg:'#f1f5f9',       border:'#cbd5e1',         text:'#475569', activeBg:'#64748b', activeText:'#fff'},
   };
   $('item-filter-chips').innerHTML = types.map(t => {
     const c = chipColors[t] || chipColors['전체'];
@@ -2607,11 +2608,11 @@ function renderItemTable() {
   const search = ($('item-search') ? $('item-search').value : '').toLowerCase();
   let filtered = DB.items.filter(i => itemFilter==='전체' || i.type===itemFilter);
   if (search) filtered = filtered.filter(i => i.name.toLowerCase().includes(search) || i.code.toLowerCase().includes(search));
-  const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray'})[t]||'gray';
+  const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray',외주가공:'gray'})[t]||'gray';
   const totalVal = DB.items.reduce((s,i) => s + (i.stock||0)*(i.price||0), 0);
   const tvEl = $('item-total-stock-value');
   if (tvEl) tvEl.textContent = fmtW(totalVal);
-  const typeRowBg = {원자재:'#f7fef9', 부자재:'#fdf8ff', OEM:'#f7fcff', 완제품:'#fffef5'};
+  const typeRowBg = {원자재:'#f7fef9', 부자재:'#fdf8ff', OEM:'#f7fcff', 완제품:'#fffef5', 외주가공:'#f8f9fa'};
   $('item-table').innerHTML = filtered.map(i => {
     const v = getVendor(i.vendorId);
     const stockVal = (i.stock||0) * (i.price||0);
@@ -2821,7 +2822,7 @@ function showItemDetail(id) {
   if (!i.id) return;
   const v = getVendor(i.vendorId);
   const ss = stockStatus(i);
-  const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray'})[t]||'gray';
+  const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray',외주가공:'gray'})[t]||'gray';
   const dday = calcDday(i.expiry);
   $('item-detail-ttl').textContent = '📦 ' + i.name;
   $('item-detail-body').innerHTML = `
@@ -3193,7 +3194,7 @@ function renderProdTable() {
     const col = statusColor[p.status]||'var(--gray-400)';
     const checkCount = (p.checks||[]).filter(Boolean).length;
     const displayName = (item && item.name) ? item.name : (p.productName || '-');
-    const typeCls = item ? ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray'}[item.type]||'gray') : 'gray';
+    const typeCls = item ? ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray',외주가공:'gray'}[item.type]||'gray') : 'gray';
     const typeLabel = item ? (item.type||'-') : '-';
     // 결제일: 생산 데이터 → 발주서 순으로 조회
     let payDate = p.payDate || '';
@@ -3209,7 +3210,7 @@ function renderProdTable() {
       const text = days < 0 ? `D+${Math.abs(days)}` : days === 0 ? 'D-Day' : `D-${days}`;
       return `<br><span style="display:inline-block;background:${color};color:#fff;font-size:9px;padding:0 5px;border-radius:8px;font-weight:700;line-height:18px;margin-top:2px">${text}</span>`;
     };
-    const typeRowBg = {원자재:'#f7fef9', 부자재:'#fdf8ff', OEM:'#f7fcff', 완제품:'#fffef5'};
+    const typeRowBg = {원자재:'#f7fef9', 부자재:'#fdf8ff', OEM:'#f7fcff', 완제품:'#fffef5', 외주가공:'#f8f9fa'};
     const rowBg = item ? (typeRowBg[item.type] || '#fff') : '#fff';
     return `<tr style="background:${rowBg}">
       <td><span class="badge ${typeCls}" style="font-size:10px">${typeLabel}</span></td>
@@ -3395,13 +3396,13 @@ function deleteStockItem() {
 }
 
 function renderStockTable() {
-  const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray'})[t]||'gray';
-  const baseItems = DB.items.filter(i => i.type !== 'OEM');
+  const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray',외주가공:'gray'})[t]||'gray';
+  const baseItems = DB.items.filter(i => i.type !== 'OEM' && i.type !== '외주가공');
   const items = _stockTypeFilter === '전체' ? baseItems : baseItems.filter(i => i.type === _stockTypeFilter);
   const totalVal = baseItems.reduce((s,i) => s + (i.stock||0)*(i.price||0), 0);
   const tvEl = $('stock-total-value');
   if (tvEl) tvEl.textContent = fmtW(totalVal);
-  const typeRowBg = {원자재:'#f7fef9', 부자재:'#fdf8ff', OEM:'#f7fcff', 완제품:'#fffef5'};
+  const typeRowBg = {원자재:'#f7fef9', 부자재:'#fdf8ff', OEM:'#f7fcff', 완제품:'#fffef5', 외주가공:'#f8f9fa'};
   $('stock-table').innerHTML = items.map(i => {
     const pct = stockPct(i);
     const stockVal = (i.stock||0) * (i.price||0);
@@ -3724,9 +3725,13 @@ function renderOrderTable() {
     return (b.orderDate||'').localeCompare(a.orderDate||'');
   });
   $('order-table').innerHTML = sorted.map(o => {
-    // DB.orders에서의 실제 인덱스를 사용 (id 타입 불일치 문제 방지)
     const dbIdx = DB.orders.indexOf(o);
     const v = getVendor(o.vendorId);
+    // 행 배경색: 입고완료/완료=회색, 진행중=흰색 기본, 업체 분류 기반
+    const firstItem = o.rows[0] ? DB.items.find(i=>i.id===o.rows[0].itemId) : null;
+    const itemType = firstItem ? firstItem.type : '';
+    const typeRowBg = {원자재:'#f7fef9', 부자재:'#fdf8ff', OEM:'#f7fcff', 완제품:'#fffef5', 외주가공:'#f8f8f8'};
+    const rowBg = (o.status==='완료'||o.stockStatus==='입고완료') ? '#f9fafb' : (typeRowBg[itemType]||'#fff');
     const supplyTotal = o.rows.reduce((s,r)=>s+r.qty*r.price,0);
     const total = Math.round(supplyTotal * 1.1);
     const itemList = o.rows.map(r=>r.name).slice(0,2).join(', ') + (o.rows.length>2?` 외 ${o.rows.length-2}건`:'');
@@ -3737,7 +3742,7 @@ function renderOrderTable() {
     const payDisplay = o.payDate
       ? `${o.payDate} ${(payDday !== null && payDday >= 0) ? `<span class="badge ${payDday >= 10 ? 'green' : payDday >= 3 ? 'amber' : 'red'}" style="font-size:9px">D-${payDday === 0 ? 'Day' : payDday}</span>` : ''}`
       : '<span style="color:var(--gray-400);font-size:11px">미정</span>';
-    return `<tr>
+    return `<tr style="background:${rowBg}">
       <td style="font-family:monospace;font-size:11px">${o.serial||'PO-'+String(o.id).padStart(3,'0')}</td>
       <td class="lnk" onclick="viewVendor(${o.vendorId})">${v.company||'-'}</td>
       <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${itemList}">${itemList}</td>
@@ -6227,9 +6232,25 @@ async function renderUserTableFirestore() {
   if (!window._loadFirestoreUsers) { renderUserTable(); return; }
   try {
     const users = await window._loadFirestoreUsers();
-    // 최초 1회만 순서 초기화, 이후엔 기존 순서 유지
-    if (!window._firestoreUserUids || window._firestoreUserUids.length !== users.length) {
-      window._firestoreUserUids = users.map(u => u.uid);
+    // Firestore에서 저장된 순서 항상 불러오기 (새로고침 후에도 유지)
+    try {
+      const db = window._firebaseDb;
+      const docFn = window._firestoreDoc;
+      const getFn = window._firestoreGetDoc;
+      if (db && docFn && getFn) {
+        const snap = await getFn(docFn(db, 'shared', 'userOrder'));
+        if (snap && snap.exists && snap.exists() && snap.data().order && snap.data().order.length === users.length) {
+          window._firestoreUserUids = snap.data().order;
+        } else if (!window._firestoreUserUids || window._firestoreUserUids.length !== users.length) {
+          window._firestoreUserUids = users.map(u => u.uid);
+        }
+      } else if (!window._firestoreUserUids || window._firestoreUserUids.length !== users.length) {
+        window._firestoreUserUids = users.map(u => u.uid);
+      }
+    } catch(e) {
+      if (!window._firestoreUserUids || window._firestoreUserUids.length !== users.length) {
+        window._firestoreUserUids = users.map(u => u.uid);
+      }
     }
     // 저장된 순서대로 정렬
     users.sort((a, b) => {
