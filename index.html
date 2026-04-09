@@ -1213,14 +1213,14 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="modal-hdr"><span class="modal-ttl">🏭 생산 등록/수정</span><button class="modal-x" onclick="closeModal('add-production')">✕</button></div>
     <div class="modal-body">
       <div class="fg2">
-        <div class="fg full"><label>제품명<span class="req">*</span></label><select class="fs" id="p-product"></select></div>
+        <div class="fg full"><label>제품명<span class="req">*</span></label><select class="fs" id="p-product"><option value="">— 제품명을 선택하세요 —</option></select></div>
         <div class="fg"><label>발주일<span class="req">*</span></label><input class="fi" id="p-order-date" type="date"></div>
         <div class="fg"><label>입고예정일</label><input class="fi" id="p-in-date" type="date"></div>
         <div class="fg"><label>결제일</label><input class="fi" id="p-pay-date" type="date"></div>
         <div class="fg"><label>발주 수량</label><input class="fi" id="p-qty" type="number" placeholder="0"></div>
         <div class="fg"><label>예상금액(원)</label><input class="fi" id="p-amount" type="number" placeholder="0"></div>
         <div class="fg"><label>업체</label><select class="fs" id="p-vendor"></select></div>
-        <div class="fg"><label>상태</label><select class="fs" id="p-status"><option>생산중</option><option>QC검사</option><option>생산완료</option><option>입고완료</option><option>지연</option></select></div>
+        <div class="fg"><label>상태</label><select class="fs" id="p-status"><option value="">— 선택하세요 —</option><option>생산중</option><option>QC검사</option><option>생산완료</option><option>입고완료</option><option>지연</option></select></div>
         <div class="fg"><label>진행률(%)</label><input class="fi" id="p-progress" type="number" min="0" max="100" value="0"></div>
       </div>
       <div class="sec-title">체크 사항</div>
@@ -2194,7 +2194,17 @@ function openModal(id) {
     o.classList.add('show');
     // Populate dropdowns when opening
     // add-item: populateItemVendorSelect는 editItem/신규등록에서 직접 호출
-    if (id === 'add-production') { populateProdProduct(); populateProdVendor(); }
+    if (id === 'add-production') {
+      populateProdProduct(); populateProdVendor();
+      // 신규 등록 시 (editingId 없을 때) 폼 초기화
+      if (!editingId['add-production']) {
+        $('p-product').value=''; $('p-order-date').value=''; $('p-in-date').value='';
+        $('p-pay-date').value=''; $('p-qty').value=''; $('p-amount').value='';
+        $('p-vendor').value=''; $('p-status').value=''; $('p-progress').value='0';
+        ['pc1','pc2','pc3','pc4','pc5'].forEach(cid=>{ $(cid).checked=false; });
+        const delBtn = $('prod-delete-btn'); if (delBtn) delBtn.style.display='none';
+      }
+    }
     if (id === 'add-bom') { populateBOMProductModal(); populateBOMRows(); }
     if (id === 'stock-in-modal') { populateStockItemSelect('si-item'); $('si-date').value = today(); }
     if (id === 'stock-out-modal') { populateStockItemSelect('so-item'); $('so-date').value = today(); }
@@ -3267,17 +3277,18 @@ function renderProdTable() {
 }
 
 function populateProdProduct() {
-  const items = (DB.items||[]).filter(i=>i.type==='완제품'||i.type==='반제품');
-  $('p-product').innerHTML = items.map(i=>`<option value="${i.id}">${i.name}</option>`).join('');
+  const items = (DB.items||[]).filter(i=>i.type==='완제품'||i.type==='반제품'||i.type==='OEM'||i.type==='부자재'||i.type==='원자재');
+  $('p-product').innerHTML = '<option value="">— 제품명을 선택하세요 —</option>' + items.map(i=>`<option value="${i.id}">${i.name}</option>`).join('');
 }
 
 function populateProdVendor() {
-  $('p-vendor').innerHTML = DB.vendors.map(v=>`<option value="${v.id}">${v.company}</option>`).join('');
+  $('p-vendor').innerHTML = '<option value="">— 업체를 선택하세요 —</option>' + DB.vendors.map(v=>`<option value="${v.id}">${v.company}</option>`).join('');
 }
 
 function saveProduction() {
   const productId = parseInt($('p-product').value);
   if (!productId) { showNotif('제품을 선택하세요','warning'); return; }
+  if (!$('p-status').value) { showNotif('상태를 선택하세요','warning'); return; }
   const id = editingId['add-production'];
   const data = {
     productId, orderDate:$('p-order-date').value, inDate:$('p-in-date').value,
