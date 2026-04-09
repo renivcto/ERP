@@ -163,10 +163,10 @@ body{font-family:var(--font);background:var(--gray-50);color:var(--gray-800);hei
 .logo-ver{display:inline-block;background:var(--sky-500);color:#fff;font-size:9px;padding:2px 7px;border-radius:10px;margin-top:5px}
 .nav-group{padding:10px 8px 2px}
 .nav-group-title{color:var(--sky-300);font-size:9px;font-weight:600;letter-spacing:1.5px;padding:0 8px;margin-bottom:3px}
-.nav-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:7px;cursor:pointer;color:rgba(255,255,255,.7);font-size:13.5px;transition:all .12s;margin-bottom:1px;user-select:none;position:relative}
+.nav-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:7px;cursor:pointer;color:rgba(255,255,255,.7);font-size:12.5px;transition:all .12s;margin-bottom:1px;user-select:none;position:relative}
 .nav-item:hover{background:rgba(255,255,255,.1);color:#fff}
 .nav-item.active{background:rgba(255,255,255,.18);color:#fff;font-weight:500}
-.nav-item .ico{width:16px;text-align:center;font-size:15px;flex-shrink:0}
+.nav-item .ico{width:16px;text-align:center;font-size:14px;flex-shrink:0}
 .nav-badge{margin-left:auto;background:var(--sky-400);color:#fff;font-size:8px;padding:1px 5px;border-radius:8px;font-weight:600}
 .nav-badge.red{background:var(--red-500)}
 .sidebar-bottom{margin-top:auto;padding:10px 8px;border-top:1px solid rgba(255,255,255,.1)}
@@ -3207,7 +3207,7 @@ function renderProdTable() {
       if (!dateStr) return '';
       if (onlyActive && p.status !== '생산중' && p.status !== '지연' && p.status !== 'QC검사') return '';
       const days = Math.ceil((new Date(dateStr) - new Date()) / 86400000);
-      const color = days < 0 ? '#ef4444' : days <= 14 ? '#f59e0b' : '#22c55e';
+      const color = days < 0 ? '#ef4444' : days <= 2 ? '#ef4444' : days <= 9 ? '#f59e0b' : '#22c55e';
       const text = days < 0 ? `D+${Math.abs(days)}` : days === 0 ? 'D-Day' : `D-${days}`;
       return `<br><span style="display:inline-block;background:${color};color:#fff;font-size:9px;padding:0 5px;border-radius:8px;font-weight:700;line-height:18px;margin-top:2px">${text}</span>`;
     };
@@ -6233,27 +6233,18 @@ async function renderUserTableFirestore() {
   if (!window._loadFirestoreUsers) { renderUserTable(); return; }
   try {
     const users = await window._loadFirestoreUsers();
-    // Firestore에서 저장된 순서 항상 불러오기 (새로고침 후에도 유지)
+    // 저장된 순서 불러오기 (loadSharedSetting 사용 - 더 안정적)
     try {
-      const db = window._firebaseDb;
-      const docFn = window._firestoreDoc;
-      const getFn = window._firestoreGetDoc;
-      if (db && docFn && getFn) {
-        const snap = await getFn(docFn(db, 'shared', 'userOrder'));
-        if (snap && snap.exists && snap.exists() && snap.data().order && snap.data().order.length === users.length) {
-          window._firestoreUserUids = snap.data().order;
-        } else if (!window._firestoreUserUids || window._firestoreUserUids.length !== users.length) {
-          window._firestoreUserUids = users.map(u => u.uid);
-        }
-      } else if (!window._firestoreUserUids || window._firestoreUserUids.length !== users.length) {
+      const savedOrder = await loadSharedSetting('user_order');
+      if (savedOrder && Array.isArray(savedOrder) && savedOrder.length > 0) {
+        window._firestoreUserUids = savedOrder;
+      } else {
         window._firestoreUserUids = users.map(u => u.uid);
       }
     } catch(e) {
-      if (!window._firestoreUserUids || window._firestoreUserUids.length !== users.length) {
-        window._firestoreUserUids = users.map(u => u.uid);
-      }
+      window._firestoreUserUids = users.map(u => u.uid);
     }
-    // 저장된 순서대로 정렬
+    // 저장된 순서대로 정렬 (순서에 없는 uid는 뒤로)
     users.sort((a, b) => {
       const ai = window._firestoreUserUids.indexOf(a.uid);
       const bi = window._firestoreUserUids.indexOf(b.uid);
@@ -6316,14 +6307,10 @@ async function moveFirestoreUser(idx, dir) {
     window._cachedFirestoreUsers.sort((a, b) => arr.indexOf(a.uid) - arr.indexOf(b.uid));
     _renderUserTableFromList(window._cachedFirestoreUsers);
   }
-  // Firestore에 순서 저장 (비동기, UI는 이미 업데이트됨)
-  const db = window._firebaseDb;
-  const docFn = window._firestoreDoc;
-  const setFn = window._firestoreSetDoc;
-  if (db && docFn && setFn) {
-    setFn(docFn(db, 'shared', 'userOrder'), { order: arr }, { merge: false })
-      .catch(e => console.warn('userOrder 저장 실패:', e));
-  }
+  // Firestore에 순서 저장 (saveSharedSetting 사용 - 더 안정적)
+  saveSharedSetting('user_order', arr)
+    .then(() => console.log('✅ 사용자 순서 저장됨'))
+    .catch(e => console.warn('userOrder 저장 실패:', e));
 }
 
 async function approveFirestoreUser(uid, permission) {
