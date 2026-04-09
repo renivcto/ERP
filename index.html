@@ -5872,7 +5872,20 @@ function updateBadges() {
   const pendingUsr = (DB.users||[]).filter(u=>u.status==='승인대기').length;
   const activeTasks = (DB.tasks||[]).filter(t=>t.status!=='완료').length;
   $('nb-prod').textContent = late>0 ? '지연'+late : ''; $('nb-prod').style.display = late>0?'':'none';
-  $('nb-usr').textContent = pendingUsr>0 ? pendingUsr : ''; $('nb-usr').style.display = pendingUsr>0?'':'none';
+  // Firestore 사용자 수 실시간 반영
+  if (window._loadFirestoreUsers) {
+    window._loadFirestoreUsers().then(users => {
+      const pending = users.filter(u=>u.status==='승인대기').length;
+      const total = users.length;
+      // 승인대기가 있으면 대기 수, 없으면 전체 사용자 수 표시
+      const badge = pending > 0 ? pending : total;
+      if ($('nb-usr')) { $('nb-usr').textContent = badge; $('nb-usr').style.display = badge > 0 ? '' : 'none'; }
+    }).catch(()=>{
+      if ($('nb-usr')) { $('nb-usr').textContent = pendingUsr||''; $('nb-usr').style.display = pendingUsr>0?'':'none'; }
+    });
+  } else {
+    $('nb-usr').textContent = pendingUsr>0 ? pendingUsr : ''; $('nb-usr').style.display = pendingUsr>0?'':'none';
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -6188,6 +6201,8 @@ async function renderUserTableFirestore() {
     const mgmtTh = document.getElementById('user-mgmt-th');
     if (mgmtTh) mgmtTh.style.display = isAdmin ? '' : 'none';
     const colspan = isAdmin ? 9 : 7;
+    // 전역에 uid 순서 저장 (이동 버튼에서 참조)
+    window._firestoreUserUids = users.map(u => u.uid);
     $('user-table').innerHTML = users.map((u, idx) => `
       <tr>
         <td style="text-align:center">${isAdmin
@@ -6211,8 +6226,8 @@ async function renderUserTableFirestore() {
         </td>
         <td style="text-align:center;white-space:nowrap">
           <div style="display:inline-flex;flex-direction:column;gap:1px">
-            <button onclick="moveFirestoreUser(${idx},-1,'${users.map(x=>x.uid).join(',')}')" ${idx===0?'disabled':''} style="background:${idx===0?'var(--gray-100)':'var(--sky-50)'};border:1px solid ${idx===0?'var(--gray-200)':'var(--sky-200)'};color:${idx===0?'var(--gray-300)':'var(--sky-500)'};border-radius:3px;width:14px;height:13px;cursor:${idx===0?'default':'pointer'};font-size:7px;display:flex;align-items:center;justify-content:center;padding:0">▲</button>
-            <button onclick="moveFirestoreUser(${idx},1,'${users.map(x=>x.uid).join(',')}')" ${idx===users.length-1?'disabled':''} style="background:${idx===users.length-1?'var(--gray-100)':'var(--sky-50)'};border:1px solid ${idx===users.length-1?'var(--gray-200)':'var(--sky-200)'};color:${idx===users.length-1?'var(--gray-300)':'var(--sky-500)'};border-radius:3px;width:14px;height:13px;cursor:${idx===users.length-1?'default':'pointer'};font-size:7px;display:flex;align-items:center;justify-content:center;padding:0">▼</button>
+            <button onclick="moveFirestoreUser(${idx},-1)" ${idx===0?'disabled':''} style="background:${idx===0?'var(--gray-100)':'var(--sky-50)'};border:1px solid ${idx===0?'var(--gray-200)':'var(--sky-200)'};color:${idx===0?'var(--gray-300)':'var(--sky-500)'};border-radius:3px;width:14px;height:13px;cursor:${idx===0?'default':'pointer'};font-size:7px;display:flex;align-items:center;justify-content:center;padding:0">▲</button>
+            <button onclick="moveFirestoreUser(${idx},1)" ${idx===users.length-1?'disabled':''} style="background:${idx===users.length-1?'var(--gray-100)':'var(--sky-50)'};border:1px solid ${idx===users.length-1?'var(--gray-200)':'var(--sky-200)'};color:${idx===users.length-1?'var(--gray-300)':'var(--sky-500)'};border-radius:3px;width:14px;height:13px;cursor:${idx===users.length-1?'default':'pointer'};font-size:7px;display:flex;align-items:center;justify-content:center;padding:0">▼</button>
           </div>
         </td>` : ''}
       </tr>
@@ -6222,22 +6237,22 @@ async function renderUserTableFirestore() {
   }
 }
 
-async function moveFirestoreUser(idx, dir, uidsCsv) {
-  const uids = uidsCsv.split(',');
+async function moveFirestoreUser(idx, dir) {
+  const uids = window._firestoreUserUids;
+  if (!uids || !uids.length) return;
   const newIdx = idx + dir;
   if (newIdx < 0 || newIdx >= uids.length) return;
-  // Firestore에 order 필드로 순서 저장
+  const arr = [...uids];
+  const tmp = arr[idx]; arr[idx] = arr[newIdx]; arr[newIdx] = tmp;
+  window._firestoreUserUids = arr;
   const db = window._firebaseDb;
   const docFn = window._firestoreDoc;
   const setFn = window._firestoreSetDoc;
-  if (!db || !docFn || !setFn) return;
-  try {
-    await setFn(docFn(db, 'shared', 'userOrder'), { order: (() => {
-      const arr = [...uids];
-      const tmp = arr[idx]; arr[idx] = arr[newIdx]; arr[newIdx] = tmp;
-      return arr;
-    })() }, { merge: false });
-  } catch(e) {}
+  if (db && docFn && setFn) {
+    try {
+      await setFn(docFn(db, 'shared', 'userOrder'), { order: arr }, { merge: false });
+    } catch(e) { console.warn('userOrder 저장 실패:', e); }
+  }
   renderUserTableFirestore();
 }
 
