@@ -2212,7 +2212,9 @@ function renderDashStats() {
     const key = v.company||'-';
     if (!vendorOrderMap[key]) vendorOrderMap[key] = {total:0, payDate:''};
     vendorOrderMap[key].total += t;
-    if (o.payDate && o.payDate > vendorOrderMap[key].payDate) vendorOrderMap[key].payDate = o.payDate;
+    // 완료된 발주는 결제일 D-day 집계에서 제외
+    if (o.status !== '완료' && o.payDate && o.payDate > vendorOrderMap[key].payDate)
+      vendorOrderMap[key].payDate = o.payDate;
   });
   const vendorSubText = Object.entries(vendorOrderMap).sort((a,b)=>b[1].total-a[1].total).slice(0,3)
     .map(([c,v]) => {
@@ -3587,8 +3589,9 @@ function renderOrderTable() {
       ? `<span class="badge red" style="cursor:pointer;font-size:10px" onclick="viewOrderPDFById(${o.id},'stamp')" title="${o.stampName}">🔴 보기</span>`
       : `<span class="badge gray" style="font-size:10px">없음</span>`;
     const payDday = o.payDate ? calcDday(o.payDate) : null;
+    const isPayDone = o.status === '완료';
     const payDisplay = o.payDate
-      ? `${o.payDate} ${payDday !== null ? `<span class="badge ${payDday < 0 ? 'red' : payDday <= 7 ? 'amber' : 'green'}" style="font-size:9px">D${payDday >= 0 ? '-'+payDday : '+'+Math.abs(payDday)}</span>` : ''}`
+      ? `${o.payDate} ${(!isPayDone && payDday !== null) ? `<span class="badge ${payDday < 0 ? 'red' : payDday <= 7 ? 'amber' : 'green'}" style="font-size:9px">D${payDday >= 0 ? '-'+payDday : '+'+Math.abs(payDday)}</span>` : ''}`
       : '<span style="color:var(--gray-400);font-size:11px">미정</span>';
     return `<tr>
       <td style="font-family:monospace;font-size:11px">${o.serial||'PO-'+String(o.id).padStart(3,'0')}</td>
@@ -4983,7 +4986,7 @@ function renderTrelloCards(containerId) {
   const cards = DB._trelloCards || [];
   if (!lists.length || !cards.length) return;
 
-  const labelColor = {green:'#61bd4f',yellow:'#f2d600',orange:'#ff9f1a',red:'#eb5a46',purple:'#c377e0',blue:'#0079bf',sky:'#00c2e0',lime:'#51e898',pink:'#ff78cb',black:'#344563'};
+  const labelColor = {green:'#61bd4f',green_dark:'#519839',green_light:'#b7ddb0',yellow:'#f2d600',yellow_dark:'#cf513d',yellow_light:'#fce37c',orange:'#ff9f1a',orange_dark:'#c9372c',orange_light:'#fad29c',red:'#eb5a46',red_dark:'#8e1f12',red_light:'#f5b3aa',purple:'#c377e0',purple_dark:'#6e3698',purple_light:'#dfc0ef',blue:'#0079bf',blue_dark:'#094c72',blue_light:'#8bbdd9',sky:'#00c2e0',sky_dark:'#0379a0',sky_light:'#7ac9db',lime:'#51e898',lime_dark:'#1f7c43',lime_light:'#a5e8b3',pink:'#ff78cb',pink_dark:'#b33f8d',pink_light:'#ffd0ed',black:'#344563'};
   const isDash = containerId === 'dash-kanban-board';
 
   el.innerHTML = `
@@ -4999,7 +5002,7 @@ function renderTrelloCards(containerId) {
             </div>
             ${showCards.map(card=>`
               <div style="background:#fff;border-radius:6px;padding:9px 10px;margin-bottom:6px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.1)" onclick="window.open('https://trello.com/b/69ce5a3c','_blank')">
-                ${card.labels && card.labels.length ? `<div style="display:flex;gap:3px;margin-bottom:6px;flex-wrap:wrap">${card.labels.map(l=>`<span style="height:6px;width:36px;border-radius:3px;background:${labelColor[l.color]||'#ccc'};display:inline-block"></span>`).join('')}</div>` : ''}
+                ${card.labels && card.labels.length ? `<div style="display:flex;gap:3px;margin-bottom:6px;flex-wrap:wrap">${card.labels.map(l=>`<span style="height:6px;width:36px;border-radius:3px;background:${labelColor[l.color]||labelColor[l.color?.split('_')[0]]||'#b3bac5'};display:inline-block"></span>`).join('')}</div>` : ''}
                 <div style="color:#172b4d;font-size:12px;font-weight:500;line-height:1.5">${card.name}</div>
                 ${card.due ? `<div style="color:#6b778c;font-size:10.5px;margin-top:5px">📅 ${card.due.slice(0,10)}</div>` : ''}
               </div>`).join('')}
@@ -5016,7 +5019,7 @@ function renderDashKanban() {
   if (DB._trelloLists && DB._trelloCards && DB._trelloCards.length) {
     const lists = DB._trelloLists;
     const cards = DB._trelloCards;
-    const labelColor = {green:'#61bd4f',yellow:'#f2d600',orange:'#ff9f1a',red:'#eb5a46',purple:'#c377e0',blue:'#0079bf',sky:'#00c2e0',lime:'#51e898',pink:'#ff78cb',black:'#344563'};
+    const labelColor = {green:'#61bd4f',green_dark:'#519839',green_light:'#b7ddb0',yellow:'#f2d600',yellow_dark:'#cf513d',yellow_light:'#fce37c',orange:'#ff9f1a',orange_dark:'#c9372c',orange_light:'#fad29c',red:'#eb5a46',red_dark:'#8e1f12',red_light:'#f5b3aa',purple:'#c377e0',purple_dark:'#6e3698',purple_light:'#dfc0ef',blue:'#0079bf',blue_dark:'#094c72',blue_light:'#8bbdd9',sky:'#00c2e0',sky_dark:'#0379a0',sky_light:'#7ac9db',lime:'#51e898',lime_dark:'#1f7c43',lime_light:'#a5e8b3',pink:'#ff78cb',pink_dark:'#b33f8d',pink_light:'#ffd0ed',black:'#344563'};
     board.innerHTML = `
       <div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;align-items:flex-start;min-width:0">
         ${lists.map(list => {
@@ -5029,7 +5032,7 @@ function renderDashKanban() {
               </div>
               ${listCards.map(card=>`
                 <div style="background:#fff;border-radius:6px;padding:7px 9px;margin-bottom:5px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.1)" onclick="window.open('https://trello.com/b/69ce5a3c','_blank')">
-                  ${card.labels && card.labels.length ? `<div style="display:flex;gap:3px;margin-bottom:4px">${card.labels.map(l=>`<span style="height:4px;width:24px;border-radius:2px;background:${labelColor[l.color]||'#ccc'};display:inline-block"></span>`).join('')}</div>` : ''}
+                  ${card.labels && card.labels.length ? `<div style="display:flex;gap:3px;margin-bottom:4px">${card.labels.map(l=>`<span style="height:4px;width:24px;border-radius:2px;background:${labelColor[l.color]||labelColor[l.color?.split('_')[0]]||'#b3bac5'};display:inline-block"></span>`).join('')}</div>` : ''}
                   <div style="color:#172b4d;font-size:11px;font-weight:500;line-height:1.4">${card.name}</div>
                   ${card.due ? `<div style="color:#6b778c;font-size:9.5px;margin-top:3px">📅 ${card.due.slice(0,10)}</div>` : ''}
                 </div>`).join('')}
@@ -5048,7 +5051,7 @@ function renderDashKanban() {
 
 function renderKanban() {
   const board = $('kanban-board');
-  const labelColor = {green:'#61bd4f',yellow:'#f2d600',orange:'#ff9f1a',red:'#eb5a46',purple:'#c377e0',blue:'#0079bf',sky:'#00c2e0',lime:'#51e898',pink:'#ff78cb',black:'#344563'};
+  const labelColor = {green:'#61bd4f',green_dark:'#519839',green_light:'#b7ddb0',yellow:'#f2d600',yellow_dark:'#cf513d',yellow_light:'#fce37c',orange:'#ff9f1a',orange_dark:'#c9372c',orange_light:'#fad29c',red:'#eb5a46',red_dark:'#8e1f12',red_light:'#f5b3aa',purple:'#c377e0',purple_dark:'#6e3698',purple_light:'#dfc0ef',blue:'#0079bf',blue_dark:'#094c72',blue_light:'#8bbdd9',sky:'#00c2e0',sky_dark:'#0379a0',sky_light:'#7ac9db',lime:'#51e898',lime_dark:'#1f7c43',lime_light:'#a5e8b3',pink:'#ff78cb',pink_dark:'#b33f8d',pink_light:'#ffd0ed',black:'#344563'};
 
   // ① Trello 카드 섹션 (가로 스크롤)
   let trelloHtml = '';
@@ -5072,7 +5075,7 @@ function renderKanban() {
                 </div>
                 ${listCards.map(card => `
                   <div style="background:#fff;border-radius:6px;padding:9px 10px;margin-bottom:6px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.1)" onclick="window.open('https://trello.com/b/69ce5a3c','_blank')">
-                    ${card.labels && card.labels.length ? `<div style="display:flex;gap:3px;margin-bottom:6px;flex-wrap:wrap">${card.labels.map(l=>`<span style="height:6px;width:36px;border-radius:3px;background:${labelColor[l.color]||'#ccc'};display:inline-block"></span>`).join('')}</div>` : ''}
+                    ${card.labels && card.labels.length ? `<div style="display:flex;gap:3px;margin-bottom:6px;flex-wrap:wrap">${card.labels.map(l=>`<span style="height:6px;width:36px;border-radius:3px;background:${labelColor[l.color]||labelColor[l.color?.split('_')[0]]||'#b3bac5'};display:inline-block"></span>`).join('')}</div>` : ''}
                     <div style="color:#172b4d;font-size:12px;font-weight:500;line-height:1.5">${card.name}</div>
                     ${card.due ? `<div style="color:#6b778c;font-size:10.5px;margin-top:4px">📅 ${card.due.slice(0,10)}</div>` : ''}
                   </div>`).join('')}
