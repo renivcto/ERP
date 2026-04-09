@@ -2940,14 +2940,19 @@ function renderBOM() {
           <div style="position:relative"><input class="fi" type="number" id="bom-m-price" value="${savedMargin.price||product.price||0}" oninput="calcBOMMargin(${product.id})" style="font-size:14px;font-weight:700;color:var(--sky-700);padding-right:32px"><span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--gray-400);pointer-events:none">원</span></div>
         </div>
         <div>
-          <label style="font-size:11.5px;font-weight:700;color:var(--amber-600);display:block;margin-bottom:4px">부가세 <span style="font-size:10.5px;font-weight:400">(VAT 10%, 자동계산)</span></label>
+          <label style="font-size:11.5px;font-weight:700;color:var(--amber-600);display:block;margin-bottom:4px">부가세 <span style="font-size:10.5px;font-weight:400">(10%, 자동계산)</span></label>
           <div style="position:relative"><input class="fi" type="number" id="bom-m-vat" readonly style="font-size:14px;font-weight:700;color:var(--amber-600);background:var(--amber-50);cursor:not-allowed;padding-right:32px" placeholder="자동계산"><span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--gray-400);pointer-events:none">원</span></div>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
         <div>
-          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">광고비</label>
-          <div style="position:relative"><input class="fi" type="number" id="bom-m-ad" value="${savedMargin.ad||0}" oninput="calcBOMMargin(${product.id})" style="font-size:12px;padding-right:32px"><span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--gray-400);pointer-events:none">원</span></div>
+          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">ROAS <span style="font-size:10px;color:var(--gray-400)">(%)</span></label>
+          <div style="position:relative"><input class="fi" type="number" id="bom-m-roas" value="${savedMargin.roas||0}" oninput="calcBOMMargin(${product.id})" placeholder="예: 300" style="font-size:12px;padding-right:32px"><span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--gray-400);pointer-events:none">%</span></div>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">광고비 <span style="font-size:10px;color:var(--sky-400)">(자동계산)</span></label>
+          <div style="position:relative"><input class="fi" type="number" id="bom-m-ad" readonly style="font-size:12px;padding-right:32px;background:var(--sky-50);color:var(--sky-700);cursor:not-allowed" placeholder="ROAS 입력 시 자동계산"><span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--gray-400);pointer-events:none">원</span></div>
+          <div id="bom-roas-formula" style="font-size:9.5px;color:var(--gray-400);margin-top:2px"></div>
         </div>
         <div>
           <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">마케팅비</label>
@@ -2966,8 +2971,8 @@ function renderBOM() {
         <div class="cost-row"><span style="color:var(--gray-500)">제조원가</span><span>${fmtW(Math.round(totalCost))}</span></div>
         <div class="cost-row" id="bom-mr-extra"><span style="color:var(--gray-500)">추가비용 합계</span><span>-</span></div>
         <div class="cost-row" id="bom-mr-total" style="border-top:1px solid var(--gray-200);padding-top:6px;margin-top:4px"><span style="font-weight:600">총 원가</span><span>-</span></div>
-        <div class="cost-row" id="bom-mr-margin" style="font-weight:700;font-size:13px"><span>💰 예상 마진</span><span>-</span></div>
-        <div class="cost-row" id="bom-mr-rate" style="font-size:11.5px"><span>마진율</span><span>-</span></div>
+        <div class="cost-row" id="bom-mr-margin" style="font-weight:700;font-size:20px;margin-top:4px"><span>💰 예상 마진</span><span>-</span></div>
+        <div class="cost-row" id="bom-mr-rate" style="font-size:16px;font-weight:700"><span>마진율</span><span>-</span></div>
       </div>
     </div>
   `;
@@ -2984,6 +2989,7 @@ function calcBOMCost() {
 
 function calcBOMMargin(productId) {
   const priceEl = document.getElementById('bom-m-price');
+  const roasEl  = document.getElementById('bom-m-roas');
   const adEl    = document.getElementById('bom-m-ad');
   const mktEl   = document.getElementById('bom-m-mkt');
   const logiEl  = document.getElementById('bom-m-logi');
@@ -2991,10 +2997,20 @@ function calcBOMMargin(productId) {
   const vatEl   = document.getElementById('bom-m-vat');
 
   const price  = parseFloat(priceEl ? priceEl.value : 0)||0;
-  const ad     = parseFloat(adEl   ? adEl.value   : 0)||0;
+  const roas   = parseFloat(roasEl  ? roasEl.value  : 0)||0;
   const mkt    = parseFloat(mktEl  ? mktEl.value  : 0)||0;
   const logi   = parseFloat(logiEl ? logiEl.value : 0)||0;
   const etc    = parseFloat(etcEl  ? etcEl.value  : 0)||0;
+
+  // ROAS → 광고비 자동계산: 광고비 = 판매가 ÷ (ROAS ÷ 100)
+  const ad = (roas > 0 && price > 0) ? Math.round(price / (roas / 100)) : 0;
+  if (adEl) adEl.value = ad;
+  const formulaEl = document.getElementById('bom-roas-formula');
+  if (formulaEl) {
+    formulaEl.textContent = (roas > 0 && price > 0)
+      ? `${price.toLocaleString()} ÷ ${(roas/100).toFixed(1)} = ₩${ad.toLocaleString()}`
+      : '';
+  }
 
   // 부가세 자동 계산 (판매가의 10%)
   const vat = Math.round(price / 1.1 * 0.1);
@@ -3012,12 +3028,12 @@ function calcBOMMargin(productId) {
   const el = id => document.getElementById(id);
   if (el('bom-mr-extra')) el('bom-mr-extra').innerHTML = `<span style="color:var(--gray-500)">추가비용 합계 (부가세 포함)</span><span>${fmtW(extraCost)}</span>`;
   if (el('bom-mr-total')) el('bom-mr-total').innerHTML = `<span style="font-weight:600">총 원가</span><span style="font-weight:600">${fmtW(totalCostAll)}</span>`;
-  if (el('bom-mr-margin')) el('bom-mr-margin').innerHTML = `<span>💰 예상 마진</span><span style="color:${marginColor};font-size:14px">${fmtW(margin)}</span>`;
-  if (el('bom-mr-rate'))  el('bom-mr-rate').innerHTML  = `<span>마진율</span><span style="color:${marginColor}">${marginRate}%</span>`;
+  if (el('bom-mr-margin')) el('bom-mr-margin').innerHTML = `<span>💰 예상 마진</span><span style="color:${marginColor};font-size:20px;font-weight:700">${fmtW(margin)}</span>`;
+  if (el('bom-mr-rate'))  el('bom-mr-rate').innerHTML  = `<span>마진율</span><span style="color:${marginColor};font-size:16px;font-weight:700">${marginRate}%</span>`;
 
   // 저장
   if (!DB._bomMargin) DB._bomMargin = {};
-  DB._bomMargin[productId] = {price, ad, mkt, logi, etc};
+  DB._bomMargin[productId] = {price, roas, ad, mkt, logi, etc};
   saveSharedSetting('bom_margin', DB._bomMargin);
   saveData();
 }
