@@ -3312,35 +3312,40 @@ function editProd(id) {
   const p = DB.productions.find(x=>x.id===id);
   if (!p) return;
   editingId['add-production'] = id;
-  populateProdProduct(); populateProdVendor();
-  $('p-product').value=p.productId; $('p-order-date').value=p.orderDate||'';
-  $('p-in-date').value=p.inDate||'';
-  // 결제일: 생산 데이터 우선, 없으면 연결된 발주서에서 가져오기
-  let payDate = p.payDate || '';
-  if (!payDate && p.orderId) {
-    const linkedOrder = DB.orders.find(o => o.id === p.orderId);
-    if (linkedOrder && linkedOrder.payDate) payDate = linkedOrder.payDate;
-  }
-  if (!payDate && p.serial) {
-    const linkedOrder = DB.orders.find(o => o.serial === p.serial);
-    if (linkedOrder && linkedOrder.payDate) payDate = linkedOrder.payDate;
-  }
-  $('p-pay-date').value = payDate;
-  $('p-qty').value=p.qty||0; $('p-amount').value=p.amount||0;
-  $('p-vendor').value=p.vendorId||''; $('p-status').value=p.status||'생산중';
-  $('p-progress').value=p.progress||0;
-  ['pc1','pc2','pc3','pc4','pc5'].forEach((cid,i)=>{ $(cid).checked=(p.checks||[])[i]||false; });
-  // 삭제 버튼 표시
-  const delBtn = $('prod-delete-btn');
-  if (delBtn) {
-    delBtn.style.display = '';
-    delBtn.onclick = () => {
-      if (!confirm('이 생산 항목을 삭제합니까?')) return;
-      DB.productions = DB.productions.filter(x=>x.id!==id);
-      saveData(); closeModal('add-production'); renderProdTable(); updateBadges(); showNotif('삭제되었습니다');
-    };
-  }
+  // openModal에서 populate 호출 후, 값 세팅은 setTimeout으로 DOM 업데이트 후 실행
   openModal('add-production');
+  setTimeout(() => {
+    $('p-product').value = p.productId || '';
+    $('p-order-date').value = p.orderDate || '';
+    $('p-in-date').value = p.inDate || '';
+    // 결제일: 생산 데이터 우선, 없으면 연결된 발주서에서 가져오기
+    let payDate = p.payDate || '';
+    if (!payDate && p.orderId) {
+      const linkedOrder = DB.orders.find(o => o.id === p.orderId);
+      if (linkedOrder && linkedOrder.payDate) payDate = linkedOrder.payDate;
+    }
+    if (!payDate && p.serial) {
+      const linkedOrder = DB.orders.find(o => o.serial === p.serial);
+      if (linkedOrder && linkedOrder.payDate) payDate = linkedOrder.payDate;
+    }
+    $('p-pay-date').value = payDate;
+    $('p-qty').value = p.qty || 0;
+    $('p-amount').value = p.amount || 0;
+    $('p-vendor').value = p.vendorId || '';
+    $('p-status').value = p.status || '';
+    $('p-progress').value = p.progress || 0;
+    ['pc1','pc2','pc3','pc4','pc5'].forEach((cid,i) => { $(cid).checked = (p.checks||[])[i] || false; });
+    // 삭제 버튼 표시
+    const delBtn = $('prod-delete-btn');
+    if (delBtn) {
+      delBtn.style.display = '';
+      delBtn.onclick = () => {
+        if (!confirm('이 생산 항목을 삭제합니까?')) return;
+        DB.productions = DB.productions.filter(x => x.id !== id);
+        saveData(); closeModal('add-production'); renderProdTable(); updateBadges(); showNotif('삭제되었습니다');
+      };
+    }
+  }, 50);
 }
 
 function deleteProd(id) {
