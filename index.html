@@ -5452,7 +5452,6 @@ let _gdocEditId = null;
 let _gdocSelectedType = '';
 
 async function loadGdocs() {
-  // 로딩 중 표시
   const el = document.getElementById('gdoc-list');
   if (el) el.innerHTML = '<div style="color:var(--gray-400);font-size:12px;display:flex;align-items:center;gap:6px">⏳ 불러오는 중...</div>';
 
@@ -5465,50 +5464,55 @@ async function loadGdocs() {
 
   let loaded = false;
 
-  // 1순위: erp_data/meta에서 로드 (모든 유저 접근 가능)
+  // 1순위: shared/gdocs (쓰기권한 이상)
   try {
-    const metaSnap = await window._firestoreGetDoc(
-      window._firestoreDoc(window._firebaseDb, 'erp_data', 'meta')
+    const snap = await window._firestoreGetDoc(
+      window._firestoreDoc(window._firebaseDb, 'shared', 'gdocs')
     );
-    if (metaSnap.exists()) {
-      const meta = JSON.parse(metaSnap.data().data || '{}');
-      if (meta.gdocs) {
-        _gdocList = meta.gdocs;
-        loaded = true; // 빈 배열이어도 Firestore 우선
-      }
+    if (snap.exists() && snap.data().list) {
+      _gdocList = snap.data().list;
+      loaded = true;
+      // meta에도 동기화 저장 (보기권한이 읽을 수 있도록)
+      try {
+        const metaRef = window._firestoreDoc(window._firebaseDb, 'erp_data', 'meta');
+        const metaSnap = await window._firestoreGetDoc(metaRef);
+        const metaData = metaSnap.exists() ? JSON.parse(metaSnap.data().data || '{}') : {};
+        if (JSON.stringify(metaData.gdocs) !== JSON.stringify(_gdocList)) {
+          metaData.gdocs = _gdocList;
+          await window._firestoreSetDoc(metaRef, { data: JSON.stringify(metaData), ts: Date.now() }, { merge: true });
+        }
+      } catch(e) {}
     }
   } catch(e) {}
 
-  // 2순위: shared/gdocs에서 로드 (모든 권한)
+  // 2순위: erp_data/meta (보기권한 포함 모든 유저)
   if (!loaded) {
     try {
-      const snap = await window._firestoreGetDoc(
-        window._firestoreDoc(window._firebaseDb, 'shared', 'gdocs')
+      const metaSnap = await window._firestoreGetDoc(
+        window._firestoreDoc(window._firebaseDb, 'erp_data', 'meta')
       );
-      if (snap.exists() && snap.data().list && snap.data().list.length > 0) {
-        _gdocList = snap.data().list;
-        loaded = true;
+      if (metaSnap.exists()) {
+        const meta = JSON.parse(metaSnap.data().data || '{}');
+        if (meta.gdocs && meta.gdocs.length > 0) {
+          _gdocList = meta.gdocs;
+          loaded = true;
+        }
       }
     } catch(e) {}
   }
 
-  // 3순위: localStorage
+  // 3순위: localStorage 캐시
   if (!loaded) {
-    const local = JSON.parse(localStorage.getItem('reniv_gdocs') || '[]');
-    if (local.length > 0) _gdocList = local;
-    else _gdocList = [];
-  }
-
-  // DB에도 캐시 저장 → 보기 권한 사용자도 접근 가능
-  if (_gdocList.length > 0) {
-    try { DB._gdocs = _gdocList; localStorage.setItem('reniv_gdocs', JSON.stringify(_gdocList)); } catch(e) {}
-  } else {
-    // Firestore 로드 실패 시 로컬 캐시 시도
     try {
       const local = JSON.parse(localStorage.getItem('reniv_gdocs') || '[]');
-      if (local.length > 0) _gdocList = local;
+      if (local.length > 0) { _gdocList = local; loaded = true; }
     } catch(e) {}
   }
+
+  if (!loaded) _gdocList = [];
+
+  // 로컬 캐시 업데이트
+  try { localStorage.setItem('reniv_gdocs', JSON.stringify(_gdocList)); } catch(e) {}
   renderGdocList();
 }
 
