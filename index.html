@@ -2777,7 +2777,7 @@ function deleteItemFromModal() {
   const item = DB.items.find(i => i.id === id);
   if (!item) return;
   if (!confirm(`'${item.name}' 품목을 삭제합니까?\n연결된 BOM, 생산, 재고 데이터도 확인하세요.`)) return;
-  DB.items = DB.items.filter(i => i.id !== id);
+  DB.items = DB.items.filter(i => parseInt(i.id) !== parseInt(id) && i.id != id);
   saveData(); closeModal('add-item'); renderItemTable(); showNotif('품목이 삭제되었습니다');
 }
 
@@ -2855,7 +2855,9 @@ function copyItem(id) {
   if (!src) return;
   if (!confirm(`[${src.name}]을 복사합니까?`)) return;
   const copy = JSON.parse(JSON.stringify(src));
-  copy.id = nextId('item');
+  // 현재 items 중 최대 id보다 크게 설정하여 중복 방지
+  const maxId = Math.max(...(DB.items||[]).map(i=>parseInt(i.id)||0), 0);
+  copy.id = Math.max(nextId('item'), maxId + 1);
   // 이름은 원본과 동일하게 유지
   copy.code = '';  // 코드는 비워서 중복 방지
   copy.stock = 0;  // 재고는 0으로 초기화
@@ -2969,8 +2971,11 @@ function clearQuoteFile() {
 
 
 function deleteItem(id) {
-  if (!confirm('이 품목을 삭제합니까?')) return;
-  DB.items = (DB.items||[]).filter(i=>i.id!==id);
+  id = parseInt(id) || id;
+  const item = DB.items.find(i => parseInt(i.id)===parseInt(id) || i.id==id);
+  if (!item) return;
+  if (!confirm(`'${item.name}' 품목을 삭제합니까?`)) return;
+  DB.items = (DB.items||[]).filter(i => parseInt(i.id) !== parseInt(id) && i.id != id);
   saveData(); renderItemTable(); showNotif('품목이 삭제되었습니다');
 }
 
