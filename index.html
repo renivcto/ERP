@@ -4966,7 +4966,35 @@ function editFirestoreUser(uid, name, email, role, permission) {
   if ($('u-status'))     $('u-status').value = '활성';
   if ($('u-permission')) $('u-permission').value = permission || 'read';
   if ($('u-memo'))       $('u-memo').value = '';
-  if ($('u-delete-btn')) $('u-delete-btn').style.display = 'none';
+  // 자기 자신은 삭제 불가, 관리자도 삭제 불가
+  const isTargetAdmin = window._cachedFirestoreUsers && window._cachedFirestoreUsers.find(u=>u.uid===uid)?.isAdmin;
+  const isSelf = window._currentUser && window._currentUser.uid === uid;
+  const delBtn = $('u-delete-btn');
+  if (delBtn) {
+    if (isTargetAdmin || isSelf) {
+      delBtn.style.display = 'none';
+    } else {
+      delBtn.style.display = '';
+      delBtn.onclick = () => {
+        if (!confirm('이 사용자를 삭제하시겠습니까?\n삭제 후 복구할 수 없습니다.')) return;
+        if (window._firestoreDoc && window._firebaseDb) {
+          const { deleteDoc } = window._firestoreDeleteDoc
+            ? { deleteDoc: window._firestoreDeleteDoc }
+            : {};
+          // setDoc으로 비활성화 처리 (Firestore 규칙상 delete 권한 없을 수 있음)
+          window._firestoreSetDoc(
+            window._firestoreDoc(window._firebaseDb, 'users', uid),
+            { status: '삭제됨', deletedAt: new Date().toISOString() },
+            { merge: true }
+          ).then(() => {
+            showNotif('사용자가 삭제되었습니다', 'success');
+            closeModal('edit-user');
+            renderUserTableFirestore();
+          }).catch(e => showNotif('삭제 실패: ' + e.message, 'warning'));
+        }
+      };
+    }
+  }
   openModal('edit-user');
 }
 
@@ -6490,7 +6518,8 @@ async function renderUserTableFirestore() {
   if (addUserBtn) addUserBtn.style.display = (window._currentUser && window._currentUser.isAdmin) ? '' : 'none';
   if (!window._loadFirestoreUsers) { renderUserTable(); return; }
   try {
-    const users = await window._loadFirestoreUsers();
+    const allUsers = await window._loadFirestoreUsers();
+    const users = allUsers.filter(u => u.status !== '삭제됨');
     // 저장된 순서 불러오기 (loadSharedSetting 사용 - 더 안정적)
     try {
       const savedOrder = await loadSharedSetting('user_order');
