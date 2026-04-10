@@ -65,14 +65,14 @@
             role: isFirst ? 'CTO' : '멤버',
             status: isFirst ? '활성' : '승인대기',
             joinDate: new Date().toISOString().slice(0,10),
-            lastLogin: new Date().toISOString().slice(0,10),
+            lastLogin: new Date().toLocaleString('ko-KR',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).replace(/\. /g,'-').replace(/\./g,'').replace(' ',' ').trim(),
             isAdmin: isFirst,
           };
           try { await setDoc(userRef, userData); } catch(e) {}
           window._currentUser = userData;
         } else {
           const data = userSnap.data();
-          try { await setDoc(userRef, { lastLogin: new Date().toISOString().slice(0,10) }, { merge: true }); } catch(e) {}
+          try { const _now = new Date(); const _ls = _now.getFullYear()+'-'+String(_now.getMonth()+1).padStart(2,'0')+'-'+String(_now.getDate()).padStart(2,'0')+' '+String(_now.getHours()).padStart(2,'0')+':'+String(_now.getMinutes()).padStart(2,'0'); await setDoc(userRef, { lastLogin: _ls }, { merge: true }); } catch(e) {}
           window._currentUser = { ...data, uid: user.uid, permission: data.permission || 'read' };
         }
       } catch(e) {
@@ -2625,10 +2625,10 @@ function saveVendor() {
 
 function moveVendor(idA, idB) {
   if (!DB.vendors || !idA || !idB) return;
-  idA = parseInt(idA); idB = parseInt(idB);
-  const iA = DB.vendors.findIndex(v=>v.id===idA);
-  const iB = DB.vendors.findIndex(v=>v.id===idB);
-  if (iA < 0 || iB < 0) return;
+  // 타입 통일 (숫자/문자열 모두 대응)
+  const iA = DB.vendors.findIndex(v => String(v.id) === String(idA));
+  const iB = DB.vendors.findIndex(v => String(v.id) === String(idB));
+  if (iA < 0 || iB < 0) { showNotif('순서 변경 실패', 'warning'); return; }
   const tmp = DB.vendors[iA];
   DB.vendors[iA] = DB.vendors[iB];
   DB.vendors[iB] = tmp;
