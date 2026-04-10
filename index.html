@@ -573,7 +573,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
   <!-- HEADER -->
   <div id="header">
     <div class="hdr-title" id="pageTitle">대시보드</div>
-    <button class="hdr-btn" onclick="exportToSheets()" title="ERP → Google Sheets 내보내기">
+    <button class="hdr-btn" onclick="if(requireWrite())exportToSheets()" title="ERP → Google Sheets 내보내기">
       <span class="sync-dot"></span>Sheets 연동
     </button>
     <button class="hdr-btn" onclick="showNotif('알림 없음','info')">🔔<span class="dot"></span></button>
@@ -657,7 +657,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
               style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;background:#0052cc;color:#fff;border-radius:6px;font-size:11.5px;font-weight:500;text-decoration:none">
               📋 Trello 열기
             </a>
-            <button class="btn btn-outline btn-sm" onclick="loadTrelloCards()">🔄 새로고침</button>
+            <button class="btn btn-outline btn-sm" onclick="if(requireWrite())loadTrelloCards()">🔄 새로고침</button>
           </div>
         </div>
       </div>
@@ -771,9 +771,9 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div style="display:flex;align-items:center;gap:8px">
           <label style="font-size:12px;color:var(--gray-600)">제품 선택:</label>
           <select class="fs" id="bom-product-sel" style="width:260px;max-width:100%" onchange="renderBOM()"></select>
-          <button class="btn btn-outline btn-sm" onclick="editCurrentBOM()" style="color:var(--sky-700);border-color:var(--sky-300)">✏️ BOM 수정</button>
+          <button class="btn btn-outline btn-sm" onclick="if(requireWrite())editCurrentBOM()" style="color:var(--sky-700);border-color:var(--sky-300)">✏️ BOM 수정</button>
           <div style="width:16px"></div>
-          <button class="btn btn-sm" onclick="openModal('add-bom')" style="background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0">+ BOM 등록</button>
+          <button class="btn btn-sm" onclick="if(requireWrite())openModal('add-bom')" style="background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0">+ BOM 등록</button>
         </div>
       </div>
       <!-- 상단: BOM 테이블(좌) + 판매가 및 마진 계산(우) -->
@@ -914,7 +914,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="page" id="page-users">
       <div class="alert info" style="margin-bottom:14px">ℹ️ Google 계정으로 가입한 사용자는 관리자 승인 후 데이터 접근이 가능합니다.</div>
       <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
-        <button class="btn btn-primary btn-sm" onclick="openModal('add-user')">+ 사용자 추가</button>
+        <button class="btn btn-primary btn-sm" id="add-user-btn" onclick="openModal('add-user')">+ 사용자 추가</button>
       </div>
       <div class="card">
         <div class="card-body p0 tbl-wrap">
@@ -3124,7 +3124,7 @@ function renderBOM() {
   const savedMargin = DB._bomMargin && DB._bomMargin[product.id] || {};
   $('bom-margin-box').innerHTML = `
     <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:10px;padding:14px 16px;margin-top:4px">
-      <div style="font-size:12.5px;font-weight:600;color:var(--gray-700);margin-bottom:12px;display:flex;align-items:center;justify-content:space-between"><span>💳 판매가 및 마진 계산</span><button class="btn btn-primary btn-sm" onclick="calcBOMCost()" style="font-size:11px;padding:4px 10px">💰 원가 계산 &amp; 저장</button></div>
+      <div style="font-size:12.5px;font-weight:600;color:var(--gray-700);margin-bottom:12px;display:flex;align-items:center;justify-content:space-between"><span>💳 판매가 및 마진 계산</span><button class="btn btn-primary btn-sm" onclick="if(requireWrite())calcBOMCost()" style="font-size:11px;padding:4px 10px">💰 원가 계산 &amp; 저장</button></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
         <div>
           <label style="font-size:11.5px;font-weight:700;color:var(--gray-700);display:block;margin-bottom:4px">판매가 <span style="font-size:10.5px;color:var(--gray-400);font-weight:400">(부가세 포함 금액)</span></label>
@@ -5471,7 +5471,7 @@ async function loadGdocs() {
     }
   } catch(e) {}
 
-  // 2순위: shared/gdocs에서 로드 (관리자/쓰기권한)
+  // 2순위: shared/gdocs에서 로드 (모든 권한)
   if (!loaded) {
     try {
       const snap = await window._firestoreGetDoc(
@@ -5491,12 +5491,22 @@ async function loadGdocs() {
     else _gdocList = [];
   }
 
+  // DB에도 캐시 저장 → 보기 권한 사용자도 접근 가능
+  if (_gdocList.length > 0) {
+    try { DB._gdocs = _gdocList; localStorage.setItem('reniv_gdocs', JSON.stringify(_gdocList)); } catch(e) {}
+  } else {
+    // Firestore 로드 실패 시 로컬 캐시 시도
+    try {
+      const local = JSON.parse(localStorage.getItem('reniv_gdocs') || '[]');
+      if (local.length > 0) _gdocList = local;
+    } catch(e) {}
+  }
   renderGdocList();
 }
 
 async function saveGdocsToFirestore() {
-  // localStorage에 즉시 백업
-  try { localStorage.setItem('reniv_gdocs', JSON.stringify(_gdocList)); } catch(e) {}
+  // localStorage 및 DB에 즉시 백업
+  try { localStorage.setItem('reniv_gdocs', JSON.stringify(_gdocList)); DB._gdocs = _gdocList; } catch(e) {}
 
   // erp_data/meta에 저장 (모든 유저가 읽을 수 있는 곳 - 최우선)
   try {
@@ -6465,6 +6475,9 @@ function initERPWhenReady() {
 
 // ─── 사용자 관리 페이지 — Firestore 연동 ────────────────
 async function renderUserTableFirestore() {
+  // 사용자 추가 버튼 - 관리자만 표시
+  const addUserBtn = document.getElementById('add-user-btn');
+  if (addUserBtn) addUserBtn.style.display = (window._currentUser && window._currentUser.isAdmin) ? '' : 'none';
   if (!window._loadFirestoreUsers) { renderUserTable(); return; }
   try {
     const users = await window._loadFirestoreUsers();
