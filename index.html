@@ -2855,18 +2855,20 @@ function copyItem(id) {
   if (!src) return;
   if (!confirm(`[${src.name}]을 복사합니까?`)) return;
   const copy = JSON.parse(JSON.stringify(src));
-  // 현재 items 중 최대 id보다 크게 설정하여 중복 방지
+  // 현재 items 중 최대 id + 1로 설정 (nextId 사용 안 함 - 중복 방지)
   const maxId = Math.max(...(DB.items||[]).map(i=>parseInt(i.id)||0), 0);
-  copy.id = Math.max(nextId('item'), maxId + 1);
-  // 이름은 원본과 동일하게 유지
+  copy.id = maxId + 1;
+  DB._nextId['item'] = copy.id + 1; // _nextId도 동기화
+  copy.name = src.name + ' (복사)';
   copy.code = src.code ? src.code + '_1' : '';
-  copy.stock = 0;  // 재고는 0으로 초기화
+  copy.stock = 0;
   DB.items.push(copy);
-  saveData();
-  // 검색어/필터 초기화 후 렌더링 → 복사본 바로 보이게
-  itemFilter = '전체';
+  // 현재 필터 저장 후 검색어만 초기화 (복사본이 보이도록)
+  const savedFilter = itemFilter;
   const searchEl = $('item-search');
   if (searchEl) searchEl.value = '';
+  itemFilter = savedFilter; // 필터는 유지
+  saveData();
   renderItemTable();
   showNotif('복사되었습니다. 품목명/코드를 수정해주세요.', 'success');
 }
