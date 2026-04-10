@@ -723,7 +723,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="page" id="page-vendor">
       <div style="display:flex;justify-content:space-between;margin-bottom:14px;gap:8px;flex-wrap:wrap">
         <div style="display:flex;gap:6px;flex-wrap:wrap" id="vendor-filter-chips"></div>
-        <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-vendor']=null;_vendorQuotes=[];const db=$('vendor-delete-btn');if(db)db.style.display='none';$('v-company').value='';$('v-type').value='원자재';$('v-contact').value='';$('v-phone').value='';$('v-email').value='';$('v-addr').value='';$('v-desc').value='';setTimeout(()=>renderVendorQuoteList(),10);openModal('add-vendor')}">+ 업체 등록</button>
+        <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-vendor']=null;_vendorQuotes=[];const db=$('vendor-delete-btn');if(db)db.style.display='none';$('v-company').value='';$('v-type').value='원자재';$('v-contact').value='';$('v-phone').value='';$('v-email').value='';$('v-addr').value='';$('v-desc').value='';window._vendorAttachments=[];setTimeout(()=>{renderVendorQuoteList();renderVendorAttachList();},10);openModal('add-vendor')}">+ 업체 등록</button>
       </div>
       <div class="card">
         <div class="card-body p0 tbl-wrap">
@@ -1099,7 +1099,17 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="fg full"><label>이메일</label><input class="fi" id="v-email" type="email"></div>
         <div class="fg full"><label>주소</label><input class="fi" id="v-addr"></div>
         <div class="fg full"><label>사업자등록번호</label><input class="fi" id="v-bizno" placeholder="000-00-00000" style="font-family:monospace"></div>
-        <div class="fg full"><label>거래처 설명</label><textarea class="fta" id="v-desc"></textarea></div>
+        <div class="fg full"><label>거래처 설명 (비고)</label><textarea class="fta" id="v-desc" style="min-height:80px"></textarea></div>
+        <!-- 비고 첨부파일 -->
+        <div class="fg full">
+          <label style="font-size:13px;font-weight:600;color:var(--gray-700)">📎 비고 첨부파일 <span style="font-size:11px;color:var(--gray-400);font-weight:400">(여러 개 등록 가능)</span></label>
+          <div id="v-attach-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--gray-50);border:1px dashed var(--gray-300);border-radius:7px;padding:8px 10px">
+            <input class="fi" id="v-attach-name-inp" placeholder="파일 설명 (선택)" style="flex:1;min-width:140px">
+            <input type="file" id="v-attach-file-inp" accept="*/*" style="font-size:11px;flex:1;min-width:140px">
+            <button class="btn btn-outline btn-sm" onclick="addVendorAttach()">+ 추가</button>
+          </div>
+        </div>
         <!-- 견적서 다중 파일 -->
         <div class="fg full">
           <label style="font-size:13px;font-weight:600;color:var(--gray-700)"><span style="font-size:16px">📄</span> 견적서 파일 <span style="font-size:11px;color:var(--gray-400);font-weight:400">(여러 개 등록 가능)</span></label>
@@ -2553,6 +2563,43 @@ function addVendorQuote() {
   reader.readAsDataURL(file);
 }
 
+function renderVendorAttachList() {
+  const list = document.getElementById('v-attach-list');
+  if (!list) return;
+  const atts = window._vendorAttachments || [];
+  list.innerHTML = atts.map((a, i) => `
+    <div style="display:flex;align-items:center;gap:8px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;padding:6px 10px">
+      <span style="font-size:14px">📄</span>
+      <span style="font-size:12px;flex:1;color:var(--gray-700)">${a.name ? '['+a.name+'] ' : ''}${a.fileName}</span>
+      <a href="${a.data}" download="${a.fileName}" style="color:var(--sky-600);font-size:12px;text-decoration:none">⬇</a>
+      <button class="btn btn-danger btn-xs" onclick="removeVendorAttach(${i})">✕</button>
+    </div>`).join('') || '<span style="font-size:12px;color:var(--gray-400)">첨부파일 없음</span>';
+}
+
+function removeVendorAttach(i) {
+  if (!window._vendorAttachments) return;
+  window._vendorAttachments.splice(i, 1);
+  renderVendorAttachList();
+}
+
+function addVendorAttach() {
+  const nameInp = document.getElementById('v-attach-name-inp');
+  const fileInp = document.getElementById('v-attach-file-inp');
+  const name = nameInp ? nameInp.value.trim() : '';
+  if (!fileInp || !fileInp.files || !fileInp.files[0]) { showNotif('파일을 선택해주세요','warning'); return; }
+  const file = fileInp.files[0];
+  const reader = new FileReader();
+  reader.onload = e => {
+    if (!window._vendorAttachments) window._vendorAttachments = [];
+    window._vendorAttachments.push({ name, fileName: file.name, data: e.target.result });
+    renderVendorAttachList();
+    if (nameInp) nameInp.value = '';
+    if (fileInp) fileInp.value = '';
+    showNotif('첨부파일이 추가되었습니다','success');
+  };
+  reader.readAsDataURL(file);
+}
+
 function saveVendor() {
   const company = $('v-company').value.trim();
   if (!company) { showNotif('회사명을 입력하세요','warning'); return; }
@@ -2563,7 +2610,8 @@ function saveVendor() {
     phone:$('v-phone').value, email:$('v-email').value,
     addr:$('v-addr').value, desc:$('v-desc').value,
     bizno:$('v-bizno')?$('v-bizno').value.trim():'',
-    quotes: _vendorQuotes.length ? _vendorQuotes : (existing ? (existing.quotes||[]) : [])
+    quotes: _vendorQuotes.length ? _vendorQuotes : (existing ? (existing.quotes||[]) : []),
+    attachments: window._vendorAttachments && window._vendorAttachments.length ? window._vendorAttachments : (existing ? (existing.attachments||[]) : [])
   };
   if (id != null) {
     const idx = DB.vendors.findIndex(v=>v.id==id);
@@ -2600,10 +2648,11 @@ function editVendor(id) {
   $('v-desc').value = v.desc||'';
   if ($('v-bizno')) $('v-bizno').value = v.bizno||'';
   _vendorQuotes = v.quotes ? JSON.parse(JSON.stringify(v.quotes)) : [];
+  window._vendorAttachments = v.attachments ? JSON.parse(JSON.stringify(v.attachments)) : [];
   const delBtn = $('vendor-delete-btn');
   if (delBtn) delBtn.style.display = '';
   openModal('add-vendor');
-  setTimeout(() => renderVendorQuoteList(), 10);
+  setTimeout(() => { renderVendorQuoteList(); renderVendorAttachList(); }, 10);
 }
 
 
@@ -2633,7 +2682,16 @@ function viewVendor(id) {
       <div><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">전화</div>${v.phone||'-'}</div>
       <div><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">이메일</div><span style="color:var(--sky-600)">${v.email||'-'}</span></div>
       <div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">주소</div>${v.addr||'-'}</div>
-      <div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">설명</div>${v.desc||'-'}</div>
+      <div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">설명</div><div style="white-space:pre-wrap;line-height:1.6">${v.desc||'-'}</div></div>
+      ${(v.attachments&&v.attachments.length) ? `
+      <div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:6px">📎 첨부파일 (${v.attachments.length}개)</div>
+      <div style="display:flex;flex-direction:column;gap:5px">
+        ${v.attachments.map((a,i)=>`<div style="display:flex;align-items:center;gap:8px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;padding:6px 10px">
+          <span style="font-size:14px">📄</span>
+          <span style="font-size:12px;flex:1;color:var(--gray-700)">${a.name||a.fileName}</span>
+          <a href="${a.data}" download="${a.fileName}" style="color:var(--sky-600);font-size:12px;text-decoration:none">⬇ 다운로드</a>
+        </div>`).join('')}
+      </div></div>` : ''}
     </div>
     <div class="sec-title">공급 품목 (${items.length}개)</div>
     <div style="display:flex;flex-wrap:wrap;gap:5px">
