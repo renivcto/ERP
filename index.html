@@ -1024,24 +1024,47 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <span class="card-title" id="cs-list-title">💬 소비자 CS 목록</span>
           <div style="display:flex;gap:6px">
             <input class="fi" id="cs-search" placeholder="검색..." style="width:160px;padding:5px 10px;font-size:11.5px" oninput="renderCsList()">
-            <button class="btn btn-primary btn-sm" onclick="if(requireWrite())openCsForm()">+ 새 상담</button>
+            <button class="btn btn-outline btn-sm" onclick="if(requireWrite())openCsForm('new')">+ 주문 전 고객</button>
+            <button class="btn btn-primary btn-sm" onclick="if(requireWrite())openCsForm('order')">+ 기존 주문 고객</button>
           </div>
         </div>
         <div class="card-body" style="overflow-x:auto">
-          <table class="tbl"><thead><tr><th>상담일시</th><th>고객명</th><th>유형</th><th>카테고리</th><th>상품</th><th>상태</th><th>긴급도</th><th>상담자</th></tr></thead><tbody id="cs-table"></tbody></table>
+          <table class="tbl"><thead><tr><th>상담일시</th><th>고객명</th><th>유형</th><th>카테고리</th><th>주문연동</th><th>상품</th><th>상태</th><th>긴급도</th><th>상담자</th></tr></thead><tbody id="cs-table"></tbody></table>
         </div>
       </div>
 
       <!-- CS 입력 폼 모달 -->
       <div class="overlay" id="overlay-cs-form-modal">
-        <div class="modal" style="width:580px">
+        <div class="modal" style="width:620px">
           <div class="modal-hdr"><span class="modal-ttl" id="cs-form-title">💬 새 상담 등록</span><button class="modal-x" onclick="closeModal('cs-form-modal')">✕</button></div>
           <div class="modal-body" style="max-height:65vh;overflow-y:auto">
-            <div class="fg"><label>상담 유형<span class="req">*</span></label><span id="cs-form-type-display" style="font-size:12px;color:var(--gray-500)">소비자</span></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-              <div class="fg"><label>고객명<span class="req">*</span></label><input class="fi" id="cs-customer"></div>
-              <div class="fg"><label>연락처<span class="req">*</span></label><input class="fi" id="cs-phone" placeholder="010-0000-0000"></div>
+            <div class="fg"><label>상담 대상</label><span id="cs-form-type-display" style="font-size:12px;color:var(--gray-500)">소비자</span></div>
+
+            <!-- 기존 주문 고객 검색 영역 -->
+            <div id="cs-order-search-area" style="display:none;background:var(--sky-50);border:1px solid var(--sky-200);border-radius:8px;padding:14px;margin-bottom:14px">
+              <div style="font-size:12px;font-weight:600;color:var(--sky-800);margin-bottom:10px">🔍 주문 검색 — 고객명·주문번호·쇼핑몰로 검색</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end">
+                <div class="fg" style="margin:0"><label style="font-size:10.5px">고객명</label><input class="fi" id="cs-search-customer" placeholder="고객명" oninput="csOrderSearch()"></div>
+                <div class="fg" style="margin:0"><label style="font-size:10.5px">주문번호</label><input class="fi" id="cs-search-orderno" placeholder="주문번호" oninput="csOrderSearch()"></div>
+                <div class="fg" style="margin:0"><label style="font-size:10.5px">쇼핑몰</label><select class="fs" id="cs-search-shop" onchange="csOrderSearch()"><option value="">전체</option></select></div>
+                <button class="btn btn-outline btn-sm" onclick="csOrderSearch()" style="height:34px">검색</button>
+              </div>
+              <div id="cs-order-results" style="margin-top:10px;max-height:160px;overflow-y:auto"></div>
+              <!-- 선택된 주문 정보 표시 -->
+              <div id="cs-selected-order" style="display:none;margin-top:10px;background:#fff;border:1px solid var(--sky-300);border-radius:7px;padding:10px">
+                <div style="font-size:11px;font-weight:600;color:var(--sky-700);margin-bottom:6px">✅ 선택된 주문</div>
+                <div id="cs-selected-order-info" style="font-size:12px;color:var(--gray-700)"></div>
+              </div>
             </div>
+
+            <!-- 주문 전 고객: 직접 입력 -->
+            <div id="cs-new-customer-area">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <div class="fg"><label>고객명<span class="req">*</span></label><input class="fi" id="cs-customer"></div>
+                <div class="fg"><label>연락처<span class="req">*</span></label><input class="fi" id="cs-phone" placeholder="010-0000-0000"></div>
+              </div>
+            </div>
+
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
               <div class="fg"><label>채널<span class="req">*</span></label><select class="fs" id="cs-channel"><option>전화</option><option>이메일</option><option>카카오톡</option><option>잔디</option><option>기타</option></select></div>
               <div class="fg"><label>긴급도</label><select class="fs" id="cs-urgency"><option value="1">1 (낮음)</option><option value="2">2</option><option value="3" selected>3 (보통)</option><option value="4">4</option><option value="5">5 (긴급)</option></select></div>
@@ -2650,46 +2673,175 @@ function renderCsList() {
   const q = ($('cs-search')?.value||'').toLowerCase();
   const type = window._csCurrentTab;
   const list = (DB.cs||[]).filter(c => c.type === type && (!q || (c.customer||'').toLowerCase().includes(q) || (c.category||'').toLowerCase().includes(q) || (c.content||'').toLowerCase().includes(q)));
-  if (!list.length) { tb.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:30px">등록된 CS가 없습니다</td></tr>'; return; }
+  if (!list.length) { tb.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--gray-400);padding:30px">등록된 CS가 없습니다</td></tr>'; return; }
   tb.innerHTML = list.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(c => {
     const urgColor = c.urgency >= 4 ? 'var(--red-500)' : c.urgency >= 3 ? 'var(--amber-500)' : 'var(--gray-400)';
     const stBadge = c.status === '완료' ? '<span class="badge green">완료</span>' : c.status === '처리중' ? '<span class="badge blue">처리중</span>' : c.status === '보류' ? '<span class="badge" style="background:var(--amber-50);color:var(--amber-700)">보류</span>' : '<span class="badge">접수</span>';
     const item = c.linkedItemId ? (getItem(c.linkedItemId)?.name||'-') : '-';
-    return `<tr><td style="white-space:nowrap">${c.date||'-'}</td><td>${c.customerMasked||c.customer||'-'}</td><td>${type==='consumer'?'소비자':'약사'}</td><td>${c.category||'-'}</td><td>${item}</td><td>${stBadge}</td><td><span style="color:${urgColor};font-weight:600">${c.urgency||3}</span></td><td>${c.consultant||'-'}</td></tr>`;
+    const orderBadge = c.linkedOrderNo ? `<span class="badge blue" style="font-size:10px;cursor:pointer" title="${c.linkedOrderNo}">${c.linkedOrderNo}</span>` : '<span style="color:var(--gray-300);font-size:11px">—</span>';
+    return `<tr><td style="white-space:nowrap">${c.date||'-'}</td><td>${c.customerMasked||c.customer||'-'}</td><td>${type==='consumer'?'소비자':'약사'}</td><td>${c.category||'-'}</td><td>${orderBadge}</td><td>${item}</td><td>${stBadge}</td><td><span style="color:${urgColor};font-weight:600">${c.urgency||3}</span></td><td>${c.consultant||'-'}</td></tr>`;
   }).join('');
 }
 
-function openCsForm() {
+window._csFormMode = 'new'; // 'new' or 'order'
+window._csSelectedOrder = null;
+
+function openCsForm(mode) {
+  window._csFormMode = mode || 'new';
+  window._csSelectedOrder = null;
   $('cs-form-type-display').textContent = window._csCurrentTab === 'consumer' ? '소비자' : '약사';
+  $('cs-form-title').textContent = mode === 'order' ? '💬 기존 주문 고객 상담' : '💬 주문 전 고객 상담';
+
+  // Toggle areas
+  const searchArea = $('cs-order-search-area');
+  const newArea = $('cs-new-customer-area');
+  if (searchArea) searchArea.style.display = mode === 'order' ? '' : 'none';
+  if (newArea) newArea.style.display = mode === 'order' ? 'none' : '';
+
+  // Reset common fields
   ['cs-customer','cs-phone','cs-content','cs-action'].forEach(id => { if($(id)) $(id).value = ''; });
+  ['cs-search-customer','cs-search-orderno'].forEach(id => { if($(id)) $(id).value = ''; });
   if($('cs-channel')) $('cs-channel').selectedIndex = 0;
   if($('cs-urgency')) $('cs-urgency').value = '3';
   if($('cs-status')) $('cs-status').selectedIndex = 0;
   if($('cs-category')) $('cs-category').selectedIndex = 0;
   if($('cs-linked-item')) $('cs-linked-item').selectedIndex = 0;
+  if($('cs-order-results')) $('cs-order-results').innerHTML = '';
+  if($('cs-selected-order')) $('cs-selected-order').style.display = 'none';
+  if($('cs-selected-order-info')) $('cs-selected-order-info').innerHTML = '';
+
+  // Populate shop dropdown for order search
+  if (mode === 'order') {
+    const shopSel = $('cs-search-shop');
+    if (shopSel) {
+      shopSel.innerHTML = '<option value="">전체</option>';
+      (DB.shops||[]).filter(s => s.active !== false).forEach(s => {
+        const o = document.createElement('option'); o.value = s.id; o.textContent = s.name; shopSel.appendChild(o);
+      });
+    }
+  }
   openModal('cs-form-modal');
 }
 
+// ── CS 주문 검색 (교차 필터링) ──
+function csOrderSearch() {
+  const qName = ($('cs-search-customer')?.value||'').trim().toLowerCase();
+  const qOrder = ($('cs-search-orderno')?.value||'').trim().toLowerCase();
+  const qShop = $('cs-search-shop')?.value||'';
+  const container = $('cs-order-results'); if (!container) return;
+
+  // 검색어가 모두 비어있으면 안내 메시지
+  if (!qName && !qOrder && !qShop) {
+    container.innerHTML = '<div style="text-align:center;color:var(--gray-400);padding:16px;font-size:12px">고객명, 주문번호, 또는 쇼핑몰을 입력하세요</div>';
+    return;
+  }
+
+  // DB.shopOrders 에서 교차 필터링
+  let results = (DB.shopOrders||[]).filter(o => {
+    const nameMatch = !qName || (o.customerName||'').toLowerCase().includes(qName);
+    const orderMatch = !qOrder || (o.orderNo||'').toLowerCase().includes(qOrder) || (o.id||'').toString().includes(qOrder);
+    const shopMatch = !qShop || (o.shopId||'') === qShop;
+    return nameMatch && orderMatch && shopMatch;
+  });
+
+  if (!results.length) {
+    container.innerHTML = '<div style="text-align:center;color:var(--gray-400);padding:16px;font-size:12px">검색 결과가 없습니다</div>';
+    return;
+  }
+
+  // 최근 주문 우선, 최대 30건
+  results = results.sort((a,b) => (b.orderDate||'').localeCompare(a.orderDate||'')).slice(0, 30);
+
+  const getShopName = (shopId) => { const s = (DB.shops||[]).find(x => x.id === shopId); return s ? s.name : shopId||'-'; };
+
+  container.innerHTML = '<table class="tbl" style="font-size:11.5px"><thead><tr><th>주문일</th><th>주문번호</th><th>고객명</th><th>쇼핑몰</th><th>상품</th><th>금액</th><th></th></tr></thead><tbody>' +
+    results.map(o => {
+      const custDisplay = (o.customerName||'-');
+      return `<tr style="cursor:pointer" onclick="csSelectOrder('${o.id||o.orderNo}')">
+        <td>${o.orderDate||'-'}</td>
+        <td>${o.orderNo||o.id||'-'}</td>
+        <td>${custDisplay}</td>
+        <td>${getShopName(o.shopId)}</td>
+        <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.itemName||o.productName||'-'}</td>
+        <td style="text-align:right">${o.totalPrice ? Number(o.totalPrice).toLocaleString()+'원' : '-'}</td>
+        <td><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();csSelectOrder('${o.id||o.orderNo}')">선택</button></td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
+}
+
+// ── 주문 선택 ──
+function csSelectOrder(orderId) {
+  const order = (DB.shopOrders||[]).find(o => (o.id||'').toString() === orderId.toString() || (o.orderNo||'') === orderId);
+  if (!order) { alert('주문을 찾을 수 없습니다.'); return; }
+
+  window._csSelectedOrder = order;
+  const getShopName = (shopId) => { const s = (DB.shops||[]).find(x => x.id === shopId); return s ? s.name : shopId||'-'; };
+
+  const infoEl = $('cs-selected-order-info');
+  if (infoEl) {
+    infoEl.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:12px">
+      <div><b>주문번호:</b> ${order.orderNo||order.id||'-'}</div>
+      <div><b>주문일:</b> ${order.orderDate||'-'}</div>
+      <div><b>고객명:</b> ${order.customerName||'-'}</div>
+      <div><b>연락처:</b> ${order.customerPhone||'-'}</div>
+      <div><b>쇼핑몰:</b> ${getShopName(order.shopId)}</div>
+      <div><b>금액:</b> ${order.totalPrice ? Number(order.totalPrice).toLocaleString()+'원' : '-'}</div>
+      <div style="grid-column:1/-1"><b>상품:</b> ${order.itemName||order.productName||'-'}</div>
+    </div>`;
+  }
+  const selBox = $('cs-selected-order');
+  if (selBox) selBox.style.display = '';
+
+  // 검색 결과 내 선택된 행 하이라이트
+  const rows = $('cs-order-results')?.querySelectorAll('tr');
+  if (rows) rows.forEach(r => r.style.background = '');
+}
+
 function saveCsEntry() {
-  const cust = $('cs-customer')?.value?.trim();
+  const mode = window._csFormMode;
+  let cust = '', phone = '';
+
+  if (mode === 'order') {
+    // 기존 주문 고객 모드
+    if (!window._csSelectedOrder) { alert('주문을 선택해주세요.'); return; }
+    cust = window._csSelectedOrder.customerName || '';
+    phone = window._csSelectedOrder.customerPhone || '';
+  } else {
+    // 주문 전 고객 모드
+    cust = $('cs-customer')?.value?.trim() || '';
+    phone = $('cs-phone')?.value || '';
+  }
+
   const content = $('cs-content')?.value?.trim();
   if (!cust || !content) { alert('고객명과 상담 내용은 필수입니다.'); return; }
+
   const entry = {
     id: Date.now(),
     type: window._csCurrentTab,
     customer: cust,
-    customerMasked: cust.charAt(0) + '*'.repeat(Math.max(1,cust.length-1)),
-    phone: $('cs-phone')?.value||'',
-    channel: $('cs-channel')?.value||'전화',
-    urgency: parseInt($('cs-urgency')?.value||'3'),
-    category: $('cs-category')?.value||'',
-    linkedItemId: $('cs-linked-item')?.value||'',
+    customerMasked: cust.charAt(0) + '*'.repeat(Math.max(1, cust.length - 1)),
+    phone: phone,
+    channel: $('cs-channel')?.value || '전화',
+    urgency: parseInt($('cs-urgency')?.value || '3'),
+    category: $('cs-category')?.value || '',
+    linkedItemId: $('cs-linked-item')?.value || '',
     content: content,
-    action: $('cs-action')?.value||'',
-    status: $('cs-status')?.value||'접수',
-    consultant: window._currentUser?.name||'',
-    date: new Date().toISOString().slice(0,16).replace('T',' '),
+    action: $('cs-action')?.value || '',
+    status: $('cs-status')?.value || '접수',
+    consultant: window._currentUser?.name || '',
+    date: new Date().toISOString().slice(0, 16).replace('T', ' '),
+    formMode: mode,
   };
+
+  // 기존 주문 고객인 경우 주문 정보 연동
+  if (mode === 'order' && window._csSelectedOrder) {
+    entry.linkedOrderId = window._csSelectedOrder.id || window._csSelectedOrder.orderNo || '';
+    entry.linkedOrderNo = window._csSelectedOrder.orderNo || '';
+    entry.linkedShopId = window._csSelectedOrder.shopId || '';
+    entry.linkedOrderDate = window._csSelectedOrder.orderDate || '';
+    entry.linkedProductName = window._csSelectedOrder.itemName || window._csSelectedOrder.productName || '';
+  }
+
   DB.cs.push(entry);
   saveLocal();
   closeModal('cs-form-modal');
