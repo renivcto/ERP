@@ -225,6 +225,7 @@ body{font-family:var(--font);background:var(--gray-50);color:var(--gray-800);hei
 .cs-tab.consumer.inactive{background:#f0faf6;color:#6dae97;border-color:#e0f0ea}
 .cs-tab.pharmacist{background:#D6ECF7;color:#2B6B8F;border-color:#2B6B8F}
 .cs-tab.pharmacist.inactive{background:#edf5fa;color:#6d9ab5;border-color:#dce9f2}
+.cs-icon-btn{transition:all .15s;user-select:none}.cs-icon-btn.active{background:var(--sky-100)!important;border-color:var(--sky-400)!important;box-shadow:0 0 0 2px var(--sky-200)}
 .cs-tab.active-tab{border-bottom:3px solid currentColor}
 /* Sales sub-nav */
 .sales-subnav{display:flex;gap:2px;background:var(--gray-100);border-radius:8px;padding:3px;margin-bottom:16px}
@@ -1019,7 +1020,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="cs-tab consumer active-tab" id="cs-tab-consumer" onclick="switchCsTab('consumer')">📞 소비자</div>
         <div class="cs-tab pharmacist inactive" id="cs-tab-pharmacist" onclick="switchCsTab('pharmacist')">💊 약사</div>
         <div style="width:1px;height:24px;background:var(--gray-200);margin:0 4px"></div>
-        <button class="btn btn-primary btn-sm" onclick="if(requireWrite())openCsForm('order')">+ 기존 주문 고객</button>
+        <button class="btn btn-primary btn-sm" onclick="if(requireWrite())openCsForm('order')">+ 주문 고객</button>
         <button class="btn btn-sm" style="background:#FFF8DC;color:#8B7000;border:1px solid #F0E68C;font-weight:600" onclick="if(requireWrite())openCsForm('new')">+ 주문 전 고객</button>
         <input class="fi" id="cs-search" placeholder="검색..." style="width:160px;padding:5px 10px;font-size:11.5px;margin-left:auto" oninput="renderCsList()">
       </div>
@@ -1028,18 +1029,18 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <span class="card-title" id="cs-list-title">💬 소비자 CS 목록</span>
         </div>
         <div class="card-body" style="overflow-x:auto">
-          <table class="tbl"><thead><tr><th>상담일시</th><th>고객명</th><th>유형</th><th>카테고리</th><th>주문연동</th><th>상품</th><th>상태</th><th>긴급도</th><th>상담자</th></tr></thead><tbody id="cs-table"></tbody></table>
+          <table class="tbl"><thead><tr><th>상담일시</th><th>고객명</th><th>카테고리</th><th>제품명</th><th>상태</th><th>긴급도</th><th></th></tr></thead><tbody id="cs-table"></tbody></table>
         </div>
       </div>
 
       <!-- CS 입력 폼 모달 -->
       <div class="overlay" id="overlay-cs-form-modal">
-        <div class="modal" style="width:620px">
+        <div class="modal" style="width:640px">
           <div class="modal-hdr"><span class="modal-ttl" id="cs-form-title">💬 새 상담 등록</span><button class="modal-x" onclick="closeModal('cs-form-modal')">✕</button></div>
           <div class="modal-body" style="max-height:65vh;overflow-y:auto">
             <div class="fg"><label>상담 대상</label><span id="cs-form-type-display" style="font-size:12px;color:var(--gray-500)">소비자</span></div>
 
-            <!-- 기존 주문 고객 검색 영역 -->
+            <!-- 주문 고객 검색 영역 -->
             <div id="cs-order-search-area" style="display:none;background:var(--sky-50);border:1px solid var(--sky-200);border-radius:8px;padding:14px;margin-bottom:14px">
               <div style="font-size:12px;font-weight:600;color:var(--sky-800);margin-bottom:10px">🔍 주문 검색 — 고객명·주문번호·쇼핑몰로 검색</div>
               <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end">
@@ -1049,30 +1050,54 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
                 <button class="btn btn-outline btn-sm" onclick="csOrderSearch()" style="height:34px">검색</button>
               </div>
               <div id="cs-order-results" style="margin-top:10px;max-height:160px;overflow-y:auto"></div>
-              <!-- 선택된 주문 정보 표시 -->
               <div id="cs-selected-order" style="display:none;margin-top:10px;background:#fff;border:1px solid var(--sky-300);border-radius:7px;padding:10px">
                 <div style="font-size:11px;font-weight:600;color:var(--sky-700);margin-bottom:6px">✅ 선택된 주문</div>
                 <div id="cs-selected-order-info" style="font-size:12px;color:var(--gray-700)"></div>
               </div>
             </div>
 
+            <!-- 주문 고객 전용: 배송상태 -->
+            <div id="cs-delivery-area" style="display:none">
+              <div class="fg"><label>배송 상태</label><select class="fs" id="cs-delivery-status"><option>배송 전</option><option>배송 중</option><option>배송 완료</option><option>기타</option></select></div>
+            </div>
+
             <!-- 주문 전 고객: 직접 입력 -->
             <div id="cs-new-customer-area">
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                <div class="fg"><label>고객명<span class="req">*</span></label><input class="fi" id="cs-customer"></div>
-                <div class="fg"><label>연락처<span class="req">*</span></label><input class="fi" id="cs-phone" placeholder="010-0000-0000"></div>
+                <div class="fg"><label>고객명<span class="req">*</span></label><input class="fi" id="cs-customer">
+                  <div style="display:flex;gap:6px;margin-top:6px" id="cs-customer-icons">
+                    <label style="cursor:pointer;font-size:16px" title="긴급 고객"><input type="checkbox" id="cs-icon-urgent" style="display:none"><span class="cs-icon-btn" onclick="this.classList.toggle('active')" style="padding:2px 6px;border-radius:4px;border:1px solid var(--gray-200)">🚨</span></label>
+                    <label style="cursor:pointer;font-size:16px" title="중요 고객"><input type="checkbox" id="cs-icon-star" style="display:none"><span class="cs-icon-btn" onclick="this.classList.toggle('active')" style="padding:2px 6px;border-radius:4px;border:1px solid var(--gray-200)">⭐</span></label>
+                    <label style="cursor:pointer;font-size:16px" title="단골 고객"><input type="checkbox" id="cs-icon-vip" style="display:none"><span class="cs-icon-btn" onclick="this.classList.toggle('active')" style="padding:2px 6px;border-radius:4px;border:1px solid var(--gray-200)">💚</span></label>
+                  </div>
+                </div>
+                <div class="fg"><label>연락처 <span style="font-size:10px;color:var(--gray-400)">(선택)</span></label><input class="fi" id="cs-phone" placeholder="010-0000-0000"></div>
+              </div>
+            </div>
+
+            <!-- 주문 고객 전용: 고객명 + 아이콘 -->
+            <div id="cs-order-customer-icons" style="display:none">
+              <div class="fg"><label>고객 표시</label>
+                <div style="display:flex;gap:6px">
+                  <label style="cursor:pointer;font-size:16px" title="긴급 고객"><input type="checkbox" id="cs-icon-urgent-o" style="display:none"><span class="cs-icon-btn" onclick="this.classList.toggle('active')" style="padding:2px 6px;border-radius:4px;border:1px solid var(--gray-200)">🚨</span></label>
+                  <label style="cursor:pointer;font-size:16px" title="중요 고객"><input type="checkbox" id="cs-icon-star-o" style="display:none"><span class="cs-icon-btn" onclick="this.classList.toggle('active')" style="padding:2px 6px;border-radius:4px;border:1px solid var(--gray-200)">⭐</span></label>
+                  <label style="cursor:pointer;font-size:16px" title="단골 고객"><input type="checkbox" id="cs-icon-vip-o" style="display:none"><span class="cs-icon-btn" onclick="this.classList.toggle('active')" style="padding:2px 6px;border-radius:4px;border:1px solid var(--gray-200)">💚</span></label>
+                </div>
               </div>
             </div>
 
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-              <div class="fg"><label>채널<span class="req">*</span></label><select class="fs" id="cs-channel"><option>전화</option><option>이메일</option><option>카카오톡</option><option>잔디</option><option>기타</option></select></div>
+              <div class="fg"><label>채널<span class="req">*</span></label><select class="fs" id="cs-channel"><option>전화</option><option>이메일</option><option>카카오톡</option><option>기타</option></select></div>
               <div class="fg"><label>긴급도</label><select class="fs" id="cs-urgency"><option value="1">1 (낮음)</option><option value="2">2</option><option value="3" selected>3 (보통)</option><option value="4">4</option><option value="5">5 (긴급)</option></select></div>
             </div>
             <div class="fg"><label>카테고리</label><select class="fs" id="cs-category"><option>제품 문의</option><option>배송 문의</option><option>교환/반품</option><option>불만/클레임</option><option>사용법 문의</option><option>성분 문의</option><option>부작용 상담</option><option>처방 관련</option><option>기타</option></select></div>
-            <div class="fg"><label>연동 상품</label><select class="fs" id="cs-linked-item"><option value="">— 선택 (선택사항) —</option></select></div>
+            <div class="fg"><label id="cs-product-label">구매한 제품</label><select class="fs" id="cs-linked-item"><option value="">— 선택 (선택사항) —</option></select></div>
             <div class="fg"><label>상담 내용<span class="req">*</span></label><textarea class="fi" id="cs-content" rows="4" placeholder="상담 내용을 입력하세요"></textarea></div>
             <div class="fg"><label>조치 내역</label><textarea class="fi" id="cs-action" rows="2" placeholder="처리 내용"></textarea></div>
-            <div class="fg"><label>상태</label><select class="fs" id="cs-status"><option>접수</option><option>처리중</option><option>완료</option><option>보류</option></select></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="fg"><label>상태</label><select class="fs" id="cs-status"><option>접수</option><option>처리중</option><option>완료</option><option>보류</option></select></div>
+              <div class="fg"><label>상담자 <span style="font-size:10px;color:var(--gray-400)">(선택)</span></label><input class="fi" id="cs-consultant" placeholder="상담자명"></div>
+            </div>
           </div>
           <div class="modal-foot"><button class="btn btn-outline" onclick="closeModal('cs-form-modal')">취소</button><button class="btn btn-primary" onclick="saveCsEntry()">저장</button></div>
         </div>
@@ -1197,19 +1222,26 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             <!-- ③ 광고비 -->
             <div class="shop-section">
               <div class="shop-section-title">③ 광고비</div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-                <div class="fg"><label>입력 방식</label><select class="fs" id="shop-ads-type" onchange="toggleAdsInputType()"><option value="monthly">월별 입력</option><option value="range">기간별 입력</option><option value="daily">일별 입력</option></select></div>
-                <div class="fg" id="ads-monthly-group"><label>월 선택</label><input class="fi" id="shop-ads-month" type="month"></div>
-                <div class="fg" id="ads-range-start" style="display:none"><label>시작일</label><input class="fi" id="shop-ads-start" type="date"></div>
+              <!-- 입력 방식 선택 -->
+              <div class="fg" style="margin-bottom:10px"><label>입력 방식</label><select class="fs" id="shop-ads-type" onchange="toggleAdsInputType()"><option value="monthly">월별 입력</option><option value="range">기간별 입력</option><option value="daily">일별 입력</option></select></div>
+              <!-- 월별: 월 선택 드롭다운 -->
+              <div class="fg" id="ads-monthly-group" style="margin-bottom:10px"><label>월 선택</label><input class="fi" id="shop-ads-month" type="month"></div>
+              <!-- 기간별: 시작일·종료일 나란히 -->
+              <div id="ads-range-group" style="display:none;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+                <div class="fg" style="margin:0"><label>시작일</label><input class="fi" id="shop-ads-start" type="date"></div>
+                <div class="fg" style="margin:0"><label>종료일</label><input class="fi" id="shop-ads-end" type="date"></div>
               </div>
-              <div class="fg" id="ads-range-end" style="display:none"><label>종료일</label><input class="fi" id="shop-ads-end" type="date"></div>
-              <div class="fg" id="ads-daily-date" style="display:none"><label>날짜</label><input class="fi" id="shop-ads-date" type="date"></div>
+              <!-- 일별: 날짜 (반 너비) -->
+              <div id="ads-daily-group" style="display:none;margin-bottom:10px"><div class="fg" style="max-width:50%"><label>날짜</label><input class="fi" id="shop-ads-date" type="date"></div></div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
                 <div class="fg"><label>광고비 (원)</label><input class="fi" id="shop-ads-cost" type="number" min="0" value="0" placeholder="0원 입력 허용"></div>
                 <div class="fg"><label>ROAS</label><div class="fi" id="shop-ads-roas" style="background:var(--gray-50);color:var(--gray-500);min-height:34px;display:flex;align-items:center">자동 계산</div></div>
               </div>
-              <div class="fg"><label>세부 채널 (선택)</label><input class="fi" id="shop-ads-breakdown" placeholder="검색광고, 디스플레이, 인플루언서 등"></div>
-              <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px">0원 입력 = 광고 미집행 · 기간별 ROAS 자동 계산</div>
+              <div class="fg"><label>비고</label><input class="fi" id="shop-ads-breakdown" placeholder=""></div>
+              <div style="display:flex;justify-content:flex-end;margin-top:6px"><button class="btn btn-outline btn-sm" onclick="addShopAdsCost()">+ 광고비 추가</button></div>
+              <!-- 등록된 광고비 목록 -->
+              <div id="shop-ads-list" style="margin-top:10px"></div>
+              <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px">0원 입력 = 광고 미집행 · 기간별 ROAS 자동 계산 · 미설정 날짜는 광고비 0원 적용</div>
             </div>
             <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
               <button class="btn btn-outline" onclick="showShopHistory()">📋 변경 이력 보기</button>
@@ -2655,26 +2687,143 @@ if (!DB.cs) DB.cs = [];
 
 function renderCsPage() {
   renderCsList();
-  // Populate linked item dropdown
-  const sel = $('cs-linked-item');
-  if (sel && sel.options.length <= 1) {
-    (DB.items||[]).forEach(i => { const o = document.createElement('option'); o.value = i.id; o.textContent = i.name; sel.appendChild(o); });
-  }
+  // Populate linked item dropdown — 완제품만
+  populateCsItemDropdown();
+}
+function populateCsItemDropdown() {
+  const sel = $('cs-linked-item'); if (!sel) return;
+  sel.innerHTML = '<option value="">— 선택 (선택사항) —</option>';
+  const finishedItems = (DB.items||[]).filter(i => (i.type||'').includes('완제품') || (i.category||'').includes('완제품') || (!i.type && !i.category));
+  finishedItems.forEach(i => { const o = document.createElement('option'); o.value = i.id; o.textContent = i.name; sel.appendChild(o); });
 }
 
 function renderCsList() {
   const tb = $('cs-table'); if (!tb) return;
   const q = ($('cs-search')?.value||'').toLowerCase();
   const type = window._csCurrentTab;
-  const list = (DB.cs||[]).filter(c => c.type === type && (!q || (c.customer||'').toLowerCase().includes(q) || (c.category||'').toLowerCase().includes(q) || (c.content||'').toLowerCase().includes(q)));
-  if (!list.length) { tb.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--gray-400);padding:30px">등록된 CS가 없습니다</td></tr>'; return; }
-  tb.innerHTML = list.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(c => {
+  let list = (DB.cs||[]).filter(c => c.type === type && (!q || (c.customer||'').toLowerCase().includes(q) || (c.category||'').toLowerCase().includes(q) || (c.content||'').toLowerCase().includes(q)));
+  if (!list.length) { tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:30px">등록된 CS가 없습니다</td></tr>'; return; }
+  // 고정(pinned) 항목 상단, 나머지 날짜 내림차순
+  const pinned = list.filter(c => c.pinned).sort((a,b) => (a.pinOrder||0) - (b.pinOrder||0));
+  const unpinned = list.filter(c => !c.pinned).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+  list = [...pinned, ...unpinned];
+  tb.innerHTML = list.map((c, idx) => {
     const urgColor = c.urgency >= 4 ? 'var(--red-500)' : c.urgency >= 3 ? 'var(--amber-500)' : 'var(--gray-400)';
     const stBadge = c.status === '완료' ? '<span class="badge green">완료</span>' : c.status === '처리중' ? '<span class="badge blue">처리중</span>' : c.status === '보류' ? '<span class="badge" style="background:var(--amber-50);color:var(--amber-700)">보류</span>' : '<span class="badge">접수</span>';
-    const item = c.linkedItemId ? (getItem(c.linkedItemId)?.name||'-') : '-';
-    const orderBadge = c.linkedOrderNo ? `<span class="badge blue" style="font-size:10px;cursor:pointer" title="${c.linkedOrderNo}">${c.linkedOrderNo}</span>` : '<span style="color:var(--gray-300);font-size:11px">—</span>';
-    return `<tr><td style="white-space:nowrap">${c.date||'-'}</td><td>${c.customerMasked||c.customer||'-'}</td><td>${type==='consumer'?'소비자':'약사'}</td><td>${c.category||'-'}</td><td>${orderBadge}</td><td>${item}</td><td>${stBadge}</td><td><span style="color:${urgColor};font-weight:600">${c.urgency||3}</span></td><td>${c.consultant||'-'}</td></tr>`;
+    // 제품명: 주문 연동이면 linkedProductName, 아니면 linked item
+    let productName = '-';
+    if (c.linkedProductName) productName = c.linkedProductName;
+    else if (c.linkedItemId) { const it = getItem(c.linkedItemId); productName = it?.name || '-'; }
+    // 아이콘 표시
+    const icons = [c.iconUrgent?'🚨':'', c.iconStar?'⭐':'', c.iconVip?'💚':''].filter(Boolean).join('');
+    // 고정 표시
+    const pinIcon = c.pinned ? `<span style="color:var(--sky-500);font-size:11px;cursor:pointer" onclick="event.stopPropagation();csUnpin(${c.id})" title="고정 해제">📌</span>` : '';
+    const pinArrows = c.pinned ? `<span style="font-size:10px;cursor:pointer;margin-left:2px" onclick="event.stopPropagation();csPinMove(${c.id},-1)" title="위로">▲</span><span style="font-size:10px;cursor:pointer" onclick="event.stopPropagation();csPinMove(${c.id},1)" title="아래로">▼</span>` : '';
+    return `<tr style="${c.pinned?'background:var(--sky-50);':''}" onclick="csShowDetail(${c.id})">
+      <td style="white-space:nowrap">${pinIcon}${pinArrows} ${c.date||'-'}</td>
+      <td style="cursor:pointer;color:var(--blue-600);font-weight:500" onclick="event.stopPropagation();csShowDetail(${c.id})">${icons} ${c.customerMasked||c.customer||'-'}</td>
+      <td>${c.category||'-'}</td>
+      <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${productName}</td>
+      <td>${stBadge}</td>
+      <td><span style="color:${urgColor};font-weight:600">${c.urgency||3}</span></td>
+      <td><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();csEditEntry(${c.id})">수정</button></td>
+    </tr>`;
   }).join('');
+}
+
+// CS 상세보기
+function csShowDetail(id) {
+  const c = (DB.cs||[]).find(x => x.id === id); if (!c) return;
+  const getShopName = (sid) => { const s = (DB.shops||[]).find(x => x.id === sid); return s ? s.name : sid||'-'; };
+  let productName = '-';
+  if (c.linkedProductName) productName = c.linkedProductName;
+  else if (c.linkedItemId) { const it = getItem(c.linkedItemId); productName = it?.name || '-'; }
+  const icons = [c.iconUrgent?'🚨 긴급':'', c.iconStar?'⭐ 중요':'', c.iconVip?'💚 단골':''].filter(Boolean).join(' · ');
+  const orderInfo = c.linkedOrderNo ? `<div style="margin-top:8px;padding:8px;background:var(--sky-50);border-radius:6px;font-size:12px"><b>연동 주문:</b> ${c.linkedOrderNo} (${getShopName(c.linkedShopId)}) · ${c.linkedOrderDate||''}<br><b>배송상태:</b> ${c.deliveryStatus||'-'}</div>` : '';
+  const html = `<div style="padding:4px 0">
+    <div style="font-size:15px;font-weight:700;margin-bottom:8px">${c.customer||'-'} <span style="font-size:12px;color:var(--gray-400)">${c.phone||''}</span></div>
+    ${icons?`<div style="margin-bottom:6px">${icons}</div>`:''}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;font-size:12.5px;color:var(--gray-600)">
+      <div><b>상담일:</b> ${c.date||'-'}</div><div><b>채널:</b> ${c.channel||'-'}</div>
+      <div><b>카테고리:</b> ${c.category||'-'}</div><div><b>긴급도:</b> ${c.urgency||3}</div>
+      <div><b>제품:</b> ${productName}</div><div><b>상태:</b> ${c.status||'-'}</div>
+      <div><b>상담자:</b> ${c.consultant||'-'}</div><div><b>유형:</b> ${c.formMode==='order'?'주문 고객':'주문 전 고객'}</div>
+    </div>
+    ${orderInfo}
+    <div style="margin-top:10px;padding:10px;background:var(--gray-50);border-radius:6px;font-size:12.5px"><b>상담 내용:</b><br>${(c.content||'-').replace(/\n/g,'<br>')}</div>
+    <div style="margin-top:6px;padding:10px;background:var(--gray-50);border-radius:6px;font-size:12.5px"><b>조치 내역:</b><br>${(c.action||'-').replace(/\n/g,'<br>')}</div>
+    <div style="margin-top:10px;display:flex;gap:6px;justify-content:flex-end">
+      ${!c.pinned?`<button class="btn btn-outline btn-sm" onclick="csPin(${c.id})">📌 상단 고정</button>`:`<button class="btn btn-outline btn-sm" onclick="csUnpin(${c.id})">📌 고정 해제</button>`}
+      <button class="btn btn-primary btn-sm" onclick="csEditEntry(${c.id})">수정</button>
+    </div>
+  </div>`;
+  // Reuse a simple alert-style modal
+  const d = document.createElement('div');
+  d.className = 'overlay'; d.id = 'overlay-cs-detail';
+  d.innerHTML = `<div class="modal" style="width:520px"><div class="modal-hdr"><span class="modal-ttl">📋 CS 상세</span><button class="modal-x" onclick="this.closest('.overlay').remove()">✕</button></div><div class="modal-body">${html}</div></div>`;
+  d.style.display = 'flex';
+  document.body.appendChild(d);
+}
+
+// CS 수정
+function csEditEntry(id) {
+  // Close detail modal if open
+  const detailOverlay = document.getElementById('overlay-cs-detail');
+  if (detailOverlay) detailOverlay.remove();
+  const c = (DB.cs||[]).find(x => x.id === id); if (!c) return;
+  window._csEditId = id;
+  openCsForm(c.formMode || 'new');
+  // Fill fields after modal opens
+  setTimeout(() => {
+    if (c.formMode === 'order' && c.linkedOrderNo) {
+      // Show selected order info
+      const infoEl = $('cs-selected-order-info');
+      if (infoEl) infoEl.innerHTML = `<b>주문번호:</b> ${c.linkedOrderNo} · <b>상품:</b> ${c.linkedProductName||'-'}`;
+      if ($('cs-selected-order')) $('cs-selected-order').style.display = '';
+      window._csSelectedOrder = { id: c.linkedOrderId, orderNo: c.linkedOrderNo, customerName: c.customer, customerPhone: c.phone, shopId: c.linkedShopId, orderDate: c.linkedOrderDate, itemName: c.linkedProductName };
+    } else {
+      if ($('cs-customer')) $('cs-customer').value = c.customer || '';
+      if ($('cs-phone')) $('cs-phone').value = c.phone || '';
+    }
+    if ($('cs-channel')) $('cs-channel').value = c.channel || '전화';
+    if ($('cs-urgency')) $('cs-urgency').value = (c.urgency||3).toString();
+    if ($('cs-category')) $('cs-category').value = c.category || '제품 문의';
+    if ($('cs-linked-item')) $('cs-linked-item').value = c.linkedItemId || '';
+    if ($('cs-delivery-status')) $('cs-delivery-status').value = c.deliveryStatus || '배송 전';
+    if ($('cs-content')) $('cs-content').value = c.content || '';
+    if ($('cs-action')) $('cs-action').value = c.action || '';
+    if ($('cs-status')) $('cs-status').value = c.status || '접수';
+    if ($('cs-consultant')) $('cs-consultant').value = c.consultant || '';
+    // Icons
+    document.querySelectorAll('.cs-icon-btn').forEach(b => b.classList.remove('active'));
+    if (c.iconUrgent) { const b = $('cs-icon-urgent')?.nextElementSibling || $('cs-icon-urgent-o')?.nextElementSibling; if(b) b.classList.add('active'); }
+    if (c.iconStar) { const b = $('cs-icon-star')?.nextElementSibling || $('cs-icon-star-o')?.nextElementSibling; if(b) b.classList.add('active'); }
+    if (c.iconVip) { const b = $('cs-icon-vip')?.nextElementSibling || $('cs-icon-vip-o')?.nextElementSibling; if(b) b.classList.add('active'); }
+  }, 100);
+}
+
+// CS 고정/해제
+function csPin(id) {
+  const c = (DB.cs||[]).find(x => x.id === id); if (!c) return;
+  const pinned = (DB.cs||[]).filter(x => x.pinned && x.type === c.type);
+  c.pinned = true; c.pinOrder = pinned.length;
+  saveLocal(); renderCsList();
+  const d = document.getElementById('overlay-cs-detail'); if(d) d.remove();
+}
+function csUnpin(id) {
+  const c = (DB.cs||[]).find(x => x.id === id); if (!c) return;
+  c.pinned = false; delete c.pinOrder;
+  saveLocal(); renderCsList();
+  const d = document.getElementById('overlay-cs-detail'); if(d) d.remove();
+}
+function csPinMove(id, dir) {
+  const c = (DB.cs||[]).find(x => x.id === id); if (!c) return;
+  const pinned = (DB.cs||[]).filter(x => x.pinned && x.type === c.type).sort((a,b) => (a.pinOrder||0)-(b.pinOrder||0));
+  const idx = pinned.indexOf(c);
+  const swapIdx = idx + dir;
+  if (swapIdx < 0 || swapIdx >= pinned.length) return;
+  const tmp = pinned[swapIdx].pinOrder; pinned[swapIdx].pinOrder = c.pinOrder; c.pinOrder = tmp;
+  saveLocal(); renderCsList();
 }
 
 window._csFormMode = 'new'; // 'new' or 'order'
@@ -2683,26 +2832,47 @@ window._csSelectedOrder = null;
 function openCsForm(mode) {
   window._csFormMode = mode || 'new';
   window._csSelectedOrder = null;
+  window._csEditId = null;
   $('cs-form-type-display').textContent = window._csCurrentTab === 'consumer' ? '소비자' : '약사';
-  $('cs-form-title').textContent = mode === 'order' ? '💬 기존 주문 고객 상담' : '💬 주문 전 고객 상담';
+  $('cs-form-title').textContent = mode === 'order' ? '💬 주문 고객 상담' : '💬 주문 전 고객 상담';
 
   // Toggle areas
   const searchArea = $('cs-order-search-area');
   const newArea = $('cs-new-customer-area');
+  const deliveryArea = $('cs-delivery-area');
+  const orderIcons = $('cs-order-customer-icons');
   if (searchArea) searchArea.style.display = mode === 'order' ? '' : 'none';
   if (newArea) newArea.style.display = mode === 'order' ? 'none' : '';
+  if (deliveryArea) deliveryArea.style.display = mode === 'order' ? '' : 'none';
+  if (orderIcons) orderIcons.style.display = mode === 'order' ? '' : 'none';
+
+  // Product label & options
+  const pLabel = $('cs-product-label');
+  if (pLabel) pLabel.textContent = mode === 'order' ? '구매한 제품' : '관심 제품';
+  populateCsItemDropdown();
+  // 주문 전 고객: 추가 옵션
+  if (mode !== 'order') {
+    const sel = $('cs-linked-item');
+    if (sel) {
+      const o1 = document.createElement('option'); o1.value = '__all__'; o1.textContent = '전 제품에 관심 있음'; sel.appendChild(o1);
+      const o2 = document.createElement('option'); o2.value = '__none__'; o2.textContent = '관심 상품 없음'; sel.appendChild(o2);
+    }
+  }
 
   // Reset common fields
-  ['cs-customer','cs-phone','cs-content','cs-action'].forEach(id => { if($(id)) $(id).value = ''; });
+  ['cs-customer','cs-phone','cs-content','cs-action','cs-consultant'].forEach(id => { if($(id)) $(id).value = ''; });
   ['cs-search-customer','cs-search-orderno'].forEach(id => { if($(id)) $(id).value = ''; });
   if($('cs-channel')) $('cs-channel').selectedIndex = 0;
   if($('cs-urgency')) $('cs-urgency').value = '3';
   if($('cs-status')) $('cs-status').selectedIndex = 0;
   if($('cs-category')) $('cs-category').selectedIndex = 0;
   if($('cs-linked-item')) $('cs-linked-item').selectedIndex = 0;
+  if($('cs-delivery-status')) $('cs-delivery-status').selectedIndex = 0;
   if($('cs-order-results')) $('cs-order-results').innerHTML = '';
   if($('cs-selected-order')) $('cs-selected-order').style.display = 'none';
   if($('cs-selected-order-info')) $('cs-selected-order-info').innerHTML = '';
+  // Reset icons
+  document.querySelectorAll('.cs-icon-btn').forEach(b => b.classList.remove('active'));
 
   // Populate shop dropdown for order search
   if (mode === 'order') {
@@ -2796,12 +2966,10 @@ function saveCsEntry() {
   let cust = '', phone = '';
 
   if (mode === 'order') {
-    // 기존 주문 고객 모드
     if (!window._csSelectedOrder) { alert('주문을 선택해주세요.'); return; }
     cust = window._csSelectedOrder.customerName || '';
     phone = window._csSelectedOrder.customerPhone || '';
   } else {
-    // 주문 전 고객 모드
     cust = $('cs-customer')?.value?.trim() || '';
     phone = $('cs-phone')?.value || '';
   }
@@ -2809,8 +2977,14 @@ function saveCsEntry() {
   const content = $('cs-content')?.value?.trim();
   if (!cust || !content) { alert('고객명과 상담 내용은 필수입니다.'); return; }
 
+  // Read icon states
+  const isOrder = mode === 'order';
+  const urgentEl = isOrder ? document.querySelector('#cs-icon-urgent-o')?.nextElementSibling : document.querySelector('#cs-icon-urgent')?.nextElementSibling;
+  const starEl = isOrder ? document.querySelector('#cs-icon-star-o')?.nextElementSibling : document.querySelector('#cs-icon-star')?.nextElementSibling;
+  const vipEl = isOrder ? document.querySelector('#cs-icon-vip-o')?.nextElementSibling : document.querySelector('#cs-icon-vip')?.nextElementSibling;
+
   const entry = {
-    id: Date.now(),
+    id: window._csEditId || Date.now(),
     type: window._csCurrentTab,
     customer: cust,
     customerMasked: cust.charAt(0) + '*'.repeat(Math.max(1, cust.length - 1)),
@@ -2822,21 +2996,36 @@ function saveCsEntry() {
     content: content,
     action: $('cs-action')?.value || '',
     status: $('cs-status')?.value || '접수',
-    consultant: window._currentUser?.name || '',
+    consultant: $('cs-consultant')?.value?.trim() || '',
     date: new Date().toISOString().slice(0, 16).replace('T', ' '),
     formMode: mode,
+    iconUrgent: urgentEl?.classList.contains('active') || false,
+    iconStar: starEl?.classList.contains('active') || false,
+    iconVip: vipEl?.classList.contains('active') || false,
   };
 
-  // 기존 주문 고객인 경우 주문 정보 연동
+  // 주문 고객: 주문 정보 + 배송상태 연동
   if (mode === 'order' && window._csSelectedOrder) {
     entry.linkedOrderId = window._csSelectedOrder.id || window._csSelectedOrder.orderNo || '';
     entry.linkedOrderNo = window._csSelectedOrder.orderNo || '';
     entry.linkedShopId = window._csSelectedOrder.shopId || '';
     entry.linkedOrderDate = window._csSelectedOrder.orderDate || '';
     entry.linkedProductName = window._csSelectedOrder.itemName || window._csSelectedOrder.productName || '';
+    entry.deliveryStatus = $('cs-delivery-status')?.value || '배송 전';
   }
 
-  DB.cs.push(entry);
+  // 수정 모드: 기존 항목 교체 (고정 상태 유지)
+  if (window._csEditId) {
+    const idx = DB.cs.findIndex(x => x.id === window._csEditId);
+    if (idx >= 0) {
+      entry.pinned = DB.cs[idx].pinned; entry.pinOrder = DB.cs[idx].pinOrder;
+      entry.date = DB.cs[idx].date; // 원래 상담일 유지
+      DB.cs[idx] = entry;
+    }
+    window._csEditId = null;
+  } else {
+    DB.cs.push(entry);
+  }
   saveLocal();
   closeModal('cs-form-modal');
   renderCsList();
@@ -2927,6 +3116,7 @@ function selectShop(idx) {
 function loadShopDetail(idx) {
   const s = DB.shops[idx]; if (!s) return;
   window._currentShopIdx = idx;
+  window._selectedShopId = s.id;
   if($('shop-name')) $('shop-name').value = s.name || '';
   if($('shop-api')) $('shop-api').value = s.apiLinked ? 'true' : 'false';
   if($('shop-settle')) $('shop-settle').value = s.settlementCycle || 'D+7';
@@ -2938,6 +3128,12 @@ function loadShopDetail(idx) {
   if($('shop-free-threshold')) $('shop-free-threshold').value = s.freeShippingThreshold || 0;
   if($('shop-coupon-rate')) $('shop-coupon-rate').value = s.couponBorneRate || 0;
   if($('shop-fee-memo')) $('shop-fee-memo').value = s.feeMemo || '';
+  // 광고비 목록 렌더링
+  renderShopAdsList(s.id);
+  // 광고비 입력 초기화
+  if ($('shop-ads-type')) { $('shop-ads-type').value = 'monthly'; toggleAdsInputType(); }
+  if ($('shop-ads-cost')) $('shop-ads-cost').value = '0';
+  if ($('shop-ads-breakdown')) $('shop-ads-breakdown').value = '';
 }
 function addNewShop() {
   const name = prompt('쇼핑몰명을 입력하세요:');
@@ -2969,10 +3165,59 @@ function showShopHistory() { alert('변경 이력은 Firestore 연동 후 shopFe
 
 function toggleAdsInputType() {
   const type = $('shop-ads-type')?.value;
-  $('ads-monthly-group').style.display = type === 'monthly' ? '' : 'none';
-  $('ads-range-start').style.display = type === 'range' ? '' : 'none';
-  $('ads-range-end').style.display = type === 'range' ? '' : 'none';
-  $('ads-daily-date').style.display = type === 'daily' ? '' : 'none';
+  if ($('ads-monthly-group')) $('ads-monthly-group').style.display = type === 'monthly' ? '' : 'none';
+  if ($('ads-range-group')) $('ads-range-group').style.display = type === 'range' ? 'grid' : 'none';
+  if ($('ads-daily-group')) $('ads-daily-group').style.display = type === 'daily' ? '' : 'none';
+}
+
+// 광고비 추가 (날짜 겹침 방지)
+function addShopAdsCost() {
+  const shopId = window._selectedShopId; if (!shopId) { alert('쇼핑몰을 선택해주세요.'); return; }
+  const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop) return;
+  if (!shop.adsCosts) shop.adsCosts = [];
+  const type = $('shop-ads-type')?.value || 'monthly';
+  const cost = parseFloat($('shop-ads-cost')?.value) || 0;
+  const memo = $('shop-ads-breakdown')?.value || '';
+  let startDate, endDate;
+  if (type === 'monthly') {
+    const m = $('shop-ads-month')?.value; if (!m) { alert('월을 선택해주세요.'); return; }
+    startDate = m + '-01';
+    const d = new Date(startDate); d.setMonth(d.getMonth()+1); d.setDate(0);
+    endDate = d.toISOString().slice(0,10);
+  } else if (type === 'range') {
+    startDate = $('shop-ads-start')?.value; endDate = $('shop-ads-end')?.value;
+    if (!startDate || !endDate) { alert('시작일과 종료일을 입력해주세요.'); return; }
+    if (startDate > endDate) { alert('시작일이 종료일보다 늦습니다.'); return; }
+  } else {
+    startDate = $('shop-ads-date')?.value; if (!startDate) { alert('날짜를 선택해주세요.'); return; }
+    endDate = startDate;
+  }
+  // 겹침 검사
+  const overlap = shop.adsCosts.find(a => !(endDate < a.startDate || startDate > a.endDate));
+  if (overlap) { alert('광고 기간이 겹치지 않도록 설정해 주세요.'); return; }
+  shop.adsCosts.push({ id: Date.now(), type, startDate, endDate, cost, memo });
+  shop.adsCosts.sort((a,b) => b.startDate.localeCompare(a.startDate));
+  saveLocal();
+  renderShopAdsList(shopId);
+  // Reset
+  if ($('shop-ads-cost')) $('shop-ads-cost').value = '0';
+  if ($('shop-ads-breakdown')) $('shop-ads-breakdown').value = '';
+}
+
+function renderShopAdsList(shopId) {
+  const container = $('shop-ads-list'); if (!container) return;
+  const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop || !shop.adsCosts?.length) { container.innerHTML = '<div style="text-align:center;color:var(--gray-400);padding:10px;font-size:12px">등록된 광고비가 없습니다</div>'; return; }
+  container.innerHTML = '<table class="tbl" style="font-size:11.5px"><thead><tr><th>기간</th><th>방식</th><th style="text-align:right">광고비</th><th>비고</th><th></th></tr></thead><tbody>' +
+    shop.adsCosts.map(a => {
+      const typeLabel = a.type === 'monthly' ? '월별' : a.type === 'range' ? '기간별' : '일별';
+      const period = a.startDate === a.endDate ? a.startDate : `${a.startDate} ~ ${a.endDate}`;
+      return `<tr><td style="white-space:nowrap">${period}</td><td>${typeLabel}</td><td style="text-align:right">${Number(a.cost).toLocaleString()}원</td><td>${a.memo||'-'}</td><td><button class="btn btn-outline btn-sm" style="font-size:10px;padding:1px 6px;color:var(--red-500)" onclick="removeShopAdsCost('${shopId}',${a.id})">삭제</button></td></tr>`;
+    }).join('') + '</tbody></table>';
+}
+function removeShopAdsCost(shopId, adsId) {
+  const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop) return;
+  shop.adsCosts = (shop.adsCosts||[]).filter(a => a.id !== adsId);
+  saveLocal(); renderShopAdsList(shopId);
 }
 
 function renderDashProdTable() {
