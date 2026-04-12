@@ -1178,74 +1178,93 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 
       <!-- 쇼핑몰 관리 -->
       <div id="sales-panel-shops" style="display:none">
-        <div style="display:grid;grid-template-columns:240px 1fr;gap:14px">
-          <!-- 좌측: 쇼핑몰 리스트 -->
-          <div class="card" style="height:fit-content">
-            <div class="card-hdr"><span class="card-title">쇼핑몰</span><button class="btn btn-primary btn-sm" onclick="addNewShop()" style="padding:3px 8px;font-size:10px">+ 추가</button></div>
-            <div class="card-body" id="shop-list" style="padding:6px">
-              <div style="padding:20px;text-align:center;color:var(--gray-400);font-size:12px">쇼핑몰을 추가하세요</div>
+        <!-- ▶ 쇼핑몰 목록 (기본 화면) -->
+        <div id="shop-list-view">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="addNewShop()" style="padding:4px 12px;font-size:11px">+ 쇼핑몰 추가</button>
+            <div style="width:1px;height:22px;background:var(--gray-200);margin:0 2px"></div>
+            <button class="btn btn-sm shop-channel-filter active" data-filter="all" onclick="filterShopByChannel('all')" style="font-size:11px;padding:3px 10px">전체</button>
+            <button class="btn btn-sm shop-channel-filter" data-filter="consumer" onclick="filterShopByChannel('consumer')" style="font-size:11px;padding:3px 10px">📞 소비자</button>
+            <button class="btn btn-sm shop-channel-filter" data-filter="pharmacist" onclick="filterShopByChannel('pharmacist')" style="font-size:11px;padding:3px 10px">💊 약사</button>
+          </div>
+          <div class="card">
+            <div class="card-body" style="overflow-x:auto;padding:0">
+              <table class="tbl" id="shop-table">
+                <thead><tr><th style="width:30px"></th><th>쇼핑몰명</th><th>기본 수수료</th><th>현재 광고비</th><th>무료배송 기준</th><th>담당자</th><th style="width:100px"></th></tr></thead>
+                <tbody id="shop-table-body"></tbody>
+              </table>
             </div>
           </div>
-          <!-- 우측: 상세 (한 화면 스크롤) — 쇼핑몰 선택 후 표시 -->
-          <div id="shop-detail" style="display:none">
-            <!-- ① 기본 정보 -->
-            <div class="shop-section">
-              <div class="shop-section-title">① 기본 정보</div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                <div class="fg"><label>쇼핑몰명<span class="req">*</span></label><input class="fi" id="shop-name" placeholder="예: 쿠팡, 스마트스토어"></div>
-                <div class="fg"><label>API 연동 여부</label><select class="fs" id="shop-api"><option value="true">연동 (자동 수집)</option><option value="false">미연동 (수동 업로드)</option></select></div>
-              </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                <div class="fg"><label>정산 주기</label><select class="fs" id="shop-settle"><option>D+7</option><option>D+14</option><option>D+30</option><option>월정산</option></select></div>
-                <div class="fg"><label>담당자</label><input class="fi" id="shop-manager" placeholder="담당자 이름"></div>
-              </div>
-              <div class="fg"><label>비고</label><textarea class="fi" id="shop-memo" rows="2" placeholder="특이사항, 계약 조건 등"></textarea></div>
-              <div class="fg"><label>첨부파일</label><input type="file" id="shop-attachment" class="fi" multiple style="padding:6px"></div>
+        </div>
+        <!-- ▶ 쇼핑몰 상세/수정 (쇼핑몰 선택 시 표시) -->
+        <div id="shop-detail" style="display:none">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+            <button class="btn btn-outline btn-sm" onclick="shopBackToList()" style="font-size:11px">← 목록으로</button>
+            <span id="shop-detail-title" style="font-size:15px;font-weight:700"></span>
+            <span id="shop-detail-mode-badge" class="badge blue" style="font-size:10px"></span>
+          </div>
+          <!-- ① 기본 정보 -->
+          <div class="shop-section">
+            <div class="shop-section-title">① 기본 정보</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="fg"><label>쇼핑몰명<span class="req">*</span></label><input class="fi" id="shop-name" placeholder="예: 쿠팡, 스마트스토어"></div>
+              <div class="fg"><label>API 연동 여부</label><select class="fs" id="shop-api"><option value="true">연동 (자동 수집)</option><option value="false">미연동 (수동 업로드)</option></select></div>
             </div>
-            <!-- ② 수수료 구조 -->
-            <div class="shop-section">
-              <div class="shop-section-title">② 수수료 구조</div>
-              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-                <div class="fg"><label>기본 수수료율 (%)</label><input class="fi" id="shop-commission" type="number" min="0" step="0.1" value="0" placeholder="0"></div>
-                <div class="fg"><label>배송 정책</label><select class="fs" id="shop-shipping-policy"><option value="seller">판매자 부담</option><option value="buyer">구매자 부담</option><option value="free_over">조건부 무료</option></select></div>
-                <div class="fg"><label>배송비 (원)</label><input class="fi" id="shop-shipping-cost" type="number" min="0" value="0" placeholder="0"></div>
-              </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-                <div class="fg"><label>무료배송 기준 (원)</label><input class="fi" id="shop-free-threshold" type="number" min="0" value="0" placeholder="0"></div>
-                <div class="fg"><label>쿠폰 자부담률 (%)</label><input class="fi" id="shop-coupon-rate" type="number" min="0" step="0.1" value="0" placeholder="0"></div>
-                <div class="fg"><label>적용 시작일</label><input class="fi" id="shop-fee-start" type="date"></div>
-              </div>
-              <div class="fg"><label>수수료 비고</label><input class="fi" id="shop-fee-memo" placeholder="수수료 변경 사유, 협상 조건 등"></div>
-              <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px">모든 금액·비율은 0 입력 허용 (수수료 무료 채널 대응)</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="fg"><label>정산 주기</label><select class="fs" id="shop-settle"><option>D+7</option><option>D+14</option><option>D+30</option><option>월정산</option></select></div>
+              <div class="fg"><label>담당자</label><input class="fi" id="shop-manager" placeholder="담당자 이름"></div>
             </div>
-            <!-- ③ 광고비 -->
-            <div class="shop-section">
-              <div class="shop-section-title">③ 광고비</div>
-              <!-- 입력 방식 선택 -->
-              <div class="fg" style="margin-bottom:10px"><label>입력 방식</label><select class="fs" id="shop-ads-type" onchange="toggleAdsInputType()"><option value="monthly">월별 입력</option><option value="range">기간별 입력</option><option value="daily">일별 입력</option></select></div>
-              <!-- 월별: 월 선택 드롭다운 -->
-              <div class="fg" id="ads-monthly-group" style="margin-bottom:10px"><label>월 선택</label><input class="fi" id="shop-ads-month" type="month"></div>
-              <!-- 기간별: 시작일·종료일 나란히 -->
-              <div id="ads-range-group" style="display:none;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-                <div class="fg" style="margin:0"><label>시작일</label><input class="fi" id="shop-ads-start" type="date"></div>
-                <div class="fg" style="margin:0"><label>종료일</label><input class="fi" id="shop-ads-end" type="date"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="fg">
+                <label>채널 유형</label>
+                <select class="fs" id="shop-channel-type">
+                  <option value="consumer">📞 소비자</option>
+                  <option value="pharmacist">💊 약사</option>
+                </select>
               </div>
-              <!-- 일별: 날짜 (반 너비) -->
-              <div id="ads-daily-group" style="display:none;margin-bottom:10px"><div class="fg" style="max-width:50%"><label>날짜</label><input class="fi" id="shop-ads-date" type="date"></div></div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                <div class="fg"><label>광고비 (원)</label><input class="fi" id="shop-ads-cost" type="number" min="0" value="0" placeholder="0원 입력 허용"></div>
-                <div class="fg"><label>ROAS</label><div class="fi" id="shop-ads-roas" style="background:var(--gray-50);color:var(--gray-500);min-height:34px;display:flex;align-items:center">자동 계산</div></div>
-              </div>
-              <div class="fg"><label>비고</label><input class="fi" id="shop-ads-breakdown" placeholder=""></div>
-              <div style="display:flex;justify-content:flex-end;margin-top:6px"><button class="btn btn-outline btn-sm" onclick="addShopAdsCost()">+ 광고비 추가</button></div>
-              <!-- 등록된 광고비 목록 -->
-              <div id="shop-ads-list" style="margin-top:10px"></div>
-              <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px">0원 입력 = 광고 미집행 · 기간별 ROAS 자동 계산 · 미설정 날짜는 광고비 0원 적용</div>
+              <div class="fg"><label>비고</label><textarea class="fi" id="shop-memo" rows="2" placeholder="특이사항, 계약 조건 등" style="min-height:38px"></textarea></div>
             </div>
-            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
-              <button class="btn btn-outline" onclick="showShopHistory()">📋 변경 이력 보기</button>
-              <button class="btn btn-primary" onclick="saveShopInfo()">💾 저장</button>
+            <div class="fg"><label>첨부파일</label><input type="file" id="shop-attachment" class="fi" multiple style="padding:6px"></div>
+          </div>
+          <!-- ② 수수료 구조 -->
+          <div class="shop-section">
+            <div class="shop-section-title">② 수수료 구조</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+              <div class="fg"><label>기본 수수료율 (%)</label><input class="fi" id="shop-commission" type="number" min="0" step="0.1" value="0" placeholder="0"></div>
+              <div class="fg"><label>배송 정책</label><select class="fs" id="shop-shipping-policy"><option value="seller">판매자 부담</option><option value="buyer">구매자 부담</option><option value="free_over">조건부 무료</option></select></div>
+              <div class="fg"><label>배송비 (원)</label><input class="fi" id="shop-shipping-cost" type="number" min="0" value="0" placeholder="0"></div>
             </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+              <div class="fg"><label>무료배송 기준 (원)</label><input class="fi" id="shop-free-threshold" type="number" min="0" value="0" placeholder="0"></div>
+              <div class="fg"><label>쿠폰 자부담률 (%)</label><input class="fi" id="shop-coupon-rate" type="number" min="0" step="0.1" value="0" placeholder="0"></div>
+              <div class="fg"><label>적용 시작일</label><input class="fi" id="shop-fee-start" type="date"></div>
+            </div>
+            <div class="fg"><label>수수료 비고</label><input class="fi" id="shop-fee-memo" placeholder="수수료 변경 사유, 협상 조건 등"></div>
+            <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px">모든 금액·비율은 0 입력 허용 (수수료 무료 채널 대응)</div>
+          </div>
+          <!-- ③ 광고비 -->
+          <div class="shop-section">
+            <div class="shop-section-title">③ 광고비</div>
+            <div class="fg" style="margin-bottom:10px"><label>입력 방식</label><select class="fs" id="shop-ads-type" onchange="toggleAdsInputType()"><option value="monthly">월별 입력</option><option value="range">기간별 입력</option><option value="daily">일별 입력</option></select></div>
+            <div class="fg" id="ads-monthly-group" style="margin-bottom:10px"><label>월 선택</label><input class="fi" id="shop-ads-month" type="month"></div>
+            <div id="ads-range-group" style="display:none;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+              <div class="fg" style="margin:0"><label>시작일</label><input class="fi" id="shop-ads-start" type="date"></div>
+              <div class="fg" style="margin:0"><label>종료일</label><input class="fi" id="shop-ads-end" type="date"></div>
+            </div>
+            <div id="ads-daily-group" style="display:none;margin-bottom:10px"><div class="fg" style="max-width:50%"><label>날짜</label><input class="fi" id="shop-ads-date" type="date"></div></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="fg"><label>광고비 (원)</label><input class="fi" id="shop-ads-cost" type="number" min="0" value="0" placeholder="0원 입력 허용"></div>
+              <div class="fg"><label>ROAS</label><div class="fi" id="shop-ads-roas" style="background:var(--gray-50);color:var(--gray-500);min-height:34px;display:flex;align-items:center">자동 계산</div></div>
+            </div>
+            <div class="fg"><label>비고</label><input class="fi" id="shop-ads-breakdown" placeholder=""></div>
+            <div style="display:flex;justify-content:flex-end;margin-top:6px"><button class="btn btn-outline btn-sm" onclick="addShopAdsCost()">+ 광고비 추가</button></div>
+            <div id="shop-ads-list" style="margin-top:10px"></div>
+            <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px">0원 입력 = 광고 미집행 · 기간별 ROAS 자동 계산 · 미설정 날짜는 광고비 0원 적용</div>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
+            <button class="btn btn-outline" style="color:var(--red-500);border-color:var(--red-200)" onclick="deleteShop()">🗑 삭제</button>
+            <button class="btn btn-outline" onclick="shopBackToList()">취소</button>
+            <button class="btn btn-primary" onclick="saveShopInfo()">💾 저장</button>
           </div>
         </div>
       </div>
@@ -3082,7 +3101,12 @@ function switchSalesTab(tab) {
     el.classList.toggle('active', tabs[i] === tab);
   });
   if (tab === 'orders') renderOrderShopTabs();
-  if (tab === 'shops') renderShopList();
+  if (tab === 'shops') {
+    // 탭 진입 시 항상 목록 뷰로
+    const lv = $('shop-list-view'); if (lv) lv.style.display = '';
+    const dt = $('shop-detail'); if (dt) dt.style.display = 'none';
+    renderShopList();
+  }
 }
 
 // 주문 관리 — 쇼핑몰 탭
@@ -3125,25 +3149,106 @@ function applyBulkEdit() {
 }
 
 // 쇼핑몰 관리
+window._shopChannelFilter = 'all';
+function filterShopByChannel(filter) {
+  window._shopChannelFilter = filter;
+  document.querySelectorAll('.shop-channel-filter').forEach(b => {
+    b.classList.toggle('active', b.dataset.filter === filter);
+    b.style.background = b.dataset.filter === filter ? 'var(--sky-100)' : '';
+    b.style.color = b.dataset.filter === filter ? 'var(--sky-700)' : '';
+    b.style.fontWeight = b.dataset.filter === filter ? '600' : '';
+  });
+  renderShopList();
+}
 function renderShopList() {
-  const container = $('shop-list'); if (!container) return;
-  const detail = $('shop-detail');
+  const tbody = $('shop-table-body'); if (!tbody) return;
   const shops = DB.shops || [];
-  if (!shops.length) {
-    container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:12px">쇼핑몰을 추가하세요</div>';
-    if (detail) detail.style.display = 'none';
+  const filter = window._shopChannelFilter || 'all';
+  const filtered = filter === 'all' ? shops : shops.filter(s => (s.channelType || 'consumer') === filter);
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:30px">${shops.length ? '필터 결과가 없습니다' : '쇼핑몰을 추가하세요'}</td></tr>`;
     return;
   }
-  container.innerHTML = shops.map((s,i) => `<div style="padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px;margin-bottom:2px;transition:all .1s;color:var(--gray-600)" onclick="selectShop(${i})" class="shop-list-item">${s.active===false?'<span style="opacity:.5">⏸ </span>':''}${s.name||'이름 없음'}</div>`).join('');
+  const channelIcon = { consumer: '📞', pharmacist: '💊' };
+  tbody.innerHTML = filtered.map((s, fi) => {
+    const realIdx = shops.indexOf(s);
+    const ico = channelIcon[s.channelType || 'consumer'] || '📞';
+    const latestAd = getLatestAdsCost(s);
+    return `<tr>
+      <td style="text-align:center;font-size:13px">${ico}</td>
+      <td style="cursor:pointer;color:var(--blue-600);font-weight:500" onclick="shopShowDetail(${realIdx})">${s.name||'이름 없음'}</td>
+      <td>${(s.commissionBase||0)}%</td>
+      <td>${latestAd != null ? latestAd.toLocaleString()+'원' : '-'}</td>
+      <td>${(s.freeShippingThreshold||0) > 0 ? (s.freeShippingThreshold).toLocaleString()+'원' : '-'}</td>
+      <td>${s.manager||'-'}</td>
+      <td style="white-space:nowrap;text-align:center">
+        <button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px" onclick="shopEditMode(${realIdx})">수정</button>
+        ${realIdx > 0 ? `<span style="cursor:pointer;font-size:11px;margin-left:2px" onclick="shopMove(${realIdx},-1)" title="위로">▲</span>` : ''}
+        ${realIdx < shops.length-1 ? `<span style="cursor:pointer;font-size:11px" onclick="shopMove(${realIdx},1)" title="아래로">▼</span>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
 }
-function selectShop(idx) {
-  document.querySelectorAll('.shop-list-item').forEach((el,i) => {
-    el.style.background = i === idx ? 'var(--sky-50)' : '';
-    el.style.color = i === idx ? 'var(--sky-700)' : 'var(--gray-600)';
-    el.style.fontWeight = i === idx ? '500' : '';
-  });
+function getLatestAdsCost(shop) {
+  const ads = shop.adsCosts || [];
+  if (!ads.length) return null;
+  const sorted = [...ads].sort((a,b) => (b.startDate||b.month||'').localeCompare(a.startDate||a.month||''));
+  return sorted[0]?.cost ?? null;
+}
+function shopMove(idx, dir) {
+  const shops = DB.shops; if (!shops) return;
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= shops.length) return;
+  [shops[idx], shops[newIdx]] = [shops[newIdx], shops[idx]];
+  saveData(); renderShopList();
+}
+function shopBackToList() {
+  const detail = $('shop-detail');
+  const listView = $('shop-list-view');
+  if (detail) detail.style.display = 'none';
+  if (listView) listView.style.display = '';
+  window._currentShopIdx = null; window._selectedShopId = null;
+  renderShopList();
+}
+function shopShowDetail(idx) {
+  // 읽기 전용 상세보기 모달
+  const s = DB.shops[idx]; if (!s) return;
+  const channelLabel = { consumer: '📞 소비자', pharmacist: '💊 약사' };
+  const latestAd = getLatestAdsCost(s);
+  const adsHtml = (s.adsCosts||[]).length ? (s.adsCosts||[]).map(a => `<tr><td>${a.month||a.startDate||'-'}</td><td>${a.endDate||'-'}</td><td>${(a.cost||0).toLocaleString()}원</td><td>${a.memo||'-'}</td></tr>`).join('') : '<tr><td colspan="4" style="text-align:center;color:var(--gray-400)">등록된 광고비 없음</td></tr>';
+  const html = `<div style="padding:4px 0">
+    <div style="font-size:15px;font-weight:700;margin-bottom:10px">${channelLabel[s.channelType||'consumer']||'📞'} ${s.name||'-'}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;font-size:12.5px;color:var(--gray-600)">
+      <div><b>기본 수수료:</b> ${s.commissionBase||0}%</div><div><b>배송 정책:</b> ${s.shippingPolicy==='seller'?'판매자 부담':s.shippingPolicy==='buyer'?'구매자 부담':'조건부 무료'}</div>
+      <div><b>배송비:</b> ${(s.shippingCost||0).toLocaleString()}원</div><div><b>무료배송 기준:</b> ${(s.freeShippingThreshold||0).toLocaleString()}원</div>
+      <div><b>쿠폰 자부담률:</b> ${s.couponBorneRate||0}%</div><div><b>정산 주기:</b> ${s.settlementCycle||'-'}</div>
+      <div><b>담당자:</b> ${s.manager||'-'}</div><div><b>API 연동:</b> ${s.apiLinked?'연동':'미연동'}</div>
+    </div>
+    ${s.memo?`<div style="margin-top:8px;padding:8px;background:var(--gray-50);border-radius:6px;font-size:12px"><b>비고:</b> ${s.memo}</div>`:''}
+    <div style="margin-top:12px"><b style="font-size:12.5px">광고비 이력</b></div>
+    <table class="tbl" style="margin-top:6px;font-size:12px"><thead><tr><th>시작</th><th>종료</th><th>광고비</th><th>비고</th></tr></thead><tbody>${adsHtml}</tbody></table>
+    <div style="margin-top:12px;display:flex;gap:6px;justify-content:flex-end">
+      <button class="btn btn-primary btn-sm" onclick="document.getElementById('overlay-shop-detail-view').remove();shopEditMode(${idx})">수정</button>
+    </div>
+  </div>`;
+  const existing = document.getElementById('overlay-shop-detail-view');
+  if (existing) existing.remove();
+  const d = document.createElement('div');
+  d.className = 'overlay'; d.id = 'overlay-shop-detail-view';
+  d.innerHTML = `<div class="modal" style="width:560px"><div class="modal-hdr"><span class="modal-ttl">🏪 쇼핑몰 상세</span><button class="modal-x" onclick="this.closest('.overlay').remove()">✕</button></div><div class="modal-body">${html}</div></div>`;
+  d.style.display = 'flex';
+  document.body.appendChild(d);
+}
+function shopEditMode(idx) {
+  const listView = $('shop-list-view');
+  const detail = $('shop-detail');
+  if (listView) listView.style.display = 'none';
+  if (detail) detail.style.display = '';
   loadShopDetail(idx);
+  if ($('shop-detail-title')) $('shop-detail-title').textContent = DB.shops[idx]?.name || '쇼핑몰 수정';
+  if ($('shop-detail-mode-badge')) $('shop-detail-mode-badge').textContent = '수정 모드';
 }
+function selectShop(idx) { shopEditMode(idx); }
 function loadShopDetail(idx) {
   const s = DB.shops[idx]; if (!s) return;
   window._currentShopIdx = idx;
@@ -3162,6 +3267,7 @@ function loadShopDetail(idx) {
   if($('shop-free-threshold')) $('shop-free-threshold').value = s.freeShippingThreshold || 0;
   if($('shop-coupon-rate')) $('shop-coupon-rate').value = s.couponBorneRate || 0;
   if($('shop-fee-memo')) $('shop-fee-memo').value = s.feeMemo || '';
+  if($('shop-channel-type')) $('shop-channel-type').value = s.channelType || 'consumer';
   // 광고비 목록 렌더링
   renderShopAdsList(s.id);
   // 광고비 입력 초기화
@@ -3172,12 +3278,12 @@ function loadShopDetail(idx) {
 function addNewShop() {
   const name = prompt('쇼핑몰명을 입력하세요:');
   if (!name) return;
-  DB.shops.push({ id: 'shop_'+Date.now(), name: name, active: true, apiLinked: false, commissionBase: 0, shippingPolicy: 'seller', shippingCost: 0, freeShippingThreshold: 0, couponBorneRate: 0, settlementCycle: 'D+7', manager: '', memo: '', feeMemo: '', adsCosts: [], createdAt: new Date().toISOString() });
+  DB.shops.push({ id: 'shop_'+Date.now(), name: name, active: true, apiLinked: false, channelType: 'consumer', commissionBase: 0, shippingPolicy: 'seller', shippingCost: 0, freeShippingThreshold: 0, couponBorneRate: 0, settlementCycle: 'D+7', manager: '', memo: '', feeMemo: '', adsCosts: [], createdAt: new Date().toISOString() });
   saveData();
-  renderShopList();
-  // 새로 추가한 쇼핑몰 자동 선택
+  // 새 쇼핑몰 바로 수정 모드로 열기
   const newIdx = DB.shops.length - 1;
-  selectShop(newIdx);
+  shopEditMode(newIdx);
+  if ($('shop-detail-mode-badge')) $('shop-detail-mode-badge').textContent = '신규 등록';
 }
 function saveShopInfo() {
   const idx = window._currentShopIdx; if (idx == null || !DB.shops[idx]) return;
@@ -3193,15 +3299,21 @@ function saveShopInfo() {
   s.freeShippingThreshold = parseFloat($('shop-free-threshold')?.value) || 0;
   s.couponBorneRate = parseFloat($('shop-coupon-rate')?.value) || 0;
   s.feeMemo = $('shop-fee-memo')?.value || '';
+  s.channelType = $('shop-channel-type')?.value || 'consumer';
   s.updatedAt = new Date().toISOString();
   saveData();
-  renderShopList();
-  // 저장 후 상세 영역 숨기고 리스트로 돌아감
-  const detail = $('shop-detail');
-  if (detail) detail.style.display = 'none';
-  window._currentShopIdx = null;
-  window._selectedShopId = null;
+  // 저장 후 목록으로 돌아감
+  shopBackToList();
   alert('저장되었습니다.');
+}
+function deleteShop() {
+  const idx = window._currentShopIdx; if (idx == null || !DB.shops[idx]) return;
+  const name = DB.shops[idx].name || '이 쇼핑몰';
+  if (!confirm(`"${name}"을(를) 삭제하시겠습니까?\n관련된 광고비 데이터도 함께 삭제됩니다.`)) return;
+  DB.shops.splice(idx, 1);
+  saveData();
+  shopBackToList();
+  alert('삭제되었습니다.');
 }
 function showShopHistory() { alert('변경 이력은 Firestore 연동 후 shopFeeHistory 컬렉션에서 조회됩니다.'); }
 
