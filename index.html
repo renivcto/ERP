@@ -1143,7 +1143,6 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <select class="fs" id="shop-order-status-filter" onchange="renderShopOrderTable()" style="width:110px;padding:5px;font-size:11px"><option value="">전체 상태</option><option>배송 전</option><option>배송중</option><option>배송완료</option><option>취소</option><option>반품</option></select>
           <select class="fs" id="shop-order-shop-filter" onchange="renderShopOrderTable()" style="width:130px;padding:5px;font-size:11px"><option value="">전체 쇼핑몰</option></select>
           <div style="margin-left:auto;display:flex;gap:6px">
-            <button class="btn btn-outline btn-sm" style="color:var(--red-500);border-color:var(--red-200)" onclick="deleteAllShopOrders()">🗑 전체 삭제</button>
             <button class="btn btn-outline btn-sm" onclick="downloadOrderTemplate()">📥 엑셀 양식</button>
             <button class="btn btn-primary btn-sm" onclick="openOrderUploadModal()">📤 주문 업로드</button>
           </div>
@@ -1153,6 +1152,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <span>✅ <strong id="so-sel-count">0</strong>건 선택</span>
           <button class="btn btn-sm" style="background:#16a34a;color:#fff;font-size:11px;padding:3px 10px" onclick="bulkShipComplete()">📦 배송완료 처리</button>
           <button class="btn btn-outline btn-sm" style="font-size:11px;padding:3px 10px" onclick="bulkCancelOrders()">취소 처리</button>
+          <button class="btn btn-sm" style="background:#ef4444;color:#fff;font-size:11px;padding:3px 10px" onclick="bulkDeleteOrders()">🗑 선택 삭제</button>
         </div>
         <!-- 요약 카드 -->
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">
@@ -3360,9 +3360,20 @@ function confirmOrderUpload() {
   if (!orders.length) { alert('업로드할 데이터가 없습니다.'); return; }
   const shop = (DB.shops||[]).find(s => s.id === shopId);
   const shopName = shop?.name || shopId;
-  // 중복 체크 (같은 주문번호 + 같은 쇼핑몰)
-  const existing = new Set((DB.shopOrders||[]).filter(o => o.shopId === shopId).map(o => o.orderNo));
-  const newOrders = orders.filter(o => !existing.has(o.orderNo));
+  // 중복 체크 (주문번호 + 쇼핑몰, 또는 고객명+제품명+날짜+수량+금액 복합키)
+  const shopExisting = (DB.shopOrders||[]).filter(o => o.shopId === shopId);
+  const existOrderNos = new Set(shopExisting.map(o => o.orderNo));
+  const existCompositeKeys = new Set(shopExisting.map(o =>
+    `${o.customerName}|${o.productName}|${o.orderDate}|${o.qty}|${o.paymentAmount||o.totalPrice||0}`
+  ));
+  const newOrders = orders.filter(o => {
+    // 자동생성 주문번호(MNL-)는 주문번호 중복체크 무시 → 복합키로 체크
+    if (o.orderNo.startsWith('MNL-')) {
+      const key = `${o.customerName}|${o.productName}|${o.orderDate}|${o.qty}|${o.paymentAmount||0}`;
+      return !existCompositeKeys.has(key);
+    }
+    return !existOrderNos.has(o.orderNo);
+  });
   const dupCount = orders.length - newOrders.length;
   if (dupCount > 0 && !confirm(`${dupCount}건의 중복 주문이 제외됩니다.\n${newOrders.length}건을 업로드하시겠습니까?`)) return;
   if (!newOrders.length) { alert('모든 주문이 이미 등록되어 있습니다.'); return; }
@@ -3459,7 +3470,7 @@ function renderShopOrderTable() {
   // 요약 카드
   const all = DB.shopOrders || [];
   if ($('so-total-count')) $('so-total-count').textContent = all.length;
-  if ($('so-total-revenue')) $('so-total-revenue').textContent = '₩' + all.reduce((s,o) => s + (o.paymentAmount||o.totalPrice||0), 0).toLocaleString();
+  if ($('so-total-revenue')) $('so-total-revenue').textContent = '₩' + all.filter(o => o.status !== '취소' && o.status !== '반품').reduce((s,o) => s + (o.paymentAmount||o.totalPrice||0), 0).toLocaleString();
   if ($('so-shipping-count')) $('so-shipping-count').textContent = all.filter(o => o.status === '배송 전' || o.status === '수집완료' || o.status === '출고요청').length;
   if ($('so-cancel-count')) $('so-cancel-count').textContent = all.filter(o => o.status === '취소' || o.status === '반품').length;
   // 쇼핑몰 필터 드롭다운 갱신 (비어있을 경우에만)
@@ -3546,32 +3557,15 @@ function deleteShopOrder(id) {
   saveData(); renderShopOrderTable();
 }
 
-function deleteAllShopOrders() {
+function bulkDeleteOrders() {
   if (!requireWrite()) return;
-  const cnt = (DB.shopOrders||[]).length;
-  if (!cnt) { alert('삭제할 주문이 없습니다.'); return; }
-  // 필터 적용 중이면 필터된 것만 삭제 옵션
-  const statusF = $('shop-order-status-filter')?.value || '';
-  const shopF = $('shop-order-shop-filter')?.value || '';
-  const q = ($('shop-order-search')?.value||'').toLowerCase();
-  let filtered = DB.shopOrders || [];
-  if (q) filtered = filtered.filter(o => (o.orderNo||'').toLowerCase().includes(q) || (o.customerName||'').toLowerCase().includes(q) || (o.productName||'').toLowerCase().includes(q));
-  if (statusF) filtered = filtered.filter(o => o.status === statusF);
-  if (shopF) filtered = filtered.filter(o => o.shopId === shopF);
-  const isFiltered = statusF || shopF || q;
-  let msg = isFiltered
-    ? `현재 필터링된 ${filtered.length}건을 삭제하시겠습니까?\n\n(전체 ${cnt}건 중 ${filtered.length}건)`
-    : `전체 주문 ${cnt}건을 모두 삭제하시겠습니까?\n\n⚠️ 이 작업은 되돌릴 수 없습니다.`;
-  if (!confirm(msg)) return;
-  if (isFiltered) {
-    const delIds = new Set(filtered.map(o => o.id));
-    DB.shopOrders = (DB.shopOrders||[]).filter(o => !delIds.has(o.id));
-  } else {
-    if (!confirm('정말로 전체 주문을 삭제하시겠습니까? (최종 확인)')) return;
-    DB.shopOrders = [];
-  }
+  const ids = [...document.querySelectorAll('.so-row-check:checked')].map(cb => parseInt(cb.value));
+  if (!ids.length) { alert('삭제할 주문을 선택해주세요.'); return; }
+  if (!confirm(`선택한 ${ids.length}건의 주문을 삭제하시겠습니까?\n\n⚠️ 이 작업은 되돌릴 수 없습니다.`)) return;
+  const delSet = new Set(ids);
+  DB.shopOrders = (DB.shopOrders||[]).filter(o => !delSet.has(o.id));
   saveData(); renderShopOrderTable();
-  alert(isFiltered ? `${filtered.length}건이 삭제되었습니다.` : '전체 주문이 삭제되었습니다.');
+  alert(`${ids.length}건이 삭제되었습니다.`);
 }
 
 // ══════════════ 주문 상세 모달 ══════════════
@@ -4014,6 +4008,7 @@ function calcShopRoas(shopId, startDate, endDate) {
   // 해당 쇼핑몰의 기간 내 매출 합계 계산
   const orders = (DB.shopOrders||[]).filter(o => {
     if (o.shopId !== shopId) return false;
+    if (o.status === '취소' || o.status === '반품') return false;
     const d = (o.orderDate||o.date||'').slice(0,10);
     return d >= startDate && d <= endDate;
   });
