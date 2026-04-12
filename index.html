@@ -1052,7 +1052,12 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
                 </div>
                 <input class="fi" id="cs-customer">
               </div>
-              <div class="fg"><label>연락처 <span style="font-size:10px;color:var(--gray-400)">(선택)</span></label><input class="fi" id="cs-phone" placeholder="010-0000-0000"></div>
+              <div class="fg"><label>연락처 <span style="font-size:10px;color:var(--gray-400)">(선택)</span></label>
+                <div style="display:flex;align-items:center;gap:4px">
+                  <span style="font-size:13px;font-weight:500;color:var(--gray-600);white-space:nowrap">010-</span>
+                  <input class="fi" id="cs-phone" placeholder="0000-0000" maxlength="9" oninput="formatPhoneSuffix(this)" style="flex:1">
+                </div>
+              </div>
             </div>
 
             <!-- ═══ 주문 고객: 고객명(검색) + 아이콘 → 주문번호·쇼핑몰 ═══ -->
@@ -1210,7 +1215,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
               <div class="fg"><label>API 연동 여부</label><select class="fs" id="shop-api"><option value="true">연동 (자동 수집)</option><option value="false">미연동 (수동 업로드)</option></select></div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-              <div class="fg"><label>정산 주기</label><select class="fs" id="shop-settle"><option>D+7</option><option>D+14</option><option>D+30</option><option>월정산</option></select></div>
+              <div class="fg"><label>정산 주기</label><input class="fi" id="shop-settle" placeholder="예: D+7, 월정산 등"></div>
               <div class="fg"><label>담당자</label><input class="fi" id="shop-manager" placeholder="담당자 이름"></div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
@@ -2817,7 +2822,7 @@ function csEditEntry(id) {
       window._csSelectedOrder = { id: c.linkedOrderId, orderNo: c.linkedOrderNo, customerName: c.customer, customerPhone: c.phone, shopId: c.linkedShopId, orderDate: c.linkedOrderDate, itemName: c.linkedProductName };
     } else {
       if ($('cs-customer')) $('cs-customer').value = c.customer || '';
-      if ($('cs-phone')) $('cs-phone').value = c.phone || '';
+      if ($('cs-phone')) $('cs-phone').value = (c.phone || '').replace(/^010-?/, '');
     }
     if ($('cs-channel')) $('cs-channel').value = c.channel || '전화';
     if ($('cs-urgency')) $('cs-urgency').value = (c.urgency||3).toString();
@@ -2867,6 +2872,12 @@ window._csFormMode = 'new'; // 'new' or 'order'
 window._csSelectedOrder = null;
 
 // 아이콘 라디오 토글 (하나만 선택)
+function formatPhoneSuffix(el) {
+  let v = el.value.replace(/[^0-9]/g, '');
+  if (v.length > 8) v = v.slice(0, 8);
+  if (v.length > 4) v = v.slice(0, 4) + '-' + v.slice(4);
+  el.value = v;
+}
 function csToggleIcon(el) {
   const wasActive = el.classList.contains('active');
   // 같은 모달 내 모든 아이콘 해제
@@ -3023,7 +3034,8 @@ function saveCsEntry() {
     phone = window._csSelectedOrder.customerPhone || '';
   } else {
     cust = $('cs-customer')?.value?.trim() || '';
-    phone = $('cs-phone')?.value || '';
+    const phoneSuffix = ($('cs-phone')?.value || '').trim();
+    phone = phoneSuffix ? '010-' + phoneSuffix : '';
   }
 
   const content = $('cs-content')?.value?.trim();
@@ -3277,7 +3289,7 @@ function loadShopDetail(idx) {
   if (detail) detail.style.display = '';
   if($('shop-name')) $('shop-name').value = s.name || '';
   if($('shop-api')) $('shop-api').value = s.apiLinked ? 'true' : 'false';
-  if($('shop-settle')) $('shop-settle').value = s.settlementCycle || 'D+7';
+  if($('shop-settle')) $('shop-settle').value = s.settlementCycle || '';
   if($('shop-manager')) $('shop-manager').value = s.manager || '';
   if($('shop-memo')) $('shop-memo').value = s.memo || '';
   if($('shop-commission')) $('shop-commission').value = s.commissionBase || 0;
@@ -3309,7 +3321,7 @@ function saveShopInfo() {
   const s = DB.shops[idx];
   s.name = $('shop-name')?.value || s.name;
   s.apiLinked = $('shop-api')?.value === 'true';
-  s.settlementCycle = $('shop-settle')?.value || 'D+7';
+  s.settlementCycle = $('shop-settle')?.value || '';
   s.manager = $('shop-manager')?.value || '';
   s.memo = $('shop-memo')?.value || '';
   s.commissionBase = parseFloat($('shop-commission')?.value) || 0;
