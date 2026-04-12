@@ -2731,7 +2731,7 @@ function renderCsList() {
       <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${productName}</td>
       <td>${stBadge}</td>
       <td><div style="max-height:2.8em;overflow-y:auto;font-size:11.5px;line-height:1.4;color:var(--gray-600);max-width:200px">${contentPreview||'-'}</div></td>
-      <td><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();csEditEntry(${c.id})">수정</button></td>
+      <td style="white-space:nowrap"><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();csEditEntry(${c.id})">수정</button> <button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px;color:var(--red-500);border-color:var(--red-200)" onclick="event.stopPropagation();csDeleteEntry(${c.id})">삭제</button></td>
     </tr>`;
   }).join('');
 }
@@ -2759,7 +2759,8 @@ function csShowDetail(id) {
     <div style="margin-top:10px;padding:10px;background:var(--gray-50);border-radius:6px;font-size:12.5px"><b>상담 내용:</b><br>${(c.content||'-').replace(/\n/g,'<br>')}</div>
     <div style="margin-top:6px;padding:10px;background:var(--gray-50);border-radius:6px;font-size:12.5px"><b>조치 내역:</b><br>${(c.action||'-').replace(/\n/g,'<br>')}</div>
     <div style="margin-top:10px;display:flex;gap:6px;justify-content:flex-end">
-      ${c.pinned?`<button class="btn btn-outline btn-sm" style="color:var(--red-500)" onclick="csRemovePin(${c.id})">📌 고정 삭제</button>`:''}
+      <button class="btn btn-outline btn-sm" style="color:var(--red-500)" onclick="csDeleteEntry(${c.id})">🗑 삭제</button>
+      ${c.pinned?`<button class="btn btn-outline btn-sm" style="color:var(--amber-600)" onclick="csRemovePin(${c.id})">📌 고정 삭제</button>`:''}
       <button class="btn btn-primary btn-sm" onclick="csEditEntry(${c.id})">수정</button>
     </div>
   </div>`;
@@ -2777,7 +2778,7 @@ function csEditEntry(id) {
   if (detailOverlay) detailOverlay.remove();
   const c = (DB.cs||[]).find(x => x.id === id); if (!c) return;
   window._csEditId = id;
-  openCsForm(c.formMode || 'new');
+  openCsForm(c.formMode || 'new', true);
   setTimeout(() => {
     if (c.formMode === 'order' && c.linkedOrderNo) {
       const infoEl = $('cs-selected-order-info');
@@ -2816,6 +2817,13 @@ function csRemovePin(id) {
   saveData(); renderCsList();
   const d = document.getElementById('overlay-cs-detail'); if(d) d.remove();
 }
+function csDeleteEntry(id) {
+  if (!confirm('이 CS 상담 기록을 삭제하시겠습니까?')) return;
+  const idx = (DB.cs||[]).findIndex(x => x.id === id);
+  if (idx >= 0) DB.cs.splice(idx, 1);
+  saveData(); renderCsList();
+  const d = document.getElementById('overlay-cs-detail'); if(d) d.remove();
+}
 function csPinMove(id, dir) {
   const c = (DB.cs||[]).find(x => x.id === id); if (!c) return;
   const pinned = (DB.cs||[]).filter(x => x.pinned && x.type === c.type).sort((a,b) => (a.pinOrder||0)-(b.pinOrder||0));
@@ -2842,10 +2850,10 @@ function csGetSelectedIcon(modalBody) {
   return active.dataset.icon || null; // 'urgent', 'star', 'vip'
 }
 
-function openCsForm(mode) {
+function openCsForm(mode, keepEditId) {
   window._csFormMode = mode || 'new';
   window._csSelectedOrder = null;
-  window._csEditId = null;
+  if (!keepEditId) window._csEditId = null;
   $('cs-form-type-display').textContent = window._csCurrentTab === 'consumer' ? '소비자' : '약사';
   $('cs-form-title').textContent = mode === 'order' ? '💬 주문 고객 상담' : '💬 주문 전 고객 상담';
 
@@ -3188,8 +3196,11 @@ function saveShopInfo() {
   s.updatedAt = new Date().toISOString();
   saveData();
   renderShopList();
-  // 저장 후 현재 쇼핑몰 다시 선택
-  selectShop(idx);
+  // 저장 후 상세 영역 숨기고 리스트로 돌아감
+  const detail = $('shop-detail');
+  if (detail) detail.style.display = 'none';
+  window._currentShopIdx = null;
+  window._selectedShopId = null;
   alert('저장되었습니다.');
 }
 function showShopHistory() { alert('변경 이력은 Firestore 연동 후 shopFeeHistory 컬렉션에서 조회됩니다.'); }
