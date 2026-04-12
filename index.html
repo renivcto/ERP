@@ -2851,6 +2851,7 @@ function csShowDetail(id) {
 
 // CS 수정
 function csEditEntry(id) {
+  if (!requireWrite()) return;
   const detailOverlay = document.getElementById('overlay-cs-detail');
   if (detailOverlay) detailOverlay.remove();
   const c = (DB.cs||[]).find(x => x.id === id); if (!c) return;
@@ -2889,12 +2890,14 @@ function csEditEntry(id) {
 // CS 고정/해제
 // 고정 삭제 (목록에서 ✕ 클릭 → 아이콘도 제거)
 function csRemovePin(id) {
+  if (!requireWrite()) return;
   const c = (DB.cs||[]).find(x => x.id === id); if (!c) return;
   c.pinned = false; c.pinIcon = null; delete c.pinOrder;
   saveData(); renderCsList();
   const d = document.getElementById('overlay-cs-detail'); if(d) d.remove();
 }
 function csDeleteEntry(id) {
+  if (!requireWrite()) return;
   if (!confirm('이 CS 상담 기록을 삭제하시겠습니까?')) return;
   const idx = (DB.cs||[]).findIndex(x => x.id === id);
   if (idx >= 0) DB.cs.splice(idx, 1);
@@ -2902,6 +2905,7 @@ function csDeleteEntry(id) {
   const d = document.getElementById('overlay-cs-detail'); if(d) d.remove();
 }
 function csPinMove(id, dir) {
+  if (!requireWrite()) return;
   const c = (DB.cs||[]).find(x => x.id === id); if (!c) return;
   const pinned = (DB.cs||[]).filter(x => x.pinned && x.type === c.type).sort((a,b) => (a.pinOrder||0)-(b.pinOrder||0));
   const idx = pinned.indexOf(c);
@@ -3068,6 +3072,7 @@ function csSelectOrder(orderId) {
 }
 
 function saveCsEntry() {
+  if (!requireWrite()) return;
   const mode = window._csFormMode;
   let cust = '', phone = '';
 
@@ -3199,6 +3204,7 @@ function filterOrderShop(shopId, el) {
 }
 // ══════════════ 주문 업로드/관리 ══════════════
 function openOrderUploadModal() {
+  if (!requireWrite()) return;
   // 쇼핑몰 드롭다운 채우기
   const sel = $('upload-shop-select'); if (!sel) return;
   sel.innerHTML = '<option value="">-- 쇼핑몰 선택 --</option>';
@@ -3496,6 +3502,7 @@ function updateSoBulkBar() {
 
 // 일괄 배송완료 처리
 function bulkShipComplete() {
+  if (!requireWrite()) return;
   const ids = [...document.querySelectorAll('.so-row-check:checked')].map(cb => parseInt(cb.value));
   if (!ids.length) return;
   const targets = (DB.shopOrders||[]).filter(o => ids.includes(o.id) && o.status !== '배송완료');
@@ -3516,6 +3523,7 @@ function bulkShipComplete() {
   alert(msg);
 }
 function bulkCancelOrders() {
+  if (!requireWrite()) return;
   const ids = [...document.querySelectorAll('.so-row-check:checked')].map(cb => parseInt(cb.value));
   if (!ids.length) return;
   if (!confirm(`${ids.length}건을 취소 처리하시겠습니까?`)) return;
@@ -3524,6 +3532,7 @@ function bulkCancelOrders() {
 }
 
 function deleteShopOrder(id) {
+  if (!requireWrite()) return;
   if (!confirm('이 주문을 삭제하시겠습니까?')) return;
   DB.shopOrders = (DB.shopOrders||[]).filter(o => o.id !== id);
   saveData(); renderShopOrderTable();
@@ -3591,6 +3600,7 @@ function openOrderDetail(orderId) {
 
 // 송장번호 입력 → 배송완료 + 재고차감
 function saveOrderTracking(orderId) {
+  if (!requireWrite()) return;
   const o = (DB.shopOrders||[]).find(x => x.id === orderId);
   if (!o) return;
   const tracking = $('od-tracking-input')?.value?.trim();
@@ -3614,6 +3624,7 @@ function saveOrderTracking(orderId) {
 
 // 송장번호 없이 배송완료
 function manualShipComplete(orderId) {
+  if (!requireWrite()) return;
   const o = (DB.shopOrders||[]).find(x => x.id === orderId);
   if (!o) return;
   if (!confirm('송장번호 없이 배송완료 처리하시겠습니까?\n(재고 차감이 진행됩니다)')) return;
@@ -3719,6 +3730,7 @@ function updateBulkCount() {
   const btn = $('mg-bulk-btn'); if (btn) btn.disabled = cnt === 0;
 }
 function openBulkEdit() {
+  if (!requireWrite()) return;
   const cnt = document.querySelectorAll('.mg-row-check:checked').length;
   if (!cnt) return;
   $('bulk-count').textContent = cnt;
@@ -3726,6 +3738,7 @@ function openBulkEdit() {
   openModal('bulk-edit-modal');
 }
 function applyBulkEdit() {
+  if (!requireWrite()) return;
   closeModal('bulk-edit-modal');
   alert('일괄 수정이 적용되었습니다. (주문 데이터 연동 후 실제 marginSnapshot이 업데이트됩니다)');
 }
@@ -3784,6 +3797,7 @@ function getLatestAdsCost(shop) {
   return sorted[0]?.cost ?? null;
 }
 function shopMove(idx, dir) {
+  if (!requireWrite()) return;
   const shops = DB.shops; if (!shops) return;
   const newIdx = idx + dir;
   if (newIdx < 0 || newIdx >= shops.length) return;
@@ -3831,6 +3845,7 @@ function shopShowDetail(idx) {
   document.body.appendChild(d);
 }
 function shopEditMode(idx) {
+  if (!requireWrite()) return;
   const listView = $('shop-list-view');
   const detail = $('shop-detail');
   if (listView) listView.style.display = 'none';
@@ -3867,6 +3882,7 @@ function loadShopDetail(idx) {
   if ($('shop-ads-breakdown')) $('shop-ads-breakdown').value = '';
 }
 function addNewShop() {
+  if (!requireWrite()) return;
   const name = prompt('쇼핑몰명을 입력하세요:');
   if (!name) return;
   DB.shops.push({ id: 'shop_'+Date.now(), name: name, active: true, apiLinked: false, channelType: 'consumer', commissionBase: 0, shippingPolicy: 'seller', shippingCost: 0, freeShippingThreshold: 0, couponBorneRate: 0, settlementCycle: 'D+7', manager: '', memo: '', feeMemo: '', adsCosts: [], createdAt: new Date().toISOString() });
@@ -3877,6 +3893,7 @@ function addNewShop() {
   if ($('shop-detail-mode-badge')) $('shop-detail-mode-badge').textContent = '신규 등록';
 }
 function saveShopInfo() {
+  if (!requireWrite()) return;
   const idx = window._currentShopIdx; if (idx == null || !DB.shops[idx]) return;
   const s = DB.shops[idx];
   s.name = $('shop-name')?.value || s.name;
@@ -3898,6 +3915,7 @@ function saveShopInfo() {
   alert('저장되었습니다.');
 }
 function deleteShop() {
+  if (!requireWrite()) return;
   const idx = window._currentShopIdx; if (idx == null || !DB.shops[idx]) return;
   const name = DB.shops[idx].name || '이 쇼핑몰';
   if (!confirm(`"${name}"을(를) 삭제하시겠습니까?\n관련된 광고비 데이터도 함께 삭제됩니다.`)) return;
@@ -3917,6 +3935,7 @@ function toggleAdsInputType() {
 
 // 광고비 추가 (날짜 겹침 방지)
 function addShopAdsCost() {
+  if (!requireWrite()) return;
   // 현재 상세보기 중인 쇼핑몰 자동 사용
   let shopId = window._selectedShopId;
   if (!shopId && window._currentShopIdx != null && DB.shops[window._currentShopIdx]) {
@@ -4043,6 +4062,7 @@ function renderShopAdsList(shopId) {
     }).join('') + '</tbody></table>';
 }
 function removeShopAdsCost(shopId, adsId) {
+  if (!requireWrite()) return;
   const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop) return;
   shop.adsCosts = (shop.adsCosts||[]).filter(a => a.id !== adsId);
   saveData(); renderShopAdsList(shopId);
