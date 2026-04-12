@@ -9,7 +9,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-  import { getFirestore, doc, getDoc, setDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { getFirestore, doc, getDoc, getDocFromServer, setDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyDP8KBmUQzvH9iH9YQlFa-A87fcOIV09aM",
@@ -37,6 +37,7 @@
   window._onAuthStateChanged = onAuthStateChanged;
   window._firestoreDoc = doc;
   window._firestoreGetDoc = getDoc;
+  window._firestoreGetDocFromServer = getDocFromServer;
   window._firestoreSetDoc = setDoc;
   window._firestoreCollection = collection;
   window._firestoreGetDocs = getDocs;
@@ -2062,7 +2063,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.2.5';
+const ERP_VERSION = 'v1.2.6';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -2103,21 +2104,54 @@ async function saveDataNow() {
     await _doSaveData();
     _hasUnsavedChanges = false;
     console.log('✅ 즉시 저장 완료 - shopOrders:', (DB.shopOrders||[]).length);
-    // 저장 검증: Firestore에서 shopOrders를 다시 읽어서 확인
+    // 저장 검증: 서버에서 직접 읽어서 확인 (캐시 우회)
+    const serverGet = window._firestoreGetDocFromServer || window._firestoreGetDoc;
+    let verifyOK = false;
     try {
-      if (window._firestoreGetDoc && window._firestoreDoc && window._firebaseDb) {
-        const verifySnap = await window._firestoreGetDoc(window._firestoreDoc(window._firebaseDb, 'erp_data', 'shopOrders'));
+      if (serverGet && window._firestoreDoc && window._firebaseDb) {
+        const verifySnap = await serverGet(window._firestoreDoc(window._firebaseDb, 'erp_data', 'shopOrders'));
         if (verifySnap.exists()) {
           const verifyData = JSON.parse(verifySnap.data().data);
-          console.log('🔍 [VERIFY] Firestore shopOrders 검증:', verifyData.length, '건 (기대:', (DB.shopOrders||[]).length, '건)');
-          if (verifyData.length !== (DB.shopOrders||[]).length) {
+          console.log('🔍 [VERIFY] Firestore shopOrders 서버 검증:', verifyData.length, '건 (기대:', (DB.shopOrders||[]).length, '건)');
+          if (verifyData.length === (DB.shopOrders||[]).length) {
+            verifyOK = true;
+          } else {
             console.error('❌ [VERIFY] 저장 불일치! Firestore:', verifyData.length, 'DB:', (DB.shopOrders||[]).length);
+            // 불일치 시 shopOrders만 재저장 시도
+            console.log('🔄 [VERIFY] shopOrders 강제 재저장 시도...');
+            try {
+              await window._firestoreSetDoc(
+                window._firestoreDoc(window._firebaseDb, 'erp_data', 'shopOrders'),
+                { data: JSON.stringify(DB.shopOrders || []), ts: Date.now() }
+              );
+              console.log('✅ [VERIFY] shopOrders 강제 재저장 성공!');
+              verifyOK = true;
+            } catch(rewriteErr) {
+              console.error('❌ [VERIFY] shopOrders 강제 재저장 실패:', rewriteErr);
+            }
           }
         } else {
-          console.error('❌ [VERIFY] shopOrders 문서가 Firestore에 없음!');
+          console.error('❌ [VERIFY] shopOrders 문서가 서버에 없음! 강제 재저장 시도...');
+          try {
+            await window._firestoreSetDoc(
+              window._firestoreDoc(window._firebaseDb, 'erp_data', 'shopOrders'),
+              { data: JSON.stringify(DB.shopOrders || []), ts: Date.now() }
+            );
+            console.log('✅ [VERIFY] shopOrders 강제 생성 성공!');
+            verifyOK = true;
+          } catch(rewriteErr) {
+            console.error('❌ [VERIFY] shopOrders 강제 생성 실패:', rewriteErr);
+          }
         }
       }
-    } catch(ve) { console.warn('검증 실패:', ve); }
+    } catch(ve) {
+      console.warn('서버 검증 실패 (오프라인?):', ve.message);
+      // 서버 검증 실패해도 로컬 저장은 성공으로 처리
+      verifyOK = true;
+    }
+    if (!verifyOK && (DB.shopOrders||[]).length > 0) {
+      showNotif('⚠️ 주문 데이터 서버 동기화 미확인 — 페이지를 닫지 마세요', 'error');
+    }
     return true;
   } catch(e) {
     console.error('❌ 즉시 저장 실패:', e);
@@ -2196,11 +2230,32 @@ async function _doSaveDataInner() {
   };
 
   // 순차 저장 (병렬 저장 시 Firestore 권한 오류 발생 가능)
+  let _shopOrdersSaved = false;
   for (const [key, val] of Object.entries(collections)) {
+    const payload = { data: JSON.stringify(val), ts: Date.now() };
     try {
-      await setDoc(docRef(db, 'erp_data', key), { data: JSON.stringify(val), ts: Date.now() });
+      await setDoc(docRef(db, 'erp_data', key), payload);
+      if (key === 'shopOrders') _shopOrdersSaved = true;
     } catch(e) {
-      console.error(`Firestore 저장 실패 [${key}]:`, e.message, '데이터 크기:', JSON.stringify(val).length);
+      console.error(`Firestore 저장 실패 [${key}]:`, e.message, '데이터 크기:', payload.data.length);
+      // shopOrders는 최대 3회 재시도
+      if (key === 'shopOrders') {
+        for (let retry = 1; retry <= 3; retry++) {
+          try {
+            console.log(`🔄 shopOrders 저장 재시도 ${retry}/3...`);
+            await new Promise(r => setTimeout(r, 500 * retry));
+            await setDoc(docRef(db, 'erp_data', key), payload);
+            _shopOrdersSaved = true;
+            console.log(`✅ shopOrders 저장 재시도 ${retry} 성공!`);
+            break;
+          } catch(retryErr) {
+            console.error(`❌ shopOrders 재시도 ${retry} 실패:`, retryErr.message);
+          }
+        }
+        if (!_shopOrdersSaved) {
+          throw new Error('shopOrders Firestore 저장 실패 (3회 재시도 후)');
+        }
+      }
     }
   }
 
@@ -2238,14 +2293,25 @@ async function loadDataFromFirestore() {
   try {
     if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) {
       console.warn('Firestore API 준비 안됨');
-      return null;
+      return { _loadError: true, _errorMsg: 'Firestore API 미준비' };
     }
     const db = window._firebaseDb;
-    const getDoc = window._firestoreGetDoc;
+    // 🔑 서버에서 직접 읽기 (캐시 우회) — 실패 시 캐시 fallback
+    const serverGetDoc = window._firestoreGetDocFromServer || window._firestoreGetDoc;
+    const cacheGetDoc = window._firestoreGetDoc;
     const docRef = window._firestoreDoc;
 
     const keys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders','meta'];
-    const snaps = await Promise.all(keys.map(k => getDoc(docRef(db, 'erp_data', k))));
+    let snaps;
+    try {
+      // 1차: 서버에서 직접 읽기 (캐시된 stale 데이터 방지)
+      snaps = await Promise.all(keys.map(k => serverGetDoc(docRef(db, 'erp_data', k))));
+      console.log('🔍 [FIRESTORE] 서버 직접 읽기 성공');
+    } catch(serverErr) {
+      console.warn('⚠️ 서버 직접 읽기 실패, 캐시 fallback:', serverErr.message);
+      // 2차: 캐시에서 읽기 (오프라인 등)
+      snaps = await Promise.all(keys.map(k => cacheGetDoc(docRef(db, 'erp_data', k))));
+    }
 
     // meta가 없으면 아직 Firestore에 데이터 없음 → { _noData: true }로 구분
     const metaIdx = keys.indexOf('meta');
@@ -8413,6 +8479,7 @@ function initERPWhenReady() {
     }
   };
   const hideLoader = () => { const el = document.getElementById('erp-loader'); if (el) el.remove(); };
+  let _loadDiagMsg = '';  // 로드 진단 메시지
   const doRender = () => {
     // 사이드바에 버전 표시
     const vTag = document.getElementById('erp-version-tag');
@@ -8420,6 +8487,10 @@ function initERPWhenReady() {
     try { updateBadges(); } catch(e) { console.warn('updateBadges 실패:', e); }
     try { go('dashboard'); } catch(e) {}
     try { renderDashboard(); } catch(e) { console.warn('renderDashboard 실패:', e); }
+    // 🔍 화면 진단 표시 (5초간)
+    const diagInfo = `${ERP_VERSION} 로드 완료 | shopOrders: ${(DB.shopOrders||[]).length}건 | shops: ${(DB.shops||[]).length}건 | items: ${(DB.items||[]).length}건` + (_loadDiagMsg ? ' | ' + _loadDiagMsg : '');
+    try { showNotif(diagInfo, (DB.shopOrders||[]).length > 0 ? 'success' : 'warning'); } catch(e) {}
+    console.log('📊 [DIAG]', diagInfo);
   };
 
   showLoader();
@@ -8441,8 +8512,8 @@ function initERPWhenReady() {
     // 🛡️ 로드 에러 시 → localStorage 데이터 유지, Firestore 덮어쓰기 절대 금지
     if (isError) {
       console.error('🛡️ Firestore 로드 에러 → localStorage 데이터만 사용 (Firestore 덮어쓰기 방지!)');
-      _firestoreDataLoaded = true;  // 이후 사용자 작업의 저장은 허용
-      // localStorage 데이터 보완
+      _loadDiagMsg = '⚠️ Firestore 에러→localStorage 사용';
+      _firestoreDataLoaded = true;
       if (!DB.shops) DB.shops = [];
       if (!DB.shopOrders) DB.shopOrders = [];
       if (!DB.cs) DB.cs = [];
@@ -8498,6 +8569,7 @@ function initERPWhenReady() {
       if (!DB.shops) DB.shops = [];
       if (!DB.shopOrders) DB.shopOrders = [];
       if (!DB.cs) DB.cs = [];
+      _loadDiagMsg = '✅ Firestore→머지 완료';
       console.log('✅ 머지 완료 - shopOrders:', DB.shopOrders.length, 'shops:', DB.shops.length, 'cs:', DB.cs.length);
       applyPendingStockIn();
       cleanOrphanProductions();
@@ -8507,12 +8579,14 @@ function initERPWhenReady() {
       console.log('✅ Firestore 데이터 로드 완료 — Firestore 쓰기 활성화');
     } else if (isNoData) {
       // 📭 최초 사용: Firestore에 데이터가 전혀 없음 → 현재 DB 업로드
+      _loadDiagMsg = '📭 최초 사용→Firestore 업로드';
       console.log('ℹ️ Firestore 최초 사용 → 로컬 데이터 Firestore에 업로드 중...');
-      _firestoreDataLoaded = true;  // 쓰기 허용
+      _firestoreDataLoaded = true;
       _doSaveData().catch(e => console.warn('초기 업로드 실패:', e));
     } else {
       // null 또는 예상치 못한 결과 → 안전하게 localStorage 유지
-      console.warn('⚠️ Firestore 데이터 불완전 → localStorage 데이터 유지 (Firestore 덮어쓰기 방지)');
+      _loadDiagMsg = '⚠️ Firestore 불완전→localStorage 사용';
+      console.warn('⚠️ Firestore 데이터 불완전 → localStorage 데이터 유지');
       _firestoreDataLoaded = true;
       if (!DB.shops) DB.shops = [];
       if (!DB.shopOrders) DB.shopOrders = [];
