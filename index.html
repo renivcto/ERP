@@ -2065,7 +2065,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.2.7';
+const ERP_VERSION = 'v1.2.8';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -2090,7 +2090,16 @@ let _firestoreDataLoaded = false;  // Firestore 초기 로드 완료 전까지 F
 function saveData() {
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
-    _doSaveData().catch(e => console.error('saveData 자동저장 실패:', e));
+    _doSaveData().then(() => {
+      // 자동저장 후에도 shopOrders 백업
+      try {
+        if ((DB.shopOrders||[]).length > 0) {
+          localStorage.setItem('reniv_shopOrders_backup', JSON.stringify(DB.shopOrders));
+          localStorage.setItem('reniv_shopOrders_backup_ts', String(Date.now()));
+          localStorage.setItem('reniv_shops_backup', JSON.stringify(DB.shops || []));
+        }
+      } catch(e) {}
+    }).catch(e => console.error('saveData 자동저장 실패:', e));
   }, 800);
 }
 
@@ -2155,10 +2164,27 @@ async function saveDataNow() {
     if (!verifyOK && (DB.shopOrders||[]).length > 0) {
       showNotif('⚠️ 주문 데이터 서버 동기화 미확인 — 페이지를 닫지 마세요', 'error');
     }
+    // 🛡️ shopOrders 독립 백업 (Firestore 실패해도 이것으로 복구)
+    try {
+      const backupData = JSON.stringify(DB.shopOrders || []);
+      localStorage.setItem('reniv_shopOrders_backup', backupData);
+      localStorage.setItem('reniv_shopOrders_backup_ts', String(Date.now()));
+      console.log('🛡️ shopOrders 독립 백업 완료:', (DB.shopOrders||[]).length, '건,', backupData.length, 'bytes');
+    } catch(be) { console.warn('shopOrders 백업 실패:', be); }
+    // 🛡️ shops 독립 백업
+    try {
+      localStorage.setItem('reniv_shops_backup', JSON.stringify(DB.shops || []));
+    } catch(be) {}
     return true;
   } catch(e) {
     console.error('❌ 즉시 저장 실패:', e);
     showNotif('⚠️ 저장 실패: ' + e.message, 'error');
+    // 실패해도 백업은 시도
+    try {
+      localStorage.setItem('reniv_shopOrders_backup', JSON.stringify(DB.shopOrders || []));
+      localStorage.setItem('reniv_shopOrders_backup_ts', String(Date.now()));
+      localStorage.setItem('reniv_shops_backup', JSON.stringify(DB.shops || []));
+    } catch(be) {}
     return false;
   }
 }
@@ -2203,7 +2229,13 @@ async function _doSaveDataInner() {
   });
 
   // localStorage 항상 저장 (백업)
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(dbToSave)); } catch(e) {}
+  try {
+    const lsJson = JSON.stringify(dbToSave);
+    localStorage.setItem(STORE_KEY, lsJson);
+    console.log('💾 [localStorage] 저장 완료:', lsJson.length, 'bytes — shopOrders:', (dbToSave.shopOrders||[]).length, '건');
+  } catch(e) {
+    console.error('❌ [localStorage] 저장 실패!', e.message, '— 크기:', JSON.stringify(dbToSave).length);
+  }
 
   // Firestore 저장 (공유) - 순차적으로 저장해서 에러 추적
   if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) {
@@ -2432,9 +2464,11 @@ async function restoreIDBData() {
 function loadData() {
   try {
     const s = localStorage.getItem(STORE_KEY);
-    if (!s) return null;
-    return JSON.parse(s);
-  } catch(e) {}
+    if (!s) { console.log('📭 [localStorage] 메인 키 비어있음'); return null; }
+    const data = JSON.parse(s);
+    console.log('📂 [localStorage] 로드 완료:', s.length, 'bytes — shopOrders:', (data.shopOrders||[]).length, '건, shops:', (data.shops||[]).length, '건, items:', (data.items||[]).length, '건');
+    return data;
+  } catch(e) { console.error('localStorage 로드 실패:', e); }
   return null;
 }
 
@@ -8513,7 +8547,8 @@ function initERPWhenReady() {
     try { go('dashboard'); } catch(e) {}
     try { renderDashboard(); } catch(e) { console.warn('renderDashboard 실패:', e); }
     // 🔍 화면 진단 표시 (5초간)
-    const diagInfo = `${ERP_VERSION} 로드 완료 | shopOrders: ${(DB.shopOrders||[]).length}건 | shops: ${(DB.shops||[]).length}건 | items: ${(DB.items||[]).length}건` + (_loadDiagMsg ? ' | ' + _loadDiagMsg : '');
+    const backupCount = (() => { try { const b = localStorage.getItem('reniv_shopOrders_backup'); return b ? JSON.parse(b).length : 0; } catch(e) { return '?'; } })();
+    const diagInfo = `${ERP_VERSION} | 주문: ${(DB.shopOrders||[]).length}건 | 백업: ${backupCount}건 | shops: ${(DB.shops||[]).length} | items: ${(DB.items||[]).length}` + (_loadDiagMsg ? ' | ' + _loadDiagMsg : '');
     try { showNotif(diagInfo, (DB.shopOrders||[]).length > 0 ? 'success' : 'warning'); } catch(e) {}
     console.log('📊 [DIAG]', diagInfo);
   };
@@ -8617,6 +8652,39 @@ function initERPWhenReady() {
       if (!DB.shopOrders) DB.shopOrders = [];
       if (!DB.cs) DB.cs = [];
     }
+    // 🛡️ shopOrders 최종 복구: 모든 소스에서 0이면 독립 백업에서 복구
+    if ((DB.shopOrders||[]).length === 0) {
+      console.warn('⚠️ [RECOVERY] shopOrders가 0 — 독립 백업 확인 중...');
+      try {
+        const backup = localStorage.getItem('reniv_shopOrders_backup');
+        if (backup) {
+          const backupData = JSON.parse(backup);
+          const backupTs = localStorage.getItem('reniv_shopOrders_backup_ts');
+          if (backupData.length > 0) {
+            DB.shopOrders = backupData;
+            console.log('✅ [RECOVERY] shopOrders 독립 백업에서 복구!', backupData.length, '건 (백업시각:', new Date(parseInt(backupTs)).toLocaleString(), ')');
+            _loadDiagMsg = '🔄 백업에서 복구 ' + backupData.length + '건';
+            // 복구 후 Firestore에도 저장 (다음 세션을 위해)
+            _firestoreDataLoaded = true;
+            _doSaveData().catch(e => console.warn('복구 데이터 Firestore 저장 실패:', e));
+          } else {
+            console.log('📭 [RECOVERY] 독립 백업도 비어있음');
+          }
+        } else {
+          console.log('📭 [RECOVERY] 독립 백업 없음');
+        }
+      } catch(re) { console.warn('백업 복구 실패:', re); }
+    }
+    // 🛡️ shops도 동일하게 복구
+    if ((DB.shops||[]).length === 0) {
+      try {
+        const shopsBackup = localStorage.getItem('reniv_shops_backup');
+        if (shopsBackup) {
+          const shopsData = JSON.parse(shopsBackup);
+          if (shopsData.length > 0) { DB.shops = shopsData; console.log('✅ [RECOVERY] shops 백업에서 복구:', shopsData.length, '건'); }
+        }
+      } catch(e) {}
+    }
     await restoreIDBData();
     (async () => {
       for (let i = 0; i < 10; i++) {
@@ -8628,11 +8696,22 @@ function initERPWhenReady() {
     hideLoader();
     doRender();
   }).catch(async (e) => {
-    console.error('❌ Firestore 로드 체인 실패, 로컬 데이터 유지 (Firestore 덮어쓰기 방지!):', e);
-    _firestoreDataLoaded = true;  // 이후 사용자 작업의 저장은 허용
+    console.error('❌ Firestore 로드 체인 실패, 로컬 데이터 유지:', e);
+    _loadDiagMsg = '❌ 로드 체인 실패→localStorage+백업';
+    _firestoreDataLoaded = true;
     if (!DB.shops) DB.shops = [];
     if (!DB.shopOrders) DB.shopOrders = [];
     if (!DB.cs) DB.cs = [];
+    // shopOrders 백업 복구
+    if ((DB.shopOrders||[]).length === 0) {
+      try {
+        const backup = localStorage.getItem('reniv_shopOrders_backup');
+        if (backup) { const bd = JSON.parse(backup); if (bd.length > 0) { DB.shopOrders = bd; _loadDiagMsg += ' 🔄복구' + bd.length + '건'; } }
+      } catch(re) {}
+    }
+    if ((DB.shops||[]).length === 0) {
+      try { const sb = localStorage.getItem('reniv_shops_backup'); if (sb) { const sd = JSON.parse(sb); if (sd.length > 0) DB.shops = sd; } } catch(e) {}
+    }
     await restoreIDBData();
     hideLoader();
     doRender();
