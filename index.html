@@ -9,7 +9,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-  import { getFirestore, doc, getDoc, getDocFromServer, setDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { getFirestore, doc, getDoc, getDocFromServer, getDocFromCache, setDoc, collection, getDocs, waitForPendingWrites } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyDP8KBmUQzvH9iH9YQlFa-A87fcOIV09aM",
@@ -38,7 +38,9 @@
   window._firestoreDoc = doc;
   window._firestoreGetDoc = getDoc;
   window._firestoreGetDocFromServer = getDocFromServer;
+  window._firestoreGetDocFromCache = getDocFromCache;
   window._firestoreSetDoc = setDoc;
+  window._firestoreWaitForPendingWrites = () => waitForPendingWrites(db);
   window._firestoreCollection = collection;
   window._firestoreGetDocs = getDocs;
 
@@ -2063,7 +2065,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.2.6';
+const ERP_VERSION = 'v1.2.7';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -2104,8 +2106,9 @@ async function saveDataNow() {
     await _doSaveData();
     _hasUnsavedChanges = false;
     console.log('✅ 즉시 저장 완료 - shopOrders:', (DB.shopOrders||[]).length);
-    // 저장 검증: 서버에서 직접 읽어서 확인 (캐시 우회)
+    // 저장 검증: waitForPendingWrites 후이므로 서버 데이터가 최신 → 서버에서 확인
     const serverGet = window._firestoreGetDocFromServer || window._firestoreGetDoc;
+    console.log('🔍 [VERIFY] 서버 검증 시작 (waitForPendingWrites 완료 후)...');
     let verifyOK = false;
     try {
       if (serverGet && window._firestoreDoc && window._firebaseDb) {
@@ -2280,7 +2283,17 @@ async function _doSaveDataInner() {
   } catch(e) {
     console.error('Firestore meta 저장 실패:', e.message);
   }
-  console.log('💾 Firestore 저장 완료 — shopOrders:', (dbToSave.shopOrders||[]).length, 'shops:', (dbToSave.shops||[]).length);
+  // 🔑 서버 쓰기 완료 대기 (캐시→서버 동기화 보장)
+  try {
+    if (window._firestoreWaitForPendingWrites) {
+      await window._firestoreWaitForPendingWrites();
+      console.log('💾 Firestore 서버 동기화 완료 — shopOrders:', (dbToSave.shopOrders||[]).length, 'shops:', (dbToSave.shops||[]).length);
+    } else {
+      console.log('💾 Firestore 캐시 저장 완료 (서버 대기 불가) — shopOrders:', (dbToSave.shopOrders||[]).length);
+    }
+  } catch(waitErr) {
+    console.warn('⚠️ Firestore 서버 동기화 대기 실패:', waitErr.message);
+  }
 }
 
 async function loadDataFromFirestore() {
@@ -2302,15 +2315,27 @@ async function loadDataFromFirestore() {
     const docRef = window._firestoreDoc;
 
     const keys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders','meta'];
-    let snaps;
-    try {
-      // 1차: 서버에서 직접 읽기 (캐시된 stale 데이터 방지)
-      snaps = await Promise.all(keys.map(k => serverGetDoc(docRef(db, 'erp_data', k))));
-      console.log('🔍 [FIRESTORE] 서버 직접 읽기 성공');
-    } catch(serverErr) {
-      console.warn('⚠️ 서버 직접 읽기 실패, 캐시 fallback:', serverErr.message);
-      // 2차: 캐시에서 읽기 (오프라인 등)
-      snaps = await Promise.all(keys.map(k => cacheGetDoc(docRef(db, 'erp_data', k))));
+    // 기본 getDoc 사용 (서버 우선, 오프라인 시 캐시 fallback)
+    let snaps = await Promise.all(keys.map(k => cacheGetDoc(docRef(db, 'erp_data', k))));
+    console.log('🔍 [FIRESTORE] 기본 읽기 완료');
+
+    // shopOrders가 비어있으면 캐시에서도 확인 (서버 동기화 지연 보완)
+    const soIdx = keys.indexOf('shopOrders');
+    const soSnap = snaps[soIdx];
+    const soData = soSnap.exists() ? JSON.parse(soSnap.data().data) : [];
+    if (soData.length === 0 && window._firestoreGetDocFromCache) {
+      try {
+        const cacheSnap = await window._firestoreGetDocFromCache(docRef(db, 'erp_data', 'shopOrders'));
+        if (cacheSnap.exists()) {
+          const cacheData = JSON.parse(cacheSnap.data().data);
+          if (cacheData.length > soData.length) {
+            console.log('🔍 [FIRESTORE] 캐시에 더 많은 shopOrders 발견:', cacheData.length, '건 (서버:', soData.length, '건) → 캐시 사용');
+            snaps[soIdx] = cacheSnap;
+          }
+        }
+      } catch(cacheErr) {
+        console.warn('캐시 읽기 실패:', cacheErr.message);
+      }
     }
 
     // meta가 없으면 아직 Firestore에 데이터 없음 → { _noData: true }로 구분
