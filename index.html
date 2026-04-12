@@ -3153,9 +3153,12 @@ function loadShopDetail(idx) {
 function addNewShop() {
   const name = prompt('쇼핑몰명을 입력하세요:');
   if (!name) return;
-  DB.shops.push({ id: 'shop_'+Date.now(), name: name, active: true, apiLinked: false, commissionBase: 0, shippingPolicy: 'seller', shippingCost: 0, freeShippingThreshold: 0, couponBorneRate: 0, settlementCycle: 'D+7', manager: '', memo: '', feeMemo: '', createdAt: new Date().toISOString() });
+  DB.shops.push({ id: 'shop_'+Date.now(), name: name, active: true, apiLinked: false, commissionBase: 0, shippingPolicy: 'seller', shippingCost: 0, freeShippingThreshold: 0, couponBorneRate: 0, settlementCycle: 'D+7', manager: '', memo: '', feeMemo: '', adsCosts: [], createdAt: new Date().toISOString() });
   saveLocal();
   renderShopList();
+  // 새로 추가한 쇼핑몰 자동 선택
+  const newIdx = DB.shops.length - 1;
+  selectShop(newIdx);
 }
 function saveShopInfo() {
   const idx = window._currentShopIdx; if (idx == null || !DB.shops[idx]) return;
@@ -3174,6 +3177,8 @@ function saveShopInfo() {
   s.updatedAt = new Date().toISOString();
   saveLocal();
   renderShopList();
+  // 저장 후 현재 쇼핑몰 다시 선택
+  selectShop(idx);
   alert('저장되었습니다.');
 }
 function showShopHistory() { alert('변경 이력은 Firestore 연동 후 shopFeeHistory 컬렉션에서 조회됩니다.'); }
@@ -3187,7 +3192,13 @@ function toggleAdsInputType() {
 
 // 광고비 추가 (날짜 겹침 방지)
 function addShopAdsCost() {
-  const shopId = window._selectedShopId; if (!shopId) { alert('쇼핑몰을 선택해주세요.'); return; }
+  // 현재 상세보기 중인 쇼핑몰 자동 사용
+  let shopId = window._selectedShopId;
+  if (!shopId && window._currentShopIdx != null && DB.shops[window._currentShopIdx]) {
+    shopId = DB.shops[window._currentShopIdx].id;
+    window._selectedShopId = shopId;
+  }
+  if (!shopId) { alert('쇼핑몰을 먼저 추가해주세요.'); return; }
   const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop) return;
   if (!shop.adsCosts) shop.adsCosts = [];
   const type = $('shop-ads-type')?.value || 'monthly';
