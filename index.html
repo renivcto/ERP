@@ -1138,19 +1138,55 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 
       <!-- 주문 관리 -->
       <div id="sales-panel-orders" style="display:none">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:12px">
-          <input class="fi" id="order-search" placeholder="🔍 주문번호·고객명 검색" style="width:200px;padding:5px 10px;font-size:11.5px">
-          <select class="fs" id="order-status-filter" style="width:110px;padding:5px;font-size:11px"><option value="">전체 상태</option><option>수집완료</option><option>출고요청</option><option>배송중</option><option>배송완료</option><option>오류</option></select>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:12px;flex-wrap:wrap">
+          <input class="fi" id="shop-order-search" placeholder="🔍 주문번호·고객명·상품 검색" oninput="renderShopOrderTable()" style="width:220px;padding:5px 10px;font-size:11.5px">
+          <select class="fs" id="shop-order-status-filter" onchange="renderShopOrderTable()" style="width:110px;padding:5px;font-size:11px"><option value="">전체 상태</option><option>수집완료</option><option>출고요청</option><option>배송중</option><option>배송완료</option><option>취소</option></select>
+          <select class="fs" id="shop-order-shop-filter" onchange="renderShopOrderTable()" style="width:130px;padding:5px;font-size:11px"><option value="">전체 쇼핑몰</option></select>
+          <div style="margin-left:auto;display:flex;gap:6px">
+            <button class="btn btn-outline btn-sm" onclick="downloadOrderTemplate()">📥 엑셀 양식</button>
+            <button class="btn btn-primary btn-sm" onclick="openOrderUploadModal()">📤 주문 업로드</button>
+          </div>
         </div>
-        <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:10px">
-          <button class="btn btn-primary btn-sm" onclick="openManualUpload()">📤 수동 업로드</button>
-          <button class="btn btn-outline btn-sm" onclick="downloadOrderTemplate()">📥 엑셀 양식 다운로드</button>
+        <!-- 요약 카드 -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">
+          <div style="background:var(--sky-50);border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:var(--sky-600)">총 주문</div><div style="font-size:18px;font-weight:700" id="so-total-count">0</div></div>
+          <div style="background:#F0FDF4;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#16a34a">총 매출</div><div style="font-size:18px;font-weight:700" id="so-total-revenue">₩0</div></div>
+          <div style="background:#FEF3C7;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#92400e">배송중</div><div style="font-size:18px;font-weight:700" id="so-shipping-count">0</div></div>
+          <div style="background:#FEF2F2;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#dc2626">취소/반품</div><div style="font-size:18px;font-weight:700" id="so-cancel-count">0</div></div>
         </div>
-        <div class="card"><div class="card-body" style="overflow-x:auto">
-          <table class="tbl"><thead><tr><th>주문번호</th><th>쇼핑몰</th><th>고객명</th><th>상품</th><th>수량</th><th>금액</th><th>상태</th><th>송장번호</th><th>source</th><th>일시</th></tr></thead><tbody id="order-table"></tbody></table>
+        <div class="card"><div class="card-body" style="overflow-x:auto;padding:0">
+          <table class="tbl" style="text-align:center"><thead><tr><th>주문일</th><th>쇼핑몰</th><th>주문번호</th><th>고객명</th><th>상품명</th><th>수량</th><th>금액</th><th>상태</th><th>송장번호</th><th></th></tr></thead><tbody id="shop-order-table"></tbody></table>
         </div></div>
-        <div style="margin-top:14px;padding:20px;background:var(--sky-50);border:1px solid var(--sky-200);border-radius:var(--r);text-align:center;color:var(--sky-700);font-size:13px">
-          쇼핑몰 API 연동 후 주문이 자동 수집됩니다 · 수동 업로드로 오프라인 주문 등록 가능
+      </div>
+      <!-- 주문 업로드 모달 -->
+      <div class="overlay" id="overlay-order-upload-modal">
+        <div class="modal" style="width:600px">
+          <div class="modal-hdr"><span class="modal-ttl">📤 주문 데이터 업로드</span><button class="modal-x" onclick="closeModal('order-upload-modal')">✕</button></div>
+          <div class="modal-body">
+            <div style="background:var(--sky-50);border:1px solid var(--sky-200);border-radius:7px;padding:12px;margin-bottom:14px;font-size:12px;color:var(--sky-800)">
+              <b>엑셀/CSV 파일을 업로드하세요.</b><br>
+              양식: 주문번호, 주문일, 고객명, 연락처, 상품명, 수량, 단가, 총금액, 상태, 송장번호<br>
+              <span style="color:var(--gray-500)">※ 첫 번째 행은 헤더로 인식됩니다. "📥 엑셀 양식" 버튼으로 템플릿을 다운로드하세요.</span>
+            </div>
+            <div class="fg">
+              <label>쇼핑몰 선택 <span class="req">*</span></label>
+              <select class="fs" id="upload-shop-select"><option value="">-- 쇼핑몰 선택 --</option></select>
+            </div>
+            <div class="fg">
+              <label>파일 선택 (.xlsx, .csv)</label>
+              <input type="file" id="upload-order-file" accept=".xlsx,.csv,.xls" class="fi" style="padding:8px">
+            </div>
+            <div id="upload-preview" style="display:none;margin-top:12px">
+              <div style="font-size:12px;font-weight:600;margin-bottom:6px">미리보기 (<span id="upload-preview-count">0</span>건)</div>
+              <div style="max-height:200px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:6px">
+                <table class="tbl" style="font-size:11px;text-align:center"><thead><tr><th>주문번호</th><th>주문일</th><th>고객명</th><th>상품</th><th>수량</th><th>금액</th><th>상태</th></tr></thead><tbody id="upload-preview-table"></tbody></table>
+              </div>
+            </div>
+          </div>
+          <div class="modal-ft">
+            <button class="btn btn-outline" onclick="closeModal('order-upload-modal')">취소</button>
+            <button class="btn btn-primary" id="upload-confirm-btn" onclick="confirmOrderUpload()" disabled>업로드 확인</button>
+          </div>
         </div>
       </div>
 
@@ -3140,14 +3176,232 @@ function renderOrderShopTabs() {
   shops.forEach(s => { html += `<div class="shop-tab" onclick="filterOrderShop('${s.id}',this)">${s.name}</div>`; });
   html += '<div class="shop-tab" onclick="filterOrderShop(\'manual\',this)">+ 수동</div>';
   container.innerHTML = html;
+  // 쇼핑몰 필터 드롭다운도 갱신
+  const shopSel = $('shop-order-shop-filter');
+  if (shopSel) {
+    shopSel.innerHTML = '<option value="">전체 쇼핑몰</option>';
+    shops.forEach(s => { const o = document.createElement('option'); o.value = s.id; o.textContent = s.name; shopSel.appendChild(o); });
+  }
+  renderShopOrderTable();
 }
 function filterOrderShop(shopId, el) {
   document.querySelectorAll('#order-shop-tabs .shop-tab').forEach(t => t.classList.remove('active'));
   if (el) el.classList.add('active');
-  // TODO: filter order table by shopId
+  const shopSel = $('shop-order-shop-filter');
+  if (shopSel) { shopSel.value = shopId === 'all' ? '' : shopId; }
+  renderShopOrderTable();
 }
-function openManualUpload() { alert('수동 업로드 기능은 쇼핑몰 주문 수집 모듈 연동 후 활성화됩니다.'); }
-function downloadOrderTemplate() { alert('엑셀 양식 다운로드는 쇼핑몰 주문 수집 모듈 연동 후 활성화됩니다.'); }
+// ══════════════ 주문 업로드/관리 ══════════════
+function openOrderUploadModal() {
+  // 쇼핑몰 드롭다운 채우기
+  const sel = $('upload-shop-select'); if (!sel) return;
+  sel.innerHTML = '<option value="">-- 쇼핑몰 선택 --</option>';
+  (DB.shops||[]).forEach(s => { const o = document.createElement('option'); o.value = s.id; o.textContent = s.name; sel.appendChild(o); });
+  // 초기화
+  if ($('upload-order-file')) $('upload-order-file').value = '';
+  if ($('upload-preview')) $('upload-preview').style.display = 'none';
+  if ($('upload-confirm-btn')) $('upload-confirm-btn').disabled = true;
+  window._uploadedOrders = [];
+  openModal('order-upload-modal');
+  // 파일 선택 이벤트
+  $('upload-order-file').onchange = () => parseUploadFile();
+}
+
+async function parseUploadFile() {
+  const fileInput = $('upload-order-file');
+  const file = fileInput?.files?.[0]; if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  let rows = [];
+  try {
+    if (ext === 'csv') {
+      const text = await file.text();
+      rows = parseCSV(text);
+    } else {
+      // xlsx — SheetJS 로드
+      if (!window.XLSX) {
+        await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+      }
+      const ab = await file.arrayBuffer();
+      const wb = XLSX.read(ab, {type:'array'});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      rows = XLSX.utils.sheet_to_json(ws, {header:1});
+    }
+  } catch(e) { alert('파일을 읽을 수 없습니다: ' + e.message); return; }
+  if (rows.length < 2) { alert('데이터가 없습니다 (헤더 포함 최소 2행 필요).'); return; }
+  // 헤더 매핑
+  const header = rows[0].map(h => (h||'').toString().trim().toLowerCase());
+  const colMap = detectColumns(header);
+  // 데이터 파싱
+  const parsed = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i]; if (!r || r.length < 2) continue;
+    const cell = idx => idx >= 0 ? (r[idx]||'').toString().trim() : '';
+    const order = {
+      id: Date.now() + i,
+      orderNo: cell(colMap.orderNo) || ('MNL-' + Date.now() + '-' + i),
+      orderDate: normalizeDate(cell(colMap.orderDate)) || new Date().toISOString().slice(0,10),
+      customerName: cell(colMap.customer) || '미입력',
+      customerPhone: cell(colMap.phone) || '',
+      productName: cell(colMap.product) || '미입력',
+      qty: parseInt(cell(colMap.qty)) || 1,
+      unitPrice: parseFloat(cell(colMap.unitPrice)) || 0,
+      totalPrice: parseFloat(cell(colMap.total)) || 0,
+      status: cell(colMap.status) || '수집완료',
+      trackingNo: cell(colMap.tracking) || '',
+      source: 'upload',
+    };
+    if (!order.totalPrice && order.unitPrice) order.totalPrice = order.unitPrice * order.qty;
+    if (!order.unitPrice && order.totalPrice) order.unitPrice = Math.round(order.totalPrice / order.qty);
+    parsed.push(order);
+  }
+  window._uploadedOrders = parsed;
+  // 미리보기
+  const prev = $('upload-preview'); if (prev) prev.style.display = '';
+  if ($('upload-preview-count')) $('upload-preview-count').textContent = parsed.length;
+  const tbody = $('upload-preview-table');
+  if (tbody) tbody.innerHTML = parsed.slice(0, 50).map(o =>
+    `<tr><td>${o.orderNo}</td><td>${o.orderDate}</td><td>${o.customerName}</td><td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.productName}</td><td>${o.qty}</td><td>${o.totalPrice.toLocaleString()}원</td><td>${o.status}</td></tr>`
+  ).join('');
+  if ($('upload-confirm-btn')) $('upload-confirm-btn').disabled = parsed.length === 0;
+}
+
+function detectColumns(header) {
+  const find = (...keys) => header.findIndex(h => keys.some(k => h.includes(k)));
+  return {
+    orderNo: find('주문번호','orderno','order_no','주문 번호','order no','order number'),
+    orderDate: find('주문일','주문날짜','주문 일자','orderdate','order_date','date','날짜','일자','주문일시'),
+    customer: find('고객명','고객','customer','이름','name','구매자','buyer','수취인'),
+    phone: find('연락처','전화','phone','tel','휴대폰','핸드폰','수취인연락처'),
+    product: find('상품명','상품','product','품목','item','제품명','제품','품명','옵션'),
+    qty: find('수량','qty','quantity','주문수량'),
+    unitPrice: find('단가','unitprice','unit_price','판매단가'),
+    total: find('금액','총금액','total','totalprice','결제금액','판매금액','합계','주문금액'),
+    status: find('상태','status','주문상태','배송상태'),
+    tracking: find('송장','송장번호','tracking','invoice','운송장','운송장번호'),
+  };
+}
+
+function normalizeDate(str) {
+  if (!str) return '';
+  str = str.toString().trim();
+  // 숫자(엑셀 시리얼넘버)
+  if (/^\d{5}$/.test(str)) { const d = new Date((parseInt(str)-25569)*86400000); return d.toISOString().slice(0,10); }
+  // 2026-04-12 or 2026/04/12
+  const m1 = str.match(/(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+  if (m1) return `${m1[1]}-${m1[2].padStart(2,'0')}-${m1[3].padStart(2,'0')}`;
+  // 04-12-2026
+  const m2 = str.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+  if (m2) return `${m2[3]}-${m2[1].padStart(2,'0')}-${m2[2].padStart(2,'0')}`;
+  return str.slice(0,10);
+}
+
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  return lines.map(line => {
+    const row = []; let cell = '', inQuote = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { inQuote = !inQuote; continue; }
+      if (c === ',' && !inQuote) { row.push(cell); cell = ''; continue; }
+      cell += c;
+    }
+    row.push(cell);
+    return row;
+  });
+}
+
+function loadScript(url) {
+  return new Promise((res, rej) => {
+    if (document.querySelector(`script[src="${url}"]`)) { res(); return; }
+    const s = document.createElement('script'); s.src = url;
+    s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+}
+
+function confirmOrderUpload() {
+  const shopId = $('upload-shop-select')?.value;
+  if (!shopId) { alert('쇼핑몰을 선택해주세요.'); return; }
+  const orders = window._uploadedOrders || [];
+  if (!orders.length) { alert('업로드할 데이터가 없습니다.'); return; }
+  const shop = (DB.shops||[]).find(s => s.id === shopId);
+  const shopName = shop?.name || shopId;
+  // 중복 체크 (같은 주문번호 + 같은 쇼핑몰)
+  const existing = new Set((DB.shopOrders||[]).filter(o => o.shopId === shopId).map(o => o.orderNo));
+  const newOrders = orders.filter(o => !existing.has(o.orderNo));
+  const dupCount = orders.length - newOrders.length;
+  if (dupCount > 0 && !confirm(`${dupCount}건의 중복 주문이 제외됩니다.\n${newOrders.length}건을 업로드하시겠습니까?`)) return;
+  if (!newOrders.length) { alert('모든 주문이 이미 등록되어 있습니다.'); return; }
+  // shopOrders에 추가
+  newOrders.forEach(o => { o.shopId = shopId; o.shopName = shopName; });
+  DB.shopOrders.push(...newOrders);
+  saveData();
+  closeModal('order-upload-modal');
+  renderShopOrderTable();
+  alert(`${newOrders.length}건의 주문이 업로드되었습니다.`);
+}
+
+function downloadOrderTemplate() {
+  // CSV 템플릿 생성
+  const header = '주문번호,주문일,고객명,연락처,상품명,수량,단가,총금액,상태,송장번호';
+  const sample = 'ORD-001,2026-04-12,홍길동,010-1234-5678,3중 장벽 20층 리뉴 크림 50g,2,35000,70000,수집완료,';
+  const csv = '\uFEFF' + header + '\n' + sample + '\n';
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = '주문_업로드_양식.csv';
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+function renderShopOrderTable() {
+  const tbody = $('shop-order-table'); if (!tbody) return;
+  const q = ($('shop-order-search')?.value||'').toLowerCase();
+  const statusF = $('shop-order-status-filter')?.value || '';
+  const shopF = $('shop-order-shop-filter')?.value || '';
+  let list = DB.shopOrders || [];
+  if (q) list = list.filter(o => (o.orderNo||'').toLowerCase().includes(q) || (o.customerName||'').toLowerCase().includes(q) || (o.productName||'').toLowerCase().includes(q));
+  if (statusF) list = list.filter(o => o.status === statusF);
+  if (shopF) list = list.filter(o => o.shopId === shopF);
+  // 요약 카드
+  const all = DB.shopOrders || [];
+  if ($('so-total-count')) $('so-total-count').textContent = all.length;
+  if ($('so-total-revenue')) $('so-total-revenue').textContent = '₩' + all.reduce((s,o) => s + (o.totalPrice||0), 0).toLocaleString();
+  if ($('so-shipping-count')) $('so-shipping-count').textContent = all.filter(o => o.status === '배송중').length;
+  if ($('so-cancel-count')) $('so-cancel-count').textContent = all.filter(o => o.status === '취소' || o.status === '반품').length;
+  // 쇼핑몰 필터 드롭다운 갱신 (비어있을 경우에만)
+  const shopSel = $('shop-order-shop-filter');
+  if (shopSel && shopSel.options.length <= 1) {
+    (DB.shops||[]).filter(s=>s.active!==false).forEach(s => { const o = document.createElement('option'); o.value = s.id; o.textContent = s.name; shopSel.appendChild(o); });
+  }
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--gray-400);padding:30px">주문 데이터가 없습니다. "📤 주문 업로드"로 엑셀/CSV를 업로드하세요.</td></tr>';
+    return;
+  }
+  const sorted = [...list].sort((a,b) => (b.orderDate||'').localeCompare(a.orderDate||''));
+  const statusBadge = s => {
+    const map = {수집완료:'blue',출고요청:'amber',배송중:'sky',배송완료:'green',취소:'red',반품:'red'};
+    return `<span class="badge ${map[s]||'gray'}">${s||'-'}</span>`;
+  };
+  tbody.innerHTML = sorted.map(o => {
+    return `<tr>
+      <td style="white-space:nowrap">${o.orderDate||'-'}</td>
+      <td>${o.shopName||'-'}</td>
+      <td style="font-family:monospace;font-size:11px">${o.orderNo||'-'}</td>
+      <td>${o.customerName||'-'}</td>
+      <td style="text-align:left;max-width:180px;word-break:keep-all;white-space:normal;line-height:1.4">${o.productName||'-'}</td>
+      <td>${o.qty||0}</td>
+      <td style="font-variant-numeric:tabular-nums">${(o.totalPrice||0).toLocaleString()}원</td>
+      <td>${statusBadge(o.status)}</td>
+      <td style="font-size:11px">${o.trackingNo||'-'}</td>
+      <td><button class="btn btn-outline btn-sm" style="font-size:10px;padding:1px 6px;color:var(--red-500)" onclick="deleteShopOrder(${o.id})">삭제</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function deleteShopOrder(id) {
+  if (!confirm('이 주문을 삭제하시겠습니까?')) return;
+  DB.shopOrders = (DB.shopOrders||[]).filter(o => o.id !== id);
+  saveData(); renderShopOrderTable();
+}
 
 // 마진 분석
 function toggleAllMarginRows(masterCb) {
