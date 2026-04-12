@@ -2062,7 +2062,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.2.4';
+const ERP_VERSION = 'v1.2.5';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -2082,6 +2082,7 @@ window.addEventListener('beforeunload', (e) => {
 // ── Firestore DB 동기화 ──────────────────────────────────
 let _saveTimer = null;
 let _isSaving = false;
+let _firestoreDataLoaded = false;  // Firestore 초기 로드 완료 전까지 Firestore 쓰기 방지
 
 function saveData() {
   if (_saveTimer) clearTimeout(_saveTimer);
@@ -2093,10 +2094,30 @@ function saveData() {
 // 즉시 저장 (디바운스 없이) — 주문 업로드 등 중요 작업용
 async function saveDataNow() {
   if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+  // 명시적 저장 요청이므로 Firestore 쓰기 보호 해제
+  if (!_firestoreDataLoaded) {
+    console.log('🔓 saveDataNow: Firestore 쓰기 보호 강제 해제 (명시적 저장)');
+    _firestoreDataLoaded = true;
+  }
   try {
     await _doSaveData();
     _hasUnsavedChanges = false;
     console.log('✅ 즉시 저장 완료 - shopOrders:', (DB.shopOrders||[]).length);
+    // 저장 검증: Firestore에서 shopOrders를 다시 읽어서 확인
+    try {
+      if (window._firestoreGetDoc && window._firestoreDoc && window._firebaseDb) {
+        const verifySnap = await window._firestoreGetDoc(window._firestoreDoc(window._firebaseDb, 'erp_data', 'shopOrders'));
+        if (verifySnap.exists()) {
+          const verifyData = JSON.parse(verifySnap.data().data);
+          console.log('🔍 [VERIFY] Firestore shopOrders 검증:', verifyData.length, '건 (기대:', (DB.shopOrders||[]).length, '건)');
+          if (verifyData.length !== (DB.shopOrders||[]).length) {
+            console.error('❌ [VERIFY] 저장 불일치! Firestore:', verifyData.length, 'DB:', (DB.shopOrders||[]).length);
+          }
+        } else {
+          console.error('❌ [VERIFY] shopOrders 문서가 Firestore에 없음!');
+        }
+      }
+    } catch(ve) { console.warn('검증 실패:', ve); }
     return true;
   } catch(e) {
     console.error('❌ 즉시 저장 실패:', e);
@@ -2149,7 +2170,12 @@ async function _doSaveDataInner() {
 
   // Firestore 저장 (공유) - 순차적으로 저장해서 에러 추적
   if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) {
-    console.warn('⚠️ Firestore API 미준비 — localStorage만 저장됨. _firestoreSetDoc:', !!window._firestoreSetDoc, '_firestoreDoc:', !!window._firestoreDoc, '_firebaseDb:', !!window._firebaseDb);
+    console.warn('⚠️ Firestore API 미준비 — localStorage만 저장됨');
+    return;
+  }
+  // 🛡️ 초기 로드 완료 전에는 Firestore에 쓰지 않음 (stale 데이터 덮어쓰기 방지)
+  if (!_firestoreDataLoaded) {
+    console.warn('⚠️ Firestore 초기 로드 미완료 — localStorage만 저장됨 (shopOrders:', (dbToSave.shopOrders||[]).length, ')');
     return;
   }
 
@@ -2221,24 +2247,37 @@ async function loadDataFromFirestore() {
     const keys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders','meta'];
     const snaps = await Promise.all(keys.map(k => getDoc(docRef(db, 'erp_data', k))));
 
-    // meta가 없으면 아직 Firestore에 데이터 없음
+    // meta가 없으면 아직 Firestore에 데이터 없음 → { _noData: true }로 구분
     const metaIdx = keys.indexOf('meta');
-    if (!snaps[metaIdx].exists()) { console.log('Firestore meta 없음'); return null; }
+    if (!snaps[metaIdx].exists()) { console.log('Firestore meta 없음 (최초 사용)'); return { _noData: true }; }
 
     const result = {};
     const collKeys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders'];
     snaps.slice(0, collKeys.length).forEach((snap, i) => {
-      result[collKeys[i]] = snap.exists() ? JSON.parse(snap.data().data) : [];
+      const exists = snap.exists();
+      if (exists) {
+        const raw = snap.data().data;
+        result[collKeys[i]] = JSON.parse(raw);
+        // shopOrders 특별 로깅
+        if (collKeys[i] === 'shopOrders') {
+          console.log('🔍 [FIRESTORE READ] shopOrders 문서 존재:', true, '데이터 길이:', raw.length, '파싱 결과:', result.shopOrders.length, '건');
+        }
+      } else {
+        result[collKeys[i]] = [];
+        if (collKeys[i] === 'shopOrders') {
+          console.log('🔍 [FIRESTORE READ] shopOrders 문서 존재: false → 빈 배열');
+        }
+      }
     });
     // meta
     const meta = JSON.parse(snaps[metaIdx].data().data);
     Object.assign(result, meta);
 
-    console.log('Firestore 로드 완료 - items:', result.items?.length, 'orders:', result.orders?.length);
+    console.log('🔍 [FIRESTORE READ] 전체 로드 완료 — items:', result.items?.length, 'shopOrders:', result.shopOrders?.length, 'vendors:', result.vendors?.length);
     return result;
   } catch(e) {
-    console.warn('Firestore 로드 실패:', e);
-    return null;
+    console.error('❌ Firestore 로드 실패 (에러):', e);
+    return { _loadError: true, _errorMsg: e.message };
   }
 }
 
@@ -8386,7 +8425,29 @@ function initERPWhenReady() {
   showLoader();
 
   loadDataFromFirestore().then(async (firestoreDB) => {
-    if (firestoreDB && firestoreDB.items && firestoreDB.items.length > 0) {
+    // ─── 디버그: 로드된 데이터 상세 로그 ───
+    const isError = firestoreDB && firestoreDB._loadError;
+    const isNoData = firestoreDB && firestoreDB._noData;
+    console.log('🔍 [LOAD] Firestore 로드 결과:', isError ? '❌ ERROR: '+firestoreDB._errorMsg : isNoData ? '📭 NO DATA (최초)' : firestoreDB ? '✅ OK' : '❓ NULL');
+    if (firestoreDB && !isError && !isNoData) {
+      console.log('🔍 [LOAD] Firestore shopOrders:', (firestoreDB.shopOrders||[]).length, '건');
+      console.log('🔍 [LOAD] Firestore shops:', (firestoreDB.shops||[]).length, '건');
+      console.log('🔍 [LOAD] Firestore items:', (firestoreDB.items||[]).length, '건');
+      console.log('🔍 [LOAD] Firestore vendors:', (firestoreDB.vendors||[]).length, '건');
+    }
+    console.log('🔍 [LOAD] localStorage DB.shopOrders:', (DB.shopOrders||[]).length, '건');
+    console.log('🔍 [LOAD] localStorage DB.shops:', (DB.shops||[]).length, '건');
+
+    // 🛡️ 로드 에러 시 → localStorage 데이터 유지, Firestore 덮어쓰기 절대 금지
+    if (isError) {
+      console.error('🛡️ Firestore 로드 에러 → localStorage 데이터만 사용 (Firestore 덮어쓰기 방지!)');
+      _firestoreDataLoaded = true;  // 이후 사용자 작업의 저장은 허용
+      // localStorage 데이터 보완
+      if (!DB.shops) DB.shops = [];
+      if (!DB.shopOrders) DB.shopOrders = [];
+      if (!DB.cs) DB.cs = [];
+    } else if (firestoreDB && !isNoData && firestoreDB.items && firestoreDB.items.length > 0) {
+      // ✅ 정상 Firestore 데이터 로드
       // localStorage 데이터를 fallback으로 보존
       const localDB = JSON.parse(JSON.stringify(DB));
       // Firestore 데이터 + DEFAULT_DB 누락 필드 보완
@@ -8405,7 +8466,6 @@ function initERPWhenReady() {
         else if (localDB[k] !== undefined) merged[k] = localDB[k];
       });
       // _nextId 카운터 복원 (Firestore → localStorage → DEFAULT_DB 순서)
-      // Firestore에 _nextId 또는 _nextIds (구버전) 로 저장되어 있을 수 있음
       const fsNextId = firestoreDB._nextId || firestoreDB._nextIds;
       const lcNextId = localDB._nextId || localDB._nextIds;
       if (fsNextId && Object.keys(fsNextId).length > 0) {
@@ -8413,7 +8473,6 @@ function initERPWhenReady() {
       } else if (lcNextId && Object.keys(lcNextId).length > 0) {
         merged._nextId = lcNextId;
       }
-      // _nextId가 DEFAULT_DB 값보다 작으면 안전하게 현재 데이터 기반으로 재계산
       if (!merged._nextId || Object.keys(merged._nextId).length === 0) {
         merged._nextId = JSON.parse(JSON.stringify(DEFAULT_DB._nextId));
       }
@@ -8428,7 +8487,7 @@ function initERPWhenReady() {
       merged._nextId.task   = Math.max(merged._nextId.task||0,   maxOf(merged.tasks||[],'id') + 1);
       merged._nextId.qc     = Math.max(merged._nextId.qc||0,    maxOf(merged.qcs||[],'id') + 1);
       console.log('🔢 _nextId 복원:', JSON.stringify(merged._nextId));
-      // boms (객체)와 _processedOrders (배열) 는 Firestore 것을 우선
+      // boms, sites, _processedOrders: Firestore 우선 → localStorage fallback
       if (firestoreDB.boms && Object.keys(firestoreDB.boms).length > 0) merged.boms = firestoreDB.boms;
       else if (localDB.boms && Object.keys(localDB.boms).length > 0) merged.boms = localDB.boms;
       if (firestoreDB.sites && firestoreDB.sites.length > 0) merged.sites = firestoreDB.sites;
@@ -8436,7 +8495,6 @@ function initERPWhenReady() {
       if (firestoreDB._processedOrders && firestoreDB._processedOrders.length > 0) merged._processedOrders = firestoreDB._processedOrders;
       else if (localDB._processedOrders && localDB._processedOrders.length > 0) merged._processedOrders = localDB._processedOrders;
       DB = merged;
-      // 배열 필드 초기화 보장 (undefined 방지)
       if (!DB.shops) DB.shops = [];
       if (!DB.shopOrders) DB.shopOrders = [];
       if (!DB.cs) DB.cs = [];
@@ -8445,10 +8503,20 @@ function initERPWhenReady() {
       cleanOrphanProductions();
       syncProductionStatusFromOrders();
       try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
-      console.log('✅ Firestore 데이터 로드 완료');
-    } else {
-      console.log('ℹ️ Firestore 데이터 없음 → 로컬 데이터 사용, Firestore에 업로드 중...');
+      _firestoreDataLoaded = true;  // ✅ Firestore 쓰기 허용
+      console.log('✅ Firestore 데이터 로드 완료 — Firestore 쓰기 활성화');
+    } else if (isNoData) {
+      // 📭 최초 사용: Firestore에 데이터가 전혀 없음 → 현재 DB 업로드
+      console.log('ℹ️ Firestore 최초 사용 → 로컬 데이터 Firestore에 업로드 중...');
+      _firestoreDataLoaded = true;  // 쓰기 허용
       _doSaveData().catch(e => console.warn('초기 업로드 실패:', e));
+    } else {
+      // null 또는 예상치 못한 결과 → 안전하게 localStorage 유지
+      console.warn('⚠️ Firestore 데이터 불완전 → localStorage 데이터 유지 (Firestore 덮어쓰기 방지)');
+      _firestoreDataLoaded = true;
+      if (!DB.shops) DB.shops = [];
+      if (!DB.shopOrders) DB.shopOrders = [];
+      if (!DB.cs) DB.cs = [];
     }
     await restoreIDBData();
     (async () => {
@@ -8461,7 +8529,11 @@ function initERPWhenReady() {
     hideLoader();
     doRender();
   }).catch(async (e) => {
-    console.warn('Firestore 로드 실패, 로컬 데이터 사용:', e);
+    console.error('❌ Firestore 로드 체인 실패, 로컬 데이터 유지 (Firestore 덮어쓰기 방지!):', e);
+    _firestoreDataLoaded = true;  // 이후 사용자 작업의 저장은 허용
+    if (!DB.shops) DB.shops = [];
+    if (!DB.shopOrders) DB.shopOrders = [];
+    if (!DB.cs) DB.cs = [];
     await restoreIDBData();
     hideLoader();
     doRender();
