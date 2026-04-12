@@ -219,6 +219,36 @@ body{font-family:var(--font);background:var(--gray-50);color:var(--gray-800);hei
 .stat-ico{position:absolute;right:14px;top:50%;transform:translateY(-50%);font-size:26px;opacity:.12}
 .stock-warn-label{display:inline-block;background:var(--red-500);color:#fff;font-size:8.5px;padding:1px 6px;border-radius:8px;font-weight:700;line-height:16px;vertical-align:middle;margin-left:4px}
 
+/* CS Tab colors */
+.cs-tab{display:inline-flex;align-items:center;padding:8px 20px;border-radius:8px 8px 0 0;cursor:pointer;font-size:13px;font-weight:600;transition:all .15s;border:1px solid transparent;margin-right:4px}
+.cs-tab.consumer{background:#D4F1E8;color:#2D7A5F;border-color:#2D7A5F}
+.cs-tab.consumer.inactive{background:#f0faf6;color:#6dae97;border-color:#e0f0ea}
+.cs-tab.pharmacist{background:#D6ECF7;color:#2B6B8F;border-color:#2B6B8F}
+.cs-tab.pharmacist.inactive{background:#edf5fa;color:#6d9ab5;border-color:#dce9f2}
+.cs-tab.active-tab{border-bottom:3px solid currentColor}
+/* Sales sub-nav */
+.sales-subnav{display:flex;gap:2px;background:var(--gray-100);border-radius:8px;padding:3px;margin-bottom:16px}
+.sales-subnav-item{padding:7px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;color:var(--gray-500);transition:all .12s}
+.sales-subnav-item:hover{color:var(--gray-700)}
+.sales-subnav-item.active{background:#fff;color:var(--sky-700);box-shadow:var(--shadow)}
+/* Shop tabs */
+.shop-tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px}
+.shop-tab{padding:5px 14px;border-radius:20px;cursor:pointer;font-size:11.5px;font-weight:500;background:var(--gray-100);color:var(--gray-600);border:1px solid var(--gray-200);transition:all .12s}
+.shop-tab:hover{background:var(--sky-50);border-color:var(--sky-300)}
+.shop-tab.active{background:var(--sky-500);color:#fff;border-color:var(--sky-500)}
+/* Margin colors */
+.margin-neg{color:var(--red-600);font-weight:600}
+.margin-low{color:var(--amber-600)}
+.margin-mid{color:var(--gray-700)}
+.margin-high{color:var(--green-600);font-weight:600}
+/* Shop mgmt sections */
+.shop-section{background:#fff;border:1px solid var(--gray-200);border-radius:var(--r);padding:16px;margin-bottom:14px}
+.shop-section-title{font-size:13px;font-weight:700;color:var(--gray-700);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--gray-100)}
+/* Nav sub-items */
+.nav-sub{padding-left:18px;overflow:hidden;max-height:0;transition:max-height .25s ease}
+.nav-sub.open{max-height:200px}
+.nav-sub .nav-item{font-size:11.5px;padding:6px 10px}
+
 /* GRID LAYOUTS */
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
 .g31{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px}
@@ -541,6 +571,17 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="nav-group-title">생산 · 재고</div>
     <div class="nav-item" onclick="go('production')"><span class="ico">🏭</span>생산 관리<span class="nav-badge red" id="nb-prod">지연1</span></div>
     <div class="nav-item" onclick="go('stock')"><span class="ico">📦</span>재고 관리</div>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-title">매출 · CS</div>
+    <div class="nav-item" onclick="go('cs')"><span class="ico">💬</span>CS 관리</div>
+    <div class="nav-item" onclick="toggleSalesNav(this);go('sales')" id="nav-sales"><span class="ico">📊</span>매출 분석</div>
+    <div class="nav-sub" id="sales-sub">
+      <div class="nav-item" onclick="go('sales');switchSalesTab('orders')"><span class="ico">📦</span>주문 관리</div>
+      <div class="nav-item" onclick="go('sales');switchSalesTab('margin')"><span class="ico">💰</span>마진 분석</div>
+      <div class="nav-item" onclick="go('sales');switchSalesTab('shops')"><span class="ico">🏪</span>쇼핑몰 관리</div>
+    </div>
   </div>
 
   <div class="nav-group">
@@ -968,6 +1009,214 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             <thead><tr><th>업체명</th><th>분류</th><th>납기 준수율</th><th>품질 점수</th><th>가격 경쟁력</th><th>종합 평점</th><th>평가</th></tr></thead>
             <tbody id="vendor-eval-table"></tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ CS 관리 ══════════════ -->
+    <div class="page" id="page-cs">
+      <div style="margin-bottom:16px">
+        <div class="cs-tab consumer active-tab" id="cs-tab-consumer" onclick="switchCsTab('consumer')">🟢 소비자</div>
+        <div class="cs-tab pharmacist inactive" id="cs-tab-pharmacist" onclick="switchCsTab('pharmacist')">🔵 약사</div>
+      </div>
+      <div class="card">
+        <div class="card-hdr">
+          <span class="card-title" id="cs-list-title">💬 소비자 CS 목록</span>
+          <div style="display:flex;gap:6px">
+            <input class="fi" id="cs-search" placeholder="검색..." style="width:160px;padding:5px 10px;font-size:11.5px" oninput="renderCsList()">
+            <button class="btn btn-primary btn-sm" onclick="if(requireWrite())openCsForm()">+ 새 상담</button>
+          </div>
+        </div>
+        <div class="card-body" style="overflow-x:auto">
+          <table class="tbl"><thead><tr><th>상담일시</th><th>고객명</th><th>유형</th><th>카테고리</th><th>상품</th><th>상태</th><th>긴급도</th><th>상담자</th></tr></thead><tbody id="cs-table"></tbody></table>
+        </div>
+      </div>
+
+      <!-- CS 입력 폼 모달 -->
+      <div class="overlay" id="overlay-cs-form-modal">
+        <div class="modal" style="width:580px">
+          <div class="modal-hdr"><span class="modal-ttl" id="cs-form-title">💬 새 상담 등록</span><button class="modal-x" onclick="closeModal('cs-form-modal')">✕</button></div>
+          <div class="modal-body" style="max-height:65vh;overflow-y:auto">
+            <div class="fg"><label>상담 유형<span class="req">*</span></label><span id="cs-form-type-display" style="font-size:12px;color:var(--gray-500)">소비자</span></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="fg"><label>고객명<span class="req">*</span></label><input class="fi" id="cs-customer"></div>
+              <div class="fg"><label>연락처<span class="req">*</span></label><input class="fi" id="cs-phone" placeholder="010-0000-0000"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="fg"><label>채널<span class="req">*</span></label><select class="fs" id="cs-channel"><option>전화</option><option>이메일</option><option>카카오톡</option><option>잔디</option><option>기타</option></select></div>
+              <div class="fg"><label>긴급도</label><select class="fs" id="cs-urgency"><option value="1">1 (낮음)</option><option value="2">2</option><option value="3" selected>3 (보통)</option><option value="4">4</option><option value="5">5 (긴급)</option></select></div>
+            </div>
+            <div class="fg"><label>카테고리</label><select class="fs" id="cs-category"><option>제품 문의</option><option>배송 문의</option><option>교환/반품</option><option>불만/클레임</option><option>사용법 문의</option><option>성분 문의</option><option>부작용 상담</option><option>처방 관련</option><option>기타</option></select></div>
+            <div class="fg"><label>연동 상품</label><select class="fs" id="cs-linked-item"><option value="">— 선택 (선택사항) —</option></select></div>
+            <div class="fg"><label>상담 내용<span class="req">*</span></label><textarea class="fi" id="cs-content" rows="4" placeholder="상담 내용을 입력하세요"></textarea></div>
+            <div class="fg"><label>조치 내역</label><textarea class="fi" id="cs-action" rows="2" placeholder="처리 내용"></textarea></div>
+            <div class="fg"><label>상태</label><select class="fs" id="cs-status"><option>접수</option><option>처리중</option><option>완료</option><option>보류</option></select></div>
+          </div>
+          <div class="modal-foot"><button class="btn btn-outline" onclick="closeModal('cs-form-modal')">취소</button><button class="btn btn-primary" onclick="saveCsEntry()">저장</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ 매출 분석 ══════════════ -->
+    <div class="page" id="page-sales">
+      <!-- 매출 분석 내부 서브 네비게이션 -->
+      <div class="sales-subnav" id="sales-subnav">
+        <div class="sales-subnav-item active" onclick="switchSalesTab('dashboard')">📊 매출 대시보드</div>
+        <div class="sales-subnav-item" onclick="switchSalesTab('orders')">📦 주문 관리</div>
+        <div class="sales-subnav-item" onclick="switchSalesTab('margin')">💰 마진 분석</div>
+        <div class="sales-subnav-item" onclick="switchSalesTab('shops')">🏪 쇼핑몰 관리</div>
+      </div>
+
+      <!-- 매출 대시보드 (랜딩) -->
+      <div id="sales-panel-dashboard">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+          <div class="card" style="padding:16px;text-align:center"><div style="font-size:10px;color:var(--gray-400);margin-bottom:6px">총 매출</div><div style="font-size:20px;font-weight:700" id="sd-total-rev">-</div></div>
+          <div class="card" style="padding:16px;text-align:center"><div style="font-size:10px;color:var(--gray-400);margin-bottom:6px">순매출</div><div style="font-size:20px;font-weight:700" id="sd-net-rev">-</div></div>
+          <div class="card" style="padding:16px;text-align:center"><div style="font-size:10px;color:var(--gray-400);margin-bottom:6px">Net 마진</div><div style="font-size:20px;font-weight:700" id="sd-net-margin">-</div></div>
+          <div class="card" style="padding:16px;text-align:center"><div style="font-size:10px;color:var(--gray-400);margin-bottom:6px">마진율</div><div style="font-size:20px;font-weight:700" id="sd-margin-rate">-</div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:14px">
+          <div class="card"><div class="card-hdr"><span class="card-title">쇼핑몰별 매출 & 마진</span></div><div class="card-body" style="height:250px"><canvas id="sd-shop-chart"></canvas></div></div>
+          <div class="card"><div class="card-hdr"><span class="card-title">매출 TOP 3 쇼핑몰</span></div><div class="card-body" id="sd-top3" style="font-size:13px;color:var(--gray-600)">데이터 준비 중</div></div>
+        </div>
+        <div style="margin-top:14px;padding:20px;background:var(--sky-50);border:1px solid var(--sky-200);border-radius:var(--r);text-align:center;color:var(--sky-700);font-size:13px">
+          쇼핑몰 주문 수집 모듈 연동 후 실시간 매출 데이터가 표시됩니다
+        </div>
+      </div>
+
+      <!-- 주문 관리 -->
+      <div id="sales-panel-orders" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div class="shop-tabs" id="order-shop-tabs">
+            <div class="shop-tab active" onclick="filterOrderShop('all',this)">전체</div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input class="fi" id="order-search" placeholder="🔍 주문번호·고객명 검색" style="width:180px;padding:5px 10px;font-size:11.5px">
+            <select class="fs" id="order-status-filter" style="width:100px;padding:5px;font-size:11px"><option value="">전체 상태</option><option>수집완료</option><option>출고요청</option><option>배송중</option><option>배송완료</option><option>오류</option></select>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:10px">
+          <button class="btn btn-primary btn-sm" onclick="openManualUpload()">📤 수동 업로드</button>
+          <button class="btn btn-outline btn-sm" onclick="downloadOrderTemplate()">📥 엑셀 양식 다운로드</button>
+        </div>
+        <div class="card"><div class="card-body" style="overflow-x:auto">
+          <table class="tbl"><thead><tr><th>주문번호</th><th>쇼핑몰</th><th>고객명</th><th>상품</th><th>수량</th><th>금액</th><th>상태</th><th>송장번호</th><th>source</th><th>일시</th></tr></thead><tbody id="order-table"></tbody></table>
+        </div></div>
+        <div style="margin-top:14px;padding:20px;background:var(--sky-50);border:1px solid var(--sky-200);border-radius:var(--r);text-align:center;color:var(--sky-700);font-size:13px">
+          쇼핑몰 API 연동 후 주문이 자동 수집됩니다 · 수동 업로드로 오프라인 주문 등록 가능
+        </div>
+      </div>
+
+      <!-- 마진 분석 -->
+      <div id="sales-panel-margin" style="display:none">
+        <div class="card" style="margin-bottom:14px;padding:14px 18px">
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;text-align:center">
+            <div><div style="font-size:10px;color:var(--gray-400)">총 주문</div><div style="font-size:18px;font-weight:700" id="mg-total-orders">-</div></div>
+            <div><div style="font-size:10px;color:var(--gray-400)">Gross Margin</div><div style="font-size:18px;font-weight:700" id="mg-gross">-</div></div>
+            <div><div style="font-size:10px;color:var(--gray-400)">Contribution</div><div style="font-size:18px;font-weight:700" id="mg-contrib">-</div></div>
+            <div><div style="font-size:10px;color:var(--gray-400)">Net Margin</div><div style="font-size:18px;font-weight:700" id="mg-net">-</div></div>
+            <div><div style="font-size:10px;color:var(--gray-400)">평균 ROAS</div><div style="font-size:18px;font-weight:700" id="mg-roas">-</div></div>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="display:flex;gap:6px;align-items:center">
+            <select class="fs" id="mg-period" style="width:120px;padding:5px;font-size:11px"><option>이번 달</option><option>지난 달</option><option>최근 7일</option><option>직접 선택</option></select>
+            <select class="fs" id="mg-shop-filter" style="width:120px;padding:5px;font-size:11px"><option value="">전체 쇼핑몰</option></select>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-outline btn-sm" id="mg-bulk-btn" onclick="openBulkEdit()" disabled>✏️ 일괄 수정 (<span id="mg-sel-count">0</span>건)</button>
+          </div>
+        </div>
+        <div class="card"><div class="card-body" style="overflow-x:auto">
+          <table class="tbl"><thead><tr><th style="width:30px"><input type="checkbox" id="mg-check-all" onchange="toggleAllMarginRows(this)"></th><th>쇼핑몰</th><th>주문번호</th><th>상품</th><th>판매가</th><th>COGS</th><th>수수료</th><th>광고비</th><th>Net 마진</th><th>마진율</th></tr></thead><tbody id="margin-table"></tbody></table>
+        </div></div>
+        <div style="margin-top:14px;padding:20px;background:var(--sky-50);border:1px solid var(--sky-200);border-radius:var(--r);text-align:center;color:var(--sky-700);font-size:13px">
+          주문 데이터 수집 후 3단 마진이 자동 계산됩니다 · 수수료/광고비 0원부터 입력 가능
+        </div>
+      </div>
+
+      <!-- 쇼핑몰 관리 -->
+      <div id="sales-panel-shops" style="display:none">
+        <div style="display:grid;grid-template-columns:240px 1fr;gap:14px">
+          <!-- 좌측: 쇼핑몰 리스트 -->
+          <div class="card" style="height:fit-content">
+            <div class="card-hdr"><span class="card-title">쇼핑몰</span><button class="btn btn-primary btn-sm" onclick="addNewShop()" style="padding:3px 8px;font-size:10px">+ 추가</button></div>
+            <div class="card-body" id="shop-list" style="padding:6px">
+              <div style="padding:20px;text-align:center;color:var(--gray-400);font-size:12px">쇼핑몰을 추가하세요</div>
+            </div>
+          </div>
+          <!-- 우측: 상세 (한 화면 스크롤) -->
+          <div id="shop-detail">
+            <!-- ① 기본 정보 -->
+            <div class="shop-section">
+              <div class="shop-section-title">① 기본 정보</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <div class="fg"><label>쇼핑몰명<span class="req">*</span></label><input class="fi" id="shop-name" placeholder="예: 쿠팡, 스마트스토어"></div>
+                <div class="fg"><label>API 연동 여부</label><select class="fs" id="shop-api"><option value="true">연동 (자동 수집)</option><option value="false">미연동 (수동 업로드)</option></select></div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <div class="fg"><label>정산 주기</label><select class="fs" id="shop-settle"><option>D+7</option><option>D+14</option><option>D+30</option><option>월정산</option></select></div>
+                <div class="fg"><label>담당자</label><input class="fi" id="shop-manager" placeholder="담당자 이름"></div>
+              </div>
+              <div class="fg"><label>비고</label><textarea class="fi" id="shop-memo" rows="2" placeholder="특이사항, 계약 조건 등"></textarea></div>
+              <div class="fg"><label>첨부파일</label><input type="file" id="shop-attachment" class="fi" multiple style="padding:6px"></div>
+            </div>
+            <!-- ② 수수료 구조 -->
+            <div class="shop-section">
+              <div class="shop-section-title">② 수수료 구조</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+                <div class="fg"><label>기본 수수료율 (%)</label><input class="fi" id="shop-commission" type="number" min="0" step="0.1" value="0" placeholder="0"></div>
+                <div class="fg"><label>배송 정책</label><select class="fs" id="shop-shipping-policy"><option value="seller">판매자 부담</option><option value="buyer">구매자 부담</option><option value="free_over">조건부 무료</option></select></div>
+                <div class="fg"><label>배송비 (원)</label><input class="fi" id="shop-shipping-cost" type="number" min="0" value="0" placeholder="0"></div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+                <div class="fg"><label>무료배송 기준 (원)</label><input class="fi" id="shop-free-threshold" type="number" min="0" value="0" placeholder="0"></div>
+                <div class="fg"><label>쿠폰 자부담률 (%)</label><input class="fi" id="shop-coupon-rate" type="number" min="0" step="0.1" value="0" placeholder="0"></div>
+                <div class="fg"><label>적용 시작일</label><input class="fi" id="shop-fee-start" type="date"></div>
+              </div>
+              <div class="fg"><label>수수료 비고</label><input class="fi" id="shop-fee-memo" placeholder="수수료 변경 사유, 협상 조건 등"></div>
+              <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px">모든 금액·비율은 0 입력 허용 (수수료 무료 채널 대응)</div>
+            </div>
+            <!-- ③ 광고비 -->
+            <div class="shop-section">
+              <div class="shop-section-title">③ 광고비</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+                <div class="fg"><label>입력 방식</label><select class="fs" id="shop-ads-type" onchange="toggleAdsInputType()"><option value="monthly">월별 입력</option><option value="range">기간별 입력</option><option value="daily">일별 입력</option></select></div>
+                <div class="fg" id="ads-monthly-group"><label>월 선택</label><input class="fi" id="shop-ads-month" type="month"></div>
+                <div class="fg" id="ads-range-start" style="display:none"><label>시작일</label><input class="fi" id="shop-ads-start" type="date"></div>
+              </div>
+              <div class="fg" id="ads-range-end" style="display:none"><label>종료일</label><input class="fi" id="shop-ads-end" type="date"></div>
+              <div class="fg" id="ads-daily-date" style="display:none"><label>날짜</label><input class="fi" id="shop-ads-date" type="date"></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <div class="fg"><label>광고비 (원)</label><input class="fi" id="shop-ads-cost" type="number" min="0" value="0" placeholder="0원 입력 허용"></div>
+                <div class="fg"><label>ROAS</label><div class="fi" id="shop-ads-roas" style="background:var(--gray-50);color:var(--gray-500);min-height:34px;display:flex;align-items:center">자동 계산</div></div>
+              </div>
+              <div class="fg"><label>세부 채널 (선택)</label><input class="fi" id="shop-ads-breakdown" placeholder="검색광고, 디스플레이, 인플루언서 등"></div>
+              <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px">0원 입력 = 광고 미집행 · 기간별 ROAS 자동 계산</div>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
+              <button class="btn btn-outline" onclick="showShopHistory()">📋 변경 이력 보기</button>
+              <button class="btn btn-primary" onclick="saveShopInfo()">💾 저장</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 일괄 수정 모달 -->
+      <div class="overlay" id="overlay-bulk-edit-modal">
+        <div class="modal" style="width:460px">
+          <div class="modal-hdr"><span class="modal-ttl">✏️ 수수료·광고비 일괄 수정</span><button class="modal-x" onclick="closeModal('bulk-edit-modal')">✕</button></div>
+          <div class="modal-body">
+            <div style="background:var(--sky-50);border:1px solid var(--sky-200);border-radius:7px;padding:10px;margin-bottom:14px;font-size:12px;color:var(--sky-800)">
+              선택된 <strong id="bulk-count">0</strong>건의 주문에 일괄 적용됩니다
+            </div>
+            <div class="fg"><label>수수료 변경</label>
+              <div style="display:flex;gap:6px"><input class="fi" id="bulk-commission" type="number" min="0" step="0.1" placeholder="% 입력"><span style="align-self:center;font-size:12px;color:var(--gray-500)">% 또는</span><input class="fi" id="bulk-commission-won" type="number" min="0" placeholder="원 입력"></div>
+            </div>
+            <div class="fg"><label>광고비 변경</label><input class="fi" id="bulk-ads" type="number" min="0" placeholder="원 입력 (0원 허용)"></div>
+            <div style="background:var(--amber-50);border:1px solid #fcd34d;border-radius:7px;padding:10px;font-size:11px;color:var(--amber-700)">⚠️ 개별 오버라이드 — 마스터 데이터와 별개로 선택 주문만 수정됩니다</div>
+          </div>
+          <div class="modal-foot"><button class="btn btn-outline" onclick="closeModal('bulk-edit-modal')">취소</button><button class="btn btn-primary" onclick="applyBulkEdit()">적용</button></div>
         </div>
       </div>
     </div>
@@ -2158,7 +2407,8 @@ function showNotif(msg, type='info') {
 const PAGE_TITLES = {
   dashboard:'대시보드',workflow:'워크 플로우',vendor:'업체 관리',item:'품목 관리',
   bom:'BOM 관리',production:'생산 관리',stock:'재고 관리',quote:'견적서',
-  order:'발주서',sites:'관련 사이트',users:'사용자 관리',qc:'품질 관리',cost:'원가 분석',settings:'설정'
+  order:'발주서',sites:'관련 사이트',users:'사용자 관리',qc:'품질 관리',cost:'원가 분석',settings:'설정',
+  cs:'CS 관리',sales:'매출 분석'
 };
 
 function go(page) {
@@ -2170,6 +2420,9 @@ function go(page) {
   document.querySelectorAll('.nav-item').forEach(n => {
     if (n.getAttribute('onclick') === `go('${page}')`) n.classList.add('active');
   });
+  // Auto-open sales sub-nav when navigating to sales page
+  const salesSub = $('sales-sub');
+  if (salesSub) { if (page === 'sales') salesSub.classList.add('open'); else salesSub.classList.remove('open'); }
   // Render page-specific content
   const renders = {
     dashboard: renderDashboard,
@@ -2185,6 +2438,8 @@ function go(page) {
     users: () => renderUserTableFirestore(),
     qc: renderQCTable,
     cost: renderCostPage,
+    cs: renderCsPage,
+    sales: renderSalesPage,
     settings: () => {
       const saved = localStorage.getItem('reniv_sheets_webapp_url');
       if (saved && $('webapp-url')) $('webapp-url').value = saved;
@@ -2361,6 +2616,217 @@ function renderDashStats() {
     <div class="stat ${lowStockCount>0?'c-red':'c-green'}" style="cursor:pointer" onclick="go('stock')"><div class="stat-lbl">📦 완제품 재고 현황${lowStockCount>0?' <span style="color:var(--red-500);font-weight:700">'+lowStockCount+'건 부족</span>':''}</div><div class="stat-val">${finishedItems.length}<span style="font-size:13px;font-weight:500;color:var(--gray-500)"> 품목</span></div><div class="stat-sub" style="line-height:2">${stockLines}</div><div class="stat-ico">📦</div></div>
     <div class="stat c-purple" style="cursor:pointer" onclick="go('order')"><div class="stat-lbl">💰 발주 현황 <span style="font-size:9px;opacity:.8">(VAT포함)</span></div><div class="stat-val">${fmtW(Math.round(thisMonthAmt*1.1))}</div><div class="stat-sub" style="line-height:1.9">${vendorSubText}</div><div class="stat-ico">💰</div></div>
   `;
+}
+
+// ══════════════ CS 관리 ══════════════
+function switchCsTab(type) {
+  const conTab = $('cs-tab-consumer'), pharTab = $('cs-tab-pharmacist');
+  if (type === 'consumer') {
+    conTab.className = 'cs-tab consumer active-tab';
+    pharTab.className = 'cs-tab pharmacist inactive';
+    $('cs-list-title').textContent = '💬 소비자 CS 목록';
+  } else {
+    pharTab.className = 'cs-tab pharmacist active-tab';
+    conTab.className = 'cs-tab consumer inactive';
+    $('cs-list-title').textContent = '💬 약사 CS 목록';
+  }
+  window._csCurrentTab = type;
+  renderCsList();
+}
+window._csCurrentTab = 'consumer';
+if (!DB.cs) DB.cs = [];
+
+function renderCsPage() {
+  renderCsList();
+  // Populate linked item dropdown
+  const sel = $('cs-linked-item');
+  if (sel && sel.options.length <= 1) {
+    (DB.items||[]).forEach(i => { const o = document.createElement('option'); o.value = i.id; o.textContent = i.name; sel.appendChild(o); });
+  }
+}
+
+function renderCsList() {
+  const tb = $('cs-table'); if (!tb) return;
+  const q = ($('cs-search')?.value||'').toLowerCase();
+  const type = window._csCurrentTab;
+  const list = (DB.cs||[]).filter(c => c.type === type && (!q || (c.customer||'').toLowerCase().includes(q) || (c.category||'').toLowerCase().includes(q) || (c.content||'').toLowerCase().includes(q)));
+  if (!list.length) { tb.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:30px">등록된 CS가 없습니다</td></tr>'; return; }
+  tb.innerHTML = list.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(c => {
+    const urgColor = c.urgency >= 4 ? 'var(--red-500)' : c.urgency >= 3 ? 'var(--amber-500)' : 'var(--gray-400)';
+    const stBadge = c.status === '완료' ? '<span class="badge green">완료</span>' : c.status === '처리중' ? '<span class="badge blue">처리중</span>' : c.status === '보류' ? '<span class="badge" style="background:var(--amber-50);color:var(--amber-700)">보류</span>' : '<span class="badge">접수</span>';
+    const item = c.linkedItemId ? (getItem(c.linkedItemId)?.name||'-') : '-';
+    return `<tr><td style="white-space:nowrap">${c.date||'-'}</td><td>${c.customerMasked||c.customer||'-'}</td><td>${type==='consumer'?'소비자':'약사'}</td><td>${c.category||'-'}</td><td>${item}</td><td>${stBadge}</td><td><span style="color:${urgColor};font-weight:600">${c.urgency||3}</span></td><td>${c.consultant||'-'}</td></tr>`;
+  }).join('');
+}
+
+function openCsForm() {
+  $('cs-form-type-display').textContent = window._csCurrentTab === 'consumer' ? '소비자' : '약사';
+  ['cs-customer','cs-phone','cs-content','cs-action'].forEach(id => { if($(id)) $(id).value = ''; });
+  if($('cs-channel')) $('cs-channel').selectedIndex = 0;
+  if($('cs-urgency')) $('cs-urgency').value = '3';
+  if($('cs-status')) $('cs-status').selectedIndex = 0;
+  if($('cs-category')) $('cs-category').selectedIndex = 0;
+  if($('cs-linked-item')) $('cs-linked-item').selectedIndex = 0;
+  openModal('cs-form-modal');
+}
+
+function saveCsEntry() {
+  const cust = $('cs-customer')?.value?.trim();
+  const content = $('cs-content')?.value?.trim();
+  if (!cust || !content) { alert('고객명과 상담 내용은 필수입니다.'); return; }
+  const entry = {
+    id: Date.now(),
+    type: window._csCurrentTab,
+    customer: cust,
+    customerMasked: cust.charAt(0) + '*'.repeat(Math.max(1,cust.length-1)),
+    phone: $('cs-phone')?.value||'',
+    channel: $('cs-channel')?.value||'전화',
+    urgency: parseInt($('cs-urgency')?.value||'3'),
+    category: $('cs-category')?.value||'',
+    linkedItemId: $('cs-linked-item')?.value||'',
+    content: content,
+    action: $('cs-action')?.value||'',
+    status: $('cs-status')?.value||'접수',
+    consultant: window._currentUser?.name||'',
+    date: new Date().toISOString().slice(0,16).replace('T',' '),
+  };
+  DB.cs.push(entry);
+  saveLocal();
+  closeModal('cs-form-modal');
+  renderCsList();
+}
+
+// ══════════════ 매출 분석 ══════════════
+if (!DB.shops) DB.shops = [];
+if (!DB.shopOrders) DB.shopOrders = [];
+
+function toggleSalesNav(el) {
+  const sub = $('sales-sub');
+  if (sub) sub.classList.toggle('open');
+}
+
+function renderSalesPage() {
+  switchSalesTab('dashboard');
+  renderShopList();
+}
+
+function switchSalesTab(tab) {
+  ['dashboard','orders','margin','shops'].forEach(t => {
+    const panel = $('sales-panel-'+t);
+    if (panel) panel.style.display = t === tab ? '' : 'none';
+  });
+  document.querySelectorAll('.sales-subnav-item').forEach((el,i) => {
+    const tabs = ['dashboard','orders','margin','shops'];
+    el.classList.toggle('active', tabs[i] === tab);
+  });
+  if (tab === 'orders') renderOrderShopTabs();
+  if (tab === 'shops') renderShopList();
+}
+
+// 주문 관리 — 쇼핑몰 탭
+function renderOrderShopTabs() {
+  const container = $('order-shop-tabs'); if (!container) return;
+  const shops = DB.shops.filter(s => s.active !== false);
+  let html = '<div class="shop-tab active" onclick="filterOrderShop(\'all\',this)">전체</div>';
+  shops.forEach(s => { html += `<div class="shop-tab" onclick="filterOrderShop('${s.id}',this)">${s.name}</div>`; });
+  html += '<div class="shop-tab" onclick="filterOrderShop(\'manual\',this)">+ 수동</div>';
+  container.innerHTML = html;
+}
+function filterOrderShop(shopId, el) {
+  document.querySelectorAll('#order-shop-tabs .shop-tab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  // TODO: filter order table by shopId
+}
+function openManualUpload() { alert('수동 업로드 기능은 쇼핑몰 주문 수집 모듈 연동 후 활성화됩니다.'); }
+function downloadOrderTemplate() { alert('엑셀 양식 다운로드는 쇼핑몰 주문 수집 모듈 연동 후 활성화됩니다.'); }
+
+// 마진 분석
+function toggleAllMarginRows(masterCb) {
+  document.querySelectorAll('.mg-row-check').forEach(cb => { cb.checked = masterCb.checked; });
+  updateBulkCount();
+}
+function updateBulkCount() {
+  const cnt = document.querySelectorAll('.mg-row-check:checked').length;
+  const display = $('mg-sel-count'); if (display) display.textContent = cnt;
+  const btn = $('mg-bulk-btn'); if (btn) btn.disabled = cnt === 0;
+}
+function openBulkEdit() {
+  const cnt = document.querySelectorAll('.mg-row-check:checked').length;
+  if (!cnt) return;
+  $('bulk-count').textContent = cnt;
+  ['bulk-commission','bulk-commission-won','bulk-ads'].forEach(id => { if($(id)) $(id).value = ''; });
+  openModal('bulk-edit-modal');
+}
+function applyBulkEdit() {
+  closeModal('bulk-edit-modal');
+  alert('일괄 수정이 적용되었습니다. (주문 데이터 연동 후 실제 marginSnapshot이 업데이트됩니다)');
+}
+
+// 쇼핑몰 관리
+function renderShopList() {
+  const container = $('shop-list'); if (!container) return;
+  const shops = DB.shops || [];
+  if (!shops.length) { container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:12px">쇼핑몰을 추가하세요</div>'; return; }
+  container.innerHTML = shops.map((s,i) => `<div style="padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px;margin-bottom:2px;transition:all .1s;${i===0?'background:var(--sky-50);color:var(--sky-700);font-weight:500':'color:var(--gray-600)'}" onclick="selectShop(${i})" class="shop-list-item">${s.active===false?'<span style="opacity:.5">⏸ </span>':''}${s.name||'이름 없음'}</div>`).join('');
+  if (shops.length > 0) loadShopDetail(0);
+}
+function selectShop(idx) {
+  document.querySelectorAll('.shop-list-item').forEach((el,i) => {
+    el.style.background = i === idx ? 'var(--sky-50)' : '';
+    el.style.color = i === idx ? 'var(--sky-700)' : 'var(--gray-600)';
+    el.style.fontWeight = i === idx ? '500' : '';
+  });
+  loadShopDetail(idx);
+}
+function loadShopDetail(idx) {
+  const s = DB.shops[idx]; if (!s) return;
+  window._currentShopIdx = idx;
+  if($('shop-name')) $('shop-name').value = s.name || '';
+  if($('shop-api')) $('shop-api').value = s.apiLinked ? 'true' : 'false';
+  if($('shop-settle')) $('shop-settle').value = s.settlementCycle || 'D+7';
+  if($('shop-manager')) $('shop-manager').value = s.manager || '';
+  if($('shop-memo')) $('shop-memo').value = s.memo || '';
+  if($('shop-commission')) $('shop-commission').value = s.commissionBase || 0;
+  if($('shop-shipping-policy')) $('shop-shipping-policy').value = s.shippingPolicy || 'seller';
+  if($('shop-shipping-cost')) $('shop-shipping-cost').value = s.shippingCost || 0;
+  if($('shop-free-threshold')) $('shop-free-threshold').value = s.freeShippingThreshold || 0;
+  if($('shop-coupon-rate')) $('shop-coupon-rate').value = s.couponBorneRate || 0;
+  if($('shop-fee-memo')) $('shop-fee-memo').value = s.feeMemo || '';
+}
+function addNewShop() {
+  const name = prompt('쇼핑몰명을 입력하세요:');
+  if (!name) return;
+  DB.shops.push({ id: 'shop_'+Date.now(), name: name, active: true, apiLinked: false, commissionBase: 0, shippingPolicy: 'seller', shippingCost: 0, freeShippingThreshold: 0, couponBorneRate: 0, settlementCycle: 'D+7', manager: '', memo: '', feeMemo: '', createdAt: new Date().toISOString() });
+  saveLocal();
+  renderShopList();
+}
+function saveShopInfo() {
+  const idx = window._currentShopIdx; if (idx == null || !DB.shops[idx]) return;
+  const s = DB.shops[idx];
+  s.name = $('shop-name')?.value || s.name;
+  s.apiLinked = $('shop-api')?.value === 'true';
+  s.settlementCycle = $('shop-settle')?.value || 'D+7';
+  s.manager = $('shop-manager')?.value || '';
+  s.memo = $('shop-memo')?.value || '';
+  s.commissionBase = parseFloat($('shop-commission')?.value) || 0;
+  s.shippingPolicy = $('shop-shipping-policy')?.value || 'seller';
+  s.shippingCost = parseFloat($('shop-shipping-cost')?.value) || 0;
+  s.freeShippingThreshold = parseFloat($('shop-free-threshold')?.value) || 0;
+  s.couponBorneRate = parseFloat($('shop-coupon-rate')?.value) || 0;
+  s.feeMemo = $('shop-fee-memo')?.value || '';
+  s.updatedAt = new Date().toISOString();
+  saveLocal();
+  renderShopList();
+  alert('저장되었습니다.');
+}
+function showShopHistory() { alert('변경 이력은 Firestore 연동 후 shopFeeHistory 컬렉션에서 조회됩니다.'); }
+
+function toggleAdsInputType() {
+  const type = $('shop-ads-type')?.value;
+  $('ads-monthly-group').style.display = type === 'monthly' ? '' : 'none';
+  $('ads-range-start').style.display = type === 'range' ? '' : 'none';
+  $('ads-range-end').style.display = type === 'range' ? '' : 'none';
+  $('ads-daily-date').style.display = type === 'daily' ? '' : 'none';
 }
 
 function renderDashProdTable() {
