@@ -217,7 +217,7 @@ body{font-family:var(--font);background:var(--gray-50);color:var(--gray-800);hei
 .stat-val{font-size:22px;font-weight:700;color:var(--gray-800);line-height:1}
 .stat-sub{font-size:11.5px;color:var(--gray-500);margin-top:5px}
 .stat-ico{position:absolute;right:14px;top:50%;transform:translateY(-50%);font-size:26px;opacity:.12}
-.stock-warn-label{display:inline-block;background:var(--red-500);color:#fff;font-size:8.5px;padding:1px 6px;border-radius:8px;font-weight:700;line-height:16px;vertical-align:middle;margin-left:4px}
+.stock-warn-label{display:inline-block;background:#fff;color:var(--red-500);font-size:8.5px;padding:1px 6px;border-radius:8px;font-weight:700;line-height:16px;vertical-align:middle;margin-left:4px;border:1.5px solid var(--red-500)}
 
 /* CS Tab colors */
 .cs-tab{display:inline-flex;align-items:center;padding:8px 20px;border-radius:8px 8px 0 0;cursor:pointer;font-size:13px;font-weight:600;transition:all .15s;border:1px solid transparent;margin-right:4px}
@@ -2121,10 +2121,15 @@ async function _doSaveData() {
 
   // 순차 저장 (병렬 저장 시 Firestore 권한 오류 발생 가능)
   for (const [key, val] of Object.entries(collections)) {
-    await setDoc(docRef(db, 'erp_data', key), { data: JSON.stringify(val), ts: Date.now() });
+    try {
+      await setDoc(docRef(db, 'erp_data', key), { data: JSON.stringify(val), ts: Date.now() });
+    } catch(e) {
+      console.error(`Firestore 저장 실패 [${key}]:`, e.message, '데이터 크기:', JSON.stringify(val).length);
+    }
   }
 
   // meta 저장
+  try {
   await setDoc(docRef(db, 'erp_data', 'meta'), {
     data: JSON.stringify({
       _trelloKey:       dbToSave._trelloKey       || null,
@@ -2141,6 +2146,9 @@ async function _doSaveData() {
     }),
     ts: Date.now()
   });
+  } catch(e) {
+    console.error('Firestore meta 저장 실패:', e.message);
+  }
 }
 
 async function loadDataFromFirestore() {
@@ -2702,7 +2710,7 @@ function renderDashStats() {
     const nm = (item.name||'?').replace('르니브 3중 장벽 20층 ','').replace('르니브 ','').replace(/(\([^)]+\))\s*\1/g,'$1');
     let line = '<span style="font-weight:500">' + nm + '</span>&nbsp;&nbsp;<span style="color:var(--sky-600);font-weight:600">' + fmt(stockQty) + 'EA</span>';
     if (isLow) {
-      line += ' <span class="stock-warn-label">재고부족 예상</span>';
+      line += ' <span class="stock-warn-label">🚨 재고 부족</span>';
     } else if (isWarning) {
       line += ' <span style="display:inline-block;background:var(--amber-500);color:#fff;font-size:8.5px;padding:1px 6px;border-radius:8px;font-weight:700;line-height:16px;vertical-align:middle;margin-left:4px">주의</span>';
     }
@@ -4364,7 +4372,7 @@ function openDataUrlInNewTab(dataUrl, fileName) {
 }
 
 function openVendorQuoteById(vendorId, idx) {
-  const v = DB.vendors.find(v=>v.id===vendorId);
+  const v = DB.vendors.find(v=>v.id==vendorId);
   if (!v || !v.quotes || !v.quotes[idx]) return;
   const q = v.quotes[idx];
   openDataUrlInNewTab(q.data, q.fileName || q.name);
@@ -4470,7 +4478,9 @@ function moveVendor(idA, dir) {
 }
 
 function editVendor(id) {
-  const v = getVendor(id);
+  // ID 정규화 (문자열/숫자 혼합 방지)
+  const numId = parseInt(id);
+  const v = DB.vendors.find(v => v.id === numId || v.id === id || String(v.id) === String(id));
   if (!v || !v.id) { showNotif('업체 정보를 찾을 수 없습니다','warning'); return; }
   editingId['add-vendor'] = v.id;
   // 폼 초기화 후 데이터 입력
@@ -8310,17 +8320,32 @@ function initERPWhenReady() {
 
   loadDataFromFirestore().then(async (firestoreDB) => {
     if (firestoreDB && firestoreDB.items && firestoreDB.items.length > 0) {
+      // localStorage 데이터를 fallback으로 보존
+      const localDB = JSON.parse(JSON.stringify(DB));
       // Firestore 데이터 + DEFAULT_DB 누락 필드 보완
-      const merged = Object.assign({}, JSON.parse(JSON.stringify(DEFAULT_DB)), firestoreDB);
-      // 배열 필드는 Firestore 것을 우선 (비어있지 않으면)
-      ['vendors','items','orders','productions','stockHistory','quotes','tasks','users'].forEach(k => {
-        if (firestoreDB[k] && firestoreDB[k].length > 0) merged[k] = firestoreDB[k];
+      const merged = Object.assign({}, JSON.parse(JSON.stringify(DEFAULT_DB)));
+      // 배열 필드: Firestore 우선 → localStorage fallback → DEFAULT_DB
+      ['vendors','items','orders','productions','stockHistory','quotes','tasks','users','shops','shopOrders','cs'].forEach(k => {
+        if (firestoreDB[k] && firestoreDB[k].length > 0) {
+          merged[k] = firestoreDB[k];
+        } else if (localDB[k] && localDB[k].length > 0) {
+          merged[k] = localDB[k];
+        }
+      });
+      // 비배열 메타 필드는 Firestore 것을 우선
+      ['_trelloKey','_trelloToken','_trelloLists','_trelloCards','_bomMargin','_companyInfo','_nextIds','_processedOrders'].forEach(k => {
+        if (firestoreDB[k] !== undefined) merged[k] = firestoreDB[k];
+        else if (localDB[k] !== undefined) merged[k] = localDB[k];
       });
       // boms (객체)와 _processedOrders (배열) 는 Firestore 것을 우선
       if (firestoreDB.boms && Object.keys(firestoreDB.boms).length > 0) merged.boms = firestoreDB.boms;
+      else if (localDB.boms && Object.keys(localDB.boms).length > 0) merged.boms = localDB.boms;
       if (firestoreDB.sites && firestoreDB.sites.length > 0) merged.sites = firestoreDB.sites;
+      else if (localDB.sites && localDB.sites.length > 0) merged.sites = localDB.sites;
       if (firestoreDB._processedOrders && firestoreDB._processedOrders.length > 0) merged._processedOrders = firestoreDB._processedOrders;
+      else if (localDB._processedOrders && localDB._processedOrders.length > 0) merged._processedOrders = localDB._processedOrders;
       DB = merged;
+      console.log('✅ 머지 완료 - shopOrders:', (DB.shopOrders||[]).length, 'shops:', (DB.shops||[]).length, 'cs:', (DB.cs||[]).length);
       applyPendingStockIn();
       cleanOrphanProductions();
       syncProductionStatusFromOrders();
