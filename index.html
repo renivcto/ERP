@@ -1143,6 +1143,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <select class="fs" id="shop-order-status-filter" onchange="renderShopOrderTable()" style="width:110px;padding:5px;font-size:11px"><option value="">전체 상태</option><option>배송 전</option><option>배송중</option><option>배송완료</option><option>취소</option><option>반품</option></select>
           <select class="fs" id="shop-order-shop-filter" onchange="renderShopOrderTable()" style="width:130px;padding:5px;font-size:11px"><option value="">전체 쇼핑몰</option></select>
           <div style="margin-left:auto;display:flex;gap:6px">
+            <button class="btn btn-outline btn-sm" style="color:var(--red-500);border-color:var(--red-200)" onclick="bulkDeleteOrders()">🗑 선택 삭제</button>
             <button class="btn btn-outline btn-sm" onclick="downloadOrderTemplate()">📥 엑셀 양식</button>
             <button class="btn btn-primary btn-sm" onclick="openOrderUploadModal()">📤 주문 업로드</button>
           </div>
@@ -3367,7 +3368,6 @@ function confirmOrderUpload() {
     `${o.customerName}|${o.productName}|${o.orderDate}|${o.qty}|${o.paymentAmount||o.totalPrice||0}`
   ));
   const newOrders = orders.filter(o => {
-    // 자동생성 주문번호(MNL-)는 주문번호 중복체크 무시 → 복합키로 체크
     if (o.orderNo.startsWith('MNL-')) {
       const key = `${o.customerName}|${o.productName}|${o.orderDate}|${o.qty}|${o.paymentAmount||0}`;
       return !existCompositeKeys.has(key);
@@ -3375,8 +3375,42 @@ function confirmOrderUpload() {
     return !existOrderNos.has(o.orderNo);
   });
   const dupCount = orders.length - newOrders.length;
-  if (dupCount > 0 && !confirm(`${dupCount}건의 중복 주문이 제외됩니다.\n${newOrders.length}건을 업로드하시겠습니까?`)) return;
-  if (!newOrders.length) { alert('모든 주문이 이미 등록되어 있습니다.'); return; }
+  if (dupCount > 0) {
+    if (newOrders.length === 0) {
+      // 전부 중복 — 덮어쓰기 옵션 제공
+      const action = confirm(`이 쇼핑몰의 기존 ${shopExisting.length}건과 모두 중복됩니다.\n\n[확인] → 기존 데이터 삭제 후 새로 업로드\n[취소] → 업로드 취소`);
+      if (!action) return;
+      // 해당 쇼핑몰 기존 주문 삭제
+      DB.shopOrders = (DB.shopOrders||[]).filter(o => o.shopId !== shopId);
+      // 전체를 새로 업로드
+      orders.forEach(o => { o.shopId = shopId; o.shopName = shopName; });
+      // 상품 매핑 후 업로드로 진행
+      const mappings2 = shop.productMappings || [];
+      const unmapped2 = [];
+      orders.forEach(o => {
+        const mapped = mappings2.find(m => m.shopProductName === o.productName);
+        if (mapped) { o.itemId = mapped.itemId; }
+        else {
+          const em = DB.items.find(it => it.type === '완제품' && it.name === o.productName);
+          if (em) { o.itemId = em.id; }
+          else {
+            const pm = DB.items.find(it => it.type === '완제품' && (o.productName.includes(it.name) || it.name.includes(o.productName)));
+            if (pm) { o.itemId = pm.id; }
+            else { if (!unmapped2.some(u => u.name === o.productName)) unmapped2.push({ name: o.productName }); }
+          }
+        }
+      });
+      if (unmapped2.length > 0) {
+        window._pendingUploadOrders = orders;
+        window._pendingUploadShopId = shopId;
+        openProductMappingModal(unmapped2, shopId);
+        return;
+      }
+      finalizeOrderUpload(orders, shopId);
+      return;
+    }
+    if (!confirm(`${dupCount}건의 중복 주문이 제외됩니다.\n${newOrders.length}건을 업로드하시겠습니까?`)) return;
+  }
   // 상품명 매핑 적용
   const mappings = shop.productMappings || [];
   const unmapped = [];
@@ -3559,13 +3593,40 @@ function deleteShopOrder(id) {
 
 function bulkDeleteOrders() {
   if (!requireWrite()) return;
-  const ids = [...document.querySelectorAll('.so-row-check:checked')].map(cb => parseInt(cb.value));
-  if (!ids.length) { alert('삭제할 주문을 선택해주세요.'); return; }
-  if (!confirm(`선택한 ${ids.length}건의 주문을 삭제하시겠습니까?\n\n⚠️ 이 작업은 되돌릴 수 없습니다.`)) return;
-  const delSet = new Set(ids);
-  DB.shopOrders = (DB.shopOrders||[]).filter(o => !delSet.has(o.id));
-  saveData(); renderShopOrderTable();
-  alert(`${ids.length}건이 삭제되었습니다.`);
+  const checked = [...document.querySelectorAll('.so-row-check:checked')];
+  if (checked.length > 0) {
+    // 선택된 주문 삭제
+    const ids = checked.map(cb => parseInt(cb.value));
+    if (!confirm(`선택한 ${ids.length}건의 주문을 삭제하시겠습니까?`)) return;
+    const delSet = new Set(ids);
+    DB.shopOrders = (DB.shopOrders||[]).filter(o => !delSet.has(o.id));
+    saveData(); renderShopOrderTable();
+    alert(`${ids.length}건이 삭제되었습니다.`);
+  } else {
+    // 선택된 게 없으면 → 필터 적용된 전체 또는 전체 삭제
+    const total = (DB.shopOrders||[]).length;
+    if (!total) { alert('삭제할 주문이 없습니다.'); return; }
+    const statusF = $('shop-order-status-filter')?.value || '';
+    const shopF = $('shop-order-shop-filter')?.value || '';
+    const q = ($('shop-order-search')?.value||'').toLowerCase();
+    const hasFilter = statusF || shopF || q;
+    let filtered = DB.shopOrders || [];
+    if (q) filtered = filtered.filter(o => (o.orderNo||'').toLowerCase().includes(q) || (o.customerName||'').toLowerCase().includes(q) || (o.productName||'').toLowerCase().includes(q));
+    if (statusF) filtered = filtered.filter(o => o.status === statusF);
+    if (shopF) filtered = filtered.filter(o => o.shopId === shopF);
+    const cnt = hasFilter ? filtered.length : total;
+    const label = hasFilter ? `필터링된 ${cnt}건` : `전체 ${cnt}건`;
+    if (!confirm(`체크된 주문이 없습니다.\n${label}을 삭제하시겠습니까?`)) return;
+    if (!confirm(`⚠️ 정말 ${label}을 삭제하시겠습니까? (되돌릴 수 없음)`)) return;
+    if (hasFilter) {
+      const delIds = new Set(filtered.map(o => o.id));
+      DB.shopOrders = (DB.shopOrders||[]).filter(o => !delIds.has(o.id));
+    } else {
+      DB.shopOrders = [];
+    }
+    saveData(); renderShopOrderTable();
+    alert(`${cnt}건이 삭제되었습니다.`);
+  }
 }
 
 // ══════════════ 주문 상세 모달 ══════════════
