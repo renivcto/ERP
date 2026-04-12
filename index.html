@@ -2160,7 +2160,7 @@ async function _doSaveDataInner() {
       _trelloCards:     dbToSave._trelloCards     || null,
       _bomMargin:       dbToSave._bomMargin       || {},
       _companyInfo:     dbToSave._companyInfo     || {},
-      _nextIds:         dbToSave._nextIds         || {},
+      _nextId:          dbToSave._nextId           || {},
       _processedOrders: dbToSave._processedOrders || [],
       boms:             dbToSave.boms             || {},
       sites:            dbToSave.sites            || [],
@@ -4339,7 +4339,7 @@ function renderVendorTable() {
       <td style="text-align:center">${v.contact||'-'}</td>
       <td style="text-align:center">${v.phone||'-'}</td>
       <td style="color:var(--sky-600);text-align:center">${v.email||'-'}</td>
-      <td style="text-align:center">${(DB.items||[]).filter(i=>i.vendorId===v.id).slice(0,2).map(i=>`<span class="chip" onclick="showItemDetail(${i.id})">${i.name}</span>`).join('')}</td>
+      <td style="text-align:center">${(DB.items||[]).filter(i=>i.vendorId==v.id).slice(0,2).map(i=>`<span class="chip" onclick="showItemDetail(${i.id})">${i.name}</span>`).join('')}</td>
       <td style="text-align:center">
         ${(v.quotes&&v.quotes.length) ? v.quotes.map((q,idx)=>`
           <button onclick="openVendorQuoteById(${v.id},${idx})" title="${q.name}" style="display:inline-flex;align-items:center;gap:5px;background:#fdf2f8;color:#c4708a;border:1px solid #f0c0d4;padding:4px 11px;border-radius:7px;font-size:11.5px;font-weight:400;cursor:pointer;margin:2px;white-space:nowrap"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d97b9a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg> ${q.name}</button>
@@ -4469,7 +4469,7 @@ function addVendorAttach() {
   reader.readAsDataURL(file);
 }
 
-function saveVendor() {
+async function saveVendor() {
   const company = $('v-company').value.trim();
   if (!company) { showNotif('회사명을 입력하세요','warning'); return; }
   const id = editingId['add-vendor'];
@@ -4490,7 +4490,8 @@ function saveVendor() {
     DB.vendors.push({id:nextId('vendor'), ...data});
     showNotif('업체가 등록되었습니다','success');
   }
-  saveData(); closeModal('add-vendor'); renderVendorTable();
+  closeModal('add-vendor'); renderVendorTable();
+  await saveDataNow();
 }
 
 function moveVendor(idA, dir) {
@@ -4528,19 +4529,22 @@ function editVendor(id) {
 }
 
 
-function deleteVendorFromModal() {
+async function deleteVendorFromModal() {
   const id = editingId['add-vendor'];
   if (!id) return;
   if (!confirm('이 업체를 삭제합니까?')) return;
-  DB.vendors = (DB.vendors||[]).filter(v => v.id !== id);
-  saveData(); closeModal('add-vendor'); renderVendorTable();
+  DB.vendors = (DB.vendors||[]).filter(v => v.id != id);
+  closeModal('add-vendor'); renderVendorTable();
+  await saveDataNow();
   showNotif('업체가 삭제되었습니다');
 }
 
-function deleteVendor(id) {
+async function deleteVendor(id) {
   if (!confirm('이 업체를 삭제합니까?')) return;
-  DB.vendors = (DB.vendors||[]).filter(v=>v.id!==id);
-  saveData(); renderVendorTable(); showNotif('업체가 삭제되었습니다');
+  DB.vendors = (DB.vendors||[]).filter(v=>v.id!=id);
+  renderVendorTable();
+  await saveDataNow();
+  showNotif('업체가 삭제되었습니다');
 }
 
 function viewVendor(id) {
@@ -8363,10 +8367,34 @@ function initERPWhenReady() {
         }
       });
       // 비배열 메타 필드는 Firestore 것을 우선
-      ['_trelloKey','_trelloToken','_trelloLists','_trelloCards','_bomMargin','_companyInfo','_nextIds','_processedOrders'].forEach(k => {
+      ['_trelloKey','_trelloToken','_trelloLists','_trelloCards','_bomMargin','_companyInfo','_processedOrders'].forEach(k => {
         if (firestoreDB[k] !== undefined) merged[k] = firestoreDB[k];
         else if (localDB[k] !== undefined) merged[k] = localDB[k];
       });
+      // _nextId 카운터 복원 (Firestore → localStorage → DEFAULT_DB 순서)
+      // Firestore에 _nextId 또는 _nextIds (구버전) 로 저장되어 있을 수 있음
+      const fsNextId = firestoreDB._nextId || firestoreDB._nextIds;
+      const lcNextId = localDB._nextId || localDB._nextIds;
+      if (fsNextId && Object.keys(fsNextId).length > 0) {
+        merged._nextId = fsNextId;
+      } else if (lcNextId && Object.keys(lcNextId).length > 0) {
+        merged._nextId = lcNextId;
+      }
+      // _nextId가 DEFAULT_DB 값보다 작으면 안전하게 현재 데이터 기반으로 재계산
+      if (!merged._nextId || Object.keys(merged._nextId).length === 0) {
+        merged._nextId = JSON.parse(JSON.stringify(DEFAULT_DB._nextId));
+      }
+      // 데이터 기반으로 _nextId 최솟값 보장 (ID 충돌 방지)
+      const maxOf = (arr, field) => arr.reduce((m, o) => Math.max(m, parseInt(o[field||'id'])||0), 0);
+      merged._nextId.vendor = Math.max(merged._nextId.vendor||0, maxOf(merged.vendors||[],'id') + 1);
+      merged._nextId.item   = Math.max(merged._nextId.item||0,   maxOf(merged.items||[],'id') + 1);
+      merged._nextId.prod   = Math.max(merged._nextId.prod||0,   maxOf(merged.productions||[],'id') + 1);
+      merged._nextId.stock  = Math.max(merged._nextId.stock||0,  maxOf(merged.stockHistory||[],'id') + 1);
+      merged._nextId.quote  = Math.max(merged._nextId.quote||0,  maxOf(merged.quotes||[],'id') + 1);
+      merged._nextId.order  = Math.max(merged._nextId.order||0,  maxOf(merged.orders||[],'id') + 1);
+      merged._nextId.task   = Math.max(merged._nextId.task||0,   maxOf(merged.tasks||[],'id') + 1);
+      merged._nextId.qc     = Math.max(merged._nextId.qc||0,    maxOf(merged.qcs||[],'id') + 1);
+      console.log('🔢 _nextId 복원:', JSON.stringify(merged._nextId));
       // boms (객체)와 _processedOrders (배열) 는 Firestore 것을 우선
       if (firestoreDB.boms && Object.keys(firestoreDB.boms).length > 0) merged.boms = firestoreDB.boms;
       else if (localDB.boms && Object.keys(localDB.boms).length > 0) merged.boms = localDB.boms;
