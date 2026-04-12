@@ -1492,7 +1492,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--gray-50);border:1px dashed var(--gray-300);border-radius:7px;padding:8px 10px">
             <input class="fi" id="v-quote-name-inp" placeholder="견적서 이름 (예: 25년 1분기 견적)" style="flex:1;min-width:140px">
             <input type="file" id="v-quote-file-inp" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx" style="font-size:11px;flex:1;min-width:140px">
-            <button class="btn btn-outline btn-sm" onclick="addVendorQuote()">+ 추가</button>
+            <button class="btn btn-sm" style="background:#fde8f0;color:#c4507a;border:1px solid #f0a0c0;font-weight:500" onclick="addVendorQuote()">+ 추가</button>
           </div>
         </div>
         <!-- 첨부파일 -->
@@ -1502,7 +1502,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--gray-50);border:1px dashed var(--gray-300);border-radius:7px;padding:8px 10px">
             <input class="fi" id="v-attach-name-inp" placeholder="파일 설명 (선택)" style="flex:1;min-width:140px">
             <input type="file" id="v-attach-file-inp" accept="*/*" style="font-size:11px;flex:1;min-width:140px">
-            <button class="btn btn-outline btn-sm" onclick="addVendorAttach()">+ 추가</button>
+            <button class="btn btn-sm" style="background:#fde8f0;color:#c4507a;border:1px solid #f0a0c0;font-weight:500" onclick="addVendorAttach()">+ 추가</button>
           </div>
         </div>
       </div>
@@ -2229,6 +2229,25 @@ async function _doSaveDataInner() {
       dbToSave.orders[i].stampData = '__idb__';
     }
   });
+  // 업체 견적서/첨부파일 바이너리 → IndexedDB 분리
+  (dbToSave.vendors||[]).forEach((v, vi) => {
+    if (v.quotes && v.quotes.length) {
+      v.quotes.forEach((q, qi) => {
+        if (q.data && q.data.length > 100) {
+          idbSet('vendor_quote_' + v.id + '_' + qi, q.data);
+          dbToSave.vendors[vi].quotes[qi] = { ...q, data: '__idb__' };
+        }
+      });
+    }
+    if (v.attachments && v.attachments.length) {
+      v.attachments.forEach((a, ai) => {
+        if (a.data && a.data.length > 100) {
+          idbSet('vendor_attach_' + v.id + '_' + ai, a.data);
+          dbToSave.vendors[vi].attachments[ai] = { ...a, data: '__idb__' };
+        }
+      });
+    }
+  });
 
   // localStorage 항상 저장 (백업)
   try {
@@ -2453,6 +2472,26 @@ async function restoreIDBData() {
     if (!DB.orders[i].stampData || DB.orders[i].stampData === '__idb__' || DB.orders[i].stampData === '__stored__') {
       const stamp = await idbGet('order_stamp_' + DB.orders[i].id);
       DB.orders[i].stampData = stamp || null;
+    }
+  }
+  // 업체 견적서/첨부파일 복원
+  for (let vi = 0; vi < (DB.vendors||[]).length; vi++) {
+    const v = DB.vendors[vi];
+    if (v.quotes && v.quotes.length) {
+      for (let qi = 0; qi < v.quotes.length; qi++) {
+        if (v.quotes[qi].data === '__idb__') {
+          const d = await idbGet('vendor_quote_' + v.id + '_' + qi);
+          DB.vendors[vi].quotes[qi].data = d || '';
+        }
+      }
+    }
+    if (v.attachments && v.attachments.length) {
+      for (let ai = 0; ai < v.attachments.length; ai++) {
+        if (v.attachments[ai].data === '__idb__') {
+          const d = await idbGet('vendor_attach_' + v.id + '_' + ai);
+          DB.vendors[vi].attachments[ai].data = d || '';
+        }
+      }
     }
   }
   // 프로필 사진 복원
@@ -4611,7 +4650,11 @@ function addVendorQuote() {
   const nameInp = document.getElementById('v-quote-name-inp');
   const fileInp = document.getElementById('v-quote-file-inp');
   const name = nameInp ? nameInp.value.trim() : '';
-  if (!name) { showNotif('견적서 이름을 입력해주세요','warning'); return; }
+  if (!name) {
+    alert('견적서 이름을 입력하세요.');
+    if (nameInp) nameInp.focus();
+    return;
+  }
   if (!fileInp || !fileInp.files || !fileInp.files[0]) { showNotif('파일을 선택해주세요','warning'); return; }
   const file = fileInp.files[0];
   const reader = new FileReader();
@@ -4666,14 +4709,13 @@ async function saveVendor() {
   const company = $('v-company').value.trim();
   if (!company) { showNotif('회사명을 입력하세요','warning'); return; }
   const id = editingId['add-vendor'];
-  const existing = id != null ? DB.vendors.find(v=>v.id==id) : null;
   const data = {
     company, type:$('v-type').value, contact:$('v-contact').value,
     phone:$('v-phone').value, email:$('v-email').value,
     addr:$('v-addr').value, desc:$('v-desc').value,
     bizno:$('v-bizno')?$('v-bizno').value.trim():'',
-    quotes: _vendorQuotes.length ? _vendorQuotes : (existing ? (existing.quotes||[]) : []),
-    attachments: window._vendorAttachments && window._vendorAttachments.length ? window._vendorAttachments : (existing ? (existing.attachments||[]) : [])
+    quotes: JSON.parse(JSON.stringify(_vendorQuotes || [])),
+    attachments: JSON.parse(JSON.stringify(window._vendorAttachments || []))
   };
   if (id != null) {
     const idx = DB.vendors.findIndex(v=>v.id==id);
