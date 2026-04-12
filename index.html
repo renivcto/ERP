@@ -1186,8 +1186,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
               <div style="padding:20px;text-align:center;color:var(--gray-400);font-size:12px">쇼핑몰을 추가하세요</div>
             </div>
           </div>
-          <!-- 우측: 상세 (한 화면 스크롤) -->
-          <div id="shop-detail">
+          <!-- 우측: 상세 (한 화면 스크롤) — 쇼핑몰 선택 후 표시 -->
+          <div id="shop-detail" style="display:none">
             <!-- ① 기본 정보 -->
             <div class="shop-section">
               <div class="shop-section-title">① 기본 정보</div>
@@ -2809,7 +2809,7 @@ function csEditEntry(id) {
 function csRemovePin(id) {
   const c = (DB.cs||[]).find(x => x.id === id); if (!c) return;
   c.pinned = false; c.pinIcon = null; delete c.pinOrder;
-  saveLocal(); renderCsList();
+  saveData(); renderCsList();
   const d = document.getElementById('overlay-cs-detail'); if(d) d.remove();
 }
 function csPinMove(id, dir) {
@@ -2819,7 +2819,7 @@ function csPinMove(id, dir) {
   const swapIdx = idx + dir;
   if (swapIdx < 0 || swapIdx >= pinned.length) return;
   const tmp = pinned[swapIdx].pinOrder; pinned[swapIdx].pinOrder = c.pinOrder; c.pinOrder = tmp;
-  saveLocal(); renderCsList();
+  saveData(); renderCsList();
 }
 
 window._csFormMode = 'new'; // 'new' or 'order'
@@ -3041,7 +3041,7 @@ function saveCsEntry() {
   } else {
     DB.cs.push(entry);
   }
-  saveLocal();
+  saveData();
   closeModal('cs-form-modal');
   renderCsList();
 }
@@ -3115,10 +3115,14 @@ function applyBulkEdit() {
 // 쇼핑몰 관리
 function renderShopList() {
   const container = $('shop-list'); if (!container) return;
+  const detail = $('shop-detail');
   const shops = DB.shops || [];
-  if (!shops.length) { container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:12px">쇼핑몰을 추가하세요</div>'; return; }
-  container.innerHTML = shops.map((s,i) => `<div style="padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px;margin-bottom:2px;transition:all .1s;${i===0?'background:var(--sky-50);color:var(--sky-700);font-weight:500':'color:var(--gray-600)'}" onclick="selectShop(${i})" class="shop-list-item">${s.active===false?'<span style="opacity:.5">⏸ </span>':''}${s.name||'이름 없음'}</div>`).join('');
-  if (shops.length > 0) loadShopDetail(0);
+  if (!shops.length) {
+    container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:12px">쇼핑몰을 추가하세요</div>';
+    if (detail) detail.style.display = 'none';
+    return;
+  }
+  container.innerHTML = shops.map((s,i) => `<div style="padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px;margin-bottom:2px;transition:all .1s;color:var(--gray-600)" onclick="selectShop(${i})" class="shop-list-item">${s.active===false?'<span style="opacity:.5">⏸ </span>':''}${s.name||'이름 없음'}</div>`).join('');
 }
 function selectShop(idx) {
   document.querySelectorAll('.shop-list-item').forEach((el,i) => {
@@ -3132,6 +3136,9 @@ function loadShopDetail(idx) {
   const s = DB.shops[idx]; if (!s) return;
   window._currentShopIdx = idx;
   window._selectedShopId = s.id;
+  // 상세 영역 표시
+  const detail = $('shop-detail');
+  if (detail) detail.style.display = '';
   if($('shop-name')) $('shop-name').value = s.name || '';
   if($('shop-api')) $('shop-api').value = s.apiLinked ? 'true' : 'false';
   if($('shop-settle')) $('shop-settle').value = s.settlementCycle || 'D+7';
@@ -3154,7 +3161,7 @@ function addNewShop() {
   const name = prompt('쇼핑몰명을 입력하세요:');
   if (!name) return;
   DB.shops.push({ id: 'shop_'+Date.now(), name: name, active: true, apiLinked: false, commissionBase: 0, shippingPolicy: 'seller', shippingCost: 0, freeShippingThreshold: 0, couponBorneRate: 0, settlementCycle: 'D+7', manager: '', memo: '', feeMemo: '', adsCosts: [], createdAt: new Date().toISOString() });
-  saveLocal();
+  saveData();
   renderShopList();
   // 새로 추가한 쇼핑몰 자동 선택
   const newIdx = DB.shops.length - 1;
@@ -3175,7 +3182,7 @@ function saveShopInfo() {
   s.couponBorneRate = parseFloat($('shop-coupon-rate')?.value) || 0;
   s.feeMemo = $('shop-fee-memo')?.value || '';
   s.updatedAt = new Date().toISOString();
-  saveLocal();
+  saveData();
   renderShopList();
   // 저장 후 현재 쇼핑몰 다시 선택
   selectShop(idx);
@@ -3223,7 +3230,7 @@ function addShopAdsCost() {
   if (overlap) { alert('광고 기간이 겹치지 않도록 설정해 주세요.'); return; }
   shop.adsCosts.push({ id: Date.now(), type, startDate, endDate, cost, memo });
   shop.adsCosts.sort((a,b) => b.startDate.localeCompare(a.startDate));
-  saveLocal();
+  saveData();
   renderShopAdsList(shopId);
   // Reset
   if ($('shop-ads-cost')) $('shop-ads-cost').value = '0';
@@ -3243,7 +3250,7 @@ function renderShopAdsList(shopId) {
 function removeShopAdsCost(shopId, adsId) {
   const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop) return;
   shop.adsCosts = (shop.adsCosts||[]).filter(a => a.id !== adsId);
-  saveLocal(); renderShopAdsList(shopId);
+  saveData(); renderShopAdsList(shopId);
 }
 
 function renderDashProdTable() {
