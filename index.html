@@ -2035,6 +2035,9 @@ async function _doSaveData() {
     productions: dbToSave.productions || [],
     stockHistory:dbToSave.stockHistory|| [],
     quotes:      dbToSave.quotes      || [],
+    cs:          dbToSave.cs          || [],
+    shops:       dbToSave.shops       || [],
+    shopOrders:  dbToSave.shopOrders  || [],
   };
 
   // 순차 저장 (병렬 저장 시 Firestore 권한 오류 발생 가능)
@@ -2077,19 +2080,20 @@ async function loadDataFromFirestore() {
     const getDoc = window._firestoreGetDoc;
     const docRef = window._firestoreDoc;
 
-    const keys = ['vendors','items','orders','productions','stockHistory','quotes','meta'];
+    const keys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders','meta'];
     const snaps = await Promise.all(keys.map(k => getDoc(docRef(db, 'erp_data', k))));
 
     // meta가 없으면 아직 Firestore에 데이터 없음
-    if (!snaps[6].exists()) { console.log('Firestore meta 없음'); return null; }
+    const metaIdx = keys.indexOf('meta');
+    if (!snaps[metaIdx].exists()) { console.log('Firestore meta 없음'); return null; }
 
     const result = {};
-    const collKeys = ['vendors','items','orders','productions','stockHistory','quotes'];
-    snaps.slice(0,6).forEach((snap, i) => {
+    const collKeys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders'];
+    snaps.slice(0, collKeys.length).forEach((snap, i) => {
       result[collKeys[i]] = snap.exists() ? JSON.parse(snap.data().data) : [];
     });
     // meta
-    const meta = JSON.parse(snaps[6].data().data);
+    const meta = JSON.parse(snaps[metaIdx].data().data);
     Object.assign(result, meta);
 
     console.log('Firestore 로드 완료 - items:', result.items?.length, 'orders:', result.orders?.length);
