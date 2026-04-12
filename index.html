@@ -217,7 +217,7 @@ body{font-family:var(--font);background:var(--gray-50);color:var(--gray-800);hei
 .stat-val{font-size:22px;font-weight:700;color:var(--gray-800);line-height:1}
 .stat-sub{font-size:11.5px;color:var(--gray-500);margin-top:5px}
 .stat-ico{position:absolute;right:14px;top:50%;transform:translateY(-50%);font-size:26px;opacity:.12}
-.stock-warn-label{display:inline-block;background:#fff;color:var(--red-500);font-size:8.5px;padding:1px 6px;border-radius:8px;font-weight:700;line-height:16px;vertical-align:middle;margin-left:4px;border:1.5px solid var(--red-500)}
+.stock-warn-label{display:inline-flex;align-items:center;gap:1px;background:#fff;color:var(--red-500);font-size:8.5px;padding:0px 5px;border-radius:8px;font-weight:700;line-height:15px;vertical-align:middle;margin-left:4px;border:1.5px solid var(--red-500)}
 
 /* CS Tab colors */
 .cs-tab{display:inline-flex;align-items:center;padding:8px 20px;border-radius:8px 8px 0 0;cursor:pointer;font-size:13px;font-weight:600;transition:all .15s;border:1px solid transparent;margin-right:4px}
@@ -2067,13 +2067,35 @@ const STORE_KEY = 'reniv_erp_v8';
 
 // ── Firestore DB 동기화 ──────────────────────────────────
 let _saveTimer = null;
+let _isSaving = false;
 
 function saveData() {
   if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(_doSaveData, 800);
+  _saveTimer = setTimeout(() => {
+    _doSaveData().catch(e => console.error('saveData 자동저장 실패:', e));
+  }, 800);
+}
+
+// 즉시 저장 (디바운스 없이) — 주문 업로드 등 중요 작업용
+async function saveDataNow() {
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+  try {
+    await _doSaveData();
+    console.log('✅ 즉시 저장 완료 - shopOrders:', (DB.shopOrders||[]).length);
+    return true;
+  } catch(e) {
+    console.error('❌ 즉시 저장 실패:', e);
+    return false;
+  }
 }
 
 async function _doSaveData() {
+  if (_isSaving) { console.log('⏳ 저장 진행 중 — 대기'); return; }
+  _isSaving = true;
+  try { await _doSaveDataInner(); } finally { _isSaving = false; }
+}
+
+async function _doSaveDataInner() {
   const dbToSave = JSON.parse(JSON.stringify(DB));
 
   // 바이너리 데이터 → IndexedDB 분리
@@ -2149,6 +2171,7 @@ async function _doSaveData() {
   } catch(e) {
     console.error('Firestore meta 저장 실패:', e.message);
   }
+  console.log('💾 Firestore 저장 완료 — shopOrders:', (dbToSave.shopOrders||[]).length, 'shops:', (dbToSave.shops||[]).length);
 }
 
 async function loadDataFromFirestore() {
@@ -2708,12 +2731,15 @@ function renderDashStats() {
     const isLow = item.minStock > 0 && stockQty < item.minStock;
     const isWarning = item.minStock > 0 && stockQty < item.minStock * 1.5 && !isLow;
     const nm = (item.name||'?').replace('르니브 3중 장벽 20층 ','').replace('르니브 ','').replace(/(\([^)]+\))\s*\1/g,'$1');
-    let line = '<span style="font-weight:500">' + nm + '</span>&nbsp;&nbsp;<span style="color:var(--sky-600);font-weight:600">' + fmt(stockQty) + 'EA</span>';
+    let line = '<span style="display:inline-flex;align-items:center;gap:4px;line-height:1.7">';
+    line += '<span style="font-weight:500">' + nm + '</span>';
+    line += '<span style="color:var(--sky-600);font-weight:600">' + fmt(stockQty) + 'EA</span>';
     if (isLow) {
-      line += ' <span class="stock-warn-label">🚨 재고 부족</span>';
+      line += '<span class="stock-warn-label"><span style="font-size:9.5px">🚨</span> 재고 부족</span>';
     } else if (isWarning) {
-      line += ' <span style="display:inline-block;background:var(--amber-500);color:#fff;font-size:8.5px;padding:1px 6px;border-radius:8px;font-weight:700;line-height:16px;vertical-align:middle;margin-left:4px">주의</span>';
+      line += '<span style="display:inline-flex;align-items:center;background:var(--amber-500);color:#fff;font-size:8.5px;padding:0px 5px;border-radius:8px;font-weight:700;line-height:15px">주의</span>';
     }
+    line += '</span>';
     return line;
   }).join('<br>') || '등록된 완제품 없음';
   const lowStockCount = finishedItems.filter(i => i.minStock > 0 && (i.stock||0) < i.minStock).length;
@@ -3454,7 +3480,7 @@ function confirmOrderUpload() {
   finalizeOrderUpload(newOrders, shopId);
 }
 
-function finalizeOrderUpload(orders, shopId) {
+async function finalizeOrderUpload(orders, shopId) {
   // 배송완료인 주문 → 재고 차감
   let deductCount = 0;
   let deductFail = [];
@@ -3464,11 +3490,15 @@ function finalizeOrderUpload(orders, shopId) {
       if (result) deductCount++; else deductFail.push(o.productName);
     }
   });
+  if (!DB.shopOrders) DB.shopOrders = [];
   DB.shopOrders.push(...orders);
-  saveData();
   closeModal('order-upload-modal');
   renderShopOrderTable();
+  // 즉시 저장 (디바운스 없이 Firestore + localStorage)
+  const saved = await saveDataNow();
   let msg = `${orders.length}건의 주문이 업로드되었습니다.`;
+  if (saved) msg += '\n💾 저장 완료';
+  else msg += '\n⚠️ 저장에 문제가 있을 수 있습니다. 새로고침 후 확인해주세요.';
   if (deductCount > 0) msg += `\n📦 ${deductCount}건 배송완료 → 재고 차감 완료`;
   if (deductFail.length > 0) msg += `\n⚠️ 재고 차감 실패: ${[...new Set(deductFail)].join(', ')} (재고 부족 또는 미매핑)`;
   alert(msg);
@@ -3562,7 +3592,7 @@ function updateSoBulkBar() {
 }
 
 // 일괄 배송완료 처리
-function bulkShipComplete() {
+async function bulkShipComplete() {
   if (!requireWrite()) return;
   const ids = [...document.querySelectorAll('.so-row-check:checked')].map(cb => parseInt(cb.value));
   if (!ids.length) return;
@@ -3577,29 +3607,29 @@ function bulkShipComplete() {
       if (ok) deducted++; else failList.push(o.productName);
     }
   });
-  saveData(); renderShopOrderTable();
+  await saveDataNow(); renderShopOrderTable();
   let msg = `${targets.length}건 배송완료 처리 완료`;
   if (deducted) msg += ` (${deducted}건 재고 차감)`;
   if (failList.length) msg += `\n⚠️ 재고 차감 실패: ${[...new Set(failList)].join(', ')}`;
   alert(msg);
 }
-function bulkCancelOrders() {
+async function bulkCancelOrders() {
   if (!requireWrite()) return;
   const ids = [...document.querySelectorAll('.so-row-check:checked')].map(cb => parseInt(cb.value));
   if (!ids.length) return;
   if (!confirm(`${ids.length}건을 취소 처리하시겠습니까?`)) return;
   (DB.shopOrders||[]).filter(o => ids.includes(o.id)).forEach(o => { o.status = '취소'; });
-  saveData(); renderShopOrderTable();
+  await saveDataNow(); renderShopOrderTable();
 }
 
-function deleteShopOrder(id) {
+async function deleteShopOrder(id) {
   if (!requireWrite()) return;
   if (!confirm('이 주문을 삭제하시겠습니까?')) return;
   DB.shopOrders = (DB.shopOrders||[]).filter(o => o.id !== id);
-  saveData(); renderShopOrderTable();
+  await saveDataNow(); renderShopOrderTable();
 }
 
-function bulkDeleteOrders() {
+async function bulkDeleteOrders() {
   if (!requireWrite()) return;
   const checked = [...document.querySelectorAll('.so-row-check:checked')];
   if (checked.length > 0) {
@@ -3608,7 +3638,7 @@ function bulkDeleteOrders() {
     if (!confirm(`선택한 ${ids.length}건의 주문을 삭제하시겠습니까?`)) return;
     const delSet = new Set(ids);
     DB.shopOrders = (DB.shopOrders||[]).filter(o => !delSet.has(o.id));
-    saveData(); renderShopOrderTable();
+    await saveDataNow(); renderShopOrderTable();
     alert(`${ids.length}건이 삭제되었습니다.`);
   } else {
     // 선택된 게 없으면 → 필터 적용된 전체 또는 전체 삭제
@@ -3632,7 +3662,7 @@ function bulkDeleteOrders() {
     } else {
       DB.shopOrders = [];
     }
-    saveData(); renderShopOrderTable();
+    await saveDataNow(); renderShopOrderTable();
     alert(`${cnt}건이 삭제되었습니다.`);
   }
 }
@@ -3698,7 +3728,7 @@ function openOrderDetail(orderId) {
 }
 
 // 송장번호 입력 → 배송완료 + 재고차감
-function saveOrderTracking(orderId) {
+async function saveOrderTracking(orderId) {
   if (!requireWrite()) return;
   const o = (DB.shopOrders||[]).find(x => x.id === orderId);
   if (!o) return;
@@ -3713,7 +3743,7 @@ function saveOrderTracking(orderId) {
       if (!ok) alert('⚠️ 재고 차감에 실패했습니다 (재고 부족 또는 미매핑)');
     }
   }
-  saveData(); renderShopOrderTable();
+  await saveDataNow(); renderShopOrderTable();
   // 모달 새로고침
   const m = document.getElementById('overlay-order-detail-modal');
   if (m) m.remove();
@@ -3722,7 +3752,7 @@ function saveOrderTracking(orderId) {
 }
 
 // 송장번호 없이 배송완료
-function manualShipComplete(orderId) {
+async function manualShipComplete(orderId) {
   if (!requireWrite()) return;
   const o = (DB.shopOrders||[]).find(x => x.id === orderId);
   if (!o) return;
@@ -3732,7 +3762,7 @@ function manualShipComplete(orderId) {
     const ok = deductStock(o.itemId, o.qty, `수동배송완료 [${o.orderNo}]`);
     if (!ok) alert('⚠️ 재고 차감에 실패했습니다 (재고 부족 또는 미매핑)');
   }
-  saveData(); renderShopOrderTable();
+  await saveDataNow(); renderShopOrderTable();
   const m = document.getElementById('overlay-order-detail-modal');
   if (m) m.remove();
   openOrderDetail(orderId);
@@ -8345,7 +8375,11 @@ function initERPWhenReady() {
       if (firestoreDB._processedOrders && firestoreDB._processedOrders.length > 0) merged._processedOrders = firestoreDB._processedOrders;
       else if (localDB._processedOrders && localDB._processedOrders.length > 0) merged._processedOrders = localDB._processedOrders;
       DB = merged;
-      console.log('✅ 머지 완료 - shopOrders:', (DB.shopOrders||[]).length, 'shops:', (DB.shops||[]).length, 'cs:', (DB.cs||[]).length);
+      // 배열 필드 초기화 보장 (undefined 방지)
+      if (!DB.shops) DB.shops = [];
+      if (!DB.shopOrders) DB.shopOrders = [];
+      if (!DB.cs) DB.cs = [];
+      console.log('✅ 머지 완료 - shopOrders:', DB.shopOrders.length, 'shops:', DB.shops.length, 'cs:', DB.cs.length);
       applyPendingStockIn();
       cleanOrphanProductions();
       syncProductionStatusFromOrders();
