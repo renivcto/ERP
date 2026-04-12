@@ -609,6 +609,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       </div>
       <button onclick="window._logout()" title="로그아웃" style="background:none;border:none;cursor:pointer;color:rgba(255,255,255,.5);font-size:14px;padding:2px 4px;border-radius:4px" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='rgba(255,255,255,.5)'">⏻</button>
     </div>
+    <div id="erp-version-tag" style="text-align:center;font-size:9px;color:rgba(255,255,255,.25);padding:4px 0 2px;letter-spacing:0.5px"></div>
   </div>
 </nav>
 
@@ -2059,11 +2060,24 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 
 <script>
 // ═══════════════════════════════════════════════════════
-// DATA STORE
+// DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
+const ERP_VERSION = 'v1.2.4';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
+
+// 버전 표시 (디버그용 — 콘솔에 출력)
+console.log('🏭 RENIV ERP ' + ERP_VERSION + ' 로드됨');
+
+// 페이지 이탈 시 미저장 변경 감지
+let _hasUnsavedChanges = false;
+window.addEventListener('beforeunload', (e) => {
+  if (_hasUnsavedChanges) {
+    e.preventDefault();
+    e.returnValue = '저장되지 않은 변경사항이 있습니다. 페이지를 떠나시겠습니까?';
+  }
+});
 
 // ── Firestore DB 동기화 ──────────────────────────────────
 let _saveTimer = null;
@@ -2081,16 +2095,30 @@ async function saveDataNow() {
   if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
   try {
     await _doSaveData();
+    _hasUnsavedChanges = false;
     console.log('✅ 즉시 저장 완료 - shopOrders:', (DB.shopOrders||[]).length);
     return true;
   } catch(e) {
     console.error('❌ 즉시 저장 실패:', e);
+    showNotif('⚠️ 저장 실패: ' + e.message, 'error');
     return false;
   }
 }
 
+let _saveQueue = null;
 async function _doSaveData() {
-  if (_isSaving) { console.log('⏳ 저장 진행 중 — 대기'); return; }
+  if (_isSaving) {
+    // 이미 저장 중이면 큐에 등록하고 현재 저장 완료를 기다림
+    console.log('⏳ 저장 진행 중 — 완료 후 재저장 예약');
+    if (!_saveQueue) {
+      _saveQueue = new Promise(resolve => {
+        const check = setInterval(() => {
+          if (!_isSaving) { clearInterval(check); resolve(); }
+        }, 100);
+      }).then(() => { _saveQueue = null; return _doSaveData(); });
+    }
+    return _saveQueue;
+  }
   _isSaving = true;
   try { await _doSaveDataInner(); } finally { _isSaving = false; }
 }
@@ -2121,7 +2149,7 @@ async function _doSaveDataInner() {
 
   // Firestore 저장 (공유) - 순차적으로 저장해서 에러 추적
   if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) {
-    console.warn('Firestore 미준비 - localStorage만 저장');
+    console.warn('⚠️ Firestore API 미준비 — localStorage만 저장됨. _firestoreSetDoc:', !!window._firestoreSetDoc, '_firestoreDoc:', !!window._firestoreDoc, '_firebaseDb:', !!window._firebaseDb);
     return;
   }
 
@@ -2212,15 +2240,6 @@ async function loadDataFromFirestore() {
     console.warn('Firestore 로드 실패:', e);
     return null;
   }
-}
-
-function loadData() {
-  // 동기 로드: localStorage만 (초기값)
-  try {
-    const s = localStorage.getItem(STORE_KEY);
-    if (s) return JSON.parse(s);
-  } catch(e) {}
-  return null;
 }
 
 // ── IndexedDB 헬퍼 ──────────────────────────────────────
@@ -3492,13 +3511,21 @@ async function finalizeOrderUpload(orders, shopId) {
   });
   if (!DB.shopOrders) DB.shopOrders = [];
   DB.shopOrders.push(...orders);
+  _hasUnsavedChanges = true;
   closeModal('order-upload-modal');
   renderShopOrderTable();
+  console.log('📦 주문 추가 완료 — DB.shopOrders:', DB.shopOrders.length, '건, 저장 시작...');
+  showNotif('💾 저장 중...', 'info');
   // 즉시 저장 (디바운스 없이 Firestore + localStorage)
   const saved = await saveDataNow();
   let msg = `${orders.length}건의 주문이 업로드되었습니다.`;
-  if (saved) msg += '\n💾 저장 완료';
-  else msg += '\n⚠️ 저장에 문제가 있을 수 있습니다. 새로고침 후 확인해주세요.';
+  if (saved) {
+    msg += '\n💾 Firestore 저장 완료 (' + DB.shopOrders.length + '건)';
+    showNotif('✅ ' + orders.length + '건 업로드 + Firestore 저장 완료', 'success');
+  } else {
+    msg += '\n⚠️ Firestore 저장 실패! localStorage에만 저장됨.';
+    showNotif('⚠️ Firestore 저장 실패', 'error');
+  }
   if (deductCount > 0) msg += `\n📦 ${deductCount}건 배송완료 → 재고 차감 완료`;
   if (deductFail.length > 0) msg += `\n⚠️ 재고 차감 실패: ${[...new Set(deductFail)].join(', ')} (재고 부족 또는 미매핑)`;
   alert(msg);
@@ -8333,7 +8360,10 @@ function showERPOrWaiting() {
   }
 }
 
+let _erpInitialized = false;
 function initERPWhenReady() {
+  if (_erpInitialized) { console.log('⚠️ initERPWhenReady 중복 호출 방지'); return; }
+  _erpInitialized = true;
   const showLoader = () => {
     if (!document.getElementById('erp-loader')) {
       const div = document.createElement('div');
@@ -8345,6 +8375,9 @@ function initERPWhenReady() {
   };
   const hideLoader = () => { const el = document.getElementById('erp-loader'); if (el) el.remove(); };
   const doRender = () => {
+    // 사이드바에 버전 표시
+    const vTag = document.getElementById('erp-version-tag');
+    if (vTag) vTag.textContent = ERP_VERSION;
     try { updateBadges(); } catch(e) { console.warn('updateBadges 실패:', e); }
     try { go('dashboard'); } catch(e) {}
     try { renderDashboard(); } catch(e) { console.warn('renderDashboard 실패:', e); }
