@@ -1254,12 +1254,23 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             <div id="ads-daily-group" style="display:none;margin-bottom:10px"><div class="fg" style="max-width:50%"><label>날짜</label><input class="fi" id="shop-ads-date" type="date"></div></div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
               <div class="fg"><label>광고비 (원)</label><input class="fi" id="shop-ads-cost" type="number" min="0" value="0" placeholder="0원 입력 허용"></div>
-              <div class="fg"><label>ROAS</label><div class="fi" id="shop-ads-roas" style="background:var(--gray-50);color:var(--gray-400);min-height:34px;display:flex;align-items:center;font-size:11.5px;padding:8px 12px">매출 데이터 수집 후 자동 계산됩니다</div></div>
+              <div class="fg"><label>비고</label><input class="fi" id="shop-ads-breakdown" placeholder=""></div>
             </div>
-            <div class="fg"><label>비고</label><input class="fi" id="shop-ads-breakdown" placeholder=""></div>
             <div style="display:flex;justify-content:flex-end;margin-top:6px"><button class="btn btn-outline btn-sm" onclick="addShopAdsCost()">+ 광고비 추가</button></div>
             <div id="shop-ads-list" style="margin-top:10px"></div>
-            <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px">0원 입력 = 광고 미집행 · 해당 기간 주문 매출 기반 ROAS 자동 계산 · 미설정 날짜는 광고비 0원 적용</div>
+            <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px">0원 입력 = 광고 미집행 · 미설정 날짜는 광고비 0원 적용</div>
+          </div>
+          <!-- ④ ROAS 분석 -->
+          <div class="shop-section">
+            <div class="shop-section-title">④ ROAS 분석</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">
+              <div class="fg" style="margin:0"><label>시작일</label><input class="fi" id="roas-start" type="date"></div>
+              <div class="fg" style="margin:0"><label>종료일</label><input class="fi" id="roas-end" type="date"></div>
+              <button class="btn btn-primary btn-sm" onclick="calcRoasReport()" style="height:36px;padding:0 16px;font-size:12px">조회</button>
+            </div>
+            <div id="roas-result" style="margin-top:12px">
+              <div style="text-align:center;color:var(--gray-400);font-size:12px;padding:20px">기간을 선택하고 조회를 클릭하세요</div>
+            </div>
           </div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
             <button class="btn btn-outline" style="color:var(--red-500);border-color:var(--red-200)" onclick="deleteShop()">🗑 삭제</button>
@@ -3216,14 +3227,9 @@ function shopShowDetail(idx) {
   const channelLabel = { consumer: '📞 소비자', pharmacist: '💊 약사' };
   const latestAd = getLatestAdsCost(s);
   const adsHtml = (s.adsCosts||[]).length ? (s.adsCosts||[]).map(a => {
-    const adCost = Number(a.cost)||0;
-    let roasTxt = '-';
-    if (adCost > 0) {
-      const rev = calcShopRoas(s.id, a.startDate, a.endDate);
-      roasTxt = rev === null ? '대기 중' : (rev/adCost*100).toFixed(0)+'%';
-    }
-    return `<tr><td>${a.startDate||'-'}</td><td>${a.endDate||'-'}</td><td>${adCost.toLocaleString()}원</td><td>${roasTxt}</td><td>${a.memo||'-'}</td></tr>`;
-  }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--gray-400)">등록된 광고비 없음</td></tr>';
+    const period = a.startDate === a.endDate ? a.startDate : `${a.startDate} ~ ${a.endDate}`;
+    return `<tr><td>${period}</td><td>${Number(a.cost||0).toLocaleString()}원</td><td>${a.memo||'-'}</td></tr>`;
+  }).join('') : '<tr><td colspan="3" style="text-align:center;color:var(--gray-400)">등록된 광고비 없음</td></tr>';
   const html = `<div style="padding:4px 0">
     <div style="font-size:15px;font-weight:700;margin-bottom:10px">${channelLabel[s.channelType||'consumer']||'📞'} ${s.name||'-'}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;font-size:12.5px;color:var(--gray-600)">
@@ -3234,7 +3240,7 @@ function shopShowDetail(idx) {
     </div>
     ${s.memo?`<div style="margin-top:8px;padding:8px;background:var(--gray-50);border-radius:6px;font-size:12px"><b>비고:</b> ${s.memo}</div>`:''}
     <div style="margin-top:12px"><b style="font-size:12.5px">광고비 이력</b></div>
-    <table class="tbl" style="margin-top:6px;font-size:12px;text-align:center"><thead><tr><th>시작</th><th>종료</th><th>광고비</th><th>ROAS</th><th>비고</th></tr></thead><tbody>${adsHtml}</tbody></table>
+    <table class="tbl" style="margin-top:6px;font-size:12px;text-align:center"><thead><tr><th>기간</th><th>광고비</th><th>비고</th></tr></thead><tbody>${adsHtml}</tbody></table>
     <div style="margin-top:12px;display:flex;gap:6px;justify-content:flex-end">
       <button class="btn btn-primary btn-sm" onclick="document.getElementById('overlay-shop-detail-view').remove();shopEditMode(${idx})">수정</button>
     </div>
@@ -3383,29 +3389,80 @@ function calcShopRoas(shopId, startDate, endDate) {
   const revenue = orders.reduce((sum, o) => sum + (parseFloat(o.totalPrice||o.price||o.amount||0)), 0);
   return revenue;
 }
+function calcShopAdsCostTotal(shopId, startDate, endDate) {
+  const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop) return 0;
+  return (shop.adsCosts||[]).reduce((sum, a) => {
+    // 광고 기간이 조회 기간과 겹치는 경우 포함
+    if (a.endDate < startDate || a.startDate > endDate) return sum;
+    return sum + (Number(a.cost)||0);
+  }, 0);
+}
+function calcRoasReport() {
+  const shopId = window._selectedShopId;
+  const start = $('roas-start')?.value;
+  const end = $('roas-end')?.value;
+  const container = $('roas-result'); if (!container) return;
+  if (!start || !end) { alert('시작일과 종료일을 선택해주세요.'); return; }
+  if (start > end) { alert('시작일이 종료일보다 늦습니다.'); return; }
+  if (!shopId) { alert('쇼핑몰을 먼저 선택해주세요.'); return; }
+
+  const revenue = calcShopRoas(shopId, start, end);
+  const adsCost = calcShopAdsCostTotal(shopId, start, end);
+  const orderCount = (DB.shopOrders||[]).filter(o => {
+    if (o.shopId !== shopId) return false;
+    const d = (o.orderDate||o.date||'').slice(0,10);
+    return d >= start && d <= end;
+  }).length;
+
+  // 매출도 광고비도 없는 경우
+  if (revenue === null && adsCost === 0) {
+    container.innerHTML = `<div style="text-align:center;padding:24px;background:var(--gray-50);border-radius:8px">
+      <div style="font-size:28px;margin-bottom:8px">📊</div>
+      <div style="font-size:13px;color:var(--gray-500);font-weight:500">조회 기간에 매출 및 광고비 데이터가 없습니다</div>
+      <div style="font-size:11.5px;color:var(--gray-400);margin-top:4px">주문 데이터가 수집되면 자동으로 ROAS가 계산됩니다</div>
+    </div>`;
+    return;
+  }
+
+  const rev = revenue || 0;
+  const roas = adsCost > 0 ? (rev / adsCost * 100) : null;
+  const roasColor = roas === null ? 'var(--gray-500)' : roas >= 300 ? '#16a34a' : roas >= 100 ? '#d97706' : '#dc2626';
+  const roasText = roas === null ? '-' : roas.toFixed(0) + '%';
+
+  container.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:14px">
+      <div style="background:var(--sky-50);border-radius:8px;padding:14px;text-align:center">
+        <div style="font-size:11px;color:var(--sky-600);font-weight:600;margin-bottom:4px">매출</div>
+        <div style="font-size:18px;font-weight:700;color:var(--sky-800)">${rev.toLocaleString()}<span style="font-size:12px;font-weight:400">원</span></div>
+        <div style="font-size:10.5px;color:var(--gray-400);margin-top:2px">주문 ${orderCount}건</div>
+      </div>
+      <div style="background:#FEF3C7;border-radius:8px;padding:14px;text-align:center">
+        <div style="font-size:11px;color:#92400E;font-weight:600;margin-bottom:4px">광고비</div>
+        <div style="font-size:18px;font-weight:700;color:#92400E">${adsCost.toLocaleString()}<span style="font-size:12px;font-weight:400">원</span></div>
+        <div style="font-size:10.5px;color:var(--gray-400);margin-top:2px">${adsCost === 0 ? '등록된 광고비 없음' : '기간 내 합산'}</div>
+      </div>
+      <div style="background:${roas !== null && roas >= 100 ? '#F0FDF4' : '#FEF2F2'};border-radius:8px;padding:14px;text-align:center">
+        <div style="font-size:11px;color:${roasColor};font-weight:600;margin-bottom:4px">ROAS</div>
+        <div style="font-size:22px;font-weight:700;color:${roasColor}">${roasText}</div>
+        <div style="font-size:10.5px;color:var(--gray-400);margin-top:2px">${roas === null ? '광고비 0원' : roas >= 300 ? '효율 우수' : roas >= 100 ? '손익분기 이상' : '개선 필요'}</div>
+      </div>
+      <div style="background:var(--gray-50);border-radius:8px;padding:14px;text-align:center">
+        <div style="font-size:11px;color:var(--gray-500);font-weight:600;margin-bottom:4px">순이익 (매출-광고비)</div>
+        <div style="font-size:18px;font-weight:700;color:${rev - adsCost >= 0 ? '#16a34a' : '#dc2626'}">${(rev - adsCost).toLocaleString()}<span style="font-size:12px;font-weight:400">원</span></div>
+        <div style="font-size:10.5px;color:var(--gray-400);margin-top:2px">${rev - adsCost >= 0 ? '흑자' : '적자'} (광고비 기준)</div>
+      </div>
+    </div>
+    <div style="font-size:10.5px;color:var(--gray-400)">※ ROAS = 매출 ÷ 광고비 × 100 · 수수료·원가 미포함 순수 광고 대비 매출 효율</div>
+  `;
+}
 function renderShopAdsList(shopId) {
   const container = $('shop-ads-list'); if (!container) return;
   const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop || !shop.adsCosts?.length) { container.innerHTML = '<div style="text-align:center;color:var(--gray-400);padding:10px;font-size:12px">등록된 광고비가 없습니다</div>'; return; }
-  container.innerHTML = '<table class="tbl" style="font-size:11.5px;text-align:center"><thead><tr><th>기간</th><th>방식</th><th>광고비</th><th>ROAS</th><th>비고</th><th></th></tr></thead><tbody>' +
+  container.innerHTML = '<table class="tbl" style="font-size:11.5px;text-align:center"><thead><tr><th>기간</th><th>방식</th><th>광고비</th><th>비고</th><th></th></tr></thead><tbody>' +
     shop.adsCosts.map(a => {
       const typeLabel = a.type === 'monthly' ? '월별' : a.type === 'range' ? '기간별' : '일별';
       const period = a.startDate === a.endDate ? a.startDate : `${a.startDate} ~ ${a.endDate}`;
-      // ROAS 자동 계산
-      let roasHtml = '';
-      const adCost = Number(a.cost) || 0;
-      if (adCost <= 0) {
-        roasHtml = '<span style="color:var(--gray-400)">-</span>';
-      } else {
-        const revenue = calcShopRoas(shopId, a.startDate, a.endDate);
-        if (revenue === null) {
-          roasHtml = '<span style="color:var(--gray-400);font-size:10.5px">매출 데이터 대기 중</span>';
-        } else {
-          const roas = (revenue / adCost * 100).toFixed(0);
-          const roasColor = roas >= 300 ? 'var(--green-600)' : roas >= 100 ? 'var(--amber-600)' : 'var(--red-500)';
-          roasHtml = `<span style="font-weight:600;color:${roasColor}">${roas}%</span><span style="font-size:10px;color:var(--gray-400);display:block">매출 ${revenue.toLocaleString()}원</span>`;
-        }
-      }
-      return `<tr><td style="white-space:nowrap">${period}</td><td>${typeLabel}</td><td>${Number(a.cost).toLocaleString()}원</td><td>${roasHtml}</td><td>${a.memo||'-'}</td><td><button class="btn btn-outline btn-sm" style="font-size:10px;padding:1px 6px;color:var(--red-500)" onclick="removeShopAdsCost('${shopId}',${a.id})">삭제</button></td></tr>`;
+      return `<tr><td style="white-space:nowrap">${period}</td><td>${typeLabel}</td><td>${Number(a.cost).toLocaleString()}원</td><td>${a.memo||'-'}</td><td><button class="btn btn-outline btn-sm" style="font-size:10px;padding:1px 6px;color:var(--red-500)" onclick="removeShopAdsCost('${shopId}',${a.id})">삭제</button></td></tr>`;
     }).join('') + '</tbody></table>';
 }
 function removeShopAdsCost(shopId, adsId) {
