@@ -75,6 +75,12 @@
           window._currentUser = userData;
         } else {
           const data = userSnap.data();
+          // 삭제된 사용자는 즉시 로그아웃
+          if (data.status === '삭제됨') {
+            alert('삭제된 계정입니다. 관리자에게 문의하세요.');
+            await signOut(auth);
+            return;
+          }
           try { const _now = new Date(); const _ls = _now.getFullYear()+'-'+String(_now.getMonth()+1).padStart(2,'0')+'-'+String(_now.getDate()).padStart(2,'0')+' '+String(_now.getHours()).padStart(2,'0')+':'+String(_now.getMinutes()).padStart(2,'0'); await setDoc(userRef, { lastLogin: _ls }, { merge: true }); } catch(e) {}
           window._currentUser = { ...data, uid: user.uid, permission: data.permission || 'read' };
         }
@@ -8578,7 +8584,7 @@ function showERPOrWaiting() {
   const user = window._currentUser;
   document.getElementById('login-screen').classList.remove('show');
 
-  if (!user || user.status === '승인대기') {
+  if (!user || user.status === '승인대기' || user.status === '삭제됨') {
     document.getElementById('waiting-screen').classList.add('show');
     document.getElementById('app').style.display = 'none';
     if (user) {
