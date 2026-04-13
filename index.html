@@ -841,7 +841,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           </div>
           <div class="card-body p0 tbl-wrap">
             <table>
-              <thead><tr><th>분류</th><th>코드</th><th>품목명</th><th>투입량</th><th>투입원가</th><th>업체</th></tr></thead>
+              <thead><tr><th>분류</th><th>코드</th><th>품목명</th><th>투입량</th><th>투입원가</th><th>업체</th><th style="width:30px"></th></tr></thead>
               <tbody id="bom-table"></tbody>
             </table>
           </div>
@@ -5378,14 +5378,14 @@ function renderBOM() {
   $('bom-card-title').textContent = '🔧 ' + product.name + ' — BOM';
 
   let totalCost = 0;
-  const rawRows = [], pkgRows = [];
-  bom.forEach(row => {
+  const allRows = [];
+  bom.forEach((row, idx) => {
     const item = getItem(row.itemId);
     const vendor = getVendor(item.vendorId);
     const subtotal = item.price * row.qty;
     totalCost += subtotal;
     const typeCls = ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray',외주가공:'gray'})[item.type]||'gray';
-    const tr = `
+    allRows.push(`
       <tr style="background:${item.type==='원자재'?'#fafef9':item.type==='OEM'?'#fafcff':'#fffafc'}">
         <td style="text-align:center"><span class="badge ${typeCls}" style="font-size:10px">${item.type}</span></td>
         <td style="font-family:monospace;font-size:12px;white-space:nowrap;font-weight:500;text-align:center">${item.code||'-'}</td>
@@ -5393,17 +5393,17 @@ function renderBOM() {
         <td style="text-align:center" title="${row.qtyDisplay&&row.qtyDisplay!==String(row.qty)?row.qtyDisplay:''}">${formatQty(row.qty)}${row.unit}</td>
         <td style="text-align:center">${fmtCost(item.price * row.qty)}</td>
         <td class="lnk" style="text-align:center" onclick="viewVendor(${item.vendorId})">${vendor.company||'-'}</td>
-      </tr>`;
-    if (item.type==='원자재') rawRows.push(tr);
-    else pkgRows.push(tr);
+        <td style="text-align:center;white-space:nowrap;padding:2px">
+          <span onclick="moveBOMRow(${productId},${idx},-1)" style="cursor:pointer;font-size:10px;color:var(--gray-400);display:block;line-height:1"${idx===0?' class="disabled" style="cursor:pointer;font-size:10px;color:var(--gray-200);display:block;line-height:1"':''}>&#9650;</span>
+          <span onclick="moveBOMRow(${productId},${idx},1)" style="cursor:pointer;font-size:10px;color:var(--gray-400);display:block;line-height:1"${idx===bom.length-1?' class="disabled" style="cursor:pointer;font-size:10px;color:var(--gray-200);display:block;line-height:1"':''}>&#9660;</span>
+        </td>
+      </tr>`);
   });
 
   $('bom-total-cost').textContent = fmtW(Math.round(totalCost));
 
-  let html = '';
-  if (rawRows.length) html += rawRows.join('');
-  if (pkgRows.length) html += pkgRows.join('');
-  if (!html) html = '<tr><td colspan="6" class="empty">BOM이 등록되지 않았습니다</td></tr>';
+  let html = allRows.join('');
+  if (!html) html = '<tr><td colspan="7" class="empty">BOM이 등록되지 않았습니다</td></tr>';
   $('bom-table').innerHTML = html;
 
   // Cost breakdown chart
@@ -5664,6 +5664,16 @@ function saveBOM() {
   DB.boms[productId] = rows;
   saveData(); closeModal('add-bom'); showNotif('BOM이 저장되었습니다','success');
   if ($('page-bom') && $('page-bom').classList.contains('active')) renderBOM();
+}
+
+function moveBOMRow(productId, idx, dir) {
+  const bom = DB.boms[productId];
+  if (!bom) return;
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= bom.length) return;
+  [bom[idx], bom[newIdx]] = [bom[newIdx], bom[idx]];
+  saveData();
+  renderBOM();
 }
 
 function editCurrentBOM() {
