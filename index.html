@@ -1068,7 +1068,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             <div class="fg">
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
                 <label style="margin:0;white-space:nowrap">고객명<span class="req">*</span></label>
-                <input class="fi" id="cs-customer-inline" placeholder="고객명" style="flex:1;padding:4px 8px;font-size:12px" oninput="if(window._csFormMode==='order')csOrderSearch()">
+                <input class="fi" id="cs-customer-inline" placeholder="고객명" style="flex:1;padding:7px 10px;font-size:13px" oninput="if(window._csFormMode==='order')csOrderSearch()">
                 <div style="display:flex;align-items:center;gap:4px;margin-left:auto;flex-shrink:0">
                   <span class="cs-icon-btn" data-icon="urgent" onclick="csToggleIcon(this)" style="padding:2px 6px;border-radius:5px;border:1px solid var(--gray-200);cursor:pointer;font-size:14px" title="긴급 고객">🚨</span>
                   <span class="cs-icon-btn" data-icon="star" onclick="csToggleIcon(this)" style="padding:2px 6px;border-radius:5px;border:1px solid var(--gray-200);cursor:pointer;font-size:14px" title="중요 고객">⭐</span>
@@ -1092,8 +1092,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             <!-- ═══ 3-B. 주문 고객: 주문 검색 ═══ -->
             <div id="cs-order-search-area">
               <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px">
-                <div class="fg" style="margin:0"><label style="font-size:10.5px">주문번호</label><input class="fi" id="cs-search-orderno" placeholder="주문번호" oninput="csOrderSearch()"></div>
-                <div class="fg" style="margin:0"><label style="font-size:10.5px">쇼핑몰</label><select class="fs" id="cs-search-shop" onchange="csOrderSearch()"><option value="">전체</option></select></div>
+                <div class="fg" style="margin:0"><label>주문번호</label><input class="fi" id="cs-search-orderno" placeholder="주문번호" oninput="csOrderSearch()"></div>
+                <div class="fg" style="margin:0"><label>쇼핑몰</label><select class="fs" id="cs-search-shop" onchange="csOrderSearch()"><option value="">전체</option></select></div>
                 <button class="btn btn-outline btn-sm" onclick="csOrderSearch()" style="height:34px">검색</button>
               </div>
               <div id="cs-order-results" style="max-height:180px;overflow-y:auto;background:#fffdf5;border:1px solid #f5e6a3;border-radius:8px;padding:4px"></div>
@@ -1101,6 +1101,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
                 <div style="font-size:11px;font-weight:600;color:var(--sky-700);margin-bottom:6px">✅ 선택된 주문</div>
                 <div id="cs-selected-order-info" style="font-size:12px;color:var(--gray-700)"></div>
               </div>
+              <div style="height:12px"></div>
             </div>
 
             <!-- 주문 고객 전용: 배송상태 -->
@@ -3332,7 +3333,7 @@ function csOrderSearch() {
     results.map(o => {
       const custDisplay = (o.customerName||'-');
       return `<tr style="cursor:pointer" onclick="csSelectOrder('${o.id||o.orderNo}')">
-        <td>${o.orderDate||'-'}</td>
+        <td style="white-space:nowrap">${fmtDateShort(o.orderDate)}</td>
         <td>${o.orderNo||o.id||'-'}</td>
         <td>${custDisplay}</td>
         <td>${getShopName(o.shopId)}</td>
@@ -3637,6 +3638,35 @@ function normalizeDate(str) {
   return str.slice(0,10);
 }
 
+// 날짜 포맷: 리스트용 (YYYY.MM.DD)
+function fmtDateShort(d) {
+  if (!d) return '-';
+  d = d.toString().trim();
+  // 한국어 형식: 2026년 4월 9 → 추출
+  const mk = d.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})/);
+  if (mk) return `${mk[1]}.${mk[2].padStart(2,'0')}.${mk[3].padStart(2,'0')}`;
+  // ISO/dash: 2026-04-09...
+  const mi = d.match(/(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+  if (mi) return `${mi[1]}.${mi[2].padStart(2,'0')}.${mi[3].padStart(2,'0')}`;
+  return d.slice(0,10);
+}
+// 날짜 포맷: 상세용 (M월 D일 HH:MM)
+function fmtDateFull(d) {
+  if (!d) return '-';
+  d = d.toString().trim();
+  let yy='', mm='', dd='', time='';
+  const mk = d.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일?\s*(.*)/);
+  if (mk) { yy=mk[1]; mm=mk[2]; dd=mk[3]; time=(mk[4]||'').trim(); }
+  else {
+    const mi = d.match(/(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})\s*(.*)/);
+    if (mi) { yy=mi[1]; mm=mi[2]; dd=mi[3]; time=(mi[4]||'').trim(); }
+    else return d;
+  }
+  let result = `${yy}년 ${parseInt(mm)}월 ${parseInt(dd)}일`;
+  if (time) result += ` ${time}`;
+  return result;
+}
+
 function parseCSV(text) {
   const lines = text.split(/\r?\n/).filter(l => l.trim());
   return lines.map(line => {
@@ -3846,7 +3876,7 @@ function renderShopOrderTable() {
     const amt = o.paymentAmount || o.totalPrice || 0;
     return `<tr>
       <td><input type="checkbox" class="so-row-check" value="${o.id}" onchange="updateSoBulkBar()"></td>
-      <td style="white-space:nowrap">${o.orderDate||'-'}</td>
+      <td style="white-space:nowrap;font-size:11.5px">${fmtDateShort(o.orderDate)}</td>
       <td>${o.shopName||'-'}</td>
       <td style="font-family:monospace;font-size:11px">${o.orderNo||'-'}</td>
       <td><a href="javascript:void(0)" onclick="openOrderDetail(${o.id})" style="color:var(--sky-700);text-decoration:underline;cursor:pointer">${o.customerName||'-'}</a></td>
@@ -3975,7 +4005,7 @@ function openOrderDetail(orderId) {
         </div>
         <table class="tbl" style="border-collapse:collapse;width:100%">
           ${row('주문번호', o.orderNo)}
-          ${row('주문일', o.orderDate)}
+          ${row('주문일', fmtDateFull(o.orderDate))}
           ${row('주문 고객명', o.customerName)}
           ${row('주문자 연락처', o.customerPhone)}
           ${row('이메일', o.email)}
