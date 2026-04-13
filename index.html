@@ -7898,26 +7898,41 @@ async function loadGdocs() {
   const el = document.getElementById('gdoc-list');
   if (el) el.innerHTML = '<div style="color:var(--gray-400);font-size:12px;display:flex;align-items:center;gap:6px">⏳ 불러오는 중...</div>';
 
-  // Firestore API 준비 대기 (최대 5초)
-  let waited = 0;
-  while ((!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) && waited < 50) {
-    await new Promise(r => setTimeout(r, 100));
-    waited++;
-  }
-
   let loaded = false;
   const canWrite = window._currentUser && (window._currentUser.isAdmin || window._currentUser.permission === 'write');
+  console.log('📁 [GDOCS] 로드 시작 — 권한:', canWrite ? '쓰기' : '보기', '| DB.gdocs:', (DB.gdocs||[]).length, '건 | _gdocList:', _gdocList.length, '건');
 
-  // 1순위 (쓰기권한만): shared/gdocs
+  // 1순위: 이미 메모리에 있는 데이터 (loadDataFromFirestore에서 DB.gdocs로 복원됨)
+  if (_gdocList.length > 0) {
+    loaded = true;
+    console.log('📁 [GDOCS] 1순위 _gdocList에서 로드:', _gdocList.length, '건');
+  }
+  if (!loaded) {
+    const dbGdocs = (DB && (DB.gdocs || DB._gdocs)) || [];
+    if (dbGdocs.length > 0) {
+      _gdocList = dbGdocs;
+      loaded = true;
+      console.log('📁 [GDOCS] 1순위 DB.gdocs에서 로드:', dbGdocs.length, '건');
+    }
+  }
+
+  // 2순위 (쓰기권한만): shared/gdocs (최신 데이터)
   if (canWrite) {
+    // Firestore API 준비 대기
+    let waited = 0;
+    while ((!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) && waited < 50) {
+      await new Promise(r => setTimeout(r, 100));
+      waited++;
+    }
     try {
       const snap = await window._firestoreGetDoc(
         window._firestoreDoc(window._firebaseDb, 'shared', 'gdocs')
       );
-      if (snap.exists() && snap.data().list) {
+      if (snap.exists() && snap.data().list && snap.data().list.length > 0) {
         _gdocList = snap.data().list;
         loaded = true;
-        // meta에도 동기화 저장 (보기권한이 읽을 수 있도록)
+        console.log('📁 [GDOCS] 2순위 shared/gdocs에서 로드:', _gdocList.length, '건');
+        // meta에도 동기화 저장
         try {
           const metaRef = window._firestoreDoc(window._firebaseDb, 'erp_data', 'meta');
           const metaSnap = await window._firestoreGetDoc(metaRef);
@@ -7928,11 +7943,11 @@ async function loadGdocs() {
           }
         } catch(e) {}
       }
-    } catch(e) { console.warn('shared/gdocs 읽기 실패:', e.message); }
+    } catch(e) { console.warn('📁 [GDOCS] shared/gdocs 읽기 실패:', e.message); }
   }
 
-  // 2순위: erp_data/meta (보기권한 포함 모든 유저)
-  if (!loaded) {
+  // 3순위: erp_data/meta 직접 읽기 (보기권한용 — DB 로드와 별개로 한번 더 시도)
+  if (!loaded && window._firestoreGetDoc && window._firestoreDoc && window._firebaseDb) {
     try {
       const metaSnap = await window._firestoreGetDoc(
         window._firestoreDoc(window._firebaseDb, 'erp_data', 'meta')
@@ -7942,29 +7957,21 @@ async function loadGdocs() {
         if (meta.gdocs && meta.gdocs.length > 0) {
           _gdocList = meta.gdocs;
           loaded = true;
+          console.log('📁 [GDOCS] 3순위 erp_data/meta에서 로드:', _gdocList.length, '건');
         }
       }
-    } catch(e) { console.warn('erp_data/meta gdocs 읽기 실패:', e.message); }
-  }
-
-  // 3순위: 이미 로드된 DB에서 (loadDataFromFirestore가 먼저 실행된 경우)
-  if (!loaded) {
-    const dbGdocs = (DB && (DB.gdocs || DB._gdocs)) || [];
-    if (dbGdocs.length > 0) {
-      _gdocList = dbGdocs;
-      loaded = true;
-    }
+    } catch(e) { console.warn('📁 [GDOCS] erp_data/meta 읽기 실패:', e.message); }
   }
 
   // 4순위: localStorage 캐시
   if (!loaded) {
     try {
       const local = JSON.parse(localStorage.getItem('reniv_gdocs') || '[]');
-      if (local.length > 0) { _gdocList = local; loaded = true; }
+      if (local.length > 0) { _gdocList = local; loaded = true; console.log('📁 [GDOCS] 4순위 localStorage에서 로드:', local.length, '건'); }
     } catch(e) {}
   }
 
-  if (!loaded) _gdocList = [];
+  if (!loaded) { _gdocList = []; console.log('📁 [GDOCS] 데이터 없음'); }
 
   // 로컬 캐시 업데이트
   try { localStorage.setItem('reniv_gdocs', JSON.stringify(_gdocList)); } catch(e) {}
@@ -8985,6 +8992,14 @@ function initERPWhenReady() {
       else if (localDB.sites && localDB.sites.length > 0) merged.sites = localDB.sites;
       if (firestoreDB._processedOrders && firestoreDB._processedOrders.length > 0) merged._processedOrders = firestoreDB._processedOrders;
       else if (localDB._processedOrders && localDB._processedOrders.length > 0) merged._processedOrders = localDB._processedOrders;
+      // gdocs 복원 (구글 문서 공유)
+      if (firestoreDB.gdocs && firestoreDB.gdocs.length > 0) {
+        merged.gdocs = firestoreDB.gdocs;
+        _gdocList = firestoreDB.gdocs;
+      } else if (localDB.gdocs && localDB.gdocs.length > 0) {
+        merged.gdocs = localDB.gdocs;
+        _gdocList = localDB.gdocs;
+      }
       DB = merged;
       if (!DB.shops) DB.shops = [];
       if (!DB.shopOrders) DB.shopOrders = [];
