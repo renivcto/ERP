@@ -3032,8 +3032,8 @@ function renderDashStats() {
 
   $('dash-stats').innerHTML = `
     <div class="stat c-blue" style="cursor:pointer"><div class="stat-lbl">📊 매출 분석 <span style="font-size:10.5px;opacity:.8">(${yDateDisplay})</span></div>${salesHtml}<div class="stat-ico">📊</div></div>
-    <div class="stat ${lowStockCount>0?'c-red':'c-green'}" style="cursor:pointer" onclick="go('stock')"><div class="stat-lbl">📦 완제품 재고 현황${lowStockCount>0?'&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#d4628a;font-weight:700">'+lowStockCount+'품목 부족</span>':''}</div><div class="stat-sub" style="margin-top:6px">${stockLines}</div><div class="stat-ico">📦</div></div>
-    <div class="stat c-purple" style="cursor:pointer" onclick="go('order')"><div class="stat-lbl">💰 발주 현황 <span style="font-size:10.5px;opacity:.8">(VAT포함)</span></div><div class="stat-val">${fmtW(Math.round(thisMonthAmt*1.1))}</div><div class="stat-sub">${vendorSubText}</div><div class="stat-ico">💰</div></div>
+    <div class="stat ${lowStockCount>0?'c-red':'c-green'}" style="cursor:pointer" onclick="go('stock')"><div class="stat-lbl">📦 완제품 재고 현황${lowStockCount>0?'&nbsp;&nbsp;<span style="color:#d4628a;font-weight:700">'+lowStockCount+'품목 부족</span>':''}</div><div class="stat-sub" style="margin-top:6px">${stockLines}</div><div class="stat-ico">📦</div></div>
+    <div class="stat c-purple" style="cursor:pointer" onclick="go('order')"><div class="stat-lbl">💰 발주 현황</div><div class="stat-val">${fmtW(Math.round(thisMonthAmt*1.1))} <span style="font-size:13px;font-weight:500;color:var(--gray-500)">(VAT포함)</span></div><div class="stat-sub">${vendorSubText}</div><div class="stat-ico">💰</div></div>
   `;
 }
 
@@ -5390,7 +5390,7 @@ function renderBOM() {
         <td style="text-align:center"><span class="badge ${typeCls}" style="font-size:10px">${item.type}</span></td>
         <td style="font-family:monospace;font-size:12px;white-space:nowrap;font-weight:500;text-align:center">${item.code||'-'}</td>
         <td class="lnk" onclick="showItemDetail(${item.id})">${item.name}</td>
-        <td style="text-align:center">${row.qtyDisplay||row.qty}${row.unit}</td>
+        <td style="text-align:center" title="${row.qtyDisplay&&row.qtyDisplay!==String(row.qty)?row.qtyDisplay:''}">${parseFloat(row.qty.toFixed(6))}${row.unit}</td>
         <td style="text-align:center">${fmtW(item.price)}</td>
         <td class="lnk" style="text-align:center" onclick="viewVendor(${item.vendorId})">${vendor.company||'-'}</td>
       </tr>`;
@@ -5432,7 +5432,7 @@ function renderBOM() {
     return `<tr style="border-bottom:1px solid var(--gray-100)">
       <td style="padding:7px 8px;font-size:12px">${item.name}</td>
       <td style="padding:7px 8px;text-align:center;font-size:11px;font-family:monospace;color:var(--gray-500)">${item.code||'-'}</td>
-      <td style="padding:7px 8px;text-align:center;font-size:12px">${row.qtyDisplay||row.qty}${row.unit}</td>
+      <td style="padding:7px 8px;text-align:center;font-size:12px" title="${row.qtyDisplay&&row.qtyDisplay!==String(row.qty)?row.qtyDisplay:''}">${parseFloat(row.qty.toFixed(6))}${row.unit}</td>
       <td style="padding:7px 8px;text-align:right;font-size:12px">${fmtW(item.price)}</td>
       <td style="padding:7px 8px;text-align:right;font-size:12px;font-weight:600;color:var(--sky-700)">${fmtW(Math.round(subtotal))}</td>
     </tr>`;
@@ -5595,7 +5595,9 @@ function populateBOMProductModal() {
 function parseFraction(str) {
   if (!str && str !== 0) return 0;
   str = String(str).trim();
-  if (str.includes('/')) { const pts=str.split('/'); return parseFloat(pts[0])/(parseFloat(pts[1])||1); }
+  if (/^[\d\s\.\+\-\*\/\(\)]+$/.test(str) && (str.includes('*') || str.includes('/'))) {
+    try { const v = Function('"use strict";return (' + str + ')')(); return isFinite(v) ? v : 0; } catch(e) { return parseFloat(str) || 0; }
+  }
   return parseFloat(str) || 0;
 }
 function formatQty(val) {
@@ -5630,7 +5632,7 @@ function addBOMRow(itemId, qty, unit, note) {
     </div>
     <select id="${selId}" class="fs bom-item-sel" style="width:100%;font-size:12px">${getBOMItemOptions('','')}</select>
   </td>
-  <td><input class="fi bom-qty" value="${qty!==undefined?qty:''}" style="width:75px;font-size:12px"></td>
+  <td><input class="fi bom-qty" value="${qty!==undefined?qty:''}" placeholder="예: 1/3*2" style="width:75px;font-size:12px"></td>
   <td><input class="fi bom-unit" value="${unit||'EA'}" style="width:55px;font-size:12px"></td>
   <td><input class="fi bom-note" value="${note||''}" style="width:100px;font-size:12px"></td>
   <td><button class="btn btn-danger btn-xs" onclick="this.closest('tr').remove()">✕</button></td>`;
