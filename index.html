@@ -808,7 +808,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
           <div style="background:var(--sky-50);border:1px solid var(--sky-200);border-radius:7px;padding:5px 12px;font-size:12px;color:var(--sky-800);white-space:nowrap">📦 총 재고평가액 &nbsp;: &nbsp;&nbsp;<strong id="item-total-stock-value">-</strong></div>
           <input type="text" class="fi" id="item-search" placeholder="품목 검색..." style="width:150px" oninput="renderItemTable()" onkeydown="if(event.key==='Enter')renderItemTable()"><button class="btn btn-outline btn-sm" onclick="renderItemTable()" style="padding:6px 10px">🔍</button>
-          <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-item']=null;const db=$('item-delete-btn');if(db)db.style.display='none';populateItemVendorSelect();$('i-type').value='';$('i-code').value='';$('i-name').value='';$('i-spec').value='';$('i-price').value='';$('i-stock').value=0;$('i-material').value='';$('i-note').value='';if($('i-barcode'))$('i-barcode').value='';if($('i-vendor'))$('i-vendor').value='';const prev=$('i-img-preview');if(prev)prev.innerHTML='📷';const imgIn=$('i-img');if(imgIn)imgIn.value='';const bcPrev=$('i-barcode-preview');if(bcPrev)bcPrev.innerHTML='바코드 이미지';const bcIn=$('i-barcode-img');if(bcIn)bcIn.value='';const qExist=$('i-quote-existing');if(qExist)qExist.style.display='none';const qPrev=$('i-quote-preview');if(qPrev)qPrev.innerHTML='';const qFile=$('i-quote-file');if(qFile)qFile.value='';window._clearQuoteFile=false;openModal('add-item')}">+ 품목 등록</button>
+          <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-item']=null;const db=$('item-delete-btn');if(db)db.style.display='none';populateItemVendorSelect();$('i-type').value='';$('i-code').value='';$('i-name').value='';$('i-spec').value='';$('i-price').value='';$('i-stock').value=0;$('i-material').value='';$('i-note').value='';if($('i-barcode'))$('i-barcode').value='';if($('i-vendor'))$('i-vendor').value='';const prev=$('i-img-preview');if(prev)prev.innerHTML='📷';const imgIn=$('i-img');if(imgIn){imgIn.value='';delete imgIn.dataset.compressed;}const bcPrev=$('i-barcode-preview');if(bcPrev)bcPrev.innerHTML='바코드 이미지';const bcIn=$('i-barcode-img');if(bcIn)bcIn.value='';const qExist=$('i-quote-existing');if(qExist)qExist.style.display='none';const qPrev=$('i-quote-preview');if(qPrev)qPrev.innerHTML='';const qFile=$('i-quote-file');if(qFile)qFile.value='';window._clearQuoteFile=false;openModal('add-item')}">+ 품목 등록</button>
         </div>
       </div>
       <div class="card">
@@ -2230,23 +2230,13 @@ async function _doSaveData() {
 async function _doSaveDataInner() {
   const dbToSave = JSON.parse(JSON.stringify(DB));
 
-  // 바이너리 데이터 → IndexedDB + Firestore 개별 문서 저장
-  for (let i = 0; i < dbToSave.items.length; i++) {
-    const item = dbToSave.items[i];
+  // 바이너리 데이터 → IndexedDB 분리 저장
+  dbToSave.items.forEach((item, i) => {
     if (item.image && item.image.length > 100) {
-      await idbSet('item_img_' + item.id, item.image);
-      // Firestore 개별 문서에 저장 (크로스 디바이스 동기화, 1MB 이내)
-      if (window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
-        try {
-          await window._firestoreSetDoc(
-            window._firestoreDoc(window._firebaseDb, 'erp_images', 'item_' + item.id),
-            { data: item.image, ts: Date.now() }
-          );
-        } catch(e) { console.warn('📸 이미지 Firestore 저장 실패 item_' + item.id + ':', e.message); }
-      }
+      idbSet('item_img_' + item.id, item.image);
       dbToSave.items[i].image = '__idb__';
     }
-  }
+  });
   dbToSave.orders.forEach((o, i) => {
     if (o.pdfData && o.pdfData.length > 10) {
       idbSet('order_pdf_' + o.id, o.pdfData);
@@ -2469,12 +2459,10 @@ function openIDB() {
 }
 
 function idbSet(key, value) {
-  return openIDB().then(db => new Promise((res) => {
+  return openIDB().then(db => {
     const tx = db.transaction(IDB_STORE, 'readwrite');
-    const req = tx.objectStore(IDB_STORE).put(value, key);
-    req.onsuccess = () => res(true);
-    req.onerror = () => res(false);
-  })).catch(() => false);
+    tx.objectStore(IDB_STORE).put(value, key);
+  }).catch(()=>{});
 }
 
 function idbGet(key) {
@@ -2486,23 +2474,10 @@ function idbGet(key) {
 }
 
 async function restoreIDBData() {
-  // 품목 이미지 복원 (1순위: IndexedDB, 2순위: Firestore 개별 문서)
+  // 품목 이미지 복원 (IndexedDB)
   for (let i = 0; i < DB.items.length; i++) {
     if (DB.items[i].image === '__idb__') {
-      let img = await idbGet('item_img_' + DB.items[i].id);
-      // IndexedDB에 없으면 Firestore 개별 문서에서 복원
-      if (!img && window._firestoreGetDoc && window._firestoreDoc && window._firebaseDb) {
-        try {
-          const imgSnap = await window._firestoreGetDoc(
-            window._firestoreDoc(window._firebaseDb, 'erp_images', 'item_' + DB.items[i].id)
-          );
-          if (imgSnap.exists() && imgSnap.data().data) {
-            img = imgSnap.data().data;
-            idbSet('item_img_' + DB.items[i].id, img); // IDB 캐시 복원
-            console.log('📸 Firestore→IDB 이미지 복원:', DB.items[i].name);
-          }
-        } catch(e) { console.warn('📸 이미지 복원 실패 item_' + DB.items[i].id + ':', e.message); }
-      }
+      const img = await idbGet('item_img_' + DB.items[i].id);
       DB.items[i].image = img || '';
     }
   }
@@ -5161,21 +5136,55 @@ function saveItem() {
     } else { saveWithQuote(doSave); }
   };
   if (imgFile && imgFile.files && imgFile.files[0]) {
-    const reader = new FileReader();
-    reader.onload = e => { data.image = e.target.result; saveAndClose(); };
-    reader.readAsDataURL(imgFile.files[0]);
+    // 압축된 이미지가 있으면 바로 사용, 없으면 새로 압축
+    if (imgFile.dataset.compressed) {
+      data.image = imgFile.dataset.compressed;
+      saveAndClose();
+    } else {
+      compressImage(imgFile.files[0], 400, 0.75).then(dataUrl => {
+        data.image = dataUrl || '';
+        saveAndClose();
+      });
+    }
   } else { saveAndClose(); }
+}
+
+function compressImage(file, maxSize, quality) {
+  return new Promise(res => {
+    maxSize = maxSize || 400;
+    quality = quality || 0.75;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if (w > maxSize || h > maxSize) {
+          if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
+          else { w = Math.round(w * maxSize / h); h = maxSize; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        res(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => res(e.target.result); // 압축 실패 시 원본
+      img.src = e.target.result;
+    };
+    reader.onerror = () => res(null);
+    reader.readAsDataURL(file);
+  });
 }
 
 function previewItemImg(input) {
   const file = input.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
+  compressImage(file, 400, 0.75).then(dataUrl => {
+    if (!dataUrl) return;
     const div = $('i-img-preview');
-    if (div) div.innerHTML = `<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover;border-radius:6px">`;
-  };
-  reader.readAsDataURL(file);
+    if (div) div.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:6px">`;
+    // 압축된 이미지를 input에 저장해두기
+    input.dataset.compressed = dataUrl;
+  });
 }
 
 function copyItem(id) {
@@ -5206,7 +5215,7 @@ function editItem(id) {
   if ($('i-barcode')) $('i-barcode').value='';
   if ($('i-vendor')) $('i-vendor').value='';
   const prevImg = $('i-img-preview'); if (prevImg) prevImg.innerHTML='📷';
-  const imgInput = $('i-img'); if (imgInput) imgInput.value='';
+  const imgInput = $('i-img'); if (imgInput) { imgInput.value=''; delete imgInput.dataset.compressed; }
   const bcPrev = $('i-barcode-preview'); if (bcPrev) bcPrev.innerHTML='바코드 이미지';
   const bcInput = $('i-barcode-img'); if (bcInput) bcInput.value='';
   const qExist = $('i-quote-existing'); if (qExist) qExist.style.display='none';
