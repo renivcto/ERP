@@ -956,7 +956,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <!-- ══════════════ ORDER ══════════════ -->
     <div class="page" id="page-order">
       <div style="display:flex;justify-content:flex-start;margin-bottom:14px">
-        <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-order']=null;const b=$('order-delete-btn');if(b)b.style.display='none';populateVendorSelect('o-vendor');$('o-date').value=today();$('o-addr').value='';$('o-serial').value='';openModal('add-order')}">+ 발주서 작성</button>
+        <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-order']=null;const b=$('order-delete-btn');if(b)b.style.display='none';populateVendorSelect('o-vendor');$('o-date').value=today();$('o-receiver').value='';$('o-addr').value='';$('o-serial').value='';openModal('add-order')}">+ 발주서 작성</button>
       </div>
       <div class="card">
         <div class="card-body p0 tbl-wrap">
@@ -1797,8 +1797,9 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="fg"><label>업체명<span class="req">*</span></label><select class="fs" id="o-vendor" onchange="fillOrderVendor()"></select></div>
         <div class="fg"><label>발주일<span class="req">*</span></label><input class="fi" id="o-date" type="date"></div>
         <div class="fg"><label>납기일(입고예정)</label><input class="fi" id="o-in-date" type="date" onchange="updateGCalLink('in')"></div>
-        <div class="fg"><label>납품 주소</label><input class="fi" id="o-addr" placeholder="납품받을 주소"></div>
-        <div class="fg"><label>발주번호</label><input class="fi" type="text" id="o-serial" placeholder="예: PO20260330 또는 20260331-1"></div>
+        <div class="fg"><label>입고처</label><input class="fi" id="o-receiver" placeholder="입고할 회사명"></div>
+        <div class="fg"><label>입고처 주소</label><input class="fi" id="o-addr" placeholder="입고처 주소"></div>
+        <div class="fg"><label>발주번호</label><input class="fi" type="text" id="o-serial" placeholder=""></div>
         <div class="fg"><label>발주 상태</label>
           <select class="fs" id="o-status">
             <option>진행중</option><option>완료</option><option>취소</option><option>지연</option>
@@ -6164,6 +6165,7 @@ function _editOrderDirect(o, dbIdx) {
   const _savedVendorId = o.vendorId||'';
   $('o-date').value = o.orderDate||'';
   $('o-in-date').value = o.inDate||'';
+  $('o-receiver').value = o.receiver||'';
   $('o-addr').value = o.addr||'';
   $('o-note').value = o.note||'';
   $('o-serial').value = o.serial||'';
@@ -6325,6 +6327,7 @@ function addOrderRow() {
               <button type="button" class="oip-tab" data-type="원자재" onclick="filterOrderItemPicker(this,'원자재')" style="font-size:10.5px;padding:3px 8px;border-radius:6px 6px 0 0;border:1px solid var(--gray-200);border-bottom:none;background:var(--gray-50);color:var(--gray-400);cursor:pointer">원자재</button>
               <button type="button" class="oip-tab" data-type="부자재" onclick="filterOrderItemPicker(this,'부자재')" style="font-size:10.5px;padding:3px 8px;border-radius:6px 6px 0 0;border:1px solid var(--gray-200);border-bottom:none;background:var(--gray-50);color:var(--gray-400);cursor:pointer">부자재</button>
               <button type="button" class="oip-tab" data-type="OEM" onclick="filterOrderItemPicker(this,'OEM')" style="font-size:10.5px;padding:3px 8px;border-radius:6px 6px 0 0;border:1px solid var(--gray-200);border-bottom:none;background:var(--gray-50);color:var(--gray-400);cursor:pointer">OEM</button>
+              <button type="button" class="oip-tab" data-type="외주가공" onclick="filterOrderItemPicker(this,'외주가공')" style="font-size:10.5px;padding:3px 8px;border-radius:6px 6px 0 0;border:1px solid var(--gray-200);border-bottom:none;background:var(--gray-50);color:var(--gray-400);cursor:pointer">외주가공</button>
             </div>
             <input class="fi oip-search" placeholder="🔍 품목명·코드 검색" style="width:100%;font-size:11.5px;padding:5px 8px;margin-bottom:2px" oninput="searchOrderItemPicker(this)">
             <select class="fs row-item-sel" style="width:100%;font-size:12px;margin-bottom:4px" onchange="fillOrderRowFromItem(this)">
@@ -6549,6 +6552,7 @@ function requestAIAnalysis() {
   "serial": "일련번호",
   "orderDate": "YYYY-MM-DD",
   "inDate": "납기일 YYYY-MM-DD",
+  "receiver": "입고처 회사명",
   "addr": "입고처 주소",
   "note": "특기사항",
   "rows": [{"code":"품목코드","name":"품목명","qty":수량,"price":단가}]
@@ -6677,6 +6681,7 @@ function applyParsedOrder(parsed, fileData, fileName) {
   // 날짜
   if (parsed.orderDate) $('o-date').value = parsed.orderDate;
   if (parsed.inDate) $('o-in-date').value = parsed.inDate;
+  if (parsed.receiver) $('o-receiver').value = parsed.receiver;
   if (parsed.addr) $('o-addr').value = parsed.addr;
   if (parsed.serial) $('o-serial').value = parsed.serial;
   if (parsed.note) $('o-note').value = parsed.note;
@@ -6790,7 +6795,7 @@ function saveOrder() {
   const data = {
     vendorId, orderDate:$('o-date').value, inDate:$('o-in-date').value,
     payDate:$('o-pay-date').value, stockStatus:newStockStatus,
-    addr:$('o-addr').value, serial:$('o-serial').value,
+    receiver:$('o-receiver').value, addr:$('o-addr').value, serial:$('o-serial').value,
     rows, note:$('o-note').value, status:$('o-status').value,
     pdfName:  _orderPdfName  || existing.pdfName  || '',
     pdfData:  _orderPdfData  || existing.pdfData  || null,
@@ -7072,7 +7077,7 @@ function previewOrder() {
   });
   const tempOrder = {
     vendorId, rows, orderDate:$('o-date').value, inDate:$('o-in-date').value,
-    serial:$('o-serial').value, note:$('o-note').value, addr:$('o-addr').value
+    serial:$('o-serial').value, note:$('o-note').value, receiver:$('o-receiver').value, addr:$('o-addr').value
   };
   showRenivOrderPreview(tempOrder);
 }
@@ -7138,7 +7143,7 @@ function showRenivOrderPreview(o) {
         </tr>
         <tr>
           <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600">입고처</td>
-          <td style="border:1px solid #333;padding:7px 10px">㈜르니브</td>
+          <td style="border:1px solid #333;padding:7px 10px">${o.receiver||'-'}</td>
           <td style="border:1px solid #333;padding:7px 10px;background:#f5f5f5;font-weight:600">주 소</td>
           <td style="border:1px solid #333;padding:7px 10px">서울 성동구 성수동 2가 301-94 8층</td>
         </tr>
