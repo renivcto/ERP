@@ -2230,35 +2230,22 @@ async function _doSaveData() {
 async function _doSaveDataInner() {
   const dbToSave = JSON.parse(JSON.stringify(DB));
 
-  // 바이너리 데이터 → IndexedDB + Firestore 분리 저장
-  const _imageMap = {};
+  // 바이너리 데이터 → IndexedDB + Firestore 개별 문서 저장
   for (let i = 0; i < dbToSave.items.length; i++) {
     const item = dbToSave.items[i];
     if (item.image && item.image.length > 100) {
       await idbSet('item_img_' + item.id, item.image);
-      _imageMap['item_' + item.id] = item.image;
+      // Firestore 개별 문서에 저장 (크로스 디바이스 동기화, 1MB 이내)
+      if (window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
+        try {
+          await window._firestoreSetDoc(
+            window._firestoreDoc(window._firebaseDb, 'erp_images', 'item_' + item.id),
+            { data: item.image, ts: Date.now() }
+          );
+        } catch(e) { console.warn('📸 이미지 Firestore 저장 실패 item_' + item.id + ':', e.message); }
+      }
       dbToSave.items[i].image = '__idb__';
     }
-  }
-  // Firestore에 이미지 별도 저장 (크로스 디바이스 동기화)
-  if (Object.keys(_imageMap).length > 0 && window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
-    try {
-      // 기존 이미지 병합
-      const imgRef = window._firestoreDoc(window._firebaseDb, 'erp_data', 'images');
-      let existingImages = {};
-      try {
-        const imgSnap = await window._firestoreGetDoc(imgRef);
-        if (imgSnap.exists()) existingImages = imgSnap.data() || {};
-      } catch(e) {}
-      // 삭제된 품목의 이미지 정리 + 새 이미지 병합
-      const validKeys = dbToSave.items.filter(it => it.image === '__idb__').map(it => 'item_' + it.id);
-      const merged = {};
-      validKeys.forEach(k => { if (existingImages[k]) merged[k] = existingImages[k]; });
-      Object.assign(merged, _imageMap);
-      merged._ts = Date.now();
-      await window._firestoreSetDoc(imgRef, merged);
-      console.log('📸 품목 이미지 Firestore 저장 완료:', Object.keys(_imageMap).length, '건');
-    } catch(e) { console.warn('📸 품목 이미지 Firestore 저장 실패:', e.message); }
   }
   dbToSave.orders.forEach((o, i) => {
     if (o.pdfData && o.pdfData.length > 10) {
@@ -2499,31 +2486,22 @@ function idbGet(key) {
 }
 
 async function restoreIDBData() {
-  // 품목 이미지 복원 (1순위: IndexedDB, 2순위: Firestore images 문서)
-  let _fsImages = null; // Firestore 이미지 캐시 (필요 시 1회만 로드)
+  // 품목 이미지 복원 (1순위: IndexedDB, 2순위: Firestore 개별 문서)
   for (let i = 0; i < DB.items.length; i++) {
     if (DB.items[i].image === '__idb__') {
       let img = await idbGet('item_img_' + DB.items[i].id);
-      // IndexedDB에 없으면 Firestore에서 복원
-      if (!img) {
-        if (_fsImages === null) {
-          try {
-            if (window._firestoreGetDoc && window._firestoreDoc && window._firebaseDb) {
-              const imgSnap = await window._firestoreGetDoc(
-                window._firestoreDoc(window._firebaseDb, 'erp_data', 'images')
-              );
-              _fsImages = imgSnap.exists() ? imgSnap.data() : {};
-              console.log('📸 Firestore 이미지 문서 로드 완료:', Object.keys(_fsImages).length - 1, '건');
-            } else { _fsImages = {}; }
-          } catch(e) { _fsImages = {}; console.warn('📸 Firestore 이미지 로드 실패:', e.message); }
-        }
-        const fsKey = 'item_' + DB.items[i].id;
-        if (_fsImages[fsKey]) {
-          img = _fsImages[fsKey];
-          // IndexedDB에도 캐시 저장
-          idbSet('item_img_' + DB.items[i].id, img);
-          console.log('📸 Firestore→IDB 이미지 복원:', DB.items[i].name);
-        }
+      // IndexedDB에 없으면 Firestore 개별 문서에서 복원
+      if (!img && window._firestoreGetDoc && window._firestoreDoc && window._firebaseDb) {
+        try {
+          const imgSnap = await window._firestoreGetDoc(
+            window._firestoreDoc(window._firebaseDb, 'erp_images', 'item_' + DB.items[i].id)
+          );
+          if (imgSnap.exists() && imgSnap.data().data) {
+            img = imgSnap.data().data;
+            idbSet('item_img_' + DB.items[i].id, img); // IDB 캐시 복원
+            console.log('📸 Firestore→IDB 이미지 복원:', DB.items[i].name);
+          }
+        } catch(e) { console.warn('📸 이미지 복원 실패 item_' + DB.items[i].id + ':', e.message); }
       }
       DB.items[i].image = img || '';
     }
