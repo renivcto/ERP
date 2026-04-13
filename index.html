@@ -7859,27 +7859,30 @@ async function loadGdocs() {
   }
 
   let loaded = false;
+  const canWrite = window._currentUser && (window._currentUser.isAdmin || window._currentUser.permission === 'write');
 
-  // 1순위: shared/gdocs (쓰기권한 이상)
-  try {
-    const snap = await window._firestoreGetDoc(
-      window._firestoreDoc(window._firebaseDb, 'shared', 'gdocs')
-    );
-    if (snap.exists() && snap.data().list) {
-      _gdocList = snap.data().list;
-      loaded = true;
-      // meta에도 동기화 저장 (보기권한이 읽을 수 있도록)
-      try {
-        const metaRef = window._firestoreDoc(window._firebaseDb, 'erp_data', 'meta');
-        const metaSnap = await window._firestoreGetDoc(metaRef);
-        const metaData = metaSnap.exists() ? JSON.parse(metaSnap.data().data || '{}') : {};
-        if (JSON.stringify(metaData.gdocs) !== JSON.stringify(_gdocList)) {
-          metaData.gdocs = _gdocList;
-          await window._firestoreSetDoc(metaRef, { data: JSON.stringify(metaData), ts: Date.now() }, { merge: true });
-        }
-      } catch(e) {}
-    }
-  } catch(e) {}
+  // 1순위 (쓰기권한만): shared/gdocs
+  if (canWrite) {
+    try {
+      const snap = await window._firestoreGetDoc(
+        window._firestoreDoc(window._firebaseDb, 'shared', 'gdocs')
+      );
+      if (snap.exists() && snap.data().list) {
+        _gdocList = snap.data().list;
+        loaded = true;
+        // meta에도 동기화 저장 (보기권한이 읽을 수 있도록)
+        try {
+          const metaRef = window._firestoreDoc(window._firebaseDb, 'erp_data', 'meta');
+          const metaSnap = await window._firestoreGetDoc(metaRef);
+          const metaData = metaSnap.exists() ? JSON.parse(metaSnap.data().data || '{}') : {};
+          if (JSON.stringify(metaData.gdocs) !== JSON.stringify(_gdocList)) {
+            metaData.gdocs = _gdocList;
+            await window._firestoreSetDoc(metaRef, { data: JSON.stringify(metaData), ts: Date.now() }, { merge: true });
+          }
+        } catch(e) {}
+      }
+    } catch(e) { console.warn('shared/gdocs 읽기 실패:', e.message); }
+  }
 
   // 2순위: erp_data/meta (보기권한 포함 모든 유저)
   if (!loaded) {
@@ -7894,10 +7897,19 @@ async function loadGdocs() {
           loaded = true;
         }
       }
-    } catch(e) {}
+    } catch(e) { console.warn('erp_data/meta gdocs 읽기 실패:', e.message); }
   }
 
-  // 3순위: localStorage 캐시
+  // 3순위: 이미 로드된 DB에서 (loadDataFromFirestore가 먼저 실행된 경우)
+  if (!loaded) {
+    const dbGdocs = (DB && (DB.gdocs || DB._gdocs)) || [];
+    if (dbGdocs.length > 0) {
+      _gdocList = dbGdocs;
+      loaded = true;
+    }
+  }
+
+  // 4순위: localStorage 캐시
   if (!loaded) {
     try {
       const local = JSON.parse(localStorage.getItem('reniv_gdocs') || '[]');
