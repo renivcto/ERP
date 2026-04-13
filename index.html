@@ -1795,7 +1795,16 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 
       <div class="fg2">
         <!-- 줄 1: 업체명 | 발주번호 -->
-        <div class="fg"><label>업체명<span class="req">*</span></label><select class="fs" id="o-vendor" onchange="fillOrderVendor()"></select></div>
+        <div class="fg"><label>업체명<span class="req">*</span></label>
+          <div style="display:flex;align-items:center;gap:0;margin-bottom:4px" id="o-vendor-tabs">
+            <button type="button" class="ovt active" data-type="전체" onclick="filterOrderVendor('전체',this)" style="font-size:10.5px;padding:4px 0;min-width:44px;text-align:center;border-radius:6px 6px 0 0;border:1px solid var(--gray-300);border-bottom:2px solid var(--sky-500);background:#fff;color:var(--gray-700);cursor:pointer;font-weight:600">전체</button>
+            <button type="button" class="ovt" data-type="원자재" onclick="filterOrderVendor('원자재',this)" style="font-size:10.5px;padding:4px 0;min-width:44px;text-align:center;border-radius:6px 6px 0 0;border:1px solid var(--gray-200);border-bottom:none;background:var(--gray-50);color:var(--gray-400);cursor:pointer">원자재</button>
+            <button type="button" class="ovt" data-type="부자재" onclick="filterOrderVendor('부자재',this)" style="font-size:10.5px;padding:4px 0;min-width:44px;text-align:center;border-radius:6px 6px 0 0;border:1px solid var(--gray-200);border-bottom:none;background:var(--gray-50);color:var(--gray-400);cursor:pointer">부자재</button>
+            <button type="button" class="ovt" data-type="OEM" onclick="filterOrderVendor('OEM',this)" style="font-size:10.5px;padding:4px 0;min-width:44px;text-align:center;border-radius:6px 6px 0 0;border:1px solid var(--gray-200);border-bottom:none;background:var(--gray-50);color:var(--gray-400);cursor:pointer">OEM</button>
+            <button type="button" class="ovt" data-type="외주가공" onclick="filterOrderVendor('외주가공',this)" style="font-size:10.5px;padding:4px 0;min-width:44px;text-align:center;border-radius:6px 6px 0 0;border:1px solid var(--gray-200);border-bottom:none;background:var(--gray-50);color:var(--gray-400);cursor:pointer">외주가공</button>
+          </div>
+          <select class="fs" id="o-vendor" onchange="fillOrderVendor()"></select>
+        </div>
         <div class="fg"><label>발주번호</label><input class="fi" type="text" id="o-serial" placeholder=""></div>
         <!-- 줄 2: 발주일 | 납기일 -->
         <div class="fg"><label>발주일<span class="req">*</span></label><input class="fi" id="o-date" type="date"></div>
@@ -6055,8 +6064,30 @@ function exportStockReport() {
 // ═══════════════════════════════════════════════════════
 // QUOTE
 // ═══════════════════════════════════════════════════════
-function populateVendorSelect(selId) {
-  $(selId).innerHTML = '<option value="">선택하세요</option>' + DB.vendors.map(v=>`<option value="${v.id}">${v.company}</option>`).join('');
+function populateVendorSelect(selId, typeFilter) {
+  let vendors = DB.vendors || [];
+  if (typeFilter && typeFilter !== '전체') vendors = vendors.filter(v => v.type === typeFilter);
+  $(selId).innerHTML = '<option value="">선택하세요</option>' + vendors.map(v=>`<option value="${v.id}">${v.company}</option>`).join('');
+}
+
+function filterOrderVendor(type, btn) {
+  const wrap = document.getElementById('o-vendor-tabs');
+  if (wrap) {
+    wrap.querySelectorAll('.ovt').forEach(t => {
+      if (t === btn) {
+        t.style.background = '#fff'; t.style.color = 'var(--gray-700)'; t.style.fontWeight = '600';
+        t.style.borderBottom = '2px solid var(--sky-500)'; t.style.borderColor = 'var(--gray-300)';
+        t.style.borderBottomColor = 'var(--sky-500)'; t.classList.add('active');
+      } else {
+        t.style.background = 'var(--gray-50)'; t.style.color = 'var(--gray-400)'; t.style.fontWeight = '';
+        t.style.borderBottom = 'none'; t.style.borderColor = 'var(--gray-200)'; t.classList.remove('active');
+      }
+    });
+  }
+  const savedVal = $('o-vendor').value;
+  populateVendorSelect('o-vendor', type);
+  // 기존 선택이 필터에 포함되면 유지
+  if (savedVal) $('o-vendor').value = savedVal;
 }
 
 function renderQuoteTable() {
@@ -6196,6 +6227,9 @@ function viewOrderPDFByIdx(idx, type) {
 // 발주서 직접 수정 (id 조회 없이 객체+인덱스 사용)
 function _editOrderDirect(o, dbIdx) {
   editingId['add-order'] = dbIdx; // 인덱스를 저장
+  // 업체 필터 탭 → 전체로 리셋
+  const firstTab = document.querySelector('#o-vendor-tabs .ovt[data-type="전체"]');
+  if (firstTab) filterOrderVendor('전체', firstTab);
   populateVendorSelect('o-vendor');
   $('o-vendor').value = o.vendorId||'';
   const _savedVendorId = o.vendorId||'';
