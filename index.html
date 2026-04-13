@@ -1683,13 +1683,13 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="modal-hdr"><span class="modal-ttl">📥 재고 입고</span><button class="modal-x" onclick="closeModal('stock-in-modal')">✕</button></div>
     <div class="modal-body">
       <div class="fg2">
-        <div class="fg full"><label>품목 선택<span class="req">*</span></label><select class="fs" id="si-item"></select></div>
+        <div class="fg full"><label>품목 선택<span class="req">*</span></label><select class="fs" id="si-item" onchange="onStockItemSelect('si-item','si-price')"></select></div>
         <div class="fg"><label>입고 수량<span class="req">*</span></label><input class="fi" id="si-qty" type="number" placeholder="0"></div>
         <div class="fg"><label>단가(원)</label><input class="fi" id="si-price" type="number" placeholder="0"></div>
         <div class="fg"><label>입고일<span class="req">*</span></label><input class="fi" id="si-date" type="date"></div>
-        <div class="fg"><label>LOT번호</label><input class="fi" id="si-lot" placeholder="LOT250407" style="font-family:monospace"></div>
+        <div class="fg"><label>LOT번호</label><input class="fi" id="si-lot" placeholder="" style="font-family:monospace"></div>
         <div class="fg"><label>유통기한</label><input class="fi" id="si-exp" type="date"></div>
-        <div class="fg full"><label>비고</label><input class="fi" id="si-note" placeholder="발주서 번호 등"></div>
+        <div class="fg full"><label>비고</label><input class="fi" id="si-note" placeholder=""></div>
       </div>
     </div>
     <div class="modal-ft">
@@ -1705,7 +1705,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="modal-hdr"><span class="modal-ttl">📤 재고 출고</span><button class="modal-x" onclick="closeModal('stock-out-modal')">✕</button></div>
     <div class="modal-body">
       <div class="fg2">
-        <div class="fg full"><label>품목 선택<span class="req">*</span></label><select class="fs" id="so-item"></select></div>
+        <div class="fg full"><label>품목 선택<span class="req">*</span></label><select class="fs" id="so-item" onchange="onStockItemSelect('so-item','')"></select></div>
         <div class="fg"><label>출고 수량<span class="req">*</span></label><input class="fi" id="so-qty" type="number" placeholder="0"></div>
         <div class="fg"><label>출고일<span class="req">*</span></label><input class="fi" id="so-date" type="date"></div>
         <div class="fg full"><label>출고 사유</label><select class="fs" id="so-reason"><option>생산 투입</option><option>샘플 출고</option><option>폐기</option><option>반품</option><option>기타</option></select></div>
@@ -2897,8 +2897,8 @@ function openModal(id) {
       }
     }
     if (id === 'add-bom') { populateBOMProductModal(); populateBOMRows(); }
-    if (id === 'stock-in-modal') { populateStockItemSelect('si-item'); $('si-date').value = today(); }
-    if (id === 'stock-out-modal') { populateStockItemSelect('so-item'); $('so-date').value = today(); }
+    if (id === 'stock-in-modal') { populateStockItemSelect('si-item', _stockTypeFilter); $('si-date').value = today(); $('si-price').value=''; $('si-qty').value=''; $('si-lot').value=''; $('si-note').value=''; $('si-exp').value=''; }
+    if (id === 'stock-out-modal') { populateStockItemSelect('so-item', _stockTypeFilter); $('so-date').value = today(); }
     if (id === 'add-quote') { populateVendorSelect('q-vendor'); ensureQuoteRows(); }
     if (id === 'add-order') { ensureOrderRows(); }
     if (id === 'add-qc') { populateQCProductSelect(); $('qc-date').value = today(); }
@@ -5953,8 +5953,22 @@ function renderLotTable() {
   }).join('') || '<tr><td colspan="7" class="empty">LOT 데이터가 없습니다</td></tr>';
 }
 
-function populateStockItemSelect(selId) {
-  $(selId).innerHTML = DB.items.map(i=>`<option value="${i.id}">${i.name} (재고:${i.stock})</option>`).join('');
+function populateStockItemSelect(selId, typeFilter) {
+  let items = DB.items || [];
+  if (typeFilter && typeFilter !== '전체') items = items.filter(i => i.type === typeFilter);
+  $(selId).innerHTML = '<option value="">— 품목을 선택하세요 —</option>' + items.map(i=>`<option value="${i.id}" data-price="${i.unitPrice||i.price||0}">${i.name} (재고:${i.stock})</option>`).join('');
+}
+
+function onStockItemSelect(selId, priceId) {
+  const sel = $(selId); if (!sel) return;
+  const opt = sel.options[sel.selectedIndex];
+  if (opt && opt.value) {
+    const item = (DB.items||[]).find(i => i.id === parseInt(opt.value));
+    const price = item ? (item.price || item.unitPrice || 0) : 0;
+    if ($(priceId)) $(priceId).value = price || '';
+  } else {
+    if ($(priceId)) $(priceId).value = '';
+  }
 }
 
 function saveStockIn() {
