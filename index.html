@@ -576,6 +576,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="nav-group-title">거래처 · 품목</div>
     <div class="nav-item" onclick="go('vendor')"><span class="ico">🏢</span>업체 관리</div>
     <div class="nav-item" onclick="go('item')"><span class="ico">🗂️</span>품목 관리</div>
+    <div class="nav-item" onclick="go('archive')" style="padding-left:28px;font-size:11.5px"><span class="ico">📥</span>아카이브</div>
     <div class="nav-item" onclick="go('bom')"><span class="ico">⚙️</span>BOM 관리</div>
   </div>
 
@@ -809,13 +810,28 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div style="background:var(--sky-50);border:1px solid var(--sky-200);border-radius:7px;padding:5px 12px;font-size:12px;color:var(--sky-800);white-space:nowrap">📦 총 재고평가액 &nbsp;: &nbsp;&nbsp;<strong id="item-total-stock-value">-</strong></div>
           <input type="text" class="fi" id="item-search" placeholder="품목 검색..." style="width:150px" oninput="renderItemTable()" onkeydown="if(event.key==='Enter')renderItemTable()"><button class="btn btn-outline btn-sm" onclick="renderItemTable()" style="padding:6px 10px">🔍</button>
           <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-item']=null;const db=$('item-delete-btn');if(db)db.style.display='none';populateItemVendorSelect();$('i-type').value='';$('i-code').value='';$('i-name').value='';$('i-spec').value='';$('i-price').value='';$('i-stock').value=0;$('i-material').value='';$('i-note').value='';if($('i-barcode'))$('i-barcode').value='';if($('i-vendor'))$('i-vendor').value='';const prev=$('i-img-preview');if(prev)prev.innerHTML='📷';const imgIn=$('i-img');if(imgIn){imgIn.value='';delete imgIn.dataset.compressed;}const bcPrev=$('i-barcode-preview');if(bcPrev)bcPrev.innerHTML='바코드 이미지';const bcIn=$('i-barcode-img');if(bcIn)bcIn.value='';const qExist=$('i-quote-existing');if(qExist)qExist.style.display='none';const qPrev=$('i-quote-preview');if(qPrev)qPrev.innerHTML='';const qFile=$('i-quote-file');if(qFile)qFile.value='';window._clearQuoteFile=false;openModal('add-item')}">+ 품목 등록</button>
+          <button class="btn btn-sm" id="archive-items-btn" onclick="archiveSelectedItems()" style="background:#f0f0f0;color:#666;border:1px solid #d0d0d0;font-size:12px;padding:5px 12px;display:none">📥 아카이브</button>
         </div>
       </div>
       <div class="card">
         <div class="card-body p0 tbl-wrap">
           <table>
-            <colgroup><col style="width:60px"><col style="width:90px"><col style="min-width:200px"><col style="width:55px"><col style="width:100px"><col style="width:100px"><col style="width:70px"><col style="width:70px"><col style="width:100px"><col style="width:90px"><col style="width:80px"><col style="width:55px"></colgroup><thead><tr><th>분류</th><th>코드</th><th>품목명</th><th style="text-align:center">이미지</th><th style="text-align:center">용량</th><th>바코드</th><th>단가</th><th style="text-align:center">재고수량</th><th style="text-align:right">재고평가액</th><th>업체</th><th>견적서</th><th>관리</th></tr></thead>
+            <colgroup><col style="width:32px"><col style="width:60px"><col style="width:90px"><col style="min-width:200px"><col style="width:55px"><col style="width:100px"><col style="width:100px"><col style="width:70px"><col style="width:70px"><col style="width:100px"><col style="width:90px"><col style="width:80px"><col style="width:55px"></colgroup><thead><tr><th style="text-align:center"><input type="checkbox" id="item-check-all" onchange="toggleAllItemChecks(this.checked)" style="cursor:pointer"></th><th>분류</th><th>코드</th><th>품목명</th><th style="text-align:center">이미지</th><th style="text-align:center">용량</th><th>바코드</th><th>단가</th><th style="text-align:center">재고수량</th><th style="text-align:right">재고평가액</th><th>업체</th><th>견적서</th><th>관리</th></tr></thead>
             <tbody id="item-table"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ ARCHIVE ══════════════ -->
+    <div class="page" id="page-archive">
+      <h2 class="page-title" style="font-size:16px;margin-bottom:14px">📥 아카이브 품목</h2>
+      <div class="card">
+        <div class="card-body p0 tbl-wrap">
+          <table>
+            <colgroup><col style="width:60px"><col style="width:90px"><col style="min-width:200px"><col style="width:100px"><col style="width:80px"><col style="width:90px"><col style="width:90px"><col style="width:60px"></colgroup>
+            <thead><tr><th>분류</th><th>코드</th><th>품목명</th><th style="text-align:center">용량</th><th style="text-align:center">단가</th><th style="text-align:center">업체</th><th style="text-align:center">아카이브일</th><th style="text-align:center">관리</th></tr></thead>
+            <tbody id="archive-table"></tbody>
           </table>
         </div>
       </div>
@@ -2313,6 +2329,7 @@ async function _doSaveDataInner() {
     cs:          dbToSave.cs          || [],
     shops:       dbToSave.shops       || [],
     shopOrders:  dbToSave.shopOrders  || [],
+    archivedItems: dbToSave.archivedItems || [],
   };
 
   // 순차 저장 (병렬 저장 시 Firestore 권한 오류 발생 가능)
@@ -2627,6 +2644,7 @@ const DEFAULT_DB = {
     {id:8, vendorId:5, orderDate:'2026-04-09', inDate:'2026-04-17', addr:'', serial:'20260409-1', rows:[{itemId:9, code:'M-3X-09', name:'르니브 3중 장벽 20층 용기 60g', qty:2000, price:1130, image:''},{itemId:10, code:'M-3X-10', name:'르니브 3중 장벽 20층 용기 30g', qty:6000, price:985, image:''}], note:'', status:'진행중', pdfName:'', pdfData:null, stampName:'', stampData:null, payDate:'2026-03-30', stockStatus:'입고전'},
     {id:9, vendorId:1, orderDate:'2025-12-29', inDate:'2026-03-31', addr:'인천광역시 서구 도담5로 53(오류동) 황윤태 주임 010-2999-1421', serial:'2025/12/29-2', rows:[{itemId:12, code:'M-GS-02', name:'르니브 글로우샷 스포이드', qty:5000, price:0, image:''},{itemId:13, code:'M-GS-03', name:'르니브 글로우샷 바킹', qty:5000, price:0, image:''}], note:'', status:'완료', pdfName:'', pdfData:null, stampName:'', stampData:null, payDate:'2026-04-10', stockStatus:'입고완료'},
   ],
+  archivedItems: [],
   tasks: [
     {id:1, title:'신규 세럼 BOM 작성', due:'2025-04-15', category:'R&D', status:'계획', priority:'높음', progress:10, note:''},
     {id:2, title:'호박씨 오일 긴급 발주', due:'2025-04-08', category:'구매', status:'계획', priority:'높음', progress:0, note:'재고 부족'},
@@ -2845,6 +2863,7 @@ function go(page) {
     workflow: () => { renderKanban(); loadGdocs(); },
     vendor: renderVendorTable,
     item: renderItemTable,
+    archive: renderArchivePage,
     bom: renderBOMPage,
     production: renderProdTable,
     stock: renderStock,
@@ -5062,6 +5081,7 @@ function renderItemTable() {
       ? `<span style="font-family:monospace;font-size:11px;color:var(--gray-700);letter-spacing:0.5px">${i.barcode}</span>`
       : '<span style="color:var(--gray-300);font-size:11px">-</span>';
     return `<tr style="background:${rowBg}">
+      <td style="text-align:center"><input type="checkbox" class="item-check" data-id="${i.id}" onchange="updateArchiveBtn()" style="cursor:pointer"></td>
       <td><span class="badge ${typeBadge(i.type)}" style="font-size:10px">${i.type}</span></td>
       <td style="font-family:monospace;font-size:12px;font-weight:500;text-align:center">${i.code}</td>
       <td class="lnk" style="min-width:200px;word-break:keep-all;white-space:normal;line-height:1.5" onclick="showItemDetail(${i.id})">${i.name}</td>
@@ -5078,7 +5098,67 @@ function renderItemTable() {
         <button class="btn btn-outline btn-xs" onclick="copyItem(${i.id})" style="white-space:nowrap;width:100%;background:var(--sky-50);border-color:var(--sky-300);color:var(--sky-700)">복사</button>
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="12" class="empty">등록된 품목이 없습니다</td></tr>';
+  }).join('') || '<tr><td colspan="13" class="empty">등록된 품목이 없습니다</td></tr>';
+  // 체크박스 초기화
+  const allCk = $('item-check-all'); if (allCk) allCk.checked = false;
+  updateArchiveBtn();
+}
+
+function toggleAllItemChecks(checked) {
+  document.querySelectorAll('.item-check').forEach(cb => cb.checked = checked);
+  updateArchiveBtn();
+}
+function updateArchiveBtn() {
+  const btn = $('archive-items-btn');
+  if (!btn) return;
+  const cnt = document.querySelectorAll('.item-check:checked').length;
+  btn.style.display = cnt > 0 ? 'inline-block' : 'none';
+  btn.textContent = '📥 아카이브 (' + cnt + ')';
+}
+function archiveSelectedItems() {
+  const ids = [...document.querySelectorAll('.item-check:checked')].map(cb => parseInt(cb.dataset.id));
+  if (!ids.length) return;
+  if (!confirm(ids.length + '개 품목을 아카이브하시겠습니까?')) return;
+  if (!DB.archivedItems) DB.archivedItems = [];
+  ids.forEach(id => {
+    const idx = DB.items.findIndex(i => i.id === id);
+    if (idx !== -1) {
+      const item = DB.items.splice(idx, 1)[0];
+      item._archivedAt = new Date().toISOString().slice(0,10);
+      DB.archivedItems.push(item);
+    }
+  });
+  saveData(); renderItemTable(); updateBadges();
+  showNotif(ids.length + '개 품목이 아카이브되었습니다', 'success');
+}
+function restoreArchivedItem(id) {
+  if (!DB.archivedItems) return;
+  const idx = DB.archivedItems.findIndex(i => i.id === id);
+  if (idx === -1) return;
+  const item = DB.archivedItems.splice(idx, 1)[0];
+  delete item._archivedAt;
+  DB.items.push(item);
+  saveData(); renderArchivePage(); renderItemTable(); updateBadges();
+  showNotif(item.name + ' 품목이 복원되었습니다', 'success');
+}
+function renderArchivePage() {
+  if (!DB.archivedItems) DB.archivedItems = [];
+  const tbody = $('archive-table');
+  if (!tbody) return;
+  const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray',외주가공:'gray'})[t]||'gray';
+  tbody.innerHTML = DB.archivedItems.map(i => {
+    const v = getVendor(i.vendorId);
+    return `<tr>
+      <td><span class="badge ${typeBadge(i.type)}" style="font-size:10px">${i.type}</span></td>
+      <td style="font-family:monospace;font-size:12px;font-weight:500;text-align:center">${i.code||'-'}</td>
+      <td>${i.name}</td>
+      <td style="text-align:center;font-size:12px">${i.spec||'-'}</td>
+      <td style="text-align:center">${fmtW(i.price)}</td>
+      <td class="lnk" onclick="viewVendor(${i.vendorId})" style="text-align:center">${v.company||'-'}</td>
+      <td style="text-align:center;font-size:12px;color:var(--gray-500)">${i._archivedAt||'-'}</td>
+      <td style="text-align:center"><button class="btn btn-outline btn-xs" onclick="restoreArchivedItem(${i.id})" style="color:var(--sky-700);border-color:var(--sky-300)">복원</button></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" class="empty">아카이브된 품목이 없습니다</td></tr>';
 }
 
 function populateItemVendorSelect() {
