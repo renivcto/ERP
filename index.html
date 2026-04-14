@@ -1684,11 +1684,9 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         </table>
       </div>
     </div>
-    <div class="modal-ft" style="justify-content:space-between">
-      <button class="btn btn-danger btn-sm" id="prod-delete-btn" style="display:none">🗑️ 삭제</button>
-      <div style="display:flex;gap:8px;margin-left:auto">
-        <button class="btn" style="background:#f9a8d4;color:#831843;border:1px solid #f472b6;font-weight:600" onclick="saveProduction()">+ 생산 완료 → 완제품 입고</button>
-      </div>
+    <div class="modal-ft" style="justify-content:flex-start;gap:8px">
+      <button class="btn" style="background:#fce7f3;color:#9f1239;border:1px solid #fbcfe8;font-weight:600" onclick="saveProduction()">+ 생산 완료 → 완제품 입고</button>
+      <button class="btn btn-danger btn-sm" id="prod-delete-btn" style="display:none;margin-left:auto">🗑️ 삭제</button>
     </div>
   </div>
 </div>
@@ -2144,7 +2142,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.5.3';
+const ERP_VERSION = 'v1.5.4';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -5101,7 +5099,7 @@ function viewVendor(id) {
 let itemFilter = '전체';
 
 function renderItemTable() {
-  const fixedTypes = ['원자재','부자재','OEM','완제품','외주가공'];
+  const fixedTypes = ['원자재','부자재','OEM','외주가공','완제품'];
   const extraTypes = [...new Set(DB.items.map(i=>i.type))].filter(t => !fixedTypes.includes(t));
   const types = ['전체', ...fixedTypes, ...extraTypes];
   const chipColors = {
@@ -5242,9 +5240,17 @@ function deleteItemFromModal() {
   if (!id) return;
   const item = DB.items.find(i => i.id === id);
   if (!item) return;
-  if (!confirm(`'${item.name}' 품목을 삭제합니까?\n연결된 BOM, 생산, 재고 데이터도 확인하세요.`)) return;
+  const isFinished = item.type === '완제품';
+  const confirmMsg = isFinished
+    ? `'${item.name}' 완제품을 삭제합니까?\n해당 완제품의 생산 기록에 투입되었던 BOM 재고가 자동 복구됩니다.`
+    : `'${item.name}' 품목을 삭제합니까?\n연결된 BOM, 생산, 재고 데이터도 확인하세요.`;
+  if (!confirm(confirmMsg)) return;
+  if (isFinished) restoreBOMStockForDeletedProduct(id, '완제품 삭제');
   DB.items = DB.items.filter(i => parseInt(i.id) !== parseInt(id) && i.id != id);
-  saveData(); closeModal('add-item'); renderItemTable(); showNotif('품목이 삭제되었습니다');
+  saveData(); closeModal('add-item'); renderItemTable();
+  if (typeof renderStock === 'function') renderStock();
+  updateBadges();
+  showNotif(isFinished ? '완제품 삭제 및 BOM 재고가 복구되었습니다' : '품목이 삭제되었습니다','success');
 }
 
 function saveItem() {
@@ -5476,9 +5482,17 @@ function deleteItem(id) {
   id = parseInt(id) || id;
   const item = DB.items.find(i => parseInt(i.id)===parseInt(id) || i.id==id);
   if (!item) return;
-  if (!confirm(`'${item.name}' 품목을 삭제합니까?`)) return;
+  const isFinished = item.type === '완제품';
+  const confirmMsg = isFinished
+    ? `'${item.name}' 완제품을 삭제합니까?\n해당 완제품의 생산 기록에 투입되었던 BOM 재고가 자동 복구됩니다.`
+    : `'${item.name}' 품목을 삭제합니까?`;
+  if (!confirm(confirmMsg)) return;
+  if (isFinished) restoreBOMStockForDeletedProduct(parseInt(id), '완제품 삭제');
   DB.items = (DB.items||[]).filter(i => parseInt(i.id) !== parseInt(id) && i.id != id);
-  saveData(); renderItemTable(); showNotif('품목이 삭제되었습니다');
+  saveData(); renderItemTable();
+  if (typeof renderStock === 'function') renderStock();
+  updateBadges();
+  showNotif(isFinished ? '완제품 삭제 및 BOM 재고가 복구되었습니다' : '품목이 삭제되었습니다','success');
 }
 
 function showItemDetail(id) {
@@ -6092,12 +6106,59 @@ function editProd(id) {
     if (delBtn) {
       delBtn.style.display = '';
       delBtn.onclick = () => {
-        if (!confirm('이 생산 항목을 삭제합니까? (재고는 자동 복원되지 않습니다)')) return;
+        if (!confirm('이 생산 항목을 삭제합니까?\nBOM에 투입되었던 재고가 자동으로 복구됩니다.')) return;
+        restoreProductionStock(p, { skipFinished: false, reason: '생산 취소' });
         DB.productions = DB.productions.filter(x => x.id !== id);
-        saveData(); closeModal('add-production'); renderProdTable(); updateBadges(); showNotif('삭제되었습니다');
+        saveData(); closeModal('add-production'); renderProdTable();
+        if (typeof renderStock === 'function') renderStock();
+        updateBadges();
+        showNotif('삭제 및 재고가 복구되었습니다','success');
       };
     }
   }, 50);
+}
+
+// 생산 기록 삭제 시 BOM 재고 복구 (완제품 재고도 차감)
+function restoreProductionStock(prod, opts) {
+  opts = opts || {};
+  if (!prod || !prod.productId) return;
+  const qty = prod.qty || 0;
+  if (!qty) return;
+  const bom = (DB.boms && DB.boms[prod.productId]) || [];
+  if (!DB.stockHistory) DB.stockHistory = [];
+  const reason = opts.reason || '생산 취소';
+  // BOM 구성품 재고 복구
+  bom.forEach(r => {
+    const itIdx = DB.items.findIndex(i => i.id === r.itemId);
+    if (itIdx < 0) return;
+    const restore = (r.qty||0) * qty;
+    DB.items[itIdx].stock = (DB.items[itIdx].stock||0) + restore;
+    DB.stockHistory.push({
+      id: nextId('stock'), itemId: r.itemId, type: 'in',
+      qty: restore, price: DB.items[itIdx].price||0, date: today(),
+      lot: DB.items[itIdx].lot||'', note: reason + ' 재고 복구'
+    });
+  });
+  // 완제품 재고 차감 (품목이 아직 존재하는 경우에만)
+  if (!opts.skipFinished) {
+    const pIdx = DB.items.findIndex(i => i.id === prod.productId);
+    if (pIdx >= 0) {
+      DB.items[pIdx].stock = Math.max(0, (DB.items[pIdx].stock||0) - qty);
+      DB.stockHistory.push({
+        id: nextId('stock'), itemId: prod.productId, type: 'out',
+        qty: qty, price: DB.items[pIdx].price||0, date: today(),
+        lot: '', note: reason + ' - 완제품 차감'
+      });
+    }
+  }
+}
+
+// 완제품이 품목/재고관리에서 삭제될 때, 관련 생산기록의 BOM 재고 복구
+function restoreBOMStockForDeletedProduct(productId, reason) {
+  const prodList = (DB.productions||[]).filter(p => p.productId === productId);
+  prodList.forEach(p => restoreProductionStock(p, { skipFinished: true, reason: reason || '완제품 삭제' }));
+  // 관련 생산 기록도 제거
+  DB.productions = (DB.productions||[]).filter(p => p.productId !== productId);
 }
 
 function completeProd(id) {
@@ -6206,14 +6267,19 @@ function deleteStockItem() {
   const id = _stockEditId;
   const item = DB.items.find(i => i.id === id);
   if (!item) return;
-  if (!confirm(`'${item.name}' 품목을 삭제합니까?\n연결된 BOM, 생산, 재고 데이터도 확인하세요.`)) return;
+  const isFinished = item.type === '완제품';
+  const confirmMsg = isFinished
+    ? `'${item.name}' 완제품을 삭제합니까?\n해당 완제품의 생산 기록에 투입되었던 BOM 재고가 자동 복구됩니다.`
+    : `'${item.name}' 품목을 삭제합니까?\n연결된 BOM, 생산, 재고 데이터도 확인하세요.`;
+  if (!confirm(confirmMsg)) return;
+  if (isFinished) restoreBOMStockForDeletedProduct(id, '완제품 삭제');
   DB.items = DB.items.filter(i => i.id !== id);
   DB.stockHistory = DB.stockHistory.filter(h => h.itemId !== id);
   saveData();
   closeModal('stock-edit-modal');
   renderStock();
   updateBadges();
-  showNotif('품목이 삭제되었습니다');
+  showNotif(isFinished ? '완제품 삭제 및 BOM 재고가 복구되었습니다' : '품목이 삭제되었습니다','success');
 }
 
 function renderStockTable() {
