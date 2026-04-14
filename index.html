@@ -576,7 +576,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="nav-group-title">거래처 · 품목</div>
     <div class="nav-item" onclick="go('vendor')"><span class="ico">🏢</span>업체 관리</div>
     <div class="nav-item" onclick="go('item')"><span class="ico">🗂️</span>품목 관리</div>
-    <div class="nav-item" onclick="go('archive')" style="padding-left:28px;font-size:11.5px"><span class="ico">📥</span>아카이브</div>
+    <div class="nav-item" id="nav-archive-sub" onclick="go('archive')" style="padding-left:28px;font-size:11.5px;display:none"><span class="ico">📥</span>아카이브</div>
     <div class="nav-item" onclick="go('bom')"><span class="ico">⚙️</span>BOM 관리</div>
   </div>
 
@@ -909,6 +909,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div onclick="setStockFilter('원자재',this)" style="display:inline-flex;align-items:center;padding:6px 16px;border-radius:8px 8px 0 0;cursor:pointer;font-size:12px;font-weight:600;background:#eefbf2;color:#2d7a4a;border:1px solid #b8e8c8;border-bottom:1px solid transparent">원자재</div>
           <div onclick="setStockFilter('부자재',this)" style="display:inline-flex;align-items:center;padding:6px 16px;border-radius:8px 8px 0 0;cursor:pointer;font-size:12px;font-weight:600;background:#f6f0ff;color:#7c4dbd;border:1px solid #d4bfee;border-bottom:1px solid transparent">부자재</div>
           <div onclick="setStockFilter('완제품',this)" style="display:inline-flex;align-items:center;padding:6px 16px;border-radius:8px 8px 0 0;cursor:pointer;font-size:12px;font-weight:600;background:#fef8e8;color:#9a7520;border:1px solid #f0dea0;border-bottom:1px solid transparent">완제품</div>
+          <div onclick="setStockFilter('아카이브',this)" style="display:inline-flex;align-items:center;padding:6px 16px;border-radius:8px 8px 0 0;cursor:pointer;font-size:12px;font-weight:600;background:#f1f3f5;color:#6b7280;border:1px solid #d1d5db;border-bottom:1px solid transparent">아카이브</div>
           <div style="width:14px"></div>
           <button class="btn btn-success btn-sm" onclick="if(requireWrite())openModal('stock-in-modal')">📥 입고 처리</button>
           <button class="btn btn-danger btn-sm" onclick="if(requireWrite())openModal('stock-out-modal')">📤 출고 처리</button>
@@ -2119,7 +2120,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.3.4';
+const ERP_VERSION = 'v1.3.5';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -2846,6 +2847,7 @@ function showNotif(msg, type='info') {
 // ═══════════════════════════════════════════════════════
 const PAGE_TITLES = {
   dashboard:'대시보드',workflow:'워크 플로우',vendor:'업체 관리',item:'품목 관리',
+  archive:'Archive',
   bom:'BOM 관리',production:'생산 관리',stock:'재고 관리',quote:'견적서',
   order:'발주서',sites:'관련 사이트',users:'사용자 관리',qc:'품질 관리',cost:'원가 분석',settings:'설정',
   cs:'CS 관리',sales:'매출 분석'
@@ -2863,6 +2865,9 @@ function go(page) {
   // Auto-open sales sub-nav when navigating to sales page
   const salesSub = $('sales-sub');
   if (salesSub) { if (page === 'sales') salesSub.classList.add('open'); else salesSub.classList.remove('open'); }
+  // 아카이브 sub-menu: 품목관리 또는 archive 페이지일 때만 표시
+  const archiveSub = $('nav-archive-sub');
+  if (archiveSub) archiveSub.style.display = (page === 'item' || page === 'archive') ? '' : 'none';
   // Render page-specific content
   const renders = {
     dashboard: renderDashboard,
@@ -5978,12 +5983,14 @@ function setStockFilter(type, el) {
     '원자재':{bg:'#4aab6e',text:'#fff',border:'#4aab6e'},
     '부자재':{bg:'#a06cd6',text:'#fff',border:'#a06cd6'},
     '완제품':{bg:'#cda030',text:'#fff',border:'#cda030'},
+    '아카이브':{bg:'#9ca3af',text:'#fff',border:'#9ca3af'},
   };
   const inactiveColors = {
     '전체':  {bg:'#eef6fc',text:'#3b82a0',border:'#c4dff2'},
     '원자재':{bg:'#eefbf2',text:'#2d7a4a',border:'#b8e8c8'},
     '부자재':{bg:'#f6f0ff',text:'#7c4dbd',border:'#d4bfee'},
     '완제품':{bg:'#fef8e8',text:'#9a7520',border:'#f0dea0'},
+    '아카이브':{bg:'#f1f3f5',text:'#6b7280',border:'#d1d5db'},
   };
   document.querySelectorAll('#stock-type-chips div').forEach(c => {
     const t = c.textContent.replace(/\(.*\)/, '').trim();
@@ -5992,7 +5999,7 @@ function setStockFilter(type, el) {
     c.style.borderBottom = '1px solid transparent';
   });
   if (el) {
-    const ac = {'전체':{bg:'#7bb8d6'},'원자재':{bg:'#4aab6e'},'부자재':{bg:'#a06cd6'},'완제품':{bg:'#cda030'}}[type] || {bg:'#7bb8d6'};
+    const ac = {'전체':{bg:'#7bb8d6'},'원자재':{bg:'#4aab6e'},'부자재':{bg:'#a06cd6'},'완제품':{bg:'#cda030'},'아카이브':{bg:'#9ca3af'}}[type] || {bg:'#7bb8d6'};
     el.style.background = ac.bg; el.style.color = '#fff'; el.style.borderColor = ac.bg;
     el.style.borderBottom = '3px solid currentColor';
   }
@@ -6062,11 +6069,20 @@ function renderStockTable() {
   const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray',외주가공:'gray'})[t]||'gray';
   const searchQ = ($('stock-search')?.value||'').toLowerCase().trim();
   const archivedList = (DB.archivedItems||[]).map(i => ({...i, _archived:true}));
-  const allItems = [...DB.items, ...archivedList];
-  const baseItems = allItems.filter(i => i.type !== 'OEM' && i.type !== '외주가공');
-  const filtered = _stockTypeFilter === '전체' ? baseItems : baseItems.filter(i => i.type === _stockTypeFilter);
+  const activeItems = DB.items.filter(i => i.type !== 'OEM' && i.type !== '외주가공');
+  const archivedBase = archivedList.filter(i => i.type !== 'OEM' && i.type !== '외주가공');
+  let filtered;
+  if (_stockTypeFilter === '아카이브') {
+    filtered = archivedBase;
+  } else if (_stockTypeFilter === '전체') {
+    filtered = activeItems;
+  } else {
+    filtered = activeItems.filter(i => i.type === _stockTypeFilter);
+  }
   const items = searchQ ? filtered.filter(i => (i.name||'').toLowerCase().includes(searchQ) || (i.code||'').toLowerCase().includes(searchQ)) : filtered;
-  const totalVal = baseItems.reduce((s,i) => s + (i.stock||0)*(i.price||0), 0);
+  // 총 재고평가액: 현재 탭에 따라 변경 - 아카이브 탭이면 아카이브 합계, 아니면 활성 품목 합계
+  const totalSource = _stockTypeFilter === '아카이브' ? archivedBase : activeItems;
+  const totalVal = totalSource.reduce((s,i) => s + (i.stock||0)*(i.price||0), 0);
   const tvEl = $('stock-total-value');
   if (tvEl) tvEl.textContent = fmtW(totalVal);
   const typeRowBg = {원자재:'#fafef9', 부자재:'#fefaff', OEM:'#fafcff', 완제품:'#fffefa', 외주가공:'#fafbfc'};
@@ -6074,11 +6090,10 @@ function renderStockTable() {
     const pct = stockPct(i);
     const stockVal = (i.stock||0) * (i.price||0);
     const rowBg = i._archived ? '#f5f5f5' : (typeRowBg[i.type] || '#fff');
-    const nameExtra = i._archived ? ' <span style="font-size:10px;color:var(--gray-500);background:#e5e7eb;padding:1px 6px;border-radius:8px;margin-left:4px">아카이브</span>' : '';
     return `<tr style="background:${rowBg}${i._archived?';opacity:0.85':''}">
       <td style="text-align:center"><span class="badge ${typeBadge(i.type)}" style="font-size:10px">${i.type}</span></td>
       <td style="font-family:monospace;font-size:12px;font-weight:500;text-align:center">${i.code}</td>
-      <td class="lnk" onclick="showItemDetail(${i.id})" style="text-align:center">${i.name}${nameExtra}</td>
+      <td class="lnk" onclick="showItemDetail(${i.id})" style="text-align:center">${i.name}</td>
       <td style="font-size:12px;color:var(--gray-500);text-align:center">${i.spec||'-'}</td>
       <td style="text-align:center;font-size:13px"><strong>${fmt(i.stock)}</strong></td>
       <td style="text-align:right;color:var(--sky-700);font-weight:500;font-size:13px;padding-right:16px;font-variant-numeric:tabular-nums">${fmtW(stockVal)}</td>
