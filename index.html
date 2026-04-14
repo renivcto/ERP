@@ -815,7 +815,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div style="display:flex;justify-content:space-between;margin-bottom:14px;gap:8px;flex-wrap:wrap;align-items:center">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <div style="display:flex;gap:0;flex-wrap:wrap;align-items:center" id="item-filter-chips"></div>
-          <button class="btn btn-primary btn-sm pg-topbar-btn" style="margin-left:6px" onclick="if(requireWrite()){editingId['add-item']=null;const db=$('item-delete-btn');if(db)db.style.display='none';$('i-type').value=(itemFilter&&itemFilter!=='전체')?itemFilter:'';populateItemVendorSelect();$('i-code').value='';$('i-name').value='';$('i-spec').value='';$('i-price').value='';$('i-stock').value=0;$('i-material').value='';$('i-note').value='';if($('i-barcode'))$('i-barcode').value='';if($('i-vendor'))$('i-vendor').value='';const prev=$('i-img-preview');if(prev)prev.innerHTML='📷';const imgIn=$('i-img');if(imgIn){imgIn.value='';delete imgIn.dataset.compressed;}const bcPrev=$('i-barcode-preview');if(bcPrev)bcPrev.innerHTML='바코드 이미지';const bcIn=$('i-barcode-img');if(bcIn)bcIn.value='';const qExist=$('i-quote-existing');if(qExist)qExist.style.display='none';const qPrev=$('i-quote-preview');if(qPrev)qPrev.innerHTML='';const qFile=$('i-quote-file');if(qFile)qFile.value='';window._clearQuoteFile=false;openModal('add-item')}">+ 품목 등록</button>
+          <button class="btn btn-primary btn-sm pg-topbar-btn" style="margin-left:6px" onclick="if(requireWrite()){editingId['add-item']=null;const db=$('item-delete-btn');if(db)db.style.display='none';$('i-type').value=(itemFilter&&itemFilter!=='전체')?itemFilter:'';populateItemVendorSelect();updateBomCostBtnState();$('i-code').value='';$('i-name').value='';$('i-spec').value='';$('i-price').value='';$('i-stock').value=0;$('i-material').value='';$('i-note').value='';if($('i-barcode'))$('i-barcode').value='';if($('i-vendor'))$('i-vendor').value='';const prev=$('i-img-preview');if(prev)prev.innerHTML='📷';const imgIn=$('i-img');if(imgIn){imgIn.value='';delete imgIn.dataset.compressed;}const bcPrev=$('i-barcode-preview');if(bcPrev)bcPrev.innerHTML='바코드 이미지';const bcIn=$('i-barcode-img');if(bcIn)bcIn.value='';const qExist=$('i-quote-existing');if(qExist)qExist.style.display='none';const qPrev=$('i-quote-preview');if(qPrev)qPrev.innerHTML='';const qFile=$('i-quote-file');if(qFile)qFile.value='';window._clearQuoteFile=false;openModal('add-item')}">+ 품목 등록</button>
           <button class="btn btn-sm" id="archive-items-btn" onclick="archiveSelectedItems()" style="background:#f0f0f0;color:#666;border:1px solid #d0d0d0;font-size:12px;padding:5px 12px;display:none">📥 아카이브</button>
         </div>
         <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
@@ -1577,7 +1577,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="modal-hdr"><span class="modal-ttl">📦 품목 등록/수정</span><button class="modal-x" onclick="closeModal('add-item')">✕</button></div>
     <div class="modal-body">
       <div class="fg2">
-        <div class="fg"><label>분류<span class="req">*</span></label><select class="fs" id="i-type" onchange="populateItemVendorSelect()"><option value="">— 선택하세요 —</option><option>원자재</option><option>부자재</option><option>OEM</option><option>완제품</option><option>반제품</option><option>외주가공</option></select></div>
+        <div class="fg"><label>분류<span class="req">*</span></label><select class="fs" id="i-type" onchange="populateItemVendorSelect();updateBomCostBtnState()"><option value="">— 선택하세요 —</option><option>원자재</option><option>부자재</option><option>OEM</option><option>완제품</option><option>반제품</option><option>외주가공</option></select></div>
         <div class="fg"><label>품목코드</label><input class="fi" id="i-code" style="font-family:monospace"></div>
         <div class="fg full"><label>품목명<span class="req">*</span></label><input class="fi" id="i-name"></div>
         <div class="fg full"><label>업체</label><select class="fs" id="i-vendor"></select></div>
@@ -2146,7 +2146,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.8.2';
+const ERP_VERSION = 'v1.8.3';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -5524,6 +5524,7 @@ function editItem(id) {
     if ($('i-barcode')) $('i-barcode').value = i.barcode||'';
     // 분류 설정 후 해당 분류의 업체 리스트로 드롭박스 채우기
     populateItemVendorSelect();
+    updateBomCostBtnState();
     if ($('i-vendor')) $('i-vendor').value = i.vendorId != null ? String(i.vendorId) : '';
     const prev = $('i-img-preview');
     if (prev) prev.innerHTML = i.image ? `<img src="${i.image}" style="width:100%;height:100%;object-fit:cover;border-radius:6px">` : '📷';
@@ -5662,12 +5663,35 @@ function renderBOMPage() {
   renderBOM();
 }
 
+function updateBomCostBtnState() {
+  const btn = document.getElementById('i-bom-cost-btn');
+  if (!btn) return;
+  const t = ($('i-type') && $('i-type').value) || '';
+  const enabled = (t === '완제품');
+  btn.disabled = !enabled;
+  if (enabled) {
+    btn.style.background = '#f3f0ff';
+    btn.style.color = '#6d5dd3';
+    btn.style.border = '1px solid #d4ccf0';
+    btn.style.cursor = 'pointer';
+    btn.style.opacity = '1';
+    btn.title = 'BOM 합계 제조원가를 단가로 불러오기';
+  } else {
+    btn.style.background = '#f3f4f6';
+    btn.style.color = '#9ca3af';
+    btn.style.border = '1px solid #e5e7eb';
+    btn.style.cursor = 'not-allowed';
+    btn.style.opacity = '0.6';
+    btn.title = '완제품 분류에서만 사용 가능합니다';
+  }
+}
+
 function loadBomCostToPrice() {
   const id = editingId['add-item'];
   const typeEl = $('i-type');
   const curType = typeEl ? typeEl.value : '';
-  if (!['완제품','반제품'].includes(curType)) {
-    showNotif('BOM은 완제품/반제품에만 해당됩니다','warning');
+  if (curType !== '완제품') {
+    showNotif('완제품 분류에서만 사용 가능합니다','warning');
     return;
   }
   if (!id) {
