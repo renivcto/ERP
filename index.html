@@ -1924,7 +1924,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             <div style="display:flex;align-items:center;gap:8px;background:var(--green-50);border:1px solid var(--green-400);border-radius:7px;padding:8px 12px;font-size:12px;color:var(--green-700)">
               <span>📄</span><span id="o-pdf-existing-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
               <button class="btn btn-outline btn-xs" onclick="viewOrderFileDirect('origin')">보기</button>
-              <button class="btn btn-outline btn-xs" onclick="clearOrderFile('origin')">변경</button>
+              <button class="btn btn-outline btn-xs" style="color:#b91c1c;border-color:#fca5a5" onclick="deleteOrderFileFromEdit('origin')">삭제</button>
             </div>
           </div>
         </div>
@@ -1941,7 +1941,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             <div style="display:flex;align-items:center;gap:8px;background:var(--red-50);border:1px solid var(--red-400);border-radius:7px;padding:8px 12px;font-size:12px;color:var(--red-700)">
               <span>🔴</span><span id="o-stamp-existing-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
               <button class="btn btn-outline btn-xs" onclick="viewOrderFileDirect('stamp')">보기</button>
-              <button class="btn btn-outline btn-xs" onclick="clearOrderFile('stamp')">변경</button>
+              <button class="btn btn-outline btn-xs" style="color:#b91c1c;border-color:#fca5a5" onclick="deleteOrderFileFromEdit('stamp')">삭제</button>
             </div>
           </div>
         </div>
@@ -2144,7 +2144,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.6.1';
+const ERP_VERSION = 'v1.6.2';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -3106,7 +3106,7 @@ function renderDashStats() {
           </span>
           <span style="display:inline-flex;align-items:center;gap:6px;flex-shrink:0">
             <span style="font-size:12.5px;font-weight:700;color:#7c3aed;font-variant-numeric:tabular-nums">${fmtW(Math.round(v.total*1.1))}</span>
-            ${ddayHtml}
+            <span style="display:inline-flex;justify-content:flex-end;width:42px;flex-shrink:0">${ddayHtml}</span>
           </span>
         </div>`;
     }).join('') || '<div style="padding:8px 0;color:var(--gray-400);font-size:12px;text-align:center">발주 없음</div>';
@@ -7099,10 +7099,58 @@ function clearOrderFile(type) {
 }
 
 function viewOrderFileDirect(type) {
-  const data = type === 'stamp' ? _orderStampData : _orderPdfData;
-  if (!data) return;
+  let data = type === 'stamp' ? _orderStampData : _orderPdfData;
+  if (!data) {
+    // 수정 모드에서 기존 DB 레코드의 파일을 조회
+    const editVal = (typeof editingId !== 'undefined') ? editingId['add-order'] : null;
+    if (editVal !== null && editVal !== undefined) {
+      const o = DB.orders[parseInt(editVal)];
+      if (o) data = type === 'stamp' ? o.stampData : o.pdfData;
+    }
+  }
+  if (!data || data === '__idb__' || data === '__stored__') {
+    showNotif(type==='stamp'?'도장 날인본이 없습니다':'원본 PDF가 없습니다','warning');
+    return;
+  }
   const w = window.open();
   w.document.write(`<iframe src="${data}" style="width:100%;height:100vh;border:none"></iframe>`);
+}
+
+function deleteOrderFileFromEdit(type) {
+  const msg = type==='stamp' ? '도장 날인본을 삭제하시겠습니까?' : '발주서 원본 PDF를 삭제하시겠습니까?';
+  if (!confirm(msg)) return;
+  // 메모리 상태 초기화
+  if (type === 'stamp') {
+    _orderStampData = null; _orderStampName = null;
+    const fp = $('o-stamp-pdf'); if (fp) fp.value = '';
+    const pv = $('o-stamp-preview'); if (pv) pv.style.display = 'none';
+    const ex = $('o-stamp-existing'); if (ex) ex.style.display = 'none';
+  } else {
+    _orderPdfData = null; _orderPdfName = null;
+    const fp = $('o-pdf'); if (fp) fp.value = '';
+    const pv = $('o-pdf-preview'); if (pv) pv.style.display = 'none';
+    const ex = $('o-pdf-existing'); if (ex) ex.style.display = 'none';
+  }
+  // DB 레코드에서도 삭제
+  const editVal = (typeof editingId !== 'undefined') ? editingId['add-order'] : null;
+  if (editVal !== null && editVal !== undefined) {
+    const idx = parseInt(editVal);
+    if (DB.orders[idx]) {
+      if (type === 'stamp') {
+        DB.orders[idx].stampData = null;
+        DB.orders[idx].stampName = '';
+        DB.orders[idx].stampUploadedAt = 0;
+      } else {
+        DB.orders[idx].pdfData = null;
+        DB.orders[idx].pdfName = '';
+      }
+      saveData();
+      try { renderOrderTable(); } catch(e) {}
+      showNotif(type==='stamp'?'날인본이 삭제되었습니다':'원본 PDF가 삭제되었습니다','success');
+    }
+  } else {
+    showNotif('삭제되었습니다','success');
+  }
 }
 
 function viewOrderPDF() { viewOrderFileDirect('origin'); }
