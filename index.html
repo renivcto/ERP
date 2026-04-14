@@ -2120,7 +2120,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.3.5';
+const ERP_VERSION = 'v1.3.6';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -6071,17 +6071,21 @@ function renderStockTable() {
   const archivedList = (DB.archivedItems||[]).map(i => ({...i, _archived:true}));
   const activeItems = DB.items.filter(i => i.type !== 'OEM' && i.type !== '외주가공');
   const archivedBase = archivedList.filter(i => i.type !== 'OEM' && i.type !== '외주가공');
+  const allItems = [...activeItems, ...archivedBase];
   let filtered;
   if (_stockTypeFilter === '아카이브') {
     filtered = archivedBase;
   } else if (_stockTypeFilter === '전체') {
-    filtered = activeItems;
+    filtered = allItems;
   } else {
     filtered = activeItems.filter(i => i.type === _stockTypeFilter);
   }
   const items = searchQ ? filtered.filter(i => (i.name||'').toLowerCase().includes(searchQ) || (i.code||'').toLowerCase().includes(searchQ)) : filtered;
-  // 총 재고평가액: 현재 탭에 따라 변경 - 아카이브 탭이면 아카이브 합계, 아니면 활성 품목 합계
-  const totalSource = _stockTypeFilter === '아카이브' ? archivedBase : activeItems;
+  // 총 재고평가액: 전체 탭이면 활성+아카이브 합계, 아카이브 탭이면 아카이브 합계, 그 외 타입 탭이면 해당 타입의 활성 품목 합계
+  let totalSource;
+  if (_stockTypeFilter === '아카이브') totalSource = archivedBase;
+  else if (_stockTypeFilter === '전체') totalSource = allItems;
+  else totalSource = activeItems.filter(i => i.type === _stockTypeFilter);
   const totalVal = totalSource.reduce((s,i) => s + (i.stock||0)*(i.price||0), 0);
   const tvEl = $('stock-total-value');
   if (tvEl) tvEl.textContent = fmtW(totalVal);
