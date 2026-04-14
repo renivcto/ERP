@@ -2146,7 +2146,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.8.1';
+const ERP_VERSION = 'v1.8.2';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -9708,9 +9708,12 @@ function initERPWhenReady() {
       // Firestore 데이터 + DEFAULT_DB 누락 필드 보완
       const merged = Object.assign({}, JSON.parse(JSON.stringify(DEFAULT_DB)));
       // 배열 필드: Firestore 우선 → localStorage fallback → DEFAULT_DB
+      // ★ 버그 수정: Firestore 배열이 []이어도(= 전부 삭제됨) Firestore를 신뢰해야 함.
+      //    이전 코드는 length>0 일 때만 Firestore 사용 → 마지막 항목 삭제 시 localStorage
+      //    의 stale 데이터가 되살아나는 문제 발생 (특히 보기 권한 유저에서).
       ['vendors','items','orders','productions','stockHistory','quotes','tasks','users','shops','shopOrders','cs','archivedItems'].forEach(k => {
-        if (firestoreDB[k] && firestoreDB[k].length > 0) {
-          merged[k] = firestoreDB[k];
+        if (Array.isArray(firestoreDB[k])) {
+          merged[k] = firestoreDB[k]; // 빈 배열도 명시적 상태로 신뢰
         } else if (localDB[k] && localDB[k].length > 0) {
           merged[k] = localDB[k];
         }
