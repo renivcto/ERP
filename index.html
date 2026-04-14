@@ -831,7 +831,10 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <!-- ══════════════ ARCHIVE ══════════════ -->
     <div class="page" id="page-archive">
       <h2 class="page-title" style="font-size:16px;margin-bottom:14px">📥 아카이브 품목</h2>
-      <div style="background:var(--sky-50);border:1px solid var(--sky-200);border-radius:7px;padding:6px 14px;margin-bottom:10px;font-size:12px;color:var(--sky-800)">📦 아카이브 총 재고평가액 &nbsp;: &nbsp;&nbsp;&nbsp;<strong id="archive-total-value">-</strong></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
+        <div style="background:var(--sky-50);border:1px solid var(--sky-200);border-radius:7px;padding:6px 14px;font-size:12px;color:var(--sky-800)">📦 아카이브 총 재고평가액 &nbsp;: &nbsp;&nbsp;&nbsp;<strong id="archive-total-value">-</strong> &nbsp;·&nbsp; 품목 수: <strong id="archive-count">0</strong></div>
+        <button class="btn btn-outline btn-sm" onclick="forceReloadArchive()" style="font-size:11px">🔄 Firestore에서 다시 불러오기</button>
+      </div>
       <div class="card">
         <div class="card-body p0 tbl-wrap">
           <table>
@@ -2119,7 +2122,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.3.0';
+const ERP_VERSION = 'v1.3.1';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -5155,6 +5158,9 @@ function renderArchivePage() {
   const totalVal = DB.archivedItems.reduce((s,i) => s + (i.stock||0)*(i.price||0), 0);
   const tvEl = $('archive-total-value');
   if (tvEl) tvEl.textContent = fmtW(totalVal);
+  const cntEl = $('archive-count');
+  if (cntEl) cntEl.textContent = DB.archivedItems.length;
+  console.log('📥 [renderArchivePage] DB.archivedItems:', DB.archivedItems.length, '건', DB.archivedItems);
   tbody.innerHTML = DB.archivedItems.map(i => {
     const v = getVendor(i.vendorId);
     const stockVal = (i.stock||0) * (i.price||0);
@@ -5179,6 +5185,30 @@ function updateArchiveNote(id, note) {
   if (!item) return;
   item.archiveNote = note;
   saveData();
+}
+async function forceReloadArchive() {
+  showNotif('Firestore에서 archivedItems를 다시 불러오는 중...', 'info');
+  try {
+    if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) {
+      showNotif('Firestore 연결이 준비되지 않았습니다', 'warning');
+      return;
+    }
+    const snap = await window._firestoreGetDoc(window._firestoreDoc(window._firebaseDb, 'erp_data', 'archivedItems'));
+    if (snap.exists()) {
+      const data = JSON.parse(snap.data().data);
+      DB.archivedItems = data || [];
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
+      renderArchivePage();
+      showNotif('Firestore archivedItems 로드 완료: ' + DB.archivedItems.length + '건', DB.archivedItems.length > 0 ? 'success' : 'warning');
+      console.log('🔄 [forceReloadArchive] 로드됨:', DB.archivedItems);
+    } else {
+      showNotif('Firestore에 archivedItems 문서가 없습니다 (최초 상태)', 'warning');
+      console.log('🔄 [forceReloadArchive] Firestore에 archivedItems 문서 없음');
+    }
+  } catch(e) {
+    console.error('forceReloadArchive 실패:', e);
+    showNotif('실패: ' + e.message, 'warning');
+  }
 }
 
 function populateItemVendorSelect() {
