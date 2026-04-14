@@ -2131,7 +2131,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.5.0';
+const ERP_VERSION = 'v1.5.1';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -5502,7 +5502,15 @@ function showItemDetail(id) {
 let bomChart;
 
 function renderBOMPage() {
+  if (!DB.bomTimestamps) DB.bomTimestamps = {};
   const fgItems = (DB.items||[]).filter(i=>i.type==='완제품'||i.type==='반제품');
+  // 최신 BOM 등록/수정 순 정렬 (미등록은 뒤로)
+  fgItems.sort((a,b) => {
+    const ta = DB.bomTimestamps[a.id] || 0;
+    const tb = DB.bomTimestamps[b.id] || 0;
+    if (tb !== ta) return tb - ta;
+    return (b.id||0) - (a.id||0);
+  });
   const sel = $('bom-product-sel');
   sel.innerHTML = fgItems.map(i=>`<option value="${i.id}">${i.name}</option>`).join('');
   renderBOM();
@@ -5799,7 +5807,9 @@ function saveBOM() {
     }
   });
   if (!DB.boms) DB.boms = {};
+  if (!DB.bomTimestamps) DB.bomTimestamps = {};
   DB.boms[productId] = rows;
+  DB.bomTimestamps[productId] = Date.now();
   saveData(); closeModal('add-bom'); showNotif('BOM이 저장되었습니다','success');
   if ($('page-bom') && $('page-bom').classList.contains('active')) renderBOM();
 }
