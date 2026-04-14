@@ -831,9 +831,13 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <!-- ══════════════ ARCHIVE ══════════════ -->
     <div class="page" id="page-archive">
       <h2 class="page-title" style="font-size:16px;margin-bottom:14px">📥 아카이브 품목</h2>
+      <div id="archive-diag-panel" style="background:#fffbeb;border:2px solid #fbbf24;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#78350f;font-family:monospace;line-height:1.7"></div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
         <div style="background:var(--sky-50);border:1px solid var(--sky-200);border-radius:7px;padding:6px 14px;font-size:12px;color:var(--sky-800)">📦 아카이브 총 재고평가액 &nbsp;: &nbsp;&nbsp;&nbsp;<strong id="archive-total-value">-</strong> &nbsp;·&nbsp; 품목 수: <strong id="archive-count">0</strong></div>
-        <button class="btn btn-outline btn-sm" onclick="forceReloadArchive()" style="font-size:11px">🔄 Firestore에서 다시 불러오기</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-outline btn-sm" onclick="forceReloadArchive()" style="font-size:11px">🔄 Firestore에서 다시 불러오기</button>
+          <button class="btn btn-sm" onclick="testAddArchivedItem()" style="font-size:11px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d">🧪 테스트: 더미 아카이브 추가</button>
+        </div>
       </div>
       <div class="card">
         <div class="card-body p0 tbl-wrap">
@@ -2122,7 +2126,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.3.1';
+const ERP_VERSION = 'v1.3.2';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -5126,19 +5130,43 @@ function updateArchiveBtn() {
 }
 function archiveSelectedItems() {
   const ids = [...document.querySelectorAll('.item-check:checked')].map(cb => parseInt(cb.dataset.id));
+  console.log('📥 [archiveSelectedItems] 선택된 ID:', ids);
   if (!ids.length) return;
   if (!confirm(ids.length + '개 품목을 아카이브하시겠습니까?')) return;
   if (!DB.archivedItems) DB.archivedItems = [];
+  const before = DB.archivedItems.length;
   ids.forEach(id => {
     const idx = DB.items.findIndex(i => i.id === id);
     if (idx !== -1) {
       const item = DB.items.splice(idx, 1)[0];
       item._archivedAt = new Date().toISOString().slice(0,10);
       DB.archivedItems.push(item);
+      console.log('📥 [archiveSelectedItems] 추가됨:', item.code, item.name);
+    } else {
+      console.warn('📥 [archiveSelectedItems] ID ' + id + ' 을 DB.items에서 찾을 수 없음');
     }
   });
+  console.log('📥 [archiveSelectedItems] 결과 - archivedItems:', before, '→', DB.archivedItems.length);
   saveData(); renderItemTable(); updateBadges();
-  showNotif(ids.length + '개 품목이 아카이브되었습니다', 'success');
+  showNotif(ids.length + '개 품목이 아카이브되었습니다 (총 ' + DB.archivedItems.length + '건)', 'success');
+}
+function testAddArchivedItem() {
+  if (!DB.archivedItems) DB.archivedItems = [];
+  const dummy = {
+    id: 99000 + DB.archivedItems.length,
+    type: '부자재',
+    code: 'TEST-' + Date.now().toString().slice(-5),
+    name: '🧪 테스트 아카이브 품목 ' + (DB.archivedItems.length+1),
+    spec: 'test', price: 1000, stock: 10, minStock: 0, maxStock: 0,
+    lot: '', expiry: '', vendorId: 1, material: '', note: '',
+    _archivedAt: new Date().toISOString().slice(0,10),
+    archiveNote: '테스트용 더미 데이터'
+  };
+  DB.archivedItems.push(dummy);
+  console.log('🧪 [test] DB.archivedItems에 추가 후 길이:', DB.archivedItems.length);
+  saveData();
+  renderArchivePage();
+  showNotif('테스트 더미 추가 완료 — 아카이브: ' + DB.archivedItems.length + '건', 'success');
 }
 function restoreArchivedItem(id) {
   if (!DB.archivedItems) return;
@@ -5160,6 +5188,18 @@ function renderArchivePage() {
   if (tvEl) tvEl.textContent = fmtW(totalVal);
   const cntEl = $('archive-count');
   if (cntEl) cntEl.textContent = DB.archivedItems.length;
+  // 진단 패널 업데이트
+  const diagPanel = $('archive-diag-panel');
+  if (diagPanel) {
+    let lsArchived = 0;
+    try { const s = localStorage.getItem(STORE_KEY); if (s) { const d = JSON.parse(s); lsArchived = (d.archivedItems||[]).length; } } catch(e) {}
+    const items = DB.archivedItems.slice(0, 5).map(i => `[${i.code||'?'}] ${i.name||'?'}`).join(', ') || '(없음)';
+    diagPanel.innerHTML = `<strong>🔎 진단 (${ERP_VERSION})</strong><br>
+      • DB.archivedItems (현재 메모리): <strong>${DB.archivedItems.length}건</strong><br>
+      • localStorage archivedItems: <strong>${lsArchived}건</strong><br>
+      • 샘플: ${items}<br>
+      • DB.items (품목관리에 보이는 것): ${DB.items.length}건`;
+  }
   console.log('📥 [renderArchivePage] DB.archivedItems:', DB.archivedItems.length, '건', DB.archivedItems);
   tbody.innerHTML = DB.archivedItems.map(i => {
     const v = getVendor(i.vendorId);
