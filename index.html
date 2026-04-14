@@ -2144,7 +2144,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.6.2';
+const ERP_VERSION = 'v1.6.3';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -4915,9 +4915,36 @@ function openDataUrlInNewTab(dataUrl, fileName) {
     while (n--) u8arr[n] = bstr.charCodeAt(n);
     const blob = new Blob([u8arr], {type: mime});
     const blobUrl = URL.createObjectURL(blob);
-    const win = window.open(blobUrl, '_blank');
-    // 새 탭이 열린 후 URL 해제 (메모리 관리)
-    if (win) setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+    const isPdf = /pdf/i.test(mime) || /\.pdf$/i.test(fileName||'');
+    const isImg = /^image\//i.test(mime) || /\.(jpe?g|png|gif|webp|svg)$/i.test(fileName||'');
+    const isOfficeOrBin = /\.(xlsx|xls|docx?|pptx?)$/i.test(fileName||'') || /officedocument|msword|excel|powerpoint/i.test(mime);
+
+    if (isOfficeOrBin) {
+      // Office 문서는 브라우저에서 인라인 표시 불가 → 다운로드로 fallback
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = fileName || '파일';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+      return;
+    }
+
+    // PDF / 이미지 / 기타 → 새 탭에서 iframe으로 인라인 표시 (다운로드 방지)
+    const title = (fileName||'파일').replace(/[<>]/g,'');
+    const win = window.open('', '_blank');
+    if (!win) { // 팝업 차단 시 fallback
+      window.open(blobUrl, '_blank');
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+      return;
+    }
+    if (isImg) {
+      win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>html,body{margin:0;height:100%;background:#111;display:flex;align-items:center;justify-content:center}img{max-width:100%;max-height:100vh}</style></head><body><img src="${blobUrl}" alt=""></body></html>`);
+    } else {
+      // PDF + 기타
+      win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>html,body{margin:0;height:100%}iframe{width:100%;height:100%;border:0}</style></head><body><iframe src="${blobUrl}"></iframe></body></html>`);
+    }
+    win.document.close();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
   } catch(e) {
     // 변환 실패 시 다운로드로 fallback
     const a = document.createElement('a');
