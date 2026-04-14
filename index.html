@@ -826,11 +826,12 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <!-- ══════════════ ARCHIVE ══════════════ -->
     <div class="page" id="page-archive">
       <h2 class="page-title" style="font-size:16px;margin-bottom:14px">📥 아카이브 품목</h2>
+      <div style="background:var(--sky-50);border:1px solid var(--sky-200);border-radius:7px;padding:6px 14px;margin-bottom:10px;font-size:12px;color:var(--sky-800)">📦 아카이브 총 재고평가액 &nbsp;: &nbsp;&nbsp;&nbsp;<strong id="archive-total-value">-</strong></div>
       <div class="card">
         <div class="card-body p0 tbl-wrap">
           <table>
-            <colgroup><col style="width:60px"><col style="width:90px"><col style="min-width:200px"><col style="width:100px"><col style="width:80px"><col style="width:90px"><col style="width:90px"><col style="width:60px"></colgroup>
-            <thead><tr><th>분류</th><th>코드</th><th>품목명</th><th style="text-align:center">용량</th><th style="text-align:center">단가</th><th style="text-align:center">업체</th><th style="text-align:center">아카이브일</th><th style="text-align:center">관리</th></tr></thead>
+            <colgroup><col style="width:60px"><col style="width:90px"><col style="min-width:200px"><col style="width:80px"><col style="width:80px"><col style="width:70px"><col style="width:100px"><col style="width:90px"><col style="min-width:150px"><col style="width:80px"><col style="width:60px"></colgroup>
+            <thead><tr><th>분류</th><th>코드</th><th>품목명</th><th style="text-align:center">용량</th><th style="text-align:center">단가</th><th style="text-align:center">재고수량</th><th style="text-align:right;padding-right:12px">재고평가액</th><th style="text-align:center">업체</th><th style="text-align:center">비고</th><th style="text-align:center">아카이브일</th><th style="text-align:center">관리</th></tr></thead>
             <tbody id="archive-table"></tbody>
           </table>
         </div>
@@ -2414,7 +2415,7 @@ async function loadDataFromFirestore() {
     const cacheGetDoc = window._firestoreGetDoc;
     const docRef = window._firestoreDoc;
 
-    const keys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders','meta'];
+    const keys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders','archivedItems','meta'];
     // 기본 getDoc 사용 (서버 우선, 오프라인 시 캐시 fallback)
     let snaps = await Promise.all(keys.map(k => cacheGetDoc(docRef(db, 'erp_data', k))));
     console.log('🔍 [FIRESTORE] 기본 읽기 완료');
@@ -2443,7 +2444,7 @@ async function loadDataFromFirestore() {
     if (!snaps[metaIdx].exists()) { console.log('Firestore meta 없음 (최초 사용)'); return { _noData: true }; }
 
     const result = {};
-    const collKeys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders'];
+    const collKeys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders','archivedItems'];
     snaps.slice(0, collKeys.length).forEach((snap, i) => {
       const exists = snap.exists();
       if (exists) {
@@ -2777,7 +2778,7 @@ const today = () => new Date().toISOString().slice(0,10);
 const uid = () => Date.now();
 
 function getVendor(id) { return DB.vendors.find(v => v.id == id || String(v.id) === String(id)) || {}; }
-function getItem(id) { return DB.items.find(i => i.id == id) || {}; }
+function getItem(id) { return DB.items.find(i => i.id == id) || (DB.archivedItems||[]).find(i => i.id == id) || {}; }
 function nextId(key) { return DB._nextId[key]++; }
 
 function statusBadge(s) {
@@ -5146,19 +5147,33 @@ function renderArchivePage() {
   const tbody = $('archive-table');
   if (!tbody) return;
   const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray',외주가공:'gray'})[t]||'gray';
+  const totalVal = DB.archivedItems.reduce((s,i) => s + (i.stock||0)*(i.price||0), 0);
+  const tvEl = $('archive-total-value');
+  if (tvEl) tvEl.textContent = fmtW(totalVal);
   tbody.innerHTML = DB.archivedItems.map(i => {
     const v = getVendor(i.vendorId);
+    const stockVal = (i.stock||0) * (i.price||0);
     return `<tr>
       <td><span class="badge ${typeBadge(i.type)}" style="font-size:10px">${i.type}</span></td>
       <td style="font-family:monospace;font-size:12px;font-weight:500;text-align:center">${i.code||'-'}</td>
       <td>${i.name}</td>
       <td style="text-align:center;font-size:12px">${i.spec||'-'}</td>
       <td style="text-align:center">${fmtW(i.price)}</td>
+      <td style="text-align:center;font-size:13px"><strong>${fmt(i.stock||0)}</strong></td>
+      <td style="text-align:right;color:var(--sky-700);font-weight:500;font-size:13px;padding-right:12px;font-variant-numeric:tabular-nums">${fmtW(stockVal)}</td>
       <td class="lnk" onclick="viewVendor(${i.vendorId})" style="text-align:center">${v.company||'-'}</td>
+      <td style="padding:4px 6px"><input type="text" value="${(i.archiveNote||'').replace(/"/g,'&quot;')}" placeholder="비고" onchange="updateArchiveNote(${i.id}, this.value)" style="width:100%;font-size:12px;padding:3px 6px;border:1px solid var(--gray-200);border-radius:4px;background:#fafafa"></td>
       <td style="text-align:center;font-size:12px;color:var(--gray-500)">${i._archivedAt||'-'}</td>
       <td style="text-align:center"><button class="btn btn-outline btn-xs" onclick="restoreArchivedItem(${i.id})" style="color:var(--sky-700);border-color:var(--sky-300)">복원</button></td>
     </tr>`;
-  }).join('') || '<tr><td colspan="8" class="empty">아카이브된 품목이 없습니다</td></tr>';
+  }).join('') || '<tr><td colspan="11" class="empty">아카이브된 품목이 없습니다</td></tr>';
+}
+function updateArchiveNote(id, note) {
+  if (!DB.archivedItems) return;
+  const item = DB.archivedItems.find(i => i.id == id);
+  if (!item) return;
+  item.archiveNote = note;
+  saveData();
 }
 
 function populateItemVendorSelect() {
@@ -6040,7 +6055,9 @@ function deleteStockItem() {
 function renderStockTable() {
   const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray',외주가공:'gray'})[t]||'gray';
   const searchQ = ($('stock-search')?.value||'').toLowerCase().trim();
-  const baseItems = DB.items.filter(i => i.type !== 'OEM' && i.type !== '외주가공');
+  const archivedList = (DB.archivedItems||[]).map(i => ({...i, _archived:true}));
+  const allItems = [...DB.items, ...archivedList];
+  const baseItems = allItems.filter(i => i.type !== 'OEM' && i.type !== '외주가공');
   const filtered = _stockTypeFilter === '전체' ? baseItems : baseItems.filter(i => i.type === _stockTypeFilter);
   const items = searchQ ? filtered.filter(i => (i.name||'').toLowerCase().includes(searchQ) || (i.code||'').toLowerCase().includes(searchQ)) : filtered;
   const totalVal = baseItems.reduce((s,i) => s + (i.stock||0)*(i.price||0), 0);
@@ -6050,16 +6067,17 @@ function renderStockTable() {
   $('stock-table').innerHTML = items.map(i => {
     const pct = stockPct(i);
     const stockVal = (i.stock||0) * (i.price||0);
-    const rowBg = typeRowBg[i.type] || '#fff';
-    return `<tr style="background:${rowBg}">
+    const rowBg = i._archived ? '#f5f5f5' : (typeRowBg[i.type] || '#fff');
+    const nameExtra = i._archived ? ' <span style="font-size:10px;color:var(--gray-500);background:#e5e7eb;padding:1px 6px;border-radius:8px;margin-left:4px">아카이브</span>' : '';
+    return `<tr style="background:${rowBg}${i._archived?';opacity:0.85':''}">
       <td style="text-align:center"><span class="badge ${typeBadge(i.type)}" style="font-size:10px">${i.type}</span></td>
       <td style="font-family:monospace;font-size:12px;font-weight:500;text-align:center">${i.code}</td>
-      <td class="lnk" onclick="showItemDetail(${i.id})" style="text-align:center">${i.name}</td>
+      <td class="lnk" onclick="showItemDetail(${i.id})" style="text-align:center">${i.name}${nameExtra}</td>
       <td style="font-size:12px;color:var(--gray-500);text-align:center">${i.spec||'-'}</td>
       <td style="text-align:center;font-size:13px"><strong>${fmt(i.stock)}</strong></td>
       <td style="text-align:right;color:var(--sky-700);font-weight:500;font-size:13px;padding-right:16px;font-variant-numeric:tabular-nums">${fmtW(stockVal)}</td>
       <td style="text-align:center">
-        <button class="btn btn-outline btn-xs" onclick="openStockEditModal(${i.id})">수정</button>
+        ${i._archived ? '<span style="font-size:11px;color:var(--gray-400)">-</span>' : `<button class="btn btn-outline btn-xs" onclick="openStockEditModal(${i.id})">수정</button>`}
       </td>
     </tr>`;
   }).join('');
