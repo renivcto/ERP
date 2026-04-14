@@ -2144,7 +2144,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.5.9';
+const ERP_VERSION = 'v1.6.0';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -3028,32 +3028,46 @@ function renderDashStats() {
     const net = salesData.netMargin || 0;
     const rate = rev > 0 ? ((net / rev) * 100).toFixed(1) : '0.0';
     const top3 = (salesData.topShops || []).slice(0,3).join(' / ') || '-';
-    salesHtml = `<div class="stat-val">₩${fmt(rev)}</div><div class="stat-sub" style="line-height:2">마진 ₩${fmt(net)} (${rate}%)<br><span style="font-weight:500">${top3}</span></div>`;
+    salesHtml = `
+      <div style="font-size:22px;font-weight:700;color:var(--gray-800);line-height:1.1;letter-spacing:-.5px">₩${fmt(rev)}</div>
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--gray-600)">
+        <div style="display:flex;justify-content:space-between"><span>마진</span><span style="font-weight:700;color:var(--gray-800)">₩${fmt(net)} <span style="color:var(--sky-600);font-weight:600;font-size:11px">(${rate}%)</span></span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px"><span style="flex-shrink:0">Top 채널</span><span style="font-weight:500;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${top3}</span></div>
+      </div>`;
   } else {
-    salesHtml = `<div class="stat-val" style="font-size:18px;color:var(--gray-400)">데이터 준비 중</div><div class="stat-sub"><span style="color:var(--gray-400)">매출 분석 모듈 연동 후 활성화</span><br><span style="font-size:11px;color:var(--gray-300)">쇼핑몰 주문 수집 시작 시 자동 표시</span></div>`;
+    salesHtml = `
+      <div style="display:flex;flex-direction:column;gap:10px;padding:6px 0 2px">
+        <div style="display:inline-flex;align-items:center;gap:5px;background:#eff6ff;color:#3b82f6;border:1px solid #bfdbfe;padding:3px 10px;border-radius:12px;font-size:10.5px;font-weight:700;align-self:flex-start">⏳ 데이터 준비 중</div>
+        <div style="font-size:12.5px;color:var(--gray-500);line-height:1.7">쇼핑몰 주문 수집 모듈이 연동되면<br>매출·마진이 자동으로 집계됩니다</div>
+      </div>`;
   }
 
   // ── 카드 2: 완제품 재고 현황 ──
   const finishedItems = (DB.items||[]).filter(i => i.type === '완제품');
-  // 판매 분석 기반 재고 부족 예상 판단
-  // 평균 일판매량 기반 DOH 계산 (현재는 minStock 기준으로 대체)
-  const stockLines = finishedItems.slice(0,5).map(item => {
+  const stockRows = finishedItems.slice(0,5).map(item => {
     const stockQty = item.stock || 0;
     const isLow = item.minStock > 0 && stockQty < item.minStock;
     const isWarning = item.minStock > 0 && stockQty < item.minStock * 1.5 && !isLow;
     const nm = (item.name||'?').replace('르니브 3중 장벽 20층 ','').replace('르니브 ','').replace(/(\([^)]+\))\s*\1/g,'$1');
-    let line = '<span style="display:inline-flex;align-items:center;gap:4px;line-height:1.7">';
-    line += '<span style="font-weight:500">' + nm + '</span>';
-    line += '<span style="color:var(--sky-600);font-weight:600">' + fmt(stockQty) + 'EA</span>';
-    if (isLow) {
-      line += '<span class="stock-warn-label"><span style="font-size:10.5px">🚨</span> 재고 부족</span>';
-    } else if (isWarning) {
-      line += '<span style="display:inline-flex;align-items:center;background:var(--amber-500);color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:700;line-height:16px">주의</span>';
-    }
-    line += '</span>';
-    return line;
-  }).join('<br>') || '등록된 완제품 없음';
+    const pill = isLow
+      ? '<span style="display:inline-flex;align-items:center;gap:2px;background:#fef2f5;color:#d4628a;font-size:9.5px;padding:1px 7px;border-radius:9px;font-weight:700;border:1px solid #f0a0be;line-height:14px;white-space:nowrap">🚨 부족</span>'
+      : isWarning
+      ? '<span style="display:inline-flex;align-items:center;background:#fef3c7;color:#92400e;font-size:9.5px;padding:1px 7px;border-radius:9px;font-weight:700;border:1px solid #fcd34d;line-height:14px;white-space:nowrap">⚠ 주의</span>'
+      : '';
+    const qtyColor = isLow ? '#d4628a' : isWarning ? '#b45309' : 'var(--sky-600)';
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 0">
+        <span style="font-size:12px;color:var(--gray-700);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${nm}</span>
+        <span style="display:inline-flex;align-items:center;gap:7px;flex-shrink:0">
+          <span style="font-size:12.5px;font-weight:700;color:${qtyColor};font-variant-numeric:tabular-nums">${fmt(stockQty)}<span style="font-size:10px;font-weight:500;opacity:.65;margin-left:1px">EA</span></span>
+          ${pill}
+        </span>
+      </div>`;
+  }).join('') || '<div style="padding:8px 0;color:var(--gray-400);font-size:12px;text-align:center">등록된 완제품 없음</div>';
   const lowStockCount = finishedItems.filter(i => i.minStock > 0 && (i.stock||0) < i.minStock).length;
+  const stockHeaderPill = lowStockCount > 0
+    ? `<span style="font-size:10px;background:#fef2f5;color:#d4628a;border:1px solid #f0a0be;padding:1px 8px;border-radius:10px;font-weight:700">${lowStockCount}품목 부족</span>`
+    : `<span style="font-size:10px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:1px 8px;border-radius:10px;font-weight:700">정상</span>`;
 
   // ── 카드 3: 발주 현황 ──
   const thisMonthAmt = (DB.orders||[]).reduce((s,o) => {
@@ -3069,28 +3083,60 @@ function renderDashStats() {
     vendorOrderMap[key].total += t;
     vendorOrderMap[key].orders.push(o);
   });
-  const vendorSubText = Object.entries(vendorOrderMap).sort((a,b)=>b[1].total-a[1].total).slice(0,3)
+  const vendorRows = Object.entries(vendorOrderMap).sort((a,b)=>b[1].total-a[1].total).slice(0,3)
     .map(([c,v]) => {
-      const namePart = c.replace('(주)','').replace('㈜','') + ' ' + fmtW(Math.round(v.total*1.1));
+      const short = c.replace('(주)','').replace('㈜','');
       const latestOrder = v.orders.filter(o=>o.payDate).sort((a,b)=>b.payDate.localeCompare(a.payDate))[0];
-      if (!latestOrder) return namePart;
       let ddayHtml = '';
-      if (latestOrder.payDate) {
+      let dateText = '';
+      if (latestOrder && latestOrder.payDate) {
+        dateText = latestOrder.payDate.replace(/-/g,'.');
         const days = Math.ceil((new Date(latestOrder.payDate) - new Date()) / 86400000);
         if (days >= 0) {
           const styles = days >= 10 ? {bg:'#dcfce7',fg:'#166534',br:'#86efac'} : days >= 3 ? {bg:'#fef3c7',fg:'#92400e',br:'#fcd34d'} : {bg:'#fee2e2',fg:'#991b1b',br:'#fca5a5'};
           const text = days === 0 ? 'D-Day' : `D-${days}`;
-          ddayHtml = ` <span style="display:inline-block;background:${styles.bg};color:${styles.fg};border:1px solid ${styles.br};font-size:10px;padding:1px 6px;border-radius:8px;font-weight:700;line-height:18px;vertical-align:middle">${text}</span>`;
+          ddayHtml = `<span style="display:inline-block;background:${styles.bg};color:${styles.fg};border:1px solid ${styles.br};font-size:9.5px;padding:0 6px;border-radius:8px;font-weight:700;line-height:15px;white-space:nowrap">${text}</span>`;
         }
       }
-      return namePart + ` <span style="font-size:10.5px;opacity:.8">(결제일 ${latestOrder.payDate.replace(/-/g,'.')})</span>${ddayHtml}`;
-    })
-    .join('<br>') || '발주 없음';
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 0">
+          <span style="display:inline-flex;flex-direction:column;gap:1px;overflow:hidden;flex:1;min-width:0">
+            <span style="font-size:12px;color:var(--gray-700);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${short}</span>
+            ${dateText?`<span style="font-size:10px;color:var(--gray-400);font-weight:400">결제 ${dateText}</span>`:''}
+          </span>
+          <span style="display:inline-flex;align-items:center;gap:6px;flex-shrink:0">
+            <span style="font-size:12.5px;font-weight:700;color:#7c3aed;font-variant-numeric:tabular-nums">${fmtW(Math.round(v.total*1.1))}</span>
+            ${ddayHtml}
+          </span>
+        </div>`;
+    }).join('') || '<div style="padding:8px 0;color:var(--gray-400);font-size:12px;text-align:center">발주 없음</div>';
 
   $('dash-stats').innerHTML = `
-    <div class="stat c-blue" style="cursor:pointer"><div class="stat-lbl">📊 매출 분석 <span style="font-size:10.5px;opacity:.8">(${yDateDisplay})</span></div>${salesHtml}<div class="stat-ico">📊</div></div>
-    <div class="stat ${lowStockCount>0?'c-red':'c-green'}" style="cursor:pointer" onclick="go('stock')"><div class="stat-lbl">📦 완제품 재고 현황${lowStockCount>0?'&nbsp;&nbsp;<span style="color:#d4628a;font-weight:700">'+lowStockCount+'품목 부족</span>':''}</div><div class="stat-sub" style="margin-top:6px">${stockLines}</div><div class="stat-ico">📦</div></div>
-    <div class="stat c-purple" style="cursor:pointer" onclick="go('order')"><div class="stat-lbl">💰 발주 현황</div><div class="stat-val">${fmtW(Math.round(thisMonthAmt*1.1))} <span style="font-size:13px;font-weight:500;color:var(--gray-500)">(VAT포함)</span></div><div class="stat-sub">${vendorSubText}</div><div class="stat-ico">💰</div></div>
+    <div class="stat c-blue" style="cursor:pointer">
+      <div class="stat-lbl" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span>📊 매출 분석</span>
+        <span style="font-size:10px;color:var(--gray-400);font-weight:500">${yDateDisplay}</span>
+      </div>
+      ${salesHtml}
+      <div class="stat-ico">📊</div>
+    </div>
+    <div class="stat ${lowStockCount>0?'c-red':'c-green'}" style="cursor:pointer" onclick="go('stock')">
+      <div class="stat-lbl" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span>📦 완제품 재고 현황</span>
+        ${stockHeaderPill}
+      </div>
+      <div style="margin-top:6px;display:flex;flex-direction:column">${stockRows}</div>
+      <div class="stat-ico">📦</div>
+    </div>
+    <div class="stat c-purple" style="cursor:pointer" onclick="go('order')">
+      <div class="stat-lbl">💰 발주 현황</div>
+      <div style="display:flex;align-items:baseline;gap:6px;margin:2px 0 8px">
+        <span style="font-size:22px;font-weight:700;color:var(--gray-800);letter-spacing:-.5px">${fmtW(Math.round(thisMonthAmt*1.1))}</span>
+        <span style="font-size:10.5px;font-weight:500;color:var(--gray-400)">VAT포함</span>
+      </div>
+      <div style="display:flex;flex-direction:column">${vendorRows}</div>
+      <div class="stat-ico">💰</div>
+    </div>
   `;
 }
 
