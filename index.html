@@ -2142,7 +2142,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.5.4';
+const ERP_VERSION = 'v1.5.5';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -6011,14 +6011,50 @@ function saveProduction() {
   if (!product) { showNotif('완제품을 찾을 수 없습니다','warning'); return; }
 
   const id = editingId['add-production'];
-  // 편집 모드: 수량/일자만 갱신하고 재고 조정은 하지 않음 (재생성 필요 시 삭제 후 재등록)
+  // 편집 모드: 기존 생산 되돌린 뒤 새 생산으로 재적용 → BOM 재고 반영
   if (id) {
     const idx = DB.productions.findIndex(p=>p.id===id);
-    if (idx>=0) {
-      DB.productions[idx] = {...DB.productions[idx], productId, orderDate: prodDate, qty};
+    if (idx < 0) { showNotif('생산 기록을 찾을 수 없습니다','warning'); return; }
+    const oldProd = {...DB.productions[idx]};
+    const newBom = (DB.boms && DB.boms[productId]) || [];
+    if (!newBom.length) { showNotif('해당 완제품의 BOM이 등록되지 않았습니다','warning'); return; }
+
+    // 시뮬레이션: 기존 복구 후 상태에서 새 차감이 가능한지 체크
+    const simStock = {};
+    const oldBom = (DB.boms && DB.boms[oldProd.productId]) || [];
+    oldBom.forEach(r => {
+      const it = getItem(r.itemId) || {};
+      if (simStock[r.itemId] === undefined) simStock[r.itemId] = (it.stock||0);
+      simStock[r.itemId] += (r.qty||0) * (oldProd.qty||0);
+    });
+    const shortage = [];
+    let totalCost = 0;
+    newBom.forEach(r => {
+      const it = getItem(r.itemId) || {};
+      const need = (r.qty||0) * qty;
+      totalCost += (it.price||0) * need;
+      const available = (simStock[r.itemId] !== undefined) ? simStock[r.itemId] : (it.stock||0);
+      if (available < need) shortage.push(`• ${it.name}: 필요 ${formatQty(need)}, 재고 ${formatQty(available)}`);
+    });
+    if (shortage.length) {
+      if (!confirm('다음 재료의 재고가 부족합니다. 그래도 진행할까요?\n\n' + shortage.join('\n'))) return;
     }
-    saveData(); closeModal('add-production'); renderProdTable(); updateBadges();
-    showNotif('생산 내역이 수정되었습니다','success');
+
+    // 실제 적용: 기존 되돌리기 → 새로 반영
+    restoreProductionStock(oldProd, { skipFinished: false, reason: '생산 수정(되돌리기)' });
+    applyProductionStock({ productId, qty }, prodDate);
+
+    DB.productions[idx] = {
+      ...oldProd,
+      productId, orderDate: prodDate, inDate: prodDate,
+      qty, amount: Math.round(totalCost),
+      status: '생산완료', progress: 100
+    };
+
+    saveData(); closeModal('add-production'); renderProdTable();
+    if (typeof renderStock === 'function') renderStock();
+    updateBadges();
+    showNotif('생산 수정 및 BOM 재고가 반영되었습니다','success');
     return;
   }
 
@@ -6151,6 +6187,40 @@ function restoreProductionStock(prod, opts) {
       });
     }
   }
+}
+
+// 생산 1건의 재고 효과 적용 (BOM 차감 + 완제품 입고)
+function applyProductionStock(prod, date) {
+  if (!prod || !prod.productId || !prod.qty) return 0;
+  const qty = prod.qty;
+  const bom = (DB.boms && DB.boms[prod.productId]) || [];
+  const product = getItem(prod.productId);
+  if (!DB.stockHistory) DB.stockHistory = [];
+  const useDate = date || today();
+  let totalCost = 0;
+  bom.forEach(r => {
+    const itIdx = DB.items.findIndex(i => i.id === r.itemId);
+    if (itIdx < 0) return;
+    const it = DB.items[itIdx];
+    const use = (r.qty||0) * qty;
+    it.stock = Math.max(0, (it.stock||0) - use);
+    totalCost += (it.price||0) * use;
+    DB.stockHistory.push({
+      id: nextId('stock'), itemId: r.itemId, type: 'out',
+      qty: use, price: it.price||0, date: useDate, lot: it.lot||'',
+      note: `완제품 생산 투입 (${product?product.name:''} ${qty}개)`
+    });
+  });
+  const pIdx = DB.items.findIndex(i => i.id === prod.productId);
+  if (pIdx >= 0) {
+    DB.items[pIdx].stock = (DB.items[pIdx].stock||0) + qty;
+    DB.stockHistory.push({
+      id: nextId('stock'), itemId: prod.productId, type: 'in',
+      qty: qty, price: qty>0 ? Math.round(totalCost/qty) : 0, date: useDate, lot: '',
+      note: '완제품 생산 입고'
+    });
+  }
+  return totalCost;
 }
 
 // 완제품이 품목/재고관리에서 삭제될 때, 관련 생산기록의 BOM 재고 복구
