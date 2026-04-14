@@ -815,7 +815,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div style="display:flex;justify-content:space-between;margin-bottom:14px;gap:8px;flex-wrap:wrap;align-items:center">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <div style="display:flex;gap:0;flex-wrap:wrap;align-items:center" id="item-filter-chips"></div>
-          <button class="btn btn-primary btn-sm pg-topbar-btn" style="margin-left:6px" onclick="if(requireWrite()){editingId['add-item']=null;const db=$('item-delete-btn');if(db)db.style.display='none';populateItemVendorSelect();$('i-type').value=(itemFilter&&itemFilter!=='전체')?itemFilter:'';$('i-code').value='';$('i-name').value='';$('i-spec').value='';$('i-price').value='';$('i-stock').value=0;$('i-material').value='';$('i-note').value='';if($('i-barcode'))$('i-barcode').value='';if($('i-vendor'))$('i-vendor').value='';const prev=$('i-img-preview');if(prev)prev.innerHTML='📷';const imgIn=$('i-img');if(imgIn){imgIn.value='';delete imgIn.dataset.compressed;}const bcPrev=$('i-barcode-preview');if(bcPrev)bcPrev.innerHTML='바코드 이미지';const bcIn=$('i-barcode-img');if(bcIn)bcIn.value='';const qExist=$('i-quote-existing');if(qExist)qExist.style.display='none';const qPrev=$('i-quote-preview');if(qPrev)qPrev.innerHTML='';const qFile=$('i-quote-file');if(qFile)qFile.value='';window._clearQuoteFile=false;openModal('add-item')}">+ 품목 등록</button>
+          <button class="btn btn-primary btn-sm pg-topbar-btn" style="margin-left:6px" onclick="if(requireWrite()){editingId['add-item']=null;const db=$('item-delete-btn');if(db)db.style.display='none';$('i-type').value=(itemFilter&&itemFilter!=='전체')?itemFilter:'';populateItemVendorSelect();$('i-code').value='';$('i-name').value='';$('i-spec').value='';$('i-price').value='';$('i-stock').value=0;$('i-material').value='';$('i-note').value='';if($('i-barcode'))$('i-barcode').value='';if($('i-vendor'))$('i-vendor').value='';const prev=$('i-img-preview');if(prev)prev.innerHTML='📷';const imgIn=$('i-img');if(imgIn){imgIn.value='';delete imgIn.dataset.compressed;}const bcPrev=$('i-barcode-preview');if(bcPrev)bcPrev.innerHTML='바코드 이미지';const bcIn=$('i-barcode-img');if(bcIn)bcIn.value='';const qExist=$('i-quote-existing');if(qExist)qExist.style.display='none';const qPrev=$('i-quote-preview');if(qPrev)qPrev.innerHTML='';const qFile=$('i-quote-file');if(qFile)qFile.value='';window._clearQuoteFile=false;openModal('add-item')}">+ 품목 등록</button>
           <button class="btn btn-sm" id="archive-items-btn" onclick="archiveSelectedItems()" style="background:#f0f0f0;color:#666;border:1px solid #d0d0d0;font-size:12px;padding:5px 12px;display:none">📥 아카이브</button>
         </div>
         <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
@@ -1577,7 +1577,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="modal-hdr"><span class="modal-ttl">📦 품목 등록/수정</span><button class="modal-x" onclick="closeModal('add-item')">✕</button></div>
     <div class="modal-body">
       <div class="fg2">
-        <div class="fg"><label>분류<span class="req">*</span></label><select class="fs" id="i-type"><option value="">— 선택하세요 —</option><option>원자재</option><option>부자재</option><option>OEM</option><option>완제품</option><option>반제품</option><option>외주가공</option></select></div>
+        <div class="fg"><label>분류<span class="req">*</span></label><select class="fs" id="i-type" onchange="populateItemVendorSelect()"><option value="">— 선택하세요 —</option><option>원자재</option><option>부자재</option><option>OEM</option><option>완제품</option><option>반제품</option><option>외주가공</option></select></div>
         <div class="fg"><label>품목코드</label><input class="fi" id="i-code" style="font-family:monospace"></div>
         <div class="fg full"><label>품목명<span class="req">*</span></label><input class="fi" id="i-name"></div>
         <div class="fg full"><label>업체</label><select class="fs" id="i-vendor"></select></div>
@@ -2146,7 +2146,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.7.5';
+const ERP_VERSION = 'v1.7.6';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -5339,8 +5339,18 @@ function updateArchiveNote(id, note) {
   saveData();
 }
 function populateItemVendorSelect() {
-  $('i-vendor').innerHTML = '<option value="">선택 안함</option>' +
-    DB.vendors.map(v=>`<option value="${v.id}">${v.company}</option>`).join('');
+  const sel = $('i-vendor'); if (!sel) return;
+  const typeEl = $('i-type');
+  const currentType = typeEl ? typeEl.value : '';
+  // 분류가 선택되어 있으면 같은 분류의 업체만 필터링
+  const list = currentType
+    ? (DB.vendors||[]).filter(v => v.type === currentType)
+    : (DB.vendors||[]);
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">업체를 선택하세요.</option>' +
+    list.map(v=>`<option value="${v.id}">${v.company}</option>`).join('');
+  // 이전 선택이 새 목록에 있으면 유지
+  if (prev && list.some(v => String(v.id) === String(prev))) sel.value = prev;
 }
 
 function deleteItemFromModal() {
@@ -5501,7 +5511,6 @@ function editItem(id) {
   window._clearQuoteFile = false;
   const delBtn = $('item-delete-btn');
   if (delBtn) delBtn.style.display = '';
-  populateItemVendorSelect();
   openModal('add-item');
   setTimeout(() => {
     $('i-type').value = i.type||'원자재';
@@ -5513,6 +5522,8 @@ function editItem(id) {
     $('i-material').value = i.material||'';
     $('i-note').value = i.note||'';
     if ($('i-barcode')) $('i-barcode').value = i.barcode||'';
+    // 분류 설정 후 해당 분류의 업체 리스트로 드롭박스 채우기
+    populateItemVendorSelect();
     if ($('i-vendor')) $('i-vendor').value = i.vendorId != null ? String(i.vendorId) : '';
     const prev = $('i-img-preview');
     if (prev) prev.innerHTML = i.image ? `<img src="${i.image}" style="width:100%;height:100%;object-fit:cover;border-radius:6px">` : '📷';
@@ -9526,8 +9537,49 @@ function syncGSheets() {
 }
 
 function init() {
+  dedupeVendors();
   updateBadges();
   renderDashboard();
+}
+
+// 동일 업체(회사명+분류 기준) 중복 항목 정리 — 저장 실패 잔재 등을 청소
+function dedupeVendors() {
+  if (!DB.vendors || DB.vendors.length < 2) return;
+  const norm = s => String(s||'').replace(/\s+/g,'').toLowerCase();
+  const seen = new Map(); // key → {keepId, ids:[]}
+  DB.vendors.forEach(v => {
+    if (!v || !v.company) return;
+    const key = norm(v.company) + '|' + (v.type||'');
+    if (!seen.has(key)) seen.set(key, { keepId: v.id, ids: [v.id] });
+    else seen.get(key).ids.push(v.id);
+  });
+  let removed = 0;
+  seen.forEach(info => {
+    if (info.ids.length < 2) return;
+    // 데이터가 더 많은(또는 id가 작은) 것을 보존
+    const candidates = info.ids.map(id => {
+      const v = DB.vendors.find(x => x.id === id) || {};
+      const score = (v.contact?1:0)+(v.phone?1:0)+(v.email?1:0)+(v.addr?1:0)+(v.desc?1:0)+((v.quotes||[]).length)+((v.attachments||[]).length);
+      const linkedItems = (DB.items||[]).filter(i => i.vendorId == id).length;
+      const linkedOrders = (DB.orders||[]).filter(o => o.vendorId == id).length;
+      return { id, rich: score + linkedItems*2 + linkedOrders*2 };
+    });
+    candidates.sort((a,b) => b.rich - a.rich || a.id - b.id);
+    const keepId = candidates[0].id;
+    info.keepId = keepId;
+    const dupIds = info.ids.filter(id => id !== keepId);
+    // 연결된 레코드를 keepId로 재매핑
+    (DB.items||[]).forEach(i => { if (dupIds.includes(i.vendorId)) i.vendorId = keepId; });
+    (DB.orders||[]).forEach(o => { if (dupIds.includes(o.vendorId)) o.vendorId = keepId; });
+    (DB.productions||[]).forEach(p => { if (dupIds.includes(p.vendorId)) p.vendorId = keepId; });
+    // 중복 업체 제거
+    DB.vendors = DB.vendors.filter(v => !dupIds.includes(v.id));
+    removed += dupIds.length;
+  });
+  if (removed > 0) {
+    console.log(`🧹 중복 업체 ${removed}건 정리됨`);
+    try { saveData(); } catch(e) {}
+  }
 }
 
 // ═══════════════════════════════════════════════════════
