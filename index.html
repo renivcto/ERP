@@ -596,7 +596,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
   <div class="nav-group">
     <div class="nav-group-title">거래처 · 품목</div>
     <div class="nav-item" onclick="go('vendor')"><span class="ico">🏢</span>업체 관리</div>
-    <div class="nav-item" onclick="go('item')"><span class="ico">🗂️</span>품목 관리</div>
+    <div class="nav-item" onclick="clickNavItem('item','nav-archive-sub')"><span class="ico">🗂️</span>품목 관리</div>
     <div class="nav-item nav-item-sub" id="nav-archive-sub" onclick="go('archive')" style="display:none"><span class="ico">📥</span>아카이브</div>
     <div class="nav-item" onclick="go('bom')"><span class="ico">⚙️</span>BOM 관리</div>
   </div>
@@ -610,7 +610,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
   <div class="nav-group">
     <div class="nav-group-title">매출 · CS</div>
     <div class="nav-item" onclick="go('cs')"><span class="ico">💬</span>CS 관리</div>
-    <div class="nav-item" onclick="toggleSalesNav(this);go('sales')" id="nav-sales"><span class="ico">📊</span>매출 분석</div>
+    <div class="nav-item" onclick="clickNavItem('sales','sales-sub')" id="nav-sales"><span class="ico">📊</span>매출 분석</div>
     <div class="nav-sub" id="sales-sub">
       <div class="nav-item" onclick="go('sales');switchSalesTab('orders')"><span class="ico">📦</span>주문 관리</div>
       <div class="nav-item" onclick="go('sales');switchSalesTab('margin')"><span class="ico">💰</span>마진 분석</div>
@@ -2130,7 +2130,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.4.8';
+const ERP_VERSION = 'v1.4.9';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -2870,7 +2870,10 @@ function go(page) {
   if (pg) pg.classList.add('active');
   $('pageTitle').textContent = PAGE_TITLES[page] || page;
   document.querySelectorAll('.nav-item').forEach(n => {
-    if (n.getAttribute('onclick') === `go('${page}')`) n.classList.add('active');
+    const oc = n.getAttribute('onclick') || '';
+    if (oc === `go('${page}')`) n.classList.add('active');
+    else if (oc.startsWith(`clickNavItem('${page}'`)) n.classList.add('active');
+    else if (page === 'archive' && oc.startsWith(`clickNavItem('item'`)) n.classList.add('active');
   });
   // Auto-open sales sub-nav when navigating to sales page
   const salesSub = $('sales-sub');
@@ -3577,6 +3580,26 @@ if (!DB.cs) DB.cs = [];
 function toggleSalesNav(el) {
   const sub = $('sales-sub');
   if (sub) sub.classList.toggle('open');
+}
+
+// 클릭 시 이미 해당 섹션에 있으면 하위 메뉴 토글, 아니면 페이지로 이동
+function clickNavItem(page, subId) {
+  const activePage = document.querySelector('.page.active');
+  const currentId = activePage ? activePage.id : '';
+  const onSection = (page === 'item' && (currentId === 'page-item' || currentId === 'page-archive'))
+    || (page === 'sales' && currentId === 'page-sales');
+  if (onSection && subId) {
+    const sub = $(subId);
+    if (sub) {
+      if (subId === 'nav-archive-sub') {
+        sub.style.display = (sub.style.display === 'none') ? '' : 'none';
+      } else {
+        sub.classList.toggle('open');
+      }
+    }
+  } else {
+    go(page);
+  }
 }
 
 function renderSalesPage() {
