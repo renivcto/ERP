@@ -852,35 +852,73 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 
     <!-- ══════════════ BOM ══════════════ -->
     <div class="page" id="page-bom">
-      <div style="display:flex;justify-content:space-between;margin-bottom:14px;gap:8px">
-        <div style="display:flex;align-items:center;gap:8px">
-          <label style="font-size:13px;color:var(--gray-600)">제품 선택:</label>
-          <select class="fs" id="bom-product-sel" style="width:260px;max-width:100%;font-size:13px" onchange="renderBOM()"></select>
-          <div style="width:8px"></div>
-          <button class="btn btn-outline btn-sm" onclick="if(requireWrite())editCurrentBOM()" style="color:var(--sky-700);border-color:var(--sky-300);font-size:13px;padding:5px 12px">✏️ BOM 수정</button>
-          <button class="btn btn-sm" onclick="if(requireWrite()){populateBOMProductModal();openModal('add-bom');const sv=$('bom-product-sel');if(sv&&sv.value)setTimeout(()=>{$('bom-product-modal').value=sv.value},50)}" style="background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;font-size:13px;padding:5px 12px">+ BOM 등록</button>
+      <!-- 하위 탭 -->
+      <div style="display:flex;gap:4px;border-bottom:1px solid var(--gray-200);margin-bottom:14px">
+        <button id="bom-tab-bom" class="bom-subtab bom-subtab-active" onclick="switchBomSubtab('bom')" style="padding:8px 16px;border:none;background:transparent;font-size:13px;font-weight:600;cursor:pointer;border-bottom:2px solid var(--sky-500);color:var(--sky-700)">🔧 BOM</button>
+        <button id="bom-tab-spec" class="bom-subtab" onclick="switchBomSubtab('spec')" style="padding:8px 16px;border:none;background:transparent;font-size:13px;font-weight:500;cursor:pointer;border-bottom:2px solid transparent;color:var(--gray-500)">📋 부자재 사양서</button>
+      </div>
+
+      <!-- ───── BOM 서브페이지 ───── -->
+      <div id="bom-subpage-bom">
+        <div style="display:flex;justify-content:space-between;margin-bottom:14px;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <label style="font-size:13px;color:var(--gray-600)">제품 선택:</label>
+            <select class="fs" id="bom-product-sel" style="width:260px;max-width:100%;font-size:13px" onchange="renderBOM()"></select>
+            <div style="width:8px"></div>
+            <button class="btn btn-outline btn-sm" onclick="if(requireWrite())editCurrentBOM()" style="color:var(--sky-700);border-color:var(--sky-300);font-size:13px;padding:5px 12px">✏️ BOM 수정</button>
+            <button class="btn btn-sm" onclick="if(requireWrite()){populateBOMProductModal();openModal('add-bom');const sv=$('bom-product-sel');if(sv&&sv.value)setTimeout(()=>{$('bom-product-modal').value=sv.value},50)}" style="background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;font-size:13px;padding:5px 12px">+ BOM 등록</button>
+            <button class="btn btn-sm" onclick="printBomForOrder()" style="background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;font-size:13px;padding:5px 12px">🖨️ BOM 인쇄</button>
+          </div>
+        </div>
+        <!-- 상단: BOM 테이블(좌) + 판매가 및 마진 계산(우) -->
+        <div style="display:grid;grid-template-columns:3fr 1.2fr;gap:16px;margin-bottom:16px">
+          <div class="card">
+            <div class="card-hdr">
+              <span class="card-title" id="bom-card-title">🔧 BOM 구성</span>
+              <span style="font-size:12px;color:var(--gray-500)">원가: <strong id="bom-total-cost" style="color:var(--sky-700)">-</strong></span>
+            </div>
+            <div class="card-body p0 tbl-wrap">
+              <table>
+                <thead><tr><th>분류</th><th>코드</th><th>품목명</th><th>투입량</th><th>투입원가</th><th>업체</th><th style="width:30px"></th></tr></thead>
+                <tbody id="bom-table"></tbody>
+              </table>
+            </div>
+            <!-- BOM 테이블 아래: 합계 + 원자재/부자재/OEM -->
+            <div id="bom-cost-breakdown" style="padding:10px 14px 12px"></div>
+          </div>
+          <!-- 우측: 판매가 및 마진 계산 -->
+          <div class="card">
+            <div class="card-body" style="overflow-y:auto;max-height:700px;padding:12px 14px">
+              <div id="bom-margin-box"></div>
+            </div>
+          </div>
         </div>
       </div>
-      <!-- 상단: BOM 테이블(좌) + 판매가 및 마진 계산(우) -->
-      <div style="display:grid;grid-template-columns:3fr 1.2fr;gap:16px;margin-bottom:16px">
-        <div class="card">
-          <div class="card-hdr">
-            <span class="card-title" id="bom-card-title">🔧 BOM 구성</span>
-            <span style="font-size:12px;color:var(--gray-500)">원가: <strong id="bom-total-cost" style="color:var(--sky-700)">-</strong></span>
+
+      <!-- ───── 부자재 사양서 서브페이지 ───── -->
+      <div id="bom-subpage-spec" style="display:none">
+        <div style="display:flex;justify-content:space-between;margin-bottom:14px;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <button class="btn btn-primary btn-sm" onclick="if(requireWrite())openPartSpecForm()" style="font-size:13px;padding:5px 14px">+ 부자재 사양서 작성</button>
           </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input id="partspec-search" class="fi" placeholder="🔍 제품명·품목코드 검색" style="width:260px;font-size:13px;padding:6px 10px" oninput="renderPartSpecList()">
+          </div>
+        </div>
+        <div class="card">
           <div class="card-body p0 tbl-wrap">
             <table>
-              <thead><tr><th>분류</th><th>코드</th><th>품목명</th><th>투입량</th><th>투입원가</th><th>업체</th><th style="width:30px"></th></tr></thead>
-              <tbody id="bom-table"></tbody>
+              <thead><tr>
+                <th>작성일</th>
+                <th>제품명</th>
+                <th>품목코드</th>
+                <th>브랜드</th>
+                <th>제조사</th>
+                <th>버전</th>
+                <th>관리</th>
+              </tr></thead>
+              <tbody id="partspec-table"></tbody>
             </table>
-          </div>
-          <!-- BOM 테이블 아래: 합계 + 원자재/부자재/OEM -->
-          <div id="bom-cost-breakdown" style="padding:10px 14px 12px"></div>
-        </div>
-        <!-- 우측: 판매가 및 마진 계산 -->
-        <div class="card">
-          <div class="card-body" style="overflow-y:auto;max-height:700px;padding:12px 14px">
-            <div id="bom-margin-box"></div>
           </div>
         </div>
       </div>
@@ -1656,6 +1694,161 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
   </div>
 </div>
 
+<!-- 부자재 사양서 작성/수정 모달 -->
+<div class="overlay" id="overlay-add-partspec">
+  <div class="modal" style="width:1000px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column">
+    <div class="modal-hdr">
+      <span class="modal-ttl">📋 부자재 사양서 작성/수정</span>
+      <button class="modal-x" onclick="closeModal('add-partspec')">✕</button>
+    </div>
+    <div class="modal-body" style="overflow-y:auto;flex:1">
+      <!-- 1. 기본정보 -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-bottom:14px">
+        <div class="fg full"><label>제품명 (국문) <span class="req">*</span> — 완제품에서 선택</label>
+          <select class="fs" id="ps-product" onchange="onPartSpecProductChange()"><option value="">— 완제품을 선택하세요 —</option></select>
+        </div>
+        <div class="fg"><label>브랜드명</label><input class="fi" id="ps-brand"></div>
+        <div class="fg"><label>품명 (영문)</label><input class="fi" id="ps-name-en"></div>
+        <div class="fg"><label>품목코드</label><input class="fi" id="ps-code" style="font-family:monospace"></div>
+        <div class="fg"><label>바코드넘버</label><input class="fi" id="ps-barcode"></div>
+        <div class="fg"><label>제조사</label><input class="fi" id="ps-mfr"></div>
+        <div class="fg"><label>품목구분</label><input class="fi" id="ps-product-type" value="본품(판매용)"></div>
+        <div class="fg"><label>버전</label><input class="fi" id="ps-version" value="신제품"></div>
+        <div class="fg"><label>표시용량</label><input class="fi" id="ps-display-vol"></div>
+        <div class="fg"><label>실충진용량</label><input class="fi" id="ps-fill-vol"></div>
+      </div>
+
+      <!-- 2. 품질관리 -->
+      <div style="margin-bottom:14px;padding:12px 14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px">
+        <div style="font-size:13px;font-weight:600;color:#0c4a6e;margin-bottom:10px">🔬 품질관리</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px">
+          <div class="fg"><label>관리품 수량</label><input class="fi" id="ps-qc-qty" value="신규 5EA / 기존 3EA"></div>
+          <div class="fg"><label>담당자</label><input class="fi" id="ps-qc-mgr" value="송희강"></div>
+          <div class="fg full"><label>비고</label><textarea class="fi" id="ps-qc-note" rows="3" style="resize:vertical">* 납품 후 1일 이내 전달 必
+* 관리품&성적서 : 매롯트 별
+* 표준서 : 신제품 또는 개정 시마다</textarea></div>
+        </div>
+      </div>
+
+      <!-- 3. 구성품 리스트 (BOM 자동 연동) -->
+      <div style="margin-bottom:14px;padding:12px 14px;background:#fef3c7;border:1px solid #fde68a;border-radius:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-size:13px;font-weight:600;color:#92400e">📦 구성품 리스트 <span style="font-weight:400;font-size:11px;color:#b45309">(BOM에서 자동 로드, 수정 가능)</span></div>
+          <button type="button" class="btn btn-outline btn-xs" onclick="reloadPsComponentsFromBom()" style="font-size:11px">🔄 BOM에서 다시 불러오기</button>
+        </div>
+        <div class="tbl-wrap" style="max-height:280px;overflow-y:auto;background:#fff;border-radius:6px">
+          <table style="font-size:12px">
+            <thead style="background:#fef3c7"><tr>
+              <th style="width:22%">구성품명</th><th style="width:15%">재질</th><th style="width:18%">사양</th>
+              <th style="width:20%">업체</th><th>비고</th><th style="width:32px"></th>
+            </tr></thead>
+            <tbody id="ps-comp-rows"></tbody>
+          </table>
+        </div>
+        <button type="button" class="btn btn-outline btn-xs" onclick="addPsComponentRow()" style="margin-top:6px;font-size:11px">+ 구성품 추가</button>
+      </div>
+
+      <!-- 4. 제품 착인기준 -->
+      <div style="margin-bottom:14px;padding:12px 14px;background:#fef9f3;border:1px solid #fcd9a8;border-radius:8px">
+        <div style="font-size:13px;font-weight:600;color:#9a3412;margin-bottom:10px">🏷️ 제품 착인기준</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div style="padding:10px;background:#fff;border-radius:6px;border:1px solid #fed7aa">
+            <div style="font-weight:600;font-size:12px;margin-bottom:8px;text-align:center;color:#9a3412">[용기 착인]</div>
+            <div class="fg"><label style="font-size:11px">방법</label><input class="fi" id="ps-mark-ct-method" value="용기 하단 2단착인"></div>
+            <div class="fg"><label style="font-size:11px">세부내용</label><textarea class="fi" id="ps-mark-ct-detail" rows="2" style="resize:vertical">LOT
+EXP YYYYMMDD까지</textarea></div>
+            <div class="fg"><label style="font-size:11px">유효기간</label><input class="fi" id="ps-mark-ct-expiry" value="제조일로 부터 36개월"></div>
+          </div>
+          <div style="padding:10px;background:#fff;border-radius:6px;border:1px solid #fed7aa">
+            <div style="font-weight:600;font-size:12px;margin-bottom:8px;text-align:center;color:#9a3412">[단상자 착인]</div>
+            <div class="fg"><label style="font-size:11px">방법</label><input class="fi" id="ps-mark-bx-method" value="단상자 하단 2단착인"></div>
+            <div class="fg"><label style="font-size:11px">세부내용</label><textarea class="fi" id="ps-mark-bx-detail" rows="2" style="resize:vertical">LOT
+EXP YYYYMMDD 까지</textarea></div>
+            <div class="fg"><label style="font-size:11px">유효기간</label><input class="fi" id="ps-mark-bx-expiry" value="제조일로 부터 36개월"></div>
+          </div>
+        </div>
+        <div class="fg full" style="margin-top:10px"><label>표기 기준</label><input class="fi" id="ps-mark-standard" value="벌크제조일을 기준으로 사용기한 계산"></div>
+      </div>
+
+      <!-- 5. 포장방법 -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--gray-700);margin-bottom:6px">📦 포장방법</div>
+        <textarea class="fi" id="ps-packaging" rows="5" style="resize:vertical">1. 용기 밑면 착인
+   * 가운데 정렬
+   * 밑면 홈과 정방향 착인
+2. 열림방지스티커 부착 유무 확인
+3. 단상자 밑면 바코드 확인
+   * 가운데 정렬
+   * 바코드와 정방향 착인</textarea>
+      </div>
+
+      <!-- 6. 착인 위치 및 인박스, 아웃박스라벨 -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--gray-700);margin-bottom:6px">🏷️ 착인 위치 및 인박스, 아웃박스라벨</div>
+        <textarea class="fi" id="ps-label-location" rows="5" style="resize:vertical">* 착인위치 : 단상자 하단 / 아웃박스 측면
+* 제품코드 / 품명 / 수량(EA) / 유통기한 / 롯트(LOT)
+* 제조일자 기입 必</textarea>
+      </div>
+
+      <!-- 7. 적재사항 -->
+      <div style="margin-bottom:14px;padding:12px 14px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px">
+        <div style="font-size:13px;font-weight:600;color:#065f46;margin-bottom:10px">📐 적재사항</div>
+        <div style="font-size:12px;font-weight:600;color:#065f46;margin-bottom:4px">인/아웃박스</div>
+        <div class="tbl-wrap" style="background:#fff;border-radius:6px;margin-bottom:10px">
+          <table style="font-size:12px">
+            <thead><tr><th>구분</th><th>입수량</th><th>사이즈(장*폭*고mm)</th><th>테이프 밴딩</th><th>간지 유무</th><th>재질</th><th>비고</th></tr></thead>
+            <tbody>
+              <tr>
+                <td style="text-align:center;font-weight:600">인박스</td>
+                <td><input class="fi" id="ps-inbox-qty" style="font-size:11px;padding:3px 6px" value="無"></td>
+                <td><input class="fi" id="ps-inbox-size" style="font-size:11px;padding:3px 6px"></td>
+                <td><input class="fi" id="ps-inbox-tape" style="font-size:11px;padding:3px 6px"></td>
+                <td><input class="fi" id="ps-inbox-pad" style="font-size:11px;padding:3px 6px"></td>
+                <td><input class="fi" id="ps-inbox-mat" style="font-size:11px;padding:3px 6px"></td>
+                <td><input class="fi" id="ps-inbox-note" style="font-size:11px;padding:3px 6px"></td>
+              </tr>
+              <tr>
+                <td style="text-align:center;font-weight:600">아웃박스</td>
+                <td><input class="fi" id="ps-outbox-qty" style="font-size:11px;padding:3px 6px"></td>
+                <td><input class="fi" id="ps-outbox-size" style="font-size:11px;padding:3px 6px"></td>
+                <td><input class="fi" id="ps-outbox-tape" style="font-size:11px;padding:3px 6px" value="윗면 H자, 아랫면 I자"></td>
+                <td><input class="fi" id="ps-outbox-pad" style="font-size:11px;padding:3px 6px"></td>
+                <td><input class="fi" id="ps-outbox-mat" style="font-size:11px;padding:3px 6px" value="DW골"></td>
+                <td><input class="fi" id="ps-outbox-note" style="font-size:11px;padding:3px 6px"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="font-size:12px;font-weight:600;color:#065f46;margin-bottom:4px">파렛트</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="fg"><label style="font-size:11px">종류</label><input class="fi" id="ps-pallet-type" style="font-size:12px"></div>
+          <div class="fg"><label style="font-size:11px">적재방법</label><input class="fi" id="ps-pallet-method" style="font-size:12px"></div>
+          <div class="fg"><label style="font-size:11px">사이즈</label><input class="fi" id="ps-pallet-size" style="font-size:12px"></div>
+          <div class="fg"><label style="font-size:11px">높이</label><input class="fi" id="ps-pallet-height" style="font-size:12px"></div>
+          <div class="fg full"><label style="font-size:11px">주의사항</label><input class="fi" id="ps-pallet-caution" style="font-size:12px"></div>
+        </div>
+      </div>
+
+      <!-- 8. 특이사항 -->
+      <div style="margin-bottom:10px">
+        <div style="font-size:13px;font-weight:600;color:var(--gray-700);margin-bottom:6px">⚠️ 특이사항</div>
+        <textarea class="fi" id="ps-notes" rows="6" style="resize:vertical">* 아웃박스 겉면 현품표 부착(* 현품표 샘플 시트 확인 必)
+- 전체 아웃박스 앞뒷면 1회 부착, 팔레트 적치 시 현품표 확인 가능하도록 적치 요망
+- 동일 제품 기준 유통기한 및 롯트 혼적 불가
+    1) 아웃박스 당 유통기한 및 롯트 혼적 불가
+    2) 파렛트 당 유통기한 및 롯트 혼적 불가 (단일 롯트로 적재)
+** 현품표 및 거래명세서 작성 시 발주서 상 르니브 품목코드 및 품목명으로 작성 必</textarea>
+      </div>
+    </div>
+    <div class="modal-ft">
+      <button class="btn btn-danger btn-sm" id="partspec-delete-btn" style="display:none;margin-right:auto" onclick="deletePartSpec()">🗑️ 삭제</button>
+      <button class="btn btn-outline" onclick="closeModal('add-partspec')">취소</button>
+      <button class="btn" style="background:#fff7ed;color:#9a3412;border:1px solid #fed7aa" onclick="saveAndPrintPartSpec()">저장 & 🖨️ 인쇄</button>
+      <button class="btn btn-primary" onclick="savePartSpec()">저장</button>
+    </div>
+  </div>
+</div>
+
 <!-- PRODUCTION -->
 <div class="overlay" id="overlay-add-production">
   <div class="modal">
@@ -2146,7 +2339,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.8.3';
+const ERP_VERSION = 'v1.9.0';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -2363,6 +2556,7 @@ async function _doSaveDataInner() {
     shops:       dbToSave.shops       || [],
     shopOrders:  dbToSave.shopOrders  || [],
     archivedItems: dbToSave.archivedItems || [],
+    partSpecs:   dbToSave.partSpecs   || [],
   };
 
   // 순차 저장 (병렬 저장 시 Firestore 권한 오류 발생 가능)
@@ -2447,7 +2641,7 @@ async function loadDataFromFirestore() {
     const cacheGetDoc = window._firestoreGetDoc;
     const docRef = window._firestoreDoc;
 
-    const keys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders','archivedItems','meta'];
+    const keys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders','archivedItems','partSpecs','meta'];
     // 기본 getDoc 사용 (서버 우선, 오프라인 시 캐시 fallback)
     let snaps = await Promise.all(keys.map(k => cacheGetDoc(docRef(db, 'erp_data', k))));
     console.log('🔍 [FIRESTORE] 기본 읽기 완료');
@@ -2476,7 +2670,7 @@ async function loadDataFromFirestore() {
     if (!snaps[metaIdx].exists()) { console.log('Firestore meta 없음 (최초 사용)'); return { _noData: true }; }
 
     const result = {};
-    const collKeys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders','archivedItems'];
+    const collKeys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders','archivedItems','partSpecs'];
     snaps.slice(0, collKeys.length).forEach((snap, i) => {
       const exists = snap.exists();
       if (exists) {
@@ -5661,6 +5855,522 @@ function renderBOMPage() {
   const sel = $('bom-product-sel');
   sel.innerHTML = fgItems.map(i=>`<option value="${i.id}">${i.name}</option>`).join('');
   renderBOM();
+  // 서브탭도 갱신
+  renderPartSpecList();
+}
+
+// ═══════════════════════════════════════════════════════
+// 부자재 사양서 — 탭 전환 & 목록/폼/인쇄
+// ═══════════════════════════════════════════════════════
+function switchBomSubtab(which) {
+  const bomSub = document.getElementById('bom-subpage-bom');
+  const specSub = document.getElementById('bom-subpage-spec');
+  const tabBom = document.getElementById('bom-tab-bom');
+  const tabSpec = document.getElementById('bom-tab-spec');
+  if (!bomSub || !specSub) return;
+  if (which === 'spec') {
+    bomSub.style.display = 'none';
+    specSub.style.display = '';
+    tabBom.style.borderBottomColor = 'transparent';
+    tabBom.style.color = 'var(--gray-500)';
+    tabBom.style.fontWeight = '500';
+    tabSpec.style.borderBottomColor = 'var(--sky-500)';
+    tabSpec.style.color = 'var(--sky-700)';
+    tabSpec.style.fontWeight = '600';
+    renderPartSpecList();
+  } else {
+    bomSub.style.display = '';
+    specSub.style.display = 'none';
+    tabBom.style.borderBottomColor = 'var(--sky-500)';
+    tabBom.style.color = 'var(--sky-700)';
+    tabBom.style.fontWeight = '600';
+    tabSpec.style.borderBottomColor = 'transparent';
+    tabSpec.style.color = 'var(--gray-500)';
+    tabSpec.style.fontWeight = '500';
+  }
+}
+
+function renderPartSpecList() {
+  if (!DB.partSpecs) DB.partSpecs = [];
+  const q = (($('partspec-search') && $('partspec-search').value) || '').toLowerCase().trim();
+  const list = [...DB.partSpecs].sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0));
+  const filtered = !q ? list : list.filter(p => {
+    return ((p.productNameKo||'').toLowerCase().includes(q)
+         || (p.productCode||'').toLowerCase().includes(q)
+         || (p.brand||'').toLowerCase().includes(q));
+  });
+  const tbody = $('partspec-table');
+  if (!tbody) return;
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">등록된 부자재 사양서가 없습니다</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtered.map(p => {
+    const d = new Date(p.updatedAt || p.createdAt || Date.now());
+    const dateStr = d.toISOString().slice(0,10);
+    return `<tr>
+      <td style="text-align:center">${dateStr}</td>
+      <td class="lnk" onclick="editPartSpec(${p.id})">${p.productNameKo||'-'}</td>
+      <td style="text-align:center;font-family:monospace;font-size:12px">${p.productCode||'-'}</td>
+      <td style="text-align:center">${p.brand||'-'}</td>
+      <td style="text-align:center">${p.manufacturer||'-'}</td>
+      <td style="text-align:center">${p.version||'-'}</td>
+      <td style="text-align:center;white-space:nowrap">
+        <button class="btn btn-outline btn-xs" style="font-size:10px;padding:2px 8px" onclick="editPartSpec(${p.id})">수정</button>
+        <button class="btn btn-xs" style="font-size:10px;padding:2px 8px;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa" onclick="printPartSpec(${p.id})">🖨️ 인쇄</button>
+        <button class="btn btn-outline btn-xs" style="font-size:10px;padding:2px 8px;color:var(--red-500);border-color:var(--red-200)" onclick="deletePartSpecById(${p.id})">삭제</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function populatePartSpecProductSelect() {
+  const sel = $('ps-product');
+  if (!sel) return;
+  const products = (DB.items||[]).filter(i => i.type === '완제품');
+  sel.innerHTML = '<option value="">— 완제품을 선택하세요 —</option>' +
+    products.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+}
+
+function openPartSpecForm() {
+  window._editingPartSpecId = null;
+  populatePartSpecProductSelect();
+  // 기본값 초기화
+  $('ps-product').value = '';
+  $('ps-brand').value = '르니브';
+  $('ps-name-en').value = '';
+  $('ps-code').value = '';
+  $('ps-barcode').value = '';
+  $('ps-mfr').value = '';
+  $('ps-product-type').value = '본품(판매용)';
+  $('ps-version').value = '신제품';
+  $('ps-display-vol').value = '';
+  $('ps-fill-vol').value = '';
+  $('ps-qc-qty').value = '신규 5EA / 기존 3EA';
+  $('ps-qc-mgr').value = '송희강';
+  $('ps-qc-note').value = '* 납품 후 1일 이내 전달 必\n* 관리품&성적서 : 매롯트 별\n* 표준서 : 신제품 또는 개정 시마다';
+  $('ps-mark-ct-method').value = '용기 하단 2단착인';
+  $('ps-mark-ct-detail').value = 'LOT\nEXP YYYYMMDD까지';
+  $('ps-mark-ct-expiry').value = '제조일로 부터 36개월';
+  $('ps-mark-bx-method').value = '단상자 하단 2단착인';
+  $('ps-mark-bx-detail').value = 'LOT\nEXP YYYYMMDD 까지';
+  $('ps-mark-bx-expiry').value = '제조일로 부터 36개월';
+  $('ps-mark-standard').value = '벌크제조일을 기준으로 사용기한 계산';
+  $('ps-packaging').value = '1. 용기 밑면 착인\n   * 가운데 정렬\n   * 밑면 홈과 정방향 착인\n2. 열림방지스티커 부착 유무 확인\n3. 단상자 밑면 바코드 확인\n   * 가운데 정렬\n   * 바코드와 정방향 착인';
+  $('ps-label-location').value = '* 착인위치 : 단상자 하단 / 아웃박스 측면\n* 제품코드 / 품명 / 수량(EA) / 유통기한 / 롯트(LOT)\n* 제조일자 기입 必';
+  $('ps-inbox-qty').value = '無';
+  $('ps-inbox-size').value = '';
+  $('ps-inbox-tape').value = '';
+  $('ps-inbox-pad').value = '';
+  $('ps-inbox-mat').value = '';
+  $('ps-inbox-note').value = '';
+  $('ps-outbox-qty').value = '';
+  $('ps-outbox-size').value = '';
+  $('ps-outbox-tape').value = '윗면 H자, 아랫면 I자';
+  $('ps-outbox-pad').value = '';
+  $('ps-outbox-mat').value = 'DW골';
+  $('ps-outbox-note').value = '';
+  $('ps-pallet-type').value = '';
+  $('ps-pallet-method').value = '';
+  $('ps-pallet-size').value = '';
+  $('ps-pallet-height').value = '';
+  $('ps-pallet-caution').value = '';
+  $('ps-notes').value = '* 아웃박스 겉면 현품표 부착(* 현품표 샘플 시트 확인 必)\n- 전체 아웃박스 앞뒷면 1회 부착, 팔레트 적치 시 현품표 확인 가능하도록 적치 요망\n- 동일 제품 기준 유통기한 및 롯트 혼적 불가\n    1) 아웃박스 당 유통기한 및 롯트 혼적 불가\n    2) 파렛트 당 유통기한 및 롯트 혼적 불가 (단일 롯트로 적재)\n** 현품표 및 거래명세서 작성 시 발주서 상 르니브 품목코드 및 품목명으로 작성 必';
+  $('ps-comp-rows').innerHTML = '';
+  $('partspec-delete-btn').style.display = 'none';
+  openModal('add-partspec');
+}
+
+function onPartSpecProductChange() {
+  const pid = parseInt($('ps-product').value);
+  if (!pid) return;
+  const product = (DB.items||[]).find(i => i.id === pid);
+  if (!product) return;
+  // 자동 채우기 (비어있을 때만 덮어쓰지 않고, 모든 경우 갱신)
+  $('ps-code').value = product.code || '';
+  $('ps-barcode').value = product.barcode || '';
+  if (!$('ps-display-vol').value) $('ps-display-vol').value = product.spec || '';
+  if (!$('ps-fill-vol').value) $('ps-fill-vol').value = product.spec || '';
+  // 제조사: OEM 관련 업체로 자동
+  const vendor = (DB.vendors||[]).find(v => v.id === product.vendorId);
+  if (vendor) $('ps-mfr').value = vendor.company || '';
+  // BOM에서 구성품 로드
+  reloadPsComponentsFromBom();
+}
+
+function reloadPsComponentsFromBom() {
+  const pid = parseInt($('ps-product').value);
+  if (!pid) { showNotif('먼저 제품을 선택하세요', 'warning'); return; }
+  const bom = (DB.boms && DB.boms[pid]) || [];
+  if (!bom.length) { showNotif('해당 제품의 BOM이 없습니다', 'warning'); return; }
+  const rows = bom.map(r => {
+    const it = (DB.items||[]).find(x => x.id === r.itemId) || {};
+    const vd = (DB.vendors||[]).find(v => v.id === it.vendorId) || {};
+    return {
+      name: it.name || '',
+      material: it.material || '',
+      spec: it.spec || '',
+      vendor: vd.company || '',
+      note: ''
+    };
+  });
+  renderPsComponentRows(rows);
+}
+
+function renderPsComponentRows(rows) {
+  const tb = $('ps-comp-rows');
+  if (!tb) return;
+  if (!rows || !rows.length) { tb.innerHTML = '<tr><td colspan="6" class="empty">구성품 없음</td></tr>'; return; }
+  tb.innerHTML = rows.map((r, idx) => `
+    <tr>
+      <td><input class="fi ps-c-name" style="font-size:11px;padding:3px 6px" value="${(r.name||'').replace(/"/g,'&quot;')}"></td>
+      <td><input class="fi ps-c-mat" style="font-size:11px;padding:3px 6px" value="${(r.material||'').replace(/"/g,'&quot;')}"></td>
+      <td><input class="fi ps-c-spec" style="font-size:11px;padding:3px 6px" value="${(r.spec||'').replace(/"/g,'&quot;')}"></td>
+      <td><input class="fi ps-c-vendor" style="font-size:11px;padding:3px 6px" value="${(r.vendor||'').replace(/"/g,'&quot;')}"></td>
+      <td><input class="fi ps-c-note" style="font-size:11px;padding:3px 6px" value="${(r.note||'').replace(/"/g,'&quot;')}"></td>
+      <td style="text-align:center"><button type="button" class="btn btn-xs" style="padding:1px 6px;font-size:10px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca" onclick="this.closest('tr').remove()">✕</button></td>
+    </tr>`).join('');
+}
+
+function addPsComponentRow() {
+  const tb = $('ps-comp-rows');
+  if (!tb) return;
+  // 빈 테이블이면 'empty' 메시지 제거
+  if (tb.querySelector('.empty')) tb.innerHTML = '';
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input class="fi ps-c-name" style="font-size:11px;padding:3px 6px"></td>
+    <td><input class="fi ps-c-mat" style="font-size:11px;padding:3px 6px"></td>
+    <td><input class="fi ps-c-spec" style="font-size:11px;padding:3px 6px"></td>
+    <td><input class="fi ps-c-vendor" style="font-size:11px;padding:3px 6px"></td>
+    <td><input class="fi ps-c-note" style="font-size:11px;padding:3px 6px"></td>
+    <td style="text-align:center"><button type="button" class="btn btn-xs" style="padding:1px 6px;font-size:10px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca" onclick="this.closest('tr').remove()">✕</button></td>
+  `;
+  tb.appendChild(tr);
+}
+
+function collectPsComponents() {
+  const rows = Array.from(document.querySelectorAll('#ps-comp-rows tr'));
+  return rows.map(tr => ({
+    name:     tr.querySelector('.ps-c-name')?.value || '',
+    material: tr.querySelector('.ps-c-mat')?.value || '',
+    spec:     tr.querySelector('.ps-c-spec')?.value || '',
+    vendor:   tr.querySelector('.ps-c-vendor')?.value || '',
+    note:     tr.querySelector('.ps-c-note')?.value || ''
+  })).filter(r => r.name || r.material || r.spec || r.vendor || r.note);
+}
+
+function collectPartSpecForm() {
+  const pid = parseInt($('ps-product').value) || null;
+  const product = pid ? (DB.items||[]).find(i => i.id === pid) : null;
+  return {
+    productId: pid,
+    productNameKo: product ? product.name : '',
+    brand: $('ps-brand').value.trim(),
+    productNameEn: $('ps-name-en').value.trim(),
+    productCode: $('ps-code').value.trim(),
+    barcodeNumber: $('ps-barcode').value.trim(),
+    manufacturer: $('ps-mfr').value.trim(),
+    productType: $('ps-product-type').value.trim(),
+    version: $('ps-version').value.trim(),
+    displayVolume: $('ps-display-vol').value.trim(),
+    fillVolume: $('ps-fill-vol').value.trim(),
+    qcQty: $('ps-qc-qty').value.trim(),
+    qcManager: $('ps-qc-mgr').value.trim(),
+    qcNote: $('ps-qc-note').value,
+    components: collectPsComponents(),
+    markContainer: {
+      method: $('ps-mark-ct-method').value,
+      detail: $('ps-mark-ct-detail').value,
+      expiry: $('ps-mark-ct-expiry').value,
+    },
+    markBox: {
+      method: $('ps-mark-bx-method').value,
+      detail: $('ps-mark-bx-detail').value,
+      expiry: $('ps-mark-bx-expiry').value,
+    },
+    markStandard: $('ps-mark-standard').value,
+    packaging: $('ps-packaging').value,
+    labelLocation: $('ps-label-location').value,
+    inbox: {
+      qty: $('ps-inbox-qty').value, size: $('ps-inbox-size').value, tape: $('ps-inbox-tape').value,
+      pad: $('ps-inbox-pad').value, material: $('ps-inbox-mat').value, note: $('ps-inbox-note').value,
+    },
+    outbox: {
+      qty: $('ps-outbox-qty').value, size: $('ps-outbox-size').value, tape: $('ps-outbox-tape').value,
+      pad: $('ps-outbox-pad').value, material: $('ps-outbox-mat').value, note: $('ps-outbox-note').value,
+    },
+    pallet: {
+      type: $('ps-pallet-type').value, method: $('ps-pallet-method').value,
+      size: $('ps-pallet-size').value, height: $('ps-pallet-height').value, caution: $('ps-pallet-caution').value,
+    },
+    notes: $('ps-notes').value,
+  };
+}
+
+function savePartSpec() {
+  if (!requireWrite()) return;
+  if (!DB.partSpecs) DB.partSpecs = [];
+  const data = collectPartSpecForm();
+  if (!data.productId) { showNotif('제품을 선택하세요', 'warning'); return null; }
+  const now = Date.now();
+  if (window._editingPartSpecId) {
+    const idx = DB.partSpecs.findIndex(x => x.id === window._editingPartSpecId);
+    if (idx >= 0) {
+      DB.partSpecs[idx] = { ...DB.partSpecs[idx], ...data, id: window._editingPartSpecId, updatedAt: now };
+    }
+  } else {
+    if (!DB._nextId) DB._nextId = {};
+    const newId = (DB._nextId.partSpec || (DB.partSpecs.reduce((m,p)=>Math.max(m,p.id||0),0) + 1)) || 1;
+    DB._nextId.partSpec = newId + 1;
+    DB.partSpecs.push({ id: newId, ...data, createdAt: now, updatedAt: now });
+    window._editingPartSpecId = newId;
+  }
+  saveData();
+  renderPartSpecList();
+  showNotif('부자재 사양서 저장 완료', 'success');
+  closeModal('add-partspec');
+  return window._editingPartSpecId;
+}
+
+function saveAndPrintPartSpec() {
+  const id = savePartSpec();
+  if (id) setTimeout(() => printPartSpec(id), 200);
+}
+
+function editPartSpec(id) {
+  const p = (DB.partSpecs||[]).find(x => x.id === id);
+  if (!p) return;
+  window._editingPartSpecId = id;
+  populatePartSpecProductSelect();
+  openModal('add-partspec');
+  setTimeout(() => {
+    $('ps-product').value = p.productId || '';
+    $('ps-brand').value = p.brand || '';
+    $('ps-name-en').value = p.productNameEn || '';
+    $('ps-code').value = p.productCode || '';
+    $('ps-barcode').value = p.barcodeNumber || '';
+    $('ps-mfr').value = p.manufacturer || '';
+    $('ps-product-type').value = p.productType || '';
+    $('ps-version').value = p.version || '';
+    $('ps-display-vol').value = p.displayVolume || '';
+    $('ps-fill-vol').value = p.fillVolume || '';
+    $('ps-qc-qty').value = p.qcQty || '';
+    $('ps-qc-mgr').value = p.qcManager || '';
+    $('ps-qc-note').value = p.qcNote || '';
+    renderPsComponentRows(p.components || []);
+    $('ps-mark-ct-method').value = p.markContainer?.method || '';
+    $('ps-mark-ct-detail').value = p.markContainer?.detail || '';
+    $('ps-mark-ct-expiry').value = p.markContainer?.expiry || '';
+    $('ps-mark-bx-method').value = p.markBox?.method || '';
+    $('ps-mark-bx-detail').value = p.markBox?.detail || '';
+    $('ps-mark-bx-expiry').value = p.markBox?.expiry || '';
+    $('ps-mark-standard').value = p.markStandard || '';
+    $('ps-packaging').value = p.packaging || '';
+    $('ps-label-location').value = p.labelLocation || '';
+    $('ps-inbox-qty').value    = p.inbox?.qty || '';
+    $('ps-inbox-size').value   = p.inbox?.size || '';
+    $('ps-inbox-tape').value   = p.inbox?.tape || '';
+    $('ps-inbox-pad').value    = p.inbox?.pad || '';
+    $('ps-inbox-mat').value    = p.inbox?.material || '';
+    $('ps-inbox-note').value   = p.inbox?.note || '';
+    $('ps-outbox-qty').value   = p.outbox?.qty || '';
+    $('ps-outbox-size').value  = p.outbox?.size || '';
+    $('ps-outbox-tape').value  = p.outbox?.tape || '';
+    $('ps-outbox-pad').value   = p.outbox?.pad || '';
+    $('ps-outbox-mat').value   = p.outbox?.material || '';
+    $('ps-outbox-note').value  = p.outbox?.note || '';
+    $('ps-pallet-type').value    = p.pallet?.type || '';
+    $('ps-pallet-method').value  = p.pallet?.method || '';
+    $('ps-pallet-size').value    = p.pallet?.size || '';
+    $('ps-pallet-height').value  = p.pallet?.height || '';
+    $('ps-pallet-caution').value = p.pallet?.caution || '';
+    $('ps-notes').value = p.notes || '';
+    $('partspec-delete-btn').style.display = '';
+  }, 50);
+}
+
+function deletePartSpec() {
+  if (!requireWrite()) return;
+  if (!window._editingPartSpecId) return;
+  if (!confirm('이 부자재 사양서를 삭제하시겠습니까?')) return;
+  const idx = (DB.partSpecs||[]).findIndex(x => x.id === window._editingPartSpecId);
+  if (idx >= 0) DB.partSpecs.splice(idx, 1);
+  saveData();
+  renderPartSpecList();
+  closeModal('add-partspec');
+  showNotif('삭제되었습니다', 'success');
+}
+
+function deletePartSpecById(id) {
+  if (!requireWrite()) return;
+  if (!confirm('이 부자재 사양서를 삭제하시겠습니까?')) return;
+  const idx = (DB.partSpecs||[]).findIndex(x => x.id === id);
+  if (idx >= 0) DB.partSpecs.splice(idx, 1);
+  saveData();
+  renderPartSpecList();
+  showNotif('삭제되었습니다', 'success');
+}
+
+// ───── 인쇄 (부자재 사양서) ─────
+function _esc(s) { return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function _nl2br(s) { return _esc(s).replace(/\n/g, '<br>'); }
+
+function printPartSpec(id) {
+  const p = (DB.partSpecs||[]).find(x => x.id === id);
+  if (!p) { showNotif('사양서를 찾을 수 없습니다', 'warning'); return; }
+  const comps = p.components || [];
+  const today = new Date().toISOString().slice(0,10);
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${_esc(p.productNameKo)} — 부자재 사양서</title>
+<style>
+  @page { size: A4; margin: 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Malgun Gothic', '맑은 고딕', Arial, sans-serif; font-size: 11px; color:#111; margin:0; padding:0; }
+  h1 { text-align:center; font-size:20px; margin:0 0 10px; font-weight:700; }
+  .approval { display:table; margin:0 0 10px auto; border-collapse:collapse; font-size:10px; }
+  .approval td { border:1px solid #000; padding:4px 10px; text-align:center; min-width:60px; height:44px; vertical-align:middle; }
+  table.spec { width:100%; border-collapse:collapse; margin-bottom:8px; table-layout:fixed; }
+  table.spec th, table.spec td { border:1px solid #000; padding:4px 6px; vertical-align:middle; word-wrap:break-word; }
+  table.spec th { background:#f1f5f9; font-weight:600; text-align:center; }
+  table.spec td.lbl { background:#fafafa; text-align:center; font-weight:600; }
+  .section-title { font-weight:700; padding:5px 8px; background:#e2e8f0; border:1px solid #000; border-bottom:none; }
+  .sub-box { border:1px solid #000; padding:6px 8px; margin-bottom:6px; white-space:pre-wrap; line-height:1.5; min-height:36px; }
+  .two-col { display:grid; grid-template-columns:1fr 1fr; gap:0; }
+  .two-col > div { border:1px solid #000; padding:6px 8px; }
+  .two-col > div:first-child { border-right:none; }
+  .center { text-align:center; }
+  .red { color:#c00; font-weight:600; }
+  .small { font-size:10px; }
+  .footer-meta { text-align:right; font-size:9px; color:#666; margin-top:8px; }
+</style></head><body>
+<h1>르니브 포장 사양서</h1>
+<table class="approval"><tr>
+  <td rowspan="2" style="background:#f1f5f9;font-weight:700">결재</td>
+  <td>작성자</td><td>1차 검토</td><td>2차 검토</td>
+</tr><tr><td></td><td></td><td></td></tr></table>
+
+<table class="spec"><colgroup><col style="width:14%"><col style="width:36%"><col style="width:14%"><col style="width:36%"></colgroup>
+<tr><td class="lbl">브랜드명</td><td>${_esc(p.brand)}</td><td class="lbl">표시용량</td><td>${_esc(p.displayVolume)}</td></tr>
+<tr><td class="lbl">품명(국문)</td><td>${_esc(p.productNameKo)}</td><td class="lbl">실충진용량</td><td>${_esc(p.fillVolume)}</td></tr>
+<tr><td class="lbl">품명(영문)</td><td>${_esc(p.productNameEn)}</td><td class="lbl" rowspan="3">품질<br>관리</td><td style="padding:0"><table style="width:100%;border-collapse:collapse"><tr><td style="border:none;border-right:1px solid #000;width:40%;text-align:center;padding:3px;background:#fafafa">관리품 수량</td><td style="border:none;padding:3px 6px">${_esc(p.qcQty)}</td></tr></table></td></tr>
+<tr><td class="lbl">품목코드</td><td style="font-family:monospace">${_esc(p.productCode)}</td><td style="padding:0"><table style="width:100%;border-collapse:collapse"><tr><td style="border:none;border-right:1px solid #000;width:40%;text-align:center;padding:3px;background:#fafafa">담당자</td><td style="border:none;padding:3px 6px">${_esc(p.qcManager)}</td></tr></table></td></tr>
+<tr><td class="lbl">바코드넘버</td><td>${_esc(p.barcodeNumber)}</td><td style="white-space:pre-wrap;font-size:10px">${_nl2br(p.qcNote)}</td></tr>
+<tr><td class="lbl">제조사</td><td>${_esc(p.manufacturer)}</td><td class="lbl">품목구분</td><td>${_esc(p.productType)}</td></tr>
+<tr><td class="lbl">버전</td><td colspan="3">${_esc(p.version)}</td></tr>
+</table>
+
+<div class="section-title">구성품 리스트</div>
+<table class="spec" style="margin-top:0">
+  <tr><th style="width:20%">구성품명</th><th style="width:14%">재질</th><th style="width:18%">사양</th><th style="width:22%">업체</th><th>비고</th></tr>
+  ${comps.length ? comps.map(c => `<tr><td>${_esc(c.name)}</td><td class="center">${_esc(c.material)}</td><td class="center">${_esc(c.spec)}</td><td class="center">${_esc(c.vendor)}</td><td>${_esc(c.note)}</td></tr>`).join('') : '<tr><td colspan="5" class="center" style="color:#999">구성품 없음</td></tr>'}
+</table>
+
+<div class="section-title">제품 착인기준</div>
+<table class="spec" style="margin-top:0"><colgroup><col style="width:10%"><col style="width:10%"><col style="width:30%"><col style="width:10%"><col style="width:10%"><col style="width:30%"></colgroup>
+<tr><th rowspan="4" style="width:10%">표기<br>방법</th><th colspan="2">[용기 착인]</th><td style="border:none"></td><th colspan="2">[단상자 착인]</th></tr>
+<tr><td class="lbl">방법</td><td>${_esc(p.markContainer?.method)}</td><td style="border:none"></td><td class="lbl">방법</td><td>${_esc(p.markBox?.method)}</td></tr>
+<tr><td class="lbl" rowspan="1">세부내용</td><td style="white-space:pre-wrap">${_nl2br(p.markContainer?.detail)}</td><td style="border:none"></td><td class="lbl">세부내용</td><td style="white-space:pre-wrap">${_nl2br(p.markBox?.detail)}</td></tr>
+<tr><td class="lbl">유효기간</td><td class="red">${_esc(p.markContainer?.expiry)}</td><td style="border:none"></td><td class="lbl">유효기간</td><td class="red">${_esc(p.markBox?.expiry)}</td></tr>
+<tr><td class="lbl">표기 기준</td><td colspan="5" style="background:#fffbe6">${_esc(p.markStandard)}</td></tr>
+</table>
+
+<div class="section-title">포장방법</div>
+<div class="sub-box">${_nl2br(p.packaging)}</div>
+
+<div class="section-title">착인 위치 및 인박스, 아웃박스라벨</div>
+<div class="sub-box">${_nl2br(p.labelLocation)}</div>
+
+<div class="section-title">적재사항</div>
+<table class="spec" style="margin-top:0">
+  <tr><th>구분</th><th>입수량</th><th>사이즈(장*폭*고mm)</th><th>테이프 밴딩</th><th>간지 유무</th><th>재질</th><th>비고</th></tr>
+  <tr><td class="lbl">인박스</td><td class="center">${_esc(p.inbox?.qty)}</td><td class="center">${_esc(p.inbox?.size)}</td><td class="center">${_esc(p.inbox?.tape)}</td><td class="center">${_esc(p.inbox?.pad)}</td><td class="center">${_esc(p.inbox?.material)}</td><td>${_esc(p.inbox?.note)}</td></tr>
+  <tr><td class="lbl">아웃박스</td><td class="center">${_esc(p.outbox?.qty)}</td><td class="center">${_esc(p.outbox?.size)}</td><td class="center">${_esc(p.outbox?.tape)}</td><td class="center">${_esc(p.outbox?.pad)}</td><td class="center">${_esc(p.outbox?.material)}</td><td>${_esc(p.outbox?.note)}</td></tr>
+</table>
+<table class="spec">
+  <tr><th colspan="5">파렛트</th></tr>
+  <tr><td class="lbl" style="width:14%">종류</td><td>${_esc(p.pallet?.type)}</td><td class="lbl" style="width:14%">적재방법</td><td colspan="2">${_esc(p.pallet?.method)}</td></tr>
+  <tr><td class="lbl">사이즈</td><td>${_esc(p.pallet?.size)}</td><td class="lbl">높이</td><td colspan="2">${_esc(p.pallet?.height)}</td></tr>
+  <tr><td class="lbl">주의사항</td><td colspan="4">${_esc(p.pallet?.caution)}</td></tr>
+</table>
+
+<div class="section-title">특이사항</div>
+<div class="sub-box red" style="color:#c00">${_nl2br(p.notes)}</div>
+
+<div class="footer-meta">출력일: ${today}</div>
+</body></html>`;
+  const w = window.open('', '_blank');
+  if (!w) { showNotif('팝업이 차단되었습니다. 팝업 허용 후 다시 시도해주세요.', 'warning'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+  w.onload = () => { setTimeout(() => { try { w.focus(); w.print(); } catch(e){} }, 300); };
+}
+
+// ───── 인쇄 (BOM — 발주용) ─────
+function printBomForOrder() {
+  const pid = parseInt($('bom-product-sel') ? $('bom-product-sel').value : 0);
+  if (!pid) { showNotif('제품을 선택하세요', 'warning'); return; }
+  const product = (DB.items||[]).find(i => i.id === pid);
+  if (!product) return;
+  const bom = (DB.boms && DB.boms[pid]) || [];
+  const vendor = (DB.vendors||[]).find(v => v.id === product.vendorId) || {};
+  const today = new Date().toISOString().slice(0,10);
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${_esc(product.name)} — BOM</title>
+<style>
+  @page { size: A4 landscape; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Malgun Gothic', '맑은 고딕', Arial, sans-serif; font-size: 11px; color:#111; margin:0; padding:0; }
+  h1 { text-align:center; font-size:18px; margin:0 0 12px; font-weight:700; }
+  .section-title { font-weight:700; padding:5px 8px; background:#e2e8f0; border:1px solid #000; border-bottom:none; margin-top:6px; }
+  table.bom { width:100%; border-collapse:collapse; }
+  table.bom th, table.bom td { border:1px solid #000; padding:4px 6px; vertical-align:middle; font-size:10.5px; }
+  table.bom th { background:#f1f5f9; font-weight:600; text-align:center; }
+  .center { text-align:center; }
+  .footer-meta { text-align:right; font-size:9px; color:#666; margin-top:6px; }
+</style></head><body>
+<h1>BOM 사양서 — ${_esc(product.name)}</h1>
+
+<div class="section-title">완제품</div>
+<table class="bom">
+  <tr><th style="width:5%">No.</th><th style="width:12%">품목코드</th><th>품명</th><th style="width:8%">종류</th><th style="width:10%">초도 발주량(EA)</th><th style="width:18%">제조사</th></tr>
+  <tr><td class="center">1</td><td class="center" style="font-family:monospace">${_esc(product.code)}</td><td>${_esc(product.name)}</td><td class="center">제품</td><td class="center"></td><td class="center">${_esc(vendor.company||'')}</td></tr>
+</table>
+
+<div class="section-title">BOM 사양서</div>
+<table class="bom">
+  <tr>
+    <th style="width:4%">No.</th><th style="width:10%">품목코드</th><th>품명</th>
+    <th style="width:7%">종류</th><th style="width:7%">소요량(EA)</th>
+    <th style="width:14%">재질 및 세부 사양</th><th style="width:10%">규격/사이즈</th>
+    <th style="width:8%">입고수량</th><th style="width:9%">입고 예정일</th>
+    <th style="width:12%">제조사</th><th style="width:6%">사급여부</th><th>비고</th>
+  </tr>
+  ${bom.length ? bom.map((r, idx) => {
+    const it = (DB.items||[]).find(x => x.id === r.itemId) || {};
+    const vd = (DB.vendors||[]).find(v => v.id === it.vendorId) || {};
+    return `<tr>
+      <td class="center">${idx+1}</td>
+      <td class="center" style="font-family:monospace">${_esc(it.code||'')}</td>
+      <td>${_esc(it.name||'')}</td>
+      <td class="center">${_esc(it.type||'')}</td>
+      <td class="center">${_esc(r.qty)} ${_esc(r.unit||'')}</td>
+      <td>${_esc(it.material||'')}</td>
+      <td class="center">${_esc(it.spec||'')}</td>
+      <td class="center"></td><td class="center"></td>
+      <td class="center">${_esc(vd.company||'')}</td>
+      <td class="center">사급</td>
+      <td></td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="12" class="center" style="color:#999">BOM 없음</td></tr>'}
+</table>
+
+<div class="section-title">특이사항</div>
+<div style="border:1px solid #000;padding:8px 10px;min-height:60px;white-space:pre-wrap;line-height:1.6"></div>
+
+<div class="footer-meta">출력일: ${today}</div>
+</body></html>`;
+  const w = window.open('', '_blank');
+  if (!w) { showNotif('팝업이 차단되었습니다. 팝업 허용 후 다시 시도해주세요.', 'warning'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+  w.onload = () => { setTimeout(() => { try { w.focus(); w.print(); } catch(e){} }, 300); };
 }
 
 function updateBomCostBtnState() {
@@ -9735,7 +10445,7 @@ function initERPWhenReady() {
       // ★ 버그 수정: Firestore 배열이 []이어도(= 전부 삭제됨) Firestore를 신뢰해야 함.
       //    이전 코드는 length>0 일 때만 Firestore 사용 → 마지막 항목 삭제 시 localStorage
       //    의 stale 데이터가 되살아나는 문제 발생 (특히 보기 권한 유저에서).
-      ['vendors','items','orders','productions','stockHistory','quotes','tasks','users','shops','shopOrders','cs','archivedItems'].forEach(k => {
+      ['vendors','items','orders','productions','stockHistory','quotes','tasks','users','shops','shopOrders','cs','archivedItems','partSpecs'].forEach(k => {
         if (Array.isArray(firestoreDB[k])) {
           merged[k] = firestoreDB[k]; // 빈 배열도 명시적 상태로 신뢰
         } else if (localDB[k] && localDB[k].length > 0) {
