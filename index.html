@@ -2130,7 +2130,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.4.5';
+const ERP_VERSION = 'v1.4.6';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -6203,10 +6203,23 @@ function saveStockOut() {
 }
 
 function exportStockReport() {
-  const csv = ['분류,코드,품목명,용량,재고수량,재고평가액'];
-  DB.items.forEach(i => {
+  // 활성 + 아카이브 품목 모두 포함
+  const archivedList = (DB.archivedItems||[]).map(i => ({...i, _archived:true}));
+  const allItems = [...DB.items, ...archivedList];
+  const totalVal = allItems.reduce((s,i) => s + (i.stock||0)*(i.price||0), 0);
+  const totalCount = allItems.length;
+  const esc = v => `"${String(v||'').replace(/"/g,'""')}"`;
+  const csv = [];
+  // 상단 요약 섹션
+  csv.push(`재고 리포트,${today()}`);
+  csv.push(`총 재고평가액,${totalVal}`);
+  csv.push(`총 품목 수,${totalCount}`);
+  csv.push(''); // 빈 줄
+  csv.push('분류,코드,품목명,용량,단가,재고수량,재고평가액,상태');
+  allItems.forEach(i => {
     const stockVal = (i.stock||0) * (i.price||0);
-    csv.push(`${i.type},${i.code},"${i.name}","${i.spec||''}",${i.stock||0},${stockVal}`);
+    const status = i._archived ? '아카이브' : '활성';
+    csv.push([i.type, i.code, esc(i.name), esc(i.spec||''), (i.price||0), (i.stock||0), stockVal, status].join(','));
   });
   const blob = new Blob(['\ufeff'+csv.join('\n')], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
