@@ -834,9 +834,10 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div id="archive-diag-panel" style="background:#fffbeb;border:2px solid #fbbf24;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#78350f;font-family:monospace;line-height:1.7"></div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
         <div style="background:var(--sky-50);border:1px solid var(--sky-200);border-radius:7px;padding:6px 14px;font-size:12px;color:var(--sky-800)">📦 아카이브 총 재고평가액 &nbsp;: &nbsp;&nbsp;&nbsp;<strong id="archive-total-value">-</strong> &nbsp;·&nbsp; 품목 수: <strong id="archive-count">0</strong></div>
-        <div style="display:flex;gap:6px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn btn-outline btn-sm" onclick="forceReloadArchive()" style="font-size:11px">🔄 Firestore에서 다시 불러오기</button>
-          <button class="btn btn-sm" onclick="testAddArchivedItem()" style="font-size:11px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d">🧪 테스트: 더미 아카이브 추가</button>
+          <button class="btn btn-sm" onclick="recoverLostArchivedItems()" style="font-size:11px;background:#dcfce7;color:#166534;border:1px solid #86efac">♻️ 유실된 아카이브 7건 복구</button>
+          <button class="btn btn-sm" onclick="testAddArchivedItem()" style="font-size:11px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d">🧪 테스트: 더미 추가</button>
         </div>
       </div>
       <div class="card">
@@ -2126,7 +2127,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.3.2';
+const ERP_VERSION = 'v1.3.3';
 const STORE_KEY = 'reniv_erp_v8';
 // 구버전 키 삭제
 ['reniv_erp_v1','reniv_erp_v2','reniv_erp_v3','reniv_erp_v4','reniv_erp_v5','reniv_erp_v6','reniv_erp_v7'].forEach(k => localStorage.removeItem(k));
@@ -5149,6 +5150,46 @@ function archiveSelectedItems() {
   console.log('📥 [archiveSelectedItems] 결과 - archivedItems:', before, '→', DB.archivedItems.length);
   saveData(); renderItemTable(); updateBadges();
   showNotif(ids.length + '개 품목이 아카이브되었습니다 (총 ' + DB.archivedItems.length + '건)', 'success');
+}
+function recoverLostArchivedItems() {
+  // 유실된 아카이브 품목 7개 복구 (스텔라님이 제공한 목록)
+  const lostCodes = ['M-3X-01','M-3X-02','M-3X-03','M-3X-04','M-3X-05','M-3X-07','M-3X-08'];
+  if (!confirm(`유실된 아카이브 ${lostCodes.length}건을 복구합니까?\n(품목관리에 있으면 아카이브로 이동, 없으면 DEFAULT_DB에서 복원)`)) return;
+  if (!DB.archivedItems) DB.archivedItems = [];
+  const today = new Date().toISOString().slice(0,10);
+  let recovered = 0;
+  let skipped = 0;
+  lostCodes.forEach(code => {
+    // 이미 아카이브에 있으면 스킵
+    if (DB.archivedItems.find(i => i.code === code)) { skipped++; return; }
+    // 품목관리에 있으면 거기서 이동
+    const idx = DB.items.findIndex(i => i.code === code);
+    if (idx !== -1) {
+      const item = DB.items.splice(idx, 1)[0];
+      item._archivedAt = today;
+      DB.archivedItems.push(item);
+      recovered++;
+      console.log('♻️ DB.items → archivedItems:', code, item.name);
+    } else {
+      // DEFAULT_DB에서 복원
+      const defItem = DEFAULT_DB.items.find(i => i.code === code);
+      if (defItem) {
+        const clone = JSON.parse(JSON.stringify(defItem));
+        clone._archivedAt = today;
+        clone.archiveNote = '복구됨';
+        DB.archivedItems.push(clone);
+        recovered++;
+        console.log('♻️ DEFAULT_DB → archivedItems:', code, clone.name);
+      } else {
+        console.warn('♻️ 복구 실패 (코드 없음):', code);
+      }
+    }
+  });
+  saveData();
+  renderArchivePage();
+  if (typeof renderItemTable === 'function') renderItemTable();
+  if (typeof updateBadges === 'function') updateBadges();
+  showNotif(`복구 완료: ${recovered}건 복원, ${skipped}건 스킵 (이미 존재)`, recovered > 0 ? 'success' : 'warning');
 }
 function testAddArchivedItem() {
   if (!DB.archivedItems) DB.archivedItems = [];
