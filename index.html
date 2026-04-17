@@ -3790,19 +3790,62 @@ function go(page) {
             if (tokenEl) tokenEl.value = localStorage.getItem('reniv_trello_token') || DB._trelloToken || '';
           }
         }
-        // Gemini API Key 로드
+        // Gemini API Key 로드 — 회사 공용(Firestore) 우선, 없으면 개인 localStorage
         const geminiCard = document.getElementById('gemini-settings-card');
         if (geminiCard) {
           geminiCard.style.display = canWr ? '' : 'none';
           const gkEl = document.getElementById('gemini-api-key');
-          if (gkEl) gkEl.value = localStorage.getItem('reniv_gemini_key') || '';
+          if (gkEl) {
+            const shared = (window._sharedApiKeys||{}).gemini;
+            if (shared) {
+              gkEl.value = shared;
+              const st = document.getElementById('gemini-save-status');
+              if (st) st.textContent = '🏢 회사 공용 키 사용 중 (모든 직원 공유)';
+            } else {
+              gkEl.value = localStorage.getItem('reniv_gemini_key') || '';
+              // Firestore에서 아직 로드 전이면 지금 로드
+              if ((window._sharedApiKeys||{}).gemini === null) {
+                loadSharedSetting('gemini_api_key').then(v => {
+                  if (v && typeof v === 'string') {
+                    window._sharedApiKeys.gemini = v;
+                    if (!gkEl.value) gkEl.value = v;
+                    const st = document.getElementById('gemini-save-status');
+                    if (st) st.textContent = '🏢 회사 공용 키 사용 중 (모든 직원 공유)';
+                  } else {
+                    window._sharedApiKeys.gemini = '';
+                  }
+                }).catch(()=>{});
+              }
+            }
+          }
         }
         // Claude API Key 로드
         const claudeCard = document.getElementById('claude-settings-card');
         if (claudeCard) {
           claudeCard.style.display = canWr ? '' : 'none';
           const ckEl = document.getElementById('claude-api-key');
-          if (ckEl) ckEl.value = localStorage.getItem('reniv_claude_key') || '';
+          if (ckEl) {
+            const shared = (window._sharedApiKeys||{}).claude;
+            if (shared) {
+              ckEl.value = shared;
+              const st = document.getElementById('claude-save-status');
+              if (st) st.textContent = '🏢 회사 공용 키 사용 중 (모든 직원 공유)';
+            } else {
+              ckEl.value = localStorage.getItem('reniv_claude_key') || '';
+              if ((window._sharedApiKeys||{}).claude === null) {
+                loadSharedSetting('claude_api_key').then(v => {
+                  if (v && typeof v === 'string') {
+                    window._sharedApiKeys.claude = v;
+                    if (!ckEl.value) ckEl.value = v;
+                    const st = document.getElementById('claude-save-status');
+                    if (st) st.textContent = '🏢 회사 공용 키 사용 중 (모든 직원 공유)';
+                  } else {
+                    window._sharedApiKeys.claude = '';
+                  }
+                }).catch(()=>{});
+              }
+            }
+          }
         }
       };
       applySettingsVisibility();
@@ -10578,22 +10621,40 @@ let dragTask = null;
 // ═══════════════════════════════════════════════════════
 const TRELLO_BOARD_ID = '69ce5a3c96127754b5c331df';
 
-function saveGeminiKey() {
+async function saveGeminiKey() {
   const key = (document.getElementById('gemini-api-key') || {}).value?.trim();
   if (!key) { showNotif('API Key를 입력하세요', 'warning'); return; }
+  // 1) 개인 백업 (localStorage)
   localStorage.setItem('reniv_gemini_key', key);
-  showNotif('Gemini API Key가 저장되었습니다', 'success');
+  // 2) 회사 공용 (Firestore) — 쓰기 권한이 있는 사용자만 실제로 저장됨
+  let sharedOk = false;
+  try {
+    await saveSharedSetting('gemini_api_key', key);
+    if (!window._sharedApiKeys) window._sharedApiKeys = { gemini: null, claude: null };
+    window._sharedApiKeys.gemini = key;
+    sharedOk = true;
+  } catch(e) { console.warn('Gemini 공유 저장 실패:', e); }
+  const msg = sharedOk ? '🏢 Gemini API Key가 회사 공용으로 저장되었습니다' : 'Gemini API Key가 내 기기에 저장되었습니다';
+  showNotif(msg, 'success');
   const st = document.getElementById('gemini-save-status');
-  if (st) { st.textContent = '✅ 저장 완료'; setTimeout(() => { st.textContent = ''; }, 3000); }
+  if (st) { st.textContent = sharedOk ? '✅ 저장 완료 (🏢 회사 공용 · 모든 직원 즉시 반영)' : '✅ 저장 완료 (내 기기에만)'; setTimeout(() => { st.textContent = ''; }, 5000); }
 }
 
-function saveClaudeKey() {
+async function saveClaudeKey() {
   const key = (document.getElementById('claude-api-key') || {}).value?.trim();
   if (!key) { showNotif('API Key를 입력하세요', 'warning'); return; }
   localStorage.setItem('reniv_claude_key', key);
-  showNotif('Claude API Key가 저장되었습니다', 'success');
+  let sharedOk = false;
+  try {
+    await saveSharedSetting('claude_api_key', key);
+    if (!window._sharedApiKeys) window._sharedApiKeys = { gemini: null, claude: null };
+    window._sharedApiKeys.claude = key;
+    sharedOk = true;
+  } catch(e) { console.warn('Claude 공유 저장 실패:', e); }
+  const msg = sharedOk ? '🏢 Claude API Key가 회사 공용으로 저장되었습니다' : 'Claude API Key가 내 기기에 저장되었습니다';
+  showNotif(msg, 'success');
   const st = document.getElementById('claude-save-status');
-  if (st) { st.textContent = '✅ 저장 완료'; setTimeout(() => { st.textContent = ''; }, 3000); }
+  if (st) { st.textContent = sharedOk ? '✅ 저장 완료 (🏢 회사 공용 · 모든 직원 즉시 반영)' : '✅ 저장 완료 (내 기기에만)'; setTimeout(() => { st.textContent = ''; }, 5000); }
 }
 
 function saveTrelloSettings() {
@@ -12910,11 +12971,47 @@ function importBomCost() {
   showNotif('BOM 원가를 가져왔습니다 (' + totalCost.toLocaleString() + '원)', 'success');
 }
 
+// ── 회사 공용 API Key 캐시 / 로더 ──
+// window._sharedApiKeys: { gemini: null|'', claude: null|'' }
+//   null = 아직 Firestore에서 로드 전,  '' = 공유 키 없음(개인 키 사용),  'sk-...' = 공유 키
+if (!window._sharedApiKeys) window._sharedApiKeys = { gemini: null, claude: null };
+
+async function _loadSharedApiKeys() {
+  try {
+    const [gem, clau] = await Promise.all([
+      loadSharedSetting('gemini_api_key').catch(() => null),
+      loadSharedSetting('claude_api_key').catch(() => null)
+    ]);
+    window._sharedApiKeys.gemini = (typeof gem === 'string' && gem) ? gem : '';
+    window._sharedApiKeys.claude = (typeof clau === 'string' && clau) ? clau : '';
+    console.log('🔑 회사 공용 API Key 로드 완료 — Gemini:', !!window._sharedApiKeys.gemini, 'Claude:', !!window._sharedApiKeys.claude);
+  } catch(e) {
+    console.warn('공유 API Key 로드 실패:', e);
+    if (window._sharedApiKeys.gemini === null) window._sharedApiKeys.gemini = '';
+    if (window._sharedApiKeys.claude === null) window._sharedApiKeys.claude = '';
+  }
+}
+
+// 우선순위: 회사 공용(Firestore) → 개인(localStorage)
+async function _getApiKey(provider) {
+  const lsKey = provider === 'gemini' ? 'reniv_gemini_key' : 'reniv_claude_key';
+  const cache = window._sharedApiKeys || (window._sharedApiKeys = { gemini: null, claude: null });
+  // 아직 로드 전이면 지금 로드
+  if (cache[provider] === null) {
+    try {
+      const v = await loadSharedSetting(provider + '_api_key');
+      cache[provider] = (typeof v === 'string' && v) ? v : '';
+    } catch(e) { cache[provider] = ''; }
+  }
+  if (cache[provider]) return cache[provider];  // 회사 공용 우선
+  return localStorage.getItem(lsKey) || '';      // 개인 폴백
+}
+
 // ── Claude AI 호출 (Anthropic Messages API, 브라우저 직접 호출) ──
 async function callClaude(prompt) {
-  const apiKey = localStorage.getItem('reniv_claude_key') || '';
+  const apiKey = await _getApiKey('claude');
   if (!apiKey) {
-    showNotif('설정에서 Claude API Key를 등록하세요', 'error');
+    showNotif('설정에서 Claude API Key를 등록하세요 (관리자에게 문의)', 'error');
     return null;
   }
   try {
@@ -12952,9 +13049,9 @@ async function callClaude(prompt) {
 
 // ── Gemini AI 호출 ──
 async function callGemini(prompt) {
-  const apiKey = localStorage.getItem('reniv_gemini_key') || '';
+  const apiKey = await _getApiKey('gemini');
   if (!apiKey) {
-    showNotif('설정에서 Gemini API Key를 등록하세요', 'error');
+    showNotif('설정에서 Gemini API Key를 등록하세요 (관리자에게 문의)', 'error');
     return null;
   }
   // ① 실제 사용 가능한 모델 목록을 먼저 조회 (캐싱)
@@ -13050,9 +13147,9 @@ function toggleNpAiNames() {
 // ── Gemini 나노바나나 (이미지 생성) ──
 // refImages: 선택적 참고 이미지 배열 (dataURL 형식: "data:image/...;base64,XXXX")
 async function callGeminiImage(prompt, refImages) {
-  const apiKey = localStorage.getItem('reniv_gemini_key') || '';
+  const apiKey = await _getApiKey('gemini');
   if (!apiKey) {
-    showNotif('설정에서 Gemini API Key를 등록하세요', 'error');
+    showNotif('설정에서 Gemini API Key를 등록하세요 (관리자에게 문의)', 'error');
     return null;
   }
   const model = 'gemini-2.5-flash-image';
@@ -14828,6 +14925,8 @@ function initERPWhenReady() {
         await new Promise(r => setTimeout(r, 500));
       }
       try { const s = await loadSharedSetting('logo_data'); if (s) { try { idbSet('reniv_logo', s); } catch(e) {} applyLogo(s); } } catch(e) {}
+      // 🔑 회사 공용 API Key 프리로드 (모든 직원이 버튼 누르면 바로 Gemini/Claude 사용 가능)
+      try { await _loadSharedApiKeys(); } catch(e) { console.warn('공유 API Key 프리로드 실패:', e); }
     })();
     hideLoader();
     doRender();
