@@ -6438,15 +6438,23 @@ function saveItem() {
   if (window._clearItemImg) { data.image = ''; window._clearItemImg = false; }
   if (window._clearBarcodeImg) { data.barcodeImg = ''; window._clearBarcodeImg = false; }
   const doSave = () => {
+    const isNew = !id;
     if (id) {
       const idx = DB.items.findIndex(i=>i.id===id);
       if (idx>=0) DB.items[idx] = {...DB.items[idx], ...data};
-      showNotif('품목이 수정되었습니다','success');
     } else {
       DB.items.push({id:nextId('item'), lot:'', expiry:'', ...data});
-      showNotif('품목이 등록되었습니다','success');
     }
-    saveData(); closeModal('add-item'); renderItemTable(); updateBadges();
+    closeModal('add-item'); renderItemTable(); updateBadges();
+    // 즉시 "저장 중" 알림 → Firestore 완료 후 최종 성공 알림 (데이터 소실 방지)
+    try { showNotif('💾 저장 중…','info'); } catch(_){}
+    const savePromise = (typeof _doSaveData === 'function') ? _doSaveData() : Promise.resolve(saveData());
+    Promise.resolve(savePromise).then(() => {
+      showNotif(isNew ? '✅ 품목이 등록되었습니다' : '✅ 품목이 수정되었습니다','success');
+    }).catch(err => {
+      console.error('품목 저장 실패:', err);
+      showNotif('⚠️ 저장 실패: ' + (err && err.message || '알 수 없는 오류') + ' — 새로고침 전에 다시 시도하세요','error');
+    });
   };
   const saveWithQuote = (cb) => {
     if (quoteFile && quoteFile.files && quoteFile.files[0]) {
@@ -15014,11 +15022,23 @@ function initERPWhenReady() {
       // ★ 버그 수정: Firestore 배열이 []이어도(= 전부 삭제됨) Firestore를 신뢰해야 함.
       //    이전 코드는 length>0 일 때만 Firestore 사용 → 마지막 항목 삭제 시 localStorage
       //    의 stale 데이터가 되살아나는 문제 발생 (특히 보기 권한 유저에서).
+      let _needsResaveToFirestore = false;
       ['vendors','items','orders','productions','stockHistory','quotes','tasks','users','shops','shopOrders','cs','archivedItems','partSpecs'].forEach(k => {
         if (Array.isArray(firestoreDB[k])) {
           merged[k] = firestoreDB[k]; // 빈 배열도 명시적 상태로 신뢰
         } else if (localDB[k] && localDB[k].length > 0) {
           merged[k] = localDB[k];
+        }
+        // 🛟 [SYNC RECOVERY] Firestore에는 없지만 localStorage에 있는 신규 ID는 복구
+        //  → 저장 직후 Firestore 동기화 전에 새로고침된 경우 데이터 소실 방지
+        if (Array.isArray(merged[k]) && Array.isArray(localDB[k]) && localDB[k].length > 0) {
+          const mergedIds = new Set(merged[k].map(x => x && x.id).filter(id => id != null));
+          const pending = localDB[k].filter(x => x && x.id != null && !mergedIds.has(x.id));
+          if (pending.length > 0) {
+            console.warn(`🛟 [SYNC RECOVERY] ${k}: localStorage에 있지만 Firestore에 없는 ${pending.length}건 복구 — ids:`, pending.map(x=>x.id));
+            merged[k] = merged[k].concat(pending);
+            _needsResaveToFirestore = true;
+          }
         }
       });
       // 비배열 메타 필드는 Firestore 것을 우선
@@ -15113,6 +15133,17 @@ function initERPWhenReady() {
         console.log('💾 백필 ' + _backfillCreated + '건 Firestore 저장 요청');
         if (typeof _doSaveData === 'function') _doSaveData().catch(e => console.warn('백필 저장 실패:', e));
         else if (typeof saveData === 'function') saveData();
+      }
+      // 🛟 [SYNC RECOVERY] localStorage에만 있던 항목을 복구했다면 Firestore에 다시 저장
+      if (_needsResaveToFirestore) {
+        console.log('🛟 [SYNC RECOVERY] 복구된 항목을 Firestore에 재저장');
+        try { showNotif('💾 저장되지 않았던 데이터를 복구했습니다. 저장 중…','info'); } catch(_){}
+        if (typeof _doSaveData === 'function') {
+          _doSaveData().then(()=>{ try { showNotif('✅ 데이터 복구 및 저장 완료','success'); } catch(_){} })
+                       .catch(e => { console.warn('복구 데이터 Firestore 저장 실패:', e); try { showNotif('⚠️ 복구 데이터 저장 실패: '+e.message,'error'); } catch(_){} });
+        } else if (typeof saveData === 'function') {
+          saveData();
+        }
       }
     } else if (isNoData) {
       // 📭 최초 사용: Firestore에 데이터가 전혀 없음 → 현재 DB 업로드
