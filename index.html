@@ -12542,19 +12542,70 @@ function _npMiniCard(it, cardName, bodyHtml, opts) {
   </div>`;
 }
 
-// ── 신제품 카드 이미지 캐러셀 헬퍼 ──
-function _npImgCarGo(prodId, idx) {
-  const el = document.getElementById('np-img-car-' + prodId);
+// ── 신제품 카드 이미지 캐러셀 헬퍼 (kind: 'product' | 'formula' …) ──
+function _npImgCarGo(prodId, idx, kind) {
+  kind = kind || 'product';
+  const el = document.getElementById('np-img-car-' + kind + '-' + prodId);
   if (!el) return;
   el.scrollTo({ left: el.offsetWidth * idx, behavior: 'smooth' });
 }
-function _npImgCarDots(prodId) {
-  const el = document.getElementById('np-img-car-' + prodId);
-  const dotsEl = document.getElementById('np-img-dots-' + prodId);
+function _npImgCarDots(prodId, kind) {
+  kind = kind || 'product';
+  const el = document.getElementById('np-img-car-' + kind + '-' + prodId);
+  const dotsEl = document.getElementById('np-img-dots-' + kind + '-' + prodId);
   if (!el || !dotsEl) return;
   const idx = Math.round(el.scrollLeft / (el.offsetWidth || 1));
   const dots = dotsEl.querySelectorAll('span');
   dots.forEach((d, i) => { d.style.background = i === idx ? 'var(--gray-600)' : 'var(--gray-300)'; });
+}
+
+// ── 이미지 라이트박스 (확대 보기) ──
+let _npLightboxImgs = [];
+let _npLightboxIdx = 0;
+let _npLightboxEscHandler = null;
+function _npImgOpen(key, idx) {
+  const arr = (window._npCardImgs && window._npCardImgs[key]) || [];
+  if (!arr.length) return;
+  _npLightboxImgs = arr.slice();
+  _npLightboxIdx = idx || 0;
+  _npRenderLightbox();
+}
+function _npLightboxNav(dir) {
+  if (!_npLightboxImgs.length) return;
+  _npLightboxIdx = (_npLightboxIdx + dir + _npLightboxImgs.length) % _npLightboxImgs.length;
+  const img = document.getElementById('np-lightbox-img');
+  const ctr = document.getElementById('np-lightbox-counter');
+  if (img) img.src = _npLightboxImgs[_npLightboxIdx];
+  if (ctr) ctr.textContent = (_npLightboxIdx + 1) + ' / ' + _npLightboxImgs.length;
+}
+function _npLightboxClose() {
+  const el = document.getElementById('np-lightbox');
+  if (el) el.remove();
+  if (_npLightboxEscHandler) {
+    document.removeEventListener('keydown', _npLightboxEscHandler);
+    _npLightboxEscHandler = null;
+  }
+}
+function _npRenderLightbox() {
+  _npLightboxClose();
+  const multi = _npLightboxImgs.length > 1;
+  const nav = multi ? `
+    <button onclick="event.stopPropagation();_npLightboxNav(-1)" title="이전" style="position:absolute;left:16px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.92);border:none;width:44px;height:44px;border-radius:50%;cursor:pointer;font-size:24px;font-weight:700;color:#111;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,0.35);line-height:1">‹</button>
+    <button onclick="event.stopPropagation();_npLightboxNav(1)" title="다음" style="position:absolute;right:16px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.92);border:none;width:44px;height:44px;border-radius:50%;cursor:pointer;font-size:24px;font-weight:700;color:#111;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,0.35);line-height:1">›</button>
+    <div id="np-lightbox-counter" style="position:absolute;bottom:24px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);color:#fff;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600">${_npLightboxIdx + 1} / ${_npLightboxImgs.length}</div>` : '';
+  const html = `
+    <div id="np-lightbox" onclick="_npLightboxClose()" style="position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out">
+      <button onclick="event.stopPropagation();_npLightboxClose()" title="닫기 (ESC)" style="position:absolute;top:16px;right:16px;background:rgba(255,255,255,0.92);border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;font-weight:700;color:#111;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,0.35);line-height:1">✕</button>
+      <img id="np-lightbox-img" src="${_npLightboxImgs[_npLightboxIdx]}" onclick="event.stopPropagation()" style="max-width:92vw;max-height:92vh;object-fit:contain;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,0.5);cursor:default">
+      ${nav}
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  _npLightboxEscHandler = (e) => {
+    if (e.key === 'Escape') _npLightboxClose();
+    else if (e.key === 'ArrowLeft') _npLightboxNav(-1);
+    else if (e.key === 'ArrowRight') _npLightboxNav(1);
+  };
+  document.addEventListener('keydown', _npLightboxEscHandler);
 }
 
 // 코멘트 1건 렌더 — 프로필 사진(또는 이니셜) + 이름(이메일 감추기) + 상세 일시(YYYY-MM-DD HH:mm)
