@@ -2367,14 +2367,14 @@ EXP YYYYMMDD 까지</textarea></div>
 
       <!-- TAB: 제형/성분 -->
       <div class="np-pane" id="np-pane-formula" style="display:none">
-        <div class="fg full"><label>제형 특징</label>
+        <div class="fg full">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <label style="margin:0">제형 특징</label>
+            <button type="button" id="np-ai-form-img-btn" onclick="aiGenerateFormulationImage()" title="제형 특징 설명과 첨부된 제형 이미지를 참고해서 Gemini(나노바나나)가 제형 이미지를 생성합니다" style="padding:4px 10px;background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);color:#92400e;border:1px solid #fcd34d;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:3px"><span id="np-ai-form-img-btn-inner">🍌 나노바나나</span></button>
+          </div>
           <div style="display:flex;gap:10px;align-items:flex-start">
-            <label style="flex:0 0 100px;height:80px;border:2px dashed var(--gray-300);border-radius:8px;cursor:pointer;overflow:hidden;background:#fafafa;position:relative">
-              <input type="file" id="np-form-file" accept="image/*" style="display:none" onchange="handleNpImageUpload(event,'np-form-preview','np-form-ph')">
-              <img id="np-form-preview" src="" style="display:none;width:100%;height:100%;object-fit:cover">
-              <span id="np-form-ph" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--gray-400);font-size:10px;text-align:center">🖼️ 이미지</span>
-            </label>
-            <textarea class="fta" id="np-formulation" rows="3" style="flex:1;min-height:72px;resize:vertical"></textarea>
+            <div id="np-form-imgs-preview" style="flex:0 0 auto;display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;max-width:320px"></div>
+            <textarea class="fta" id="np-formulation" rows="3" style="flex:1;min-height:98px;resize:vertical" placeholder="예) 진한 크림 제형, 부드럽게 발리고 빠르게 흡수됨"></textarea>
           </div>
         </div>
         <div class="fg full"><label>메인 성분</label><textarea class="fta" id="np-main-ing" rows="2" style="min-height:48px;resize:vertical"></textarea></div>
@@ -11887,6 +11887,7 @@ let _npRefs = [];
 let _npRegulatory = [];
 let _npImgData = { product: '', formulation: '', packaging: '' };
 let _npProductImgs = [];  // 제품 예상 이미지 (다중 업로드)
+let _npFormulationImgs = [];  // 제형 이미지 (다중 업로드, 나노바나나 생성 참고용)
 // 상태값 마이그레이션 헬퍼
 function _migrateNpStatus(s) {
   if (!s) return 'DOING';
@@ -11975,6 +11976,51 @@ function handleNpImgsAdd(ev) {
   ev.target.value = '';
 }
 function removeNpImg(i) { _npProductImgs.splice(i, 1); renderNpImgsPreview(); }
+
+// 제형 이미지 : 다중 업로드 / 프리뷰 / 삭제 (나노바나나 레퍼런스로도 사용)
+function renderNpFormImgsPreview() {
+  const wrap = document.getElementById('np-form-imgs-preview');
+  if (!wrap) return;
+  const tile = 'width:88px;height:88px;border-radius:8px;overflow:hidden;position:relative;flex:0 0 88px';
+  const tiles = _npFormulationImgs.map((src, i) => `
+    <div style="${tile};border:1px solid var(--gray-200);background:#f3f4f6">
+      <img src="${src}" style="width:100%;height:100%;object-fit:cover">
+      <button type="button" onclick="removeNpFormImg(${i})" title="삭제" style="position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,0.6);color:#fff;cursor:pointer;font-size:11px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0">✕</button>
+    </div>
+  `).join('');
+  const addTile = `
+    <label style="${tile};border:2px dashed var(--gray-300);background:#fafafa;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;color:var(--gray-400);font-size:11px;line-height:1.4;text-align:center">
+      <input type="file" id="np-form-imgs-file" accept="image/*" multiple style="display:none" onchange="handleNpFormImgsAdd(event)">
+      <span style="font-size:18px;margin-bottom:2px">🖼️</span>
+      <span>+ 이미지</span>
+    </label>
+  `;
+  wrap.innerHTML = tiles + addTile;
+}
+function handleNpFormImgsAdd(ev) {
+  const files = Array.from(ev.target.files || []);
+  files.forEach(file => {
+    if (file.size > 2 * 1024 * 1024) { showNotif(`${file.name}은(는) 2MB 초과로 건너뜁니다`,'warning'); return; }
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 600;
+        let w = img.width, h = img.height;
+        if (w > MAX || h > MAX) { const r = Math.min(MAX/w, MAX/h); w = Math.round(w*r); h = Math.round(h*r); }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        _npFormulationImgs.push(canvas.toDataURL('image/jpeg', 0.82));
+        renderNpFormImgsPreview();
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+  ev.target.value = '';
+}
+function removeNpFormImg(i) { _npFormulationImgs.splice(i, 1); renderNpFormImgsPreview(); }
 
 const NP_STAGES = {
   idea:       { emoji: '🌱', label: '아이디어',           bg: '#dcfce7', border: '#86efac', color: '#166534' },
@@ -12187,8 +12233,9 @@ function renderNpCard(it, stageMeta) {
     </div>`;
   }
   // 제형/성분 카드: 메인 성분 / 보조 성분 — 왼쪽 이미지, 세로 중앙 정렬
-  const formImgEl = it.formulationImg
-    ? `<div style="flex-shrink:0;width:72px;height:72px"><img src="${it.formulationImg}" style="width:100%;height:100%;border-radius:8px;object-fit:cover;border:1px solid var(--gray-200)"></div>`
+  const formFirstImg = (it.formulationImgs && it.formulationImgs[0]) || it.formulationImg || '';
+  const formImgEl = formFirstImg
+    ? `<div style="flex-shrink:0;width:72px;height:72px"><img src="${formFirstImg}" style="width:100%;height:100%;border-radius:8px;object-fit:cover;border:1px solid var(--gray-200)"></div>`
     : '';
 
   const row = (label, val) => val
@@ -12595,6 +12642,7 @@ function openNewProductModal(editId) {
   _npImgData = { product: '', formulation: '', packaging: '' };
 
   _npProductImgs = [];
+  _npFormulationImgs = [];
   // reset all fields
   const fields = ['np-name','np-product-names','np-usp','np-formulation','np-packaging','np-main-ing','np-sub-ing','np-target','np-note','np-comment-input','np-ref-url','np-ref-title','np-ms-title','np-ms-date','np-market-note','np-roas'];
   fields.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
@@ -12616,14 +12664,15 @@ function openNewProductModal(editId) {
   if (extraLblEl0) extraLblEl0.value = '';
   const extraDateEl0 = document.getElementById('np-extra-date');
   if (extraDateEl0) extraDateEl0.value = '';
-  // reset 제형/패키지 이미지
-  ['np-form','np-pkg'].forEach(prefix => {
+  // reset 패키지 이미지 (제형은 이제 다중 이미지로 관리)
+  ['np-pkg'].forEach(prefix => {
     const preview = document.getElementById(prefix + '-preview');
     const ph = document.getElementById(prefix + '-ph');
     if (preview) { preview.style.display = 'none'; preview.src = ''; }
     if (ph) ph.style.display = '';
   });
   renderNpImgsPreview();
+  renderNpFormImgsPreview();
   // AI panels
   const aiNames = document.getElementById('np-ai-names');
   if (aiNames) { aiNames.style.display = 'none'; aiNames.textContent = ''; }
@@ -12670,10 +12719,14 @@ function openNewProductModal(editId) {
         ? it.productImgs.slice()
         : (it.productImg ? [it.productImg] : []);
       _npImgData.product = _npProductImgs[0] || '';
-      _npImgData.formulation = it.formulationImg || '';
+      // 제형 이미지: 다중 배열 우선, 없으면 레거시 단일 formulationImg 호환
+      _npFormulationImgs = (it.formulationImgs && it.formulationImgs.length)
+        ? it.formulationImgs.slice()
+        : (it.formulationImg ? [it.formulationImg] : []);
+      _npImgData.formulation = _npFormulationImgs[0] || '';
       _npImgData.packaging = it.packagingImg || '';
       renderNpImgsPreview();
-      if (_npImgData.formulation) { const p = document.getElementById('np-form-preview'); if(p){p.src=_npImgData.formulation;p.style.display='';} const h=document.getElementById('np-form-ph');if(h)h.style.display='none'; }
+      renderNpFormImgsPreview();
       if (_npImgData.packaging) { const p = document.getElementById('np-pkg-preview'); if(p){p.src=_npImgData.packaging;p.style.display='';} const h=document.getElementById('np-pkg-ph');if(h)h.style.display='none'; }
       // 원가 : ROAS로 광고비 재계산 (저장된 roas가 있는 경우)
       setTimeout(() => { calcAdCostFromRoas(); calcNpMargin(); }, 0);
@@ -12735,7 +12788,8 @@ function saveNewProduct() {
     otherCost: parseNum('np-other-cost'),
     productImgs: _npProductImgs.slice(),
     productImg: _npProductImgs[0] || '',   // 레거시 호환
-    formulationImg: _npImgData.formulation || '',
+    formulationImgs: _npFormulationImgs.slice(),
+    formulationImg: _npFormulationImgs[0] || '',  // 레거시 호환
     packagingImg: _npImgData.packaging || '',
     refs: _npRefs,
     milestones: _npMilestones,
@@ -12994,19 +13048,32 @@ function toggleNpAiNames() {
 }
 
 // ── Gemini 나노바나나 (이미지 생성) ──
-async function callGeminiImage(prompt) {
+// refImages: 선택적 참고 이미지 배열 (dataURL 형식: "data:image/...;base64,XXXX")
+async function callGeminiImage(prompt, refImages) {
   const apiKey = localStorage.getItem('reniv_gemini_key') || '';
   if (!apiKey) {
     showNotif('설정에서 Gemini API Key를 등록하세요', 'error');
     return null;
   }
   const model = 'gemini-2.5-flash-image';
+  // parts 구성 : 참고 이미지(inlineData) + 텍스트 프롬프트
+  const parts = [];
+  if (Array.isArray(refImages)) {
+    refImages.forEach(src => {
+      if (!src || typeof src !== 'string') return;
+      const m = src.match(/^data:([^;]+);base64,(.+)$/);
+      if (m) {
+        parts.push({ inlineData: { mimeType: m[1] || 'image/jpeg', data: m[2] } });
+      }
+    });
+  }
+  parts.push({ text: prompt });
   try {
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }]
+        contents: [{ parts: parts }]
       })
     });
     if (!res.ok) {
@@ -13105,6 +13172,94 @@ VISUAL REQUIREMENTS:
   img.onerror = () => {
     _npProductImgs.push(dataUrl);
     renderNpImgsPreview();
+  };
+  img.src = dataUrl;
+}
+
+// ── 나노바나나 : 제형 이미지 생성 (제품 정보 + 업로드된 제형 이미지를 레퍼런스로 활용) ──
+async function aiGenerateFormulationImage() {
+  const projectName = (document.getElementById('np-name')||{}).value?.trim() || '';
+  const formulation = (document.getElementById('np-formulation')||{}).value?.trim() || '';
+  const usp = (document.getElementById('np-usp')||{}).value?.trim() || '';
+  const mainIng = (document.getElementById('np-main-ing')||{}).value?.trim() || '';
+  const subIng = (document.getElementById('np-sub-ing')||{}).value?.trim() || '';
+  const target = (document.getElementById('np-target')||{}).value?.trim() || '';
+
+  if (!formulation && _npFormulationImgs.length === 0) {
+    showNotif('제형 특징 설명을 입력하거나 참고 이미지를 먼저 추가하세요', 'warning');
+    return;
+  }
+
+  const btn = document.getElementById('np-ai-form-img-btn');
+  const inner = document.getElementById('np-ai-form-img-btn-inner');
+  if (btn) btn.disabled = true;
+  if (inner) inner.textContent = '🎨 생성 중...';
+
+  // 제형 설명에서 제형 유형 키워드 추출 (시각적 힌트)
+  const textureHint = (() => {
+    const f = formulation.toLowerCase();
+    if (/크림|밤|버터/.test(f)) return 'thick, rich creamy texture with soft peaks, like whipped butter or dense moisturizer';
+    if (/세럼|앰플|에센스/.test(f)) return 'glossy, translucent viscous liquid dropping from a dropper, slow flow';
+    if (/오일/.test(f)) return 'golden, clear oil droplets with light reflection, glossy surface';
+    if (/토너|스킨|미스트/.test(f)) return 'clear, watery liquid with light splashes or droplets';
+    if (/로션|밀크|에멀전/.test(f)) return 'smooth, light-weight white milky lotion with a soft silky flow';
+    if (/젤|겔/.test(f)) return 'translucent glossy gel with a jelly-like wobble and light reflection';
+    if (/클렌징|폼|워시/.test(f)) return 'soft, airy white foam with fine bubbles';
+    if (/패치|마스크|팩/.test(f)) return 'flat sheet mask material soaked in clear essence, slight glisten';
+    if (/패드/.test(f)) return 'soaked cotton/fiber pad with visible essence surface';
+    return 'luxurious skincare texture swatch with soft highlights';
+  })();
+
+  const hasRefs = _npFormulationImgs.length > 0;
+  const refsInstruction = hasRefs
+    ? `\nREFERENCE IMAGES:\n- ${_npFormulationImgs.length} reference image(s) are attached. Use them as the PRIMARY visual reference for texture, viscosity, color, and surface finish.\n- Match the consistency, glossiness, and color tone of the reference(s) as closely as possible.\n- If multiple references are provided, blend their most representative texture qualities.`
+    : '';
+
+  const prompt = `Create a photorealistic macro close-up shot of a cosmetic FORMULATION TEXTURE (the formula itself, NOT the packaged product).
+
+FORMULATION DETAILS:
+- Product concept: "${projectName || 'K-beauty skincare'}"
+- Formulation description (Korean): ${formulation || '(not specified)'}
+- Texture hint: ${textureHint}
+- Key ingredient: ${mainIng || 'botanical extracts'}
+- Supporting ingredient: ${subIng || 'n/a'}
+- USP: ${usp || 'premium K-beauty'}
+- Target customer: ${target || 'women 25-45'}
+${refsInstruction}
+
+VISUAL REQUIREMENTS:
+- Show ONLY the texture/formula itself (e.g. a dollop of cream on a clean surface, an essence droplet from a dropper, swirl of lotion, etc.)
+- DO NOT show the finished bottle/jar/packaging — this is a texture shot, not a product shot
+- Clean, minimal background: soft white, cream, or very pale pastel with subtle shadow
+- Premium K-beauty aesthetic (Aesop, Sulwhasoo, Tamburins, Dr.Jart+ mood)
+- Soft studio lighting with slight reflection to reveal texture and glossiness
+- Centered composition, 1:1 square aspect ratio, texture filling 50-70% of frame
+- Hyper-realistic detail: pores of foam, highlights on liquid, soft peaks of cream, etc.
+- DO NOT include any text, labels, watermarks, hands, people, or decorative props
+- DO NOT include multiple different products or containers
+- Photorealistic rendering quality, not illustration or cartoon style`;
+
+  const dataUrl = await callGeminiImage(prompt, _npFormulationImgs);
+  if (btn) btn.disabled = false;
+  if (inner) inner.textContent = '🍌 나노바나나';
+  if (!dataUrl) return;
+
+  // 이미지 다운사이즈 후 배열에 추가
+  const img = new Image();
+  img.onload = () => {
+    const MAX = 800;
+    let w = img.width, h = img.height;
+    if (w > MAX || h > MAX) { const r = Math.min(MAX/w, MAX/h); w = Math.round(w*r); h = Math.round(h*r); }
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    _npFormulationImgs.push(canvas.toDataURL('image/jpeg', 0.85));
+    renderNpFormImgsPreview();
+    showNotif('🍌 나노바나나가 제형 이미지를 만들었어요!', 'success');
+  };
+  img.onerror = () => {
+    _npFormulationImgs.push(dataUrl);
+    renderNpFormImgsPreview();
   };
   img.src = dataUrl;
 }
