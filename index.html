@@ -2383,13 +2383,23 @@ EXP YYYYMMDD 까지</textarea></div>
 
       <!-- TAB: 원가 -->
       <div class="np-pane" id="np-pane-cost" style="display:none">
+        <!-- Row 1: 예상 판매가 | 부가세 (자동) -->
         <div class="fg2">
           <div class="fg"><label>예상 판매가</label>
             <div style="display:flex;align-items:stretch;border:1px solid var(--gray-300);border-radius:7px;overflow:hidden;background:#fff">
-              <input class="fi" id="np-price" inputmode="numeric" style="border:none;border-radius:0;flex:1;text-align:right" oninput="formatNpNumber(this);calcAdCostFromRoas()">
+              <input class="fi" id="np-price" inputmode="numeric" style="border:none;border-radius:0;flex:1;text-align:right" oninput="formatNpNumber(this);calcAdCostFromRoas();calcNpVat()">
               <span style="padding:8px 10px;background:#f3f4f6;color:#6b7280;font-size:12.5px;border-left:1px solid var(--gray-300);display:inline-flex;align-items:center">원</span>
             </div>
           </div>
+          <div class="fg"><label>부가세 <span style="font-size:10.5px;color:var(--gray-400);font-weight:500">(자동 계산: 판매가 ÷ 1.1 × 0.1)</span></label>
+            <div style="display:flex;align-items:stretch;border:1px solid var(--gray-300);border-radius:7px;overflow:hidden;background:#f9fafb">
+              <input class="fi" id="np-vat" inputmode="numeric" readonly style="border:none;border-radius:0;flex:1;text-align:right;background:#f9fafb;color:var(--gray-700)">
+              <span style="padding:8px 10px;background:#f3f4f6;color:#6b7280;font-size:12.5px;border-left:1px solid var(--gray-300);display:inline-flex;align-items:center">원</span>
+            </div>
+          </div>
+        </div>
+        <!-- Row 2: 예상 BOM 원가 | 물류비 -->
+        <div class="fg2">
           <div class="fg"><label>예상 BOM 원가</label>
             <div style="display:flex;gap:4px">
               <div style="display:flex;align-items:stretch;border:1px solid var(--gray-300);border-radius:7px;overflow:hidden;background:#fff;flex:1">
@@ -2399,7 +2409,14 @@ EXP YYYYMMDD 까지</textarea></div>
               <button type="button" onclick="importBomCost()" style="padding:4px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;font-size:10px;cursor:pointer;white-space:nowrap">BOM</button>
             </div>
           </div>
+          <div class="fg"><label>물류비</label>
+            <div style="display:flex;align-items:stretch;border:1px solid var(--gray-300);border-radius:7px;overflow:hidden;background:#fff">
+              <input class="fi" id="np-logi-cost" inputmode="numeric" style="border:none;border-radius:0;flex:1;text-align:right" oninput="formatNpNumber(this);calcNpMargin()">
+              <span style="padding:8px 10px;background:#f3f4f6;color:#6b7280;font-size:12.5px;border-left:1px solid var(--gray-300);display:inline-flex;align-items:center">원</span>
+            </div>
+          </div>
         </div>
+        <!-- Row 3: ROAS | 광고비 (자동) -->
         <div class="fg2">
           <div class="fg"><label>ROAS <span style="font-size:10.5px;color:var(--gray-400);font-weight:500">(광고비 대비 매출)</span></label>
             <div style="display:flex;align-items:stretch;border:1px solid var(--gray-300);border-radius:7px;overflow:hidden;background:#fff">
@@ -2414,22 +2431,47 @@ EXP YYYYMMDD 까지</textarea></div>
             </div>
           </div>
         </div>
+        <!-- Row 4: 마케팅비 | 기타 비용 -->
         <div class="fg2">
           <div class="fg"><label>마케팅비</label><div style="display:flex;align-items:stretch;border:1px solid var(--gray-300);border-radius:7px;overflow:hidden;background:#fff"><input class="fi" id="np-mkt-cost" inputmode="numeric" style="border:none;border-radius:0;flex:1;text-align:right" oninput="formatNpNumber(this);calcNpMargin()"><span style="padding:8px 10px;background:#f3f4f6;color:#6b7280;font-size:12.5px;border-left:1px solid var(--gray-300);display:inline-flex;align-items:center">원</span></div></div>
           <div class="fg"><label>기타 비용</label><div style="display:flex;align-items:stretch;border:1px solid var(--gray-300);border-radius:7px;overflow:hidden;background:#fff"><input class="fi" id="np-other-cost" inputmode="numeric" style="border:none;border-radius:0;flex:1;text-align:right" oninput="formatNpNumber(this);calcNpMargin()"><span style="padding:8px 10px;background:#f3f4f6;color:#6b7280;font-size:12.5px;border-left:1px solid var(--gray-300);display:inline-flex;align-items:center">원</span></div></div>
         </div>
-        <div id="np-margin-result" style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-          <div style="padding:16px 14px;background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:12px;text-align:center">
-            <div style="font-size:12.5px;color:#166534;margin-bottom:6px;font-weight:700">💰 총 원가</div>
-            <div id="np-total-cost" style="font-size:22px;font-weight:800;color:#15803d">₩0</div>
+
+        <!-- KPI 박스 (4개): 예상 판매가 · 총 원가 · 예상 총 마진 · 총 마진율 -->
+        <div style="margin-top:16px;font-size:11.5px;font-weight:700;color:var(--gray-500);margin-bottom:6px;letter-spacing:0.3px">📊 전체 수익성 (모든 비용 반영)</div>
+        <div id="np-margin-result" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px">
+          <div style="padding:14px 10px;background:#f0f9ff;border:1.5px solid #bae6fd;border-radius:12px;text-align:center">
+            <div style="font-size:11.5px;color:#075985;margin-bottom:5px;font-weight:700">💵 예상 판매가</div>
+            <div id="np-k-price" style="font-size:19px;font-weight:800;color:#0369a1">₩0</div>
           </div>
-          <div style="padding:16px 14px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:12px;text-align:center">
-            <div style="font-size:12.5px;color:#1e40af;margin-bottom:6px;font-weight:700">📈 예상 마진</div>
-            <div id="np-margin" style="font-size:22px;font-weight:800;color:#1d4ed8">₩0</div>
+          <div style="padding:14px 10px;background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:12px;text-align:center">
+            <div style="font-size:11.5px;color:#166534;margin-bottom:5px;font-weight:700">💰 총 원가</div>
+            <div id="np-total-cost" style="font-size:19px;font-weight:800;color:#15803d">₩0</div>
           </div>
-          <div style="padding:16px 14px;background:#fdf4ff;border:1.5px solid #f0abfc;border-radius:12px;text-align:center">
-            <div style="font-size:12.5px;color:#86198f;margin-bottom:6px;font-weight:700">📊 마진율</div>
-            <div id="np-margin-rate" style="font-size:22px;font-weight:800;color:#a21caf">0%</div>
+          <div style="padding:14px 10px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:12px;text-align:center">
+            <div style="font-size:11.5px;color:#1e40af;margin-bottom:5px;font-weight:700">📈 예상 총 마진</div>
+            <div id="np-margin" style="font-size:19px;font-weight:800;color:#1d4ed8">₩0</div>
+          </div>
+          <div style="padding:14px 10px;background:#fdf4ff;border:1.5px solid #f0abfc;border-radius:12px;text-align:center">
+            <div style="font-size:11.5px;color:#86198f;margin-bottom:5px;font-weight:700">📊 총 마진율</div>
+            <div id="np-margin-rate" style="font-size:19px;font-weight:800;color:#a21caf">0%</div>
+          </div>
+        </div>
+
+        <!-- BOM 전용 KPI (3개): BOM 원가 · BOM 마진 · BOM 마진율 -->
+        <div style="margin-top:16px;font-size:11.5px;font-weight:700;color:var(--gray-500);margin-bottom:6px;letter-spacing:0.3px">🧪 BOM 기준 수익성 (부가세만 차감)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div style="padding:14px 10px;background:#fef9c3;border:1.5px solid #fde047;border-radius:12px;text-align:center">
+            <div style="font-size:11.5px;color:#854d0e;margin-bottom:5px;font-weight:700">🧪 BOM 원가</div>
+            <div id="np-k-bom-cost" style="font-size:19px;font-weight:800;color:#a16207">₩0</div>
+          </div>
+          <div style="padding:14px 10px;background:#ecfeff;border:1.5px solid #a5f3fc;border-radius:12px;text-align:center">
+            <div style="font-size:11.5px;color:#155e75;margin-bottom:5px;font-weight:700">📈 BOM 마진</div>
+            <div id="np-k-bom-margin" style="font-size:19px;font-weight:800;color:#0e7490">₩0</div>
+          </div>
+          <div style="padding:14px 10px;background:#fff1f2;border:1.5px solid #fecdd3;border-radius:12px;text-align:center">
+            <div style="font-size:11.5px;color:#9f1239;margin-bottom:5px;font-weight:700">📊 BOM 마진율</div>
+            <div id="np-k-bom-rate" style="font-size:19px;font-weight:800;color:#be123c">0%</div>
           </div>
         </div>
       </div>
@@ -12280,7 +12322,9 @@ function renderNpCard(it, stageMeta) {
   const adNum = parseInt(String(it.adCost||'').replace(/[^\d]/g,''), 10) || 0;
   const mktNum = parseInt(String(it.mktCost||'').replace(/[^\d]/g,''), 10) || 0;
   const otherNum = parseInt(String(it.otherCost||'').replace(/[^\d]/g,''), 10) || 0;
-  const totalCostNum = bomNum + adNum + mktNum + otherNum;
+  const logiNum = parseInt(String(it.logiCost||'').replace(/[^\d]/g,''), 10) || 0;
+  const vatForCard = priceNum > 0 ? Math.round(priceNum / 1.1 * 0.1) : 0;
+  const totalCostNum = vatForCard + bomNum + logiNum + adNum + mktNum + otherNum;
   const price = priceNum ? priceNum.toLocaleString() + '원' : '-';
   const bomCost = bomNum ? bomNum.toLocaleString() + '원' : '-';
   // 총원가 = BOM + 광고비 + 마케팅비 + 기타 (내부 참조용)
@@ -12769,7 +12813,7 @@ function openNewProductModal(editId) {
   // reset all fields
   const fields = ['np-name','np-product-names','np-usp','np-formulation','np-packaging','np-main-ing','np-sub-ing','np-target','np-note','np-comment-input','np-ref-url','np-ref-title','np-ms-title','np-ms-date','np-market-note','np-roas'];
   fields.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-  const costFields = ['np-price','np-bom-cost','np-ad-cost','np-mkt-cost','np-other-cost'];
+  const costFields = ['np-price','np-bom-cost','np-logi-cost','np-ad-cost','np-mkt-cost','np-other-cost','np-vat'];
   costFields.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   const progEl = document.getElementById('np-progress');
   if (progEl) progEl.value = 0;
@@ -12833,7 +12877,8 @@ function openNewProductModal(editId) {
       const tgEl = document.getElementById('np-target'); if (tgEl) tgEl.value = it.target || '';
       // 원가
       costFields.forEach(id => {
-        const key = { 'np-price':'price','np-bom-cost':'bomCost','np-ad-cost':'adCost','np-mkt-cost':'mktCost','np-other-cost':'otherCost' }[id];
+        const key = { 'np-price':'price','np-bom-cost':'bomCost','np-logi-cost':'logiCost','np-ad-cost':'adCost','np-mkt-cost':'mktCost','np-other-cost':'otherCost' }[id];
+        if (!key) return; // np-vat는 자동 계산이라 로드 스킵
         const el = document.getElementById(id);
         if (el && it[key]) { el.value = Number(it[key]).toLocaleString(); }
       });
@@ -12852,7 +12897,7 @@ function openNewProductModal(editId) {
       renderNpFormImgsPreview();
       if (_npImgData.packaging) { const p = document.getElementById('np-pkg-preview'); if(p){p.src=_npImgData.packaging;p.style.display='';} const h=document.getElementById('np-pkg-ph');if(h)h.style.display='none'; }
       // 원가 : ROAS로 광고비 재계산 (저장된 roas가 있는 경우)
-      setTimeout(() => { calcAdCostFromRoas(); calcNpMargin(); }, 0);
+      setTimeout(() => { calcNpVat(); calcAdCostFromRoas(); calcNpMargin(); }, 0);
       // 관리
       _npRefs = it.refs ? JSON.parse(JSON.stringify(it.refs)) : [];
       _npMilestones = it.milestones ? JSON.parse(JSON.stringify(it.milestones)) : [];
@@ -12909,6 +12954,7 @@ function saveNewProduct() {
     adCost: parseNum('np-ad-cost'),
     mktCost: parseNum('np-mkt-cost'),
     otherCost: parseNum('np-other-cost'),
+    logiCost: parseNum('np-logi-cost'),
     productImgs: _npProductImgs.slice(),
     productImg: _npProductImgs[0] || '',   // 레거시 호환
     formulationImgs: _npFormulationImgs.slice(),
@@ -12990,22 +13036,56 @@ function formatNpNumber(inp) {
 }
 
 // ── 마진 자동 계산 ──
+// 부가세 자동 계산 : 판매가 ÷ 1.1 × 0.1
+function calcNpVat() {
+  const priceStr = (document.getElementById('np-price')||{}).value || '';
+  const price = parseInt(priceStr.replace(/[^\d]/g,''), 10) || 0;
+  const vatEl = document.getElementById('np-vat');
+  if (!vatEl) { calcNpMargin(); return; }
+  if (price > 0) {
+    const vat = Math.round(price / 1.1 * 0.1);
+    vatEl.value = vat.toLocaleString();
+  } else {
+    vatEl.value = '';
+  }
+  calcNpMargin();
+}
+
 function calcNpMargin() {
   const getVal = id => parseInt(((document.getElementById(id)||{}).value||'').replace(/,/g,''),10) || 0;
   const price = getVal('np-price');
   const bom = getVal('np-bom-cost');
+  const logi = getVal('np-logi-cost');
   const ad = getVal('np-ad-cost');
   const mkt = getVal('np-mkt-cost');
   const other = getVal('np-other-cost');
-  const totalCost = bom + ad + mkt + other;
+  const vat = price > 0 ? Math.round(price / 1.1 * 0.1) : 0;
+  // 총 원가 = 부가세 + BOM + 물류비 + 광고비 + 마케팅비 + 기타
+  const totalCost = vat + bom + logi + ad + mkt + other;
   const margin = price - totalCost;
   const rate = price > 0 ? ((margin / price) * 100).toFixed(1) : '0';
-  const tcEl = document.getElementById('np-total-cost');
-  const mEl = document.getElementById('np-margin');
-  const mrEl = document.getElementById('np-margin-rate');
-  if (tcEl) tcEl.textContent = '₩' + totalCost.toLocaleString();
-  if (mEl) { mEl.textContent = '₩' + margin.toLocaleString(); mEl.style.color = margin >= 0 ? '#15803d' : '#dc2626'; }
-  if (mrEl) { mrEl.textContent = rate + '%'; mrEl.style.color = margin >= 0 ? '#15803d' : '#dc2626'; }
+  // BOM 기준: 판매가 - 부가세 - BOM
+  const bomMargin = (price > 0 && bom > 0) ? (price - vat - bom) : 0;
+  const bomRate = (price > 0 && bom > 0) ? ((bomMargin / price) * 100).toFixed(1) : '0';
+
+  // DOM 업데이트
+  const set = (id, text, color) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    if (color !== undefined) el.style.color = color;
+  };
+  const okColor = margin >= 0 ? '#1d4ed8' : '#dc2626';
+  const okColorRate = margin >= 0 ? '#a21caf' : '#dc2626';
+  const bomOk = bomMargin >= 0 ? '#0e7490' : '#dc2626';
+  const bomOkRate = bomMargin >= 0 ? '#be123c' : '#dc2626';
+  set('np-k-price', '₩' + price.toLocaleString());
+  set('np-total-cost', '₩' + totalCost.toLocaleString());
+  set('np-margin', '₩' + margin.toLocaleString(), okColor);
+  set('np-margin-rate', rate + '%', okColorRate);
+  set('np-k-bom-cost', '₩' + bom.toLocaleString());
+  set('np-k-bom-margin', '₩' + bomMargin.toLocaleString(), bomOk);
+  set('np-k-bom-rate', bomRate + '%', bomOkRate);
 }
 
 // ── BOM 원가 가져오기 ──
