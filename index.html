@@ -12219,6 +12219,46 @@ function renderNewProductKanban() {
   }
 }
 
+// ⓘ 공식 툴팁 팝오버 — 클릭한 아이콘 근처에 표시, 다른 곳 클릭 시 자동 닫힘
+function showNpFormulaTip(ev, anchor, text) {
+  if (ev) { ev.preventDefault && ev.preventDefault(); ev.stopPropagation && ev.stopPropagation(); }
+  // 기존 툴팁 제거
+  const old = document.getElementById('np-formula-tip');
+  if (old) { old.remove(); if (old._onDocClick) document.removeEventListener('click', old._onDocClick); }
+  const rect = anchor.getBoundingClientRect();
+  const tip = document.createElement('div');
+  tip.id = 'np-formula-tip';
+  tip.style.cssText = 'position:fixed;z-index:99999;background:#1f2937;color:#fff;padding:10px 14px;border-radius:8px;font-size:12px;line-height:1.65;white-space:pre-line;box-shadow:0 6px 20px rgba(0,0,0,0.25);max-width:280px;letter-spacing:-0.2px;font-family:inherit;';
+  tip.textContent = text;
+  // 화살표
+  const arrow = document.createElement('div');
+  arrow.style.cssText = 'position:absolute;top:-5px;left:14px;width:10px;height:10px;background:#1f2937;transform:rotate(45deg);';
+  tip.appendChild(arrow);
+  document.body.appendChild(tip);
+  // 위치 계산 (아이콘 아래, 화면 밖 방지)
+  const pad = 8;
+  let left = rect.left + rect.width/2 - 20;
+  let top = rect.bottom + pad;
+  const tipRect = tip.getBoundingClientRect();
+  if (left + tipRect.width > window.innerWidth - 10) left = window.innerWidth - tipRect.width - 10;
+  if (left < 10) left = 10;
+  if (top + tipRect.height > window.innerHeight - 10) {
+    // 아래 공간 부족 → 위쪽에 표시
+    top = rect.top - tipRect.height - pad;
+    arrow.style.top = (tipRect.height - 5) + 'px';
+  }
+  tip.style.left = left + 'px';
+  tip.style.top = top + 'px';
+  // 외부 클릭 시 닫기
+  const close = (e) => {
+    if (tip.contains(e.target)) return;
+    tip.remove();
+    document.removeEventListener('click', close);
+  };
+  tip._onDocClick = close;
+  setTimeout(() => document.addEventListener('click', close), 0);
+}
+
 function toggleNpDonePanel() {
   const panel = document.getElementById('np-done-panel');
   const btn = document.getElementById('np-done-toggle-btn');
@@ -12244,15 +12284,32 @@ function renderNpCard(it, stageMeta) {
   const totalCostNum = bomNum + adNum + mktNum + otherNum;
   const price = priceNum ? priceNum.toLocaleString() + '원' : '-';
   const bomCost = bomNum ? bomNum.toLocaleString() + '원' : '-';
-  // 총원가 = BOM + 광고비 + 마케팅비 + 기타 (예상 마진율 계산과 동일한 값)
+  // 총원가 = BOM + 광고비 + 마케팅비 + 기타 (내부 참조용)
   const totalCost = totalCostNum ? totalCostNum.toLocaleString() + '원' : '-';
-  // 예상 마진 (금액) & 마진율 (%) — 판매가 > 0 && 원가 > 0일 때만 계산
-  const estMarginNum = (priceNum > 0 && totalCostNum > 0) ? (priceNum - totalCostNum) : null;
+  // 🆕 예상 마진 = 판매가 − 부가세(판매가/1.1×0.1) − BOM 원가
+  //     = 판매가 × (10/11) − BOM 원가   (공급가액 - BOM)
+  const vatNum = priceNum > 0 ? Math.round(priceNum / 1.1 * 0.1) : 0;
+  const supplyNum = priceNum - vatNum;  // 공급가액
+  const estMarginNum = (priceNum > 0 && bomNum > 0) ? (supplyNum - bomNum) : null;
   const estMarginStr = (estMarginNum !== null) ? estMarginNum.toLocaleString() + '원' : '-';
-  const marginRate = (priceNum > 0 && totalCostNum > 0)
-    ? (((priceNum - totalCostNum) / priceNum) * 100)
+  const marginRate = (priceNum > 0 && bomNum > 0)
+    ? ((estMarginNum / priceNum) * 100)
     : null;
   const marginRateStr = (marginRate !== null) ? marginRate.toFixed(1) + '%' : '-';
+  // 공식 툴팁 텍스트 (ⓘ 클릭 시 표시)
+  const _marginFormulaTip = `마진 = 판매가 − 부가세 − BOM 원가
+부가세 = 판매가 ÷ 1.1 × 0.1
+
+판매가  ${priceNum > 0 ? priceNum.toLocaleString()+'원' : '-'}
+− 부가세 ${priceNum > 0 ? vatNum.toLocaleString()+'원' : '-'}
+− BOM 원가 ${bomNum > 0 ? bomNum.toLocaleString()+'원' : '-'}
+= 마진 ${estMarginNum !== null ? estMarginNum.toLocaleString()+'원' : '-'}`;
+  const _rateFormulaTip = `마진율 = 마진 ÷ 판매가 × 100
+
+마진 ${estMarginNum !== null ? estMarginNum.toLocaleString()+'원' : '-'}
+÷ 판매가 ${priceNum > 0 ? priceNum.toLocaleString()+'원' : '-'}
+× 100
+= ${marginRate !== null ? marginRate.toFixed(1)+'%' : '-'}`;
   // 마진 박스 색상 — 칸반 헤더(스테이지) 색상과 동일 계열로 통일, 한 톤 연하게
   const _stageTone = {
     idea:       { bg: '#f0fdf4', border: '#bbf7d0', color: '#166534' }, // 초록
@@ -12348,17 +12405,25 @@ function renderNpCard(it, stageMeta) {
         </div>
       `, { sumBox, sumHover })}
 
-      <!-- 💰 수익성 → cost 탭 (왼쪽: 판매가·총원가 / 오른쪽 KPI: 마진·마진율 — 가까이 배치) -->
+      <!-- 💰 수익성 → cost 탭 (왼쪽: 판매가·BOM 원가 / 오른쪽 KPI: 마진·마진율 + ⓘ 공식) -->
       ${_npMiniCard(it, 'cost', `
         <div style="display:flex;gap:10px;align-items:stretch;justify-content:flex-start">
           <div style="flex:0 0 auto;min-width:132px;display:flex;flex-direction:column;gap:3px;justify-content:center">
             ${row('판매가', price === '-' ? '' : price) || rowEmpty('판매가')}
-            ${row('총원가', totalCost === '-' ? '' : totalCost) || rowEmpty('총원가')}
+            ${row('BOM 원가', bomCost === '-' ? '' : bomCost) || rowEmpty('BOM 원가')}
           </div>
           <div style="flex:0 0 auto;min-width:130px;padding:7px 10px;background:${marginBg};border:1px solid ${marginBorder};border-radius:8px;display:flex;flex-direction:column;gap:3px;justify-content:center">
-            <div style="display:flex;justify-content:center;align-items:baseline;gap:6px"><span style="font-size:10.5px;color:${marginColor};font-weight:700;letter-spacing:-0.3px">마진</span><span style="font-size:13px;color:${marginColor};font-weight:800;line-height:1.1;white-space:nowrap">${estMarginStr}</span></div>
+            <div style="display:flex;justify-content:center;align-items:baseline;gap:6px">
+              <span style="font-size:10.5px;color:${marginColor};font-weight:700;letter-spacing:-0.3px">마진</span>
+              <span style="font-size:13px;color:${marginColor};font-weight:800;line-height:1.1;white-space:nowrap">${estMarginStr}</span>
+              <span onclick="event.stopPropagation();showNpFormulaTip(event,this,${JSON.stringify(_marginFormulaTip)})" style="cursor:pointer;font-size:11px;color:${marginColor};opacity:.75;user-select:none" title="공식 보기">ⓘ</span>
+            </div>
             <div style="height:1px;background:${marginBorder};margin:1px 0"></div>
-            <div style="display:flex;justify-content:center;align-items:baseline;gap:6px"><span style="font-size:10.5px;color:${marginColor};font-weight:700;letter-spacing:-0.3px">마진율</span><span style="font-size:15px;color:${marginColor};font-weight:800;line-height:1.1;white-space:nowrap">${marginRateStr}</span></div>
+            <div style="display:flex;justify-content:center;align-items:baseline;gap:6px">
+              <span style="font-size:10.5px;color:${marginColor};font-weight:700;letter-spacing:-0.3px">마진율</span>
+              <span style="font-size:15px;color:${marginColor};font-weight:800;line-height:1.1;white-space:nowrap">${marginRateStr}</span>
+              <span onclick="event.stopPropagation();showNpFormulaTip(event,this,${JSON.stringify(_rateFormulaTip)})" style="cursor:pointer;font-size:11px;color:${marginColor};opacity:.75;user-select:none" title="공식 보기">ⓘ</span>
+            </div>
           </div>
         </div>
       `, { sumBox, sumHover })}
