@@ -6434,6 +6434,9 @@ function saveItem() {
   };
   // 견적서 삭제 플래그 확인
   if (window._clearQuoteFile) { data.quoteFile=''; data.quoteFileName=''; window._clearQuoteFile=false; }
+  // 품목 이미지 / 바코드 이미지 삭제 플래그
+  if (window._clearItemImg) { data.image = ''; window._clearItemImg = false; }
+  if (window._clearBarcodeImg) { data.barcodeImg = ''; window._clearBarcodeImg = false; }
   const doSave = () => {
     if (id) {
       const idx = DB.items.findIndex(i=>i.id===id);
@@ -6499,15 +6502,48 @@ function compressImage(file, maxSize, quality) {
   });
 }
 
+// 품목 이미지 미리보기 HTML (삭제 ✕ 버튼 포함)
+function _itemImgPreviewHtml(src) {
+  return `<div style="position:relative;width:100%;height:100%">
+    <img src="${src}" style="width:100%;height:100%;object-fit:cover;border-radius:6px">
+    <button type="button" onclick="event.stopPropagation();clearItemImg()" title="이미지 삭제" style="position:absolute;top:1px;right:1px;width:18px;height:18px;border-radius:50%;background:rgba(239,68,68,0.95);color:#fff;border:1.5px solid #fff;cursor:pointer;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,0.3)">✕</button>
+  </div>`;
+}
+// 바코드 이미지 미리보기 HTML (삭제 ✕ 버튼 포함)
+function _barcodeImgPreviewHtml(src) {
+  return `<div style="position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center">
+    <img src="${src}" style="height:100%;max-width:100%;object-fit:contain">
+    <button type="button" onclick="event.stopPropagation();clearBarcodeImg()" title="바코드 이미지 삭제" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:rgba(239,68,68,0.95);color:#fff;border:1.5px solid #fff;cursor:pointer;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,0.3)">✕</button>
+  </div>`;
+}
+// 품목 이미지 삭제 (저장 시 반영)
+function clearItemImg() {
+  const div = $('i-img-preview');
+  if (div) div.innerHTML = '📷';
+  const input = $('i-img');
+  if (input) { input.value = ''; delete input.dataset.compressed; }
+  window._clearItemImg = true;
+}
+// 바코드 이미지 삭제
+function clearBarcodeImg() {
+  const div = $('i-barcode-preview');
+  if (div) div.innerHTML = '바코드 이미지';
+  const input = $('i-barcode-img');
+  if (input) input.value = '';
+  window._clearBarcodeImg = true;
+}
+
 function previewItemImg(input) {
   const file = input.files[0];
   if (!file) return;
   compressImage(file, 400, 0.75).then(dataUrl => {
     if (!dataUrl) return;
     const div = $('i-img-preview');
-    if (div) div.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:6px">`;
+    if (div) div.innerHTML = _itemImgPreviewHtml(dataUrl);
     // 압축된 이미지를 input에 저장해두기
     input.dataset.compressed = dataUrl;
+    // 새 파일 선택 시 삭제 플래그 해제
+    window._clearItemImg = false;
   });
 }
 
@@ -6547,6 +6583,8 @@ function editItem(id) {
   const qPrev = $('i-quote-preview'); if (qPrev) qPrev.innerHTML='';
   const qFile = $('i-quote-file'); if (qFile) qFile.value='';
   window._clearQuoteFile = false;
+  window._clearItemImg = false;
+  window._clearBarcodeImg = false;
   const delBtn = $('item-delete-btn');
   if (delBtn) delBtn.style.display = '';
   openModal('add-item');
@@ -6567,9 +6605,9 @@ function editItem(id) {
     if ($('i-name-en')) $('i-name-en').value = i.nameEn||'';
     if ($('i-vendor')) $('i-vendor').value = i.vendorId != null ? String(i.vendorId) : '';
     const prev = $('i-img-preview');
-    if (prev) prev.innerHTML = i.image ? `<img src="${i.image}" style="width:100%;height:100%;object-fit:cover;border-radius:6px">` : '📷';
+    if (prev) prev.innerHTML = i.image ? _itemImgPreviewHtml(i.image) : '📷';
     const bcPrev2 = $('i-barcode-preview');
-    if (bcPrev2) bcPrev2.innerHTML = i.barcodeImg ? `<img src="${i.barcodeImg}" style="height:100%;max-width:100%;object-fit:contain">` : '바코드 이미지';
+    if (bcPrev2) bcPrev2.innerHTML = i.barcodeImg ? _barcodeImgPreviewHtml(i.barcodeImg) : '바코드 이미지';
     const qExist2 = $('i-quote-existing');
     const qName = $('i-quote-filename');
     const qPrev2 = $('i-quote-preview');
@@ -6590,7 +6628,9 @@ function previewBarcodeImg(input) {
   const reader = new FileReader();
   reader.onload = e => {
     const div = $('i-barcode-preview');
-    if (div) div.innerHTML = `<img src="${e.target.result}" style="height:100%;max-width:100%;object-fit:contain">`;
+    if (div) div.innerHTML = _barcodeImgPreviewHtml(e.target.result);
+    // 새 파일 선택 시 삭제 플래그 해제
+    window._clearBarcodeImg = false;
   };
   reader.readAsDataURL(file);
 }
