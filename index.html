@@ -6755,7 +6755,12 @@ function renderBOMPage() {
   // 품목코드 순으로 정렬
   fgItems.sort(sortByCode);
   const sel = $('bom-product-sel');
-  sel.innerHTML = fgItems.map(i=>`<option value="${i.id}">${i.name}</option>`).join('');
+  // 이전 선택값 보존 (있으면 유지, 없으면 placeholder)
+  const prev = sel ? sel.value : '';
+  const hasPrev = prev && fgItems.some(i => String(i.id) === String(prev));
+  sel.innerHTML = '<option value="">— 완제품을 선택하세요 —</option>' +
+    fgItems.map(i=>`<option value="${i.id}">${i.name}</option>`).join('');
+  sel.value = hasPrev ? prev : '';
   renderBOM();
   // 서브탭도 갱신
   renderPartSpecList();
@@ -7839,8 +7844,18 @@ function loadBomCostToPrice() {
 }
 
 function renderBOM() {
-  const productId = parseInt($('bom-product-sel') ? $('bom-product-sel').value : 0);
-  if (!productId) return;
+  const selEl = $('bom-product-sel');
+  const rawVal = selEl ? selEl.value : '';
+  const productId = parseInt(rawVal);
+  // 완제품 미선택 상태: 안내 메시지만 표시하고 BOM/마진/원가 구성은 비움
+  if (!rawVal || !productId) {
+    if ($('bom-card-title')) $('bom-card-title').textContent = '🔧 BOM 구성';
+    if ($('bom-total-cost')) $('bom-total-cost').textContent = '-';
+    if ($('bom-table')) $('bom-table').innerHTML = '<tr><td colspan="8" class="empty" style="padding:32px 16px;color:var(--gray-400);text-align:center">위 드롭다운에서 완제품을 선택하면 BOM이 표시됩니다.</td></tr>';
+    if ($('bom-cost-breakdown')) $('bom-cost-breakdown').innerHTML = '';
+    if ($('bom-margin-box')) $('bom-margin-box').innerHTML = '<div style="padding:24px 8px;color:var(--gray-400);font-size:13px;text-align:center;line-height:1.6">완제품을 선택하면<br>판매가·마진 계산이 표시됩니다.</div>';
+    return;
+  }
   const product = getItem(productId);
   const bom = DB.boms[productId] || [];
   $('bom-card-title').textContent = '🔧 ' + product.name + ' — BOM';
