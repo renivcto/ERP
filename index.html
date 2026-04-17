@@ -12379,29 +12379,37 @@ BOM 마진 ${estMarginNum !== null ? estMarginNum.toLocaleString()+'원' : '-'}
   const valStyle = 'flex:1;min-width:0;color:var(--gray-800);font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
   const muted = 'font-size:12.5px;color:var(--gray-400)';
 
-  // 기본 카드: NAME / USP / 런칭 — 왼쪽 이미지 (캐러셀 ○● 넘기기)
-  let basicImgEl = '';
-  if (productImgs.length === 1) {
-    basicImgEl = `<div style="flex-shrink:0;width:72px;height:72px"><img src="${productImgs[0]}" style="width:100%;height:100%;border-radius:8px;object-fit:cover;border:1px solid var(--gray-200)"></div>`;
-  } else if (productImgs.length > 1) {
-    const cId = 'np-img-car-' + it.id;
-    const dId = 'np-img-dots-' + it.id;
-    basicImgEl = `<div style="flex-shrink:0;width:72px;display:flex;flex-direction:column;align-items:center;gap:4px" onclick="event.stopPropagation()">
+  // 공통 이미지 캐러셀 렌더 — 'product' / 'formula' 등 kind 로 구분, 클릭 시 라이트박스 확대
+  const _buildNpImgEl = (imgs, kind) => {
+    const key = kind + '-' + it.id;
+    window._npCardImgs = window._npCardImgs || {};
+    window._npCardImgs[key] = imgs.slice();
+    if (!imgs.length) return '';
+    if (imgs.length === 1) {
+      return `<div style="flex-shrink:0;width:72px;height:72px" onclick="event.stopPropagation();_npImgOpen('${key}',0)"><img src="${imgs[0]}" style="width:100%;height:100%;border-radius:8px;object-fit:cover;border:1px solid var(--gray-200);cursor:zoom-in"></div>`;
+    }
+    const cId = 'np-img-car-' + key;
+    const dId = 'np-img-dots-' + key;
+    return `<div style="flex-shrink:0;width:72px;display:flex;flex-direction:column;align-items:center;gap:4px" onclick="event.stopPropagation()">
       <div style="width:72px;height:72px;position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--gray-200)">
-        <div id="${cId}" style="width:100%;height:100%;overflow-x:auto;overflow-y:hidden;display:flex;scroll-snap-type:x mandatory;scroll-behavior:smooth;scrollbar-width:none" onscroll="_npImgCarDots('${it.id}')">
-          ${productImgs.map(src => `<img src="${src}" style="flex:0 0 100%;width:100%;height:100%;object-fit:cover;scroll-snap-align:start">`).join('')}
+        <div id="${cId}" style="width:100%;height:100%;overflow-x:auto;overflow-y:hidden;display:flex;scroll-snap-type:x mandatory;scroll-behavior:smooth;scrollbar-width:none" onscroll="_npImgCarDots('${it.id}','${kind}')">
+          ${imgs.map((src, i) => `<img src="${src}" onclick="event.stopPropagation();_npImgOpen('${key}',${i})" style="flex:0 0 100%;width:100%;height:100%;object-fit:cover;scroll-snap-align:start;cursor:zoom-in">`).join('')}
         </div>
       </div>
       <div id="${dId}" style="display:flex;gap:4px;align-items:center">
-        ${productImgs.map((_, i) => `<span onclick="event.stopPropagation();_npImgCarGo('${it.id}',${i})" style="cursor:pointer;width:6px;height:6px;border-radius:50%;background:${i===0?'var(--gray-600)':'var(--gray-300)'};display:inline-block;transition:background .15s"></span>`).join('')}
+        ${imgs.map((_, i) => `<span onclick="event.stopPropagation();_npImgCarGo('${it.id}',${i},'${kind}')" style="cursor:pointer;width:6px;height:6px;border-radius:50%;background:${i===0?'var(--gray-600)':'var(--gray-300)'};display:inline-block;transition:background .15s"></span>`).join('')}
       </div>
     </div>`;
-  }
-  // 제형/성분 카드: 메인 성분 / 보조 성분 — 왼쪽 이미지, 세로 중앙 정렬
-  const formFirstImg = (it.formulationImgs && it.formulationImgs[0]) || it.formulationImg || '';
-  const formImgEl = formFirstImg
-    ? `<div style="flex-shrink:0;width:72px;height:72px"><img src="${formFirstImg}" style="width:100%;height:100%;border-radius:8px;object-fit:cover;border:1px solid var(--gray-200)"></div>`
-    : '';
+  };
+
+  // 기본 카드: NAME / USP / 런칭 — 왼쪽 이미지 (캐러셀 ○● 넘기기 + 확대)
+  const basicImgEl = _buildNpImgEl(productImgs, 'product');
+
+  // 제형/성분 카드: 메인 성분 / 보조 성분 — 왼쪽 이미지, 캐러셀 + 확대
+  const formulationImgs = (it.formulationImgs && it.formulationImgs.length)
+    ? it.formulationImgs
+    : (it.formulationImg ? [it.formulationImg] : []);
+  const formImgEl = _buildNpImgEl(formulationImgs, 'formula');
 
   const row = (label, val) => val
     ? `<div style="display:flex;gap:8px;align-items:center;line-height:1.5;padding:1px 0"><span style="${lblStyle}">${label}</span><span style="${valStyle}">${escapeHtml(val)}</span></div>`
