@@ -25,8 +25,10 @@
   const db = getFirestore(app);
   const provider = new GoogleAuthProvider();
 
-  // 관리자 이메일 (본인 구글 계정)
-  const ADMIN_EMAIL = null; // 첫 로그인한 사람이 자동으로 관리자가 됩니다
+  // 관리자 이메일 (화이트리스트) — 이 목록에 있는 Google 계정만 자동 관리자 권한을 부여받습니다.
+  // ⚠️ 보안: null로 두면 "첫 로그인 = 관리자" 가 되어 외부인이 권한을 선점할 위험이 있습니다.
+  const ADMIN_EMAILS = ['reniv.cto@gmail.com'];
+  const _isWhitelistedAdmin = (email) => !!email && ADMIN_EMAILS.map(e=>e.toLowerCase()).includes(String(email).toLowerCase());
 
   // 전역으로 노출
   window._firebaseAuth = auth;
@@ -53,23 +55,21 @@
         const userSnap = await getDoc(userRef);
 
         if (!userSnap.exists()) {
-          // 최초 로그인 — 사용자 등록 (첫 번째 사용자는 자동 관리자)
-          let isFirst = false;
-          try {
-            const allUsers = await getDocs(collection(db, 'users'));
-            isFirst = allUsers.empty;
-          } catch(e) { isFirst = false; }
+          // 최초 로그인 — 사용자 등록
+          // v2.0 보안 패치: "첫 로그인 = 관리자" 로직 제거. ADMIN_EMAILS 화이트리스트에 있는 계정만 자동 관리자.
+          const isAdminByEmail = _isWhitelistedAdmin(user.email);
 
           const userData = {
             uid: user.uid,
             name: user.displayName,
             email: user.email,
             photo: user.photoURL,
-            role: isFirst ? 'CTO' : '멤버',
-            status: isFirst ? '활성' : '승인대기',
+            role: isAdminByEmail ? 'CTO' : '멤버',
+            status: isAdminByEmail ? '활성' : '승인대기',
+            permission: isAdminByEmail ? 'write' : 'read',
             joinDate: new Date().toISOString().slice(0,10),
             lastLogin: new Date().toLocaleString('ko-KR',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).replace(/\. /g,'-').replace(/\./g,'').replace(' ',' ').trim(),
-            isAdmin: isFirst,
+            isAdmin: isAdminByEmail,
           };
           try { await setDoc(userRef, userData); } catch(e) {}
           window._currentUser = userData;
@@ -85,16 +85,19 @@
           window._currentUser = { ...data, uid: user.uid, permission: data.permission || 'read' };
         }
       } catch(e) {
-        // Firestore 실패 시 — 기본 관리자로 진입
-        console.warn('Firestore 접근 실패, 기본값으로 진입:', e);
+        // v2.0 보안 패치: Firestore 실패 시 무조건 관리자 부여하던 로직을 제거.
+        // 화이트리스트 이메일만 관리자로 진입 가능, 나머지는 보기 전용으로 제한.
+        console.warn('Firestore 접근 실패, 제한 모드로 진입:', e);
+        const isAdminByEmail = _isWhitelistedAdmin(user.email);
         window._currentUser = {
           uid: user.uid,
-          name: user.displayName || '관리자',
+          name: user.displayName || (isAdminByEmail ? '관리자' : '사용자'),
           email: user.email,
           photo: user.photoURL,
-          role: 'CTO',
-          status: '활성',
-          isAdmin: true,
+          role: isAdminByEmail ? 'CTO' : '멤버',
+          status: isAdminByEmail ? '활성' : '승인대기',
+          permission: isAdminByEmail ? 'write' : 'read',
+          isAdmin: isAdminByEmail,
         };
       }
       showERPOrWaiting();
@@ -14120,70 +14123,20 @@ function _migrateAccountsIds() {
   }
 }
 
-// 기본 시드 데이터 (르니브 운영 계획표 - 계정 시트 기반, 55행)
-// 주의: 각 엔트리의 `loginId` 필드가 로그인 ID (고유키 id와 분리)
+// v2.0 보안 패치 — 하드코딩된 평문 비밀번호 시드 제거 (2026-04)
+// 기존: 55개 계정의 실제 비밀번호가 소스 코드에 하드코딩 → 브라우저 소스 보기만으로 유출 가능했음.
+// 현재: DB.accounts는 Firestore(erp_data/meta)에서만 로드. 소스에 비밀번호 없음.
+// 만약 Firestore 데이터가 유실된 경우 관리자가 "전체 데이터 가져오기(JSON)" 기능으로 복구.
 function _seedAccountsIfEmpty() {
   if (!DB.accounts || !Array.isArray(DB.accounts)) DB.accounts = [];
-  // 이미 데이터가 있으면 마이그레이션만 수행 (중복 id 복구)
+  // 이미 데이터가 있으면 마이그레이션만 수행
   if (DB.accounts.length > 0) { _migrateAccountsIds(); return; }
-  const S = [
-    { cat:'쇼핑몰',    name:'카페24 본계정',                  loginId:'butiplplanet',       pw:'!reniv4860',            email:'',                            url:'https://eclogin.cafe24.com/Shop/?url=Init&login_mode=3', note:'' },
-    { cat:'쇼핑몰',    name:'카페24 호스팅 센터',             loginId:'reniv0424',          pw:'reniv04240',            email:'',                            url:'', note:'' },
-    { cat:'쇼핑몰',    name:'카페24 호스팅 웹메일',           loginId:'reniv0424',          pw:'fmslqm12!',             email:'',                            url:'', note:'' },
-    { cat:'쇼핑몰',    name:'카페24 쇼핑몰 관리자',           loginId:'reniv25',            pw:'!reniv4860',            email:'',                            url:'', note:'' },
-    { cat:'쇼핑몰',    name:'네이버 계정 (스마트스토어)',     loginId:'savvy3355',          pw:'savvy2025!',            email:'',                            url:'https://sell.smartstore.naver.com/', note:'' },
-    { cat:'쇼핑몰',    name:'네이버 페이센터',                loginId:'savvy3355',          pw:'savvy2025!',            email:'',                            url:'https://admin.pay.naver.com/', note:'' },
-    { cat:'쇼핑몰',    name:'네이버 쇼핑 파트너센터',         loginId:'reniv2025',          pw:'!hsk486048',            email:'',                            url:'https://center.shopping.naver.com/', note:'' },
-    { cat:'쇼핑몰',    name:'쿠팡 / 쿠팡페이',                loginId:'reniv25',            pw:'!hsk4860486',           email:'',                            url:'https://wing.coupang.com/', note:'' },
-    { cat:'쇼핑몰',    name:'토스쇼핑 비즈니스',              loginId:'contact@reniv.co.kr',pw:'fmslqm12!',             email:'contact@reniv.co.kr',         url:'https://toss.im/shopping-seller', note:'' },
-    { cat:'쇼핑몰',    name:'와디즈 계정',                    loginId:'dbkwon@reniv.co.kr', pw:'fmslqm12!',             email:'dbkwon@reniv.co.kr',          url:'', note:'' },
-    { cat:'쇼핑몰',    name:'아임웹',                         loginId:'hq@savvybox.kr',     pw:'Savvy2024!',            email:'hq@savvybox.kr',              url:'', note:'맨앞 S만 대문자' },
-    { cat:'쇼핑몰',    name:'새비박스 cafe24 사이트',         loginId:'savvybox',           pw:'savvy2025!',            email:'',                            url:'', note:'' },
-    { cat:'마케팅/SNS', name:'르니브 공식 인스타그램',         loginId:'reniv_official',     pw:'Beauti@!7',             email:'',                            url:'', note:'' },
-    { cat:'마케팅/SNS', name:'인스타그램 (더마 사이언티스트)', loginId:'derma_scienitst',    pw:'derma_scientist',       email:'',                            url:'', note:'' },
-    { cat:'마케팅/SNS', name:'틱톡 오피셜 계정',               loginId:'beautykorealog_',    pw:'!hsk486048',            email:'',                            url:'', note:'' },
-    { cat:'광고',      name:'틱톡 광고 계정',                 loginId:'dbkwon@reniv.co.kr', pw:'!hsk486048',            email:'dbkwon@reniv.co.kr',          url:'', note:'' },
-    { cat:'마케팅/SNS', name:'카카오채널 관리자',              loginId:'contact@reniv.co.kr',pw:'fmslqm12!',             email:'contact@reniv.co.kr',         url:'', note:'' },
-    { cat:'마케팅/SNS', name:'카카오 페이센터 관리자',          loginId:'contact@reniv.co.kr',pw:'fmslqm12!',             email:'contact@reniv.co.kr',         url:'https://pg.kakao.com/', note:'' },
-    { cat:'마케팅/SNS', name:'유튜브 계정',                    loginId:'reniv2025@gmail.com',pw:'fmslqm12!',             email:'reniv2025@gmail.com',         url:'', note:'(르니브12!)' },
-    { cat:'마케팅/SNS', name:'인포크링크',                     loginId:'beautyofkorea',      pw:'fmslqm12!',             email:'',                            url:'', note:'' },
-    { cat:'이미지 / 영상',  name:'구글 계정',                      loginId:'reniv2025@gmail.com',pw:'fmslqm12!',             email:'reniv2025@gmail.com',         url:'', note:'(르니브12!)' },
-    { cat:'이미지 / 영상',  name:'어도비',                         loginId:'hq@savvybox.kr',     pw:'Savvy2025@',            email:'hq@savvybox.kr',              url:'', note:'' },
-    { cat:'이미지 / 영상',  name:'기업용 마이크로오피스',          loginId:'hq@savvycm.onmicrosoft.com', pw:'savvy2024!',    email:'hq@savvycm.onmicrosoft.com',  url:'', note:'' },
-    { cat:'이미지 / 영상',  name:'기업용 마이크로오피스',          loginId:'contact@reniv.co.kr',pw:'fmslqm12!',             email:'contact@reniv.co.kr',         url:'', note:'' },
-    { cat:'이미지 / 영상',  name:'셔터스톡',                       loginId:'reniv2025@gmail.com',pw:'fmslqm12!',             email:'reniv2025@gmail.com',         url:'', note:'(르니브12!)' },
-    { cat:'이미지 / 영상',  name:'타입캐스트',                     loginId:'reniv2025@gmail.com',pw:'fmslqm12!',             email:'reniv2025@gmail.com',         url:'', note:'(르니브12!)' },
-    { cat:'이미지 / 영상',  name:'영상 제작용 제미나이 계정 ①',   loginId:'official@savvybox.kr', pw:'fmslqm12!!',          email:'official@savvybox.kr',        url:'', note:'' },
-    { cat:'이미지 / 영상',  name:'영상 제작용 제미나이 계정 ②',   loginId:'cinemanager@savvybox.kr', pw:'fmslqm12!!',       email:'cinemanager@savvybox.kr',     url:'', note:'' },
-    { cat:'이미지 / 영상',  name:'영상 제작용 제미나이 계정 ③',   loginId:'hq@savvybox.kr',     pw:'fmslqm12!',             email:'hq@savvybox.kr',              url:'', note:'' },
-    { cat:'이미지 / 영상',  name:'영상 제작용 제미나이 계정 ④',   loginId:'100@savvybox.kr',    pw:'fmslqm12!',             email:'100@savvybox.kr',             url:'', note:'' },
-    { cat:'이미지 / 영상',  name:'영상 제작용 제미나이 계정 ⑤',   loginId:'byj7769@savvybox.kr', pw:'fmslqm12!!',           email:'byj7769@savvybox.kr',         url:'', note:'' },
-    { cat:'이미지 / 영상',  name:'찬식 르니브 메일 계정',           loginId:'100',                 pw:'creative100!',          email:'',                            url:'', note:'' },
-    { cat:'이미지 / 영상',  name:'추가 메일 (savvybox)',            loginId:'hq@savvybox.kr',     pw:'dltjdwn4455!',          email:'hq@savvybox.kr',              url:'', note:'' },
-    { cat:'물류/발주',  name:'박스포유 발주',                  loginId:'kiss748',            pw:'fmslqm12!',             email:'',                            url:'https://www.box4u.co.kr/', note:'' },
-    { cat:'물류/발주',  name:'롯데 택배',                      loginId:'329377',             pw:'fmslqm12!',             email:'',                            url:'', note:'' },
-    { cat:'물류/발주',  name:'종이테이프 · 버플페이퍼',        loginId:'',                   pw:'',                      email:'',                            url:'https://smartstore.naver.com/asintnf', note:'' },
-    { cat:'물류/발주',  name:'명함주문 (MH Factory)',          loginId:'reniv2025',          pw:'fmslqm12',              email:'',                            url:'https://www.mhfactory.co.kr/', note:'' },
-    { cat:'결제/금융',  name:'나이스페이먼츠',                 loginId:'CG0020732',          pw:'fmslqm12!',             email:'',                            url:'https://npg.nicepay.co.kr/logIn.do', note:'가맹점 아이디 · 1661-7335 (3.신규계약) · pghelp@nicepay.co.kr' },
-    { cat:'결제/금융',  name:'뱅크다',                         loginId:'contact@reniv.co.kr',pw:'fmslqm12!',             email:'contact@reniv.co.kr',         url:'', note:'' },
-    { cat:'광고',      name:'성원 애드피아',                   loginId:'reniv2025',          pw:'fmslqm12!',             email:'',                            url:'https://www.swadpia.co.kr/member/re_login', note:'' },
-    { cat:'광고',      name:'모비온',                         loginId:'reniv25',            pw:'!ja486048',             email:'',                            url:'', note:'' },
-    { cat:'광고',      name:'GFA 계정',                       loginId:'savvy3355',          pw:'savvy2025!',            email:'',                            url:'', note:'' },
-    { cat:'광고',      name:'플레이오토',                     loginId:'dbkwon@reniv.co.kr', pw:'fmslqm12!',             email:'dbkwon@reniv.co.kr',          url:'', note:'' },
-    { cat:'광고',      name:'쿠팡 파트너스',                  loginId:'dbkwon@reniv.co.kr', pw:'',                      email:'dbkwon@reniv.co.kr',          url:'', note:'' },
-    { cat:'행정/인증',  name:'식약처',                         loginId:'reniv25',            pw:'fmslqm12!',             email:'',                            url:'', note:'(르니브12!)' },
-    { cat:'행정/인증',  name:'대한화장품협회',                 loginId:'reniv25',            pw:'fmslqm12!',             email:'',                            url:'', note:'(르니브12!)' },
-    { cat:'행정/인증',  name:'보안서버 SSL 인증서',            loginId:'reniv25',            pw:'fmslqm12!',             email:'',                            url:'', note:'(르니브12!)' },
-    { cat:'행정/인증',  name:'법원 인터넷 등기소',             loginId:'savvycom',           pw:'savvy2024!',            email:'',                            url:'', note:'' },
-    { cat:'리뷰/제휴',  name:'알파리뷰',                       loginId:'',                   pw:'fmslqm12!',             email:'',                            url:'', note:'' },
-    { cat:'리뷰/제휴',  name:'리뷰 플레이스',                  loginId:'reniv',              pw:'a1234567',              email:'',                            url:'https://www.reviewplace.co.kr/', note:'' },
-    { cat:'쇼핑몰',    name:'네이버 스마트 스토어',           loginId:'',                   pw:'',                      email:'',                            url:'https://sell.smartstore.naver.com/', note:'' },
-    { cat:'쇼핑몰',    name:'르니브 메인 로그인',             loginId:'reniv25',            pw:'fmslqm12!',             email:'',                            url:'', note:'(르니브12!)' },
-  ];
-  const now = Date.now();
-  // 스프레드 뒤에 id를 배치하여 로그인 ID가 고유키를 덮어쓰지 않도록 함
-  DB.accounts = S.map((a, i) => ({ ...a, id: 'acc_' + (now + i), createdAt: now }));
-  saveData();
+  // 데이터가 비어있어도 자동 시드하지 않음 — 관리자에게 복구 안내만 표시
+  const isAdmin = window._currentUser && window._currentUser.isAdmin;
+  if (isAdmin && typeof showNotif === 'function') {
+    showNotif('⚠️ 계정 데이터가 비어있습니다. [설정 → 전체 데이터 가져오기(JSON)]로 백업에서 복구하세요.', 'warning');
+  }
+  // 빈 배열 유지 (saveData 호출 안 함 — 잘못된 덮어쓰기 방지)
 }
 
 // v1.9.84 — 사이트 페이지와 동일한 색감으로 통일 (밝고 깔끔한 파스텔 + 소프트 보더)
