@@ -3160,6 +3160,7 @@ async function _doSaveDataInner() {
       _companyInfo:     dbToSave._companyInfo     || {},
       _nextId:          dbToSave._nextId           || {},
       _processedOrders: dbToSave._processedOrders || [],
+      _stockMigrationV110Done: dbToSave._stockMigrationV110Done === true,
       boms:             dbToSave.boms             || {},
       sites:            dbToSave.sites            || [],
       gdocs:            _gdocList                 || [],
@@ -3525,8 +3526,29 @@ let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
 
 // Firestore 로드 후 미처리 입고완료 발주서 재고 반영
 // v1.9.109 — 방어적 코드: stockHistory에 이미 해당 발주서 관련 입고 기록이 있으면 재반영하지 않음
-//            (이전 버전에서 _processedOrders에 기록되지 않은 채 재고 반영된 케이스 방지)
+// v1.9.110 — 일회성 마이그레이션: 기존 입고완료 발주서를 모두 processed로 마킹 (재고 재반영 영구 차단)
+//            * 이 함수는 이제 신규로 입고완료 처리되는 발주서가 init 시점에 발견된 경우에만 재고 반영함
+//            * 기존에 입고완료된 발주서는 모두 이미 처리된 것으로 간주
 function applyPendingStockIn() {
+  // 🔧 [MIGRATION v1.9.110] 최초 1회: 기존 입고완료 발주서를 processed로 마킹
+  // — 이전 버전 버그로 _processedOrders에 기록되지 않은 발주서들이 매번 재고 재반영되던 문제 영구 해결
+  if (!DB._stockMigrationV110Done) {
+    const processed = DB._processedOrders || [];
+    let migrated = 0;
+    (DB.orders || []).forEach(o => {
+      if (o.stockStatus === '입고완료' && processed.indexOf(o.id) === -1) {
+        processed.push(o.id);
+        migrated++;
+      }
+    });
+    DB._processedOrders = processed;
+    DB._stockMigrationV110Done = true;
+    console.warn('🔧 [MIGRATION v1.9.110] 기존 입고완료 발주서 ' + migrated + '건을 processed로 마킹 (재고 재반영 영구 차단)');
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
+    return true;  // Firestore 저장도 트리거되도록
+  }
+
+  // 일반 로직: 신규로 발견된 미처리 입고완료 발주서만 재고 반영 (방어 로직 포함)
   const processed = DB._processedOrders || [];
   let changed = false;
   let alreadyInHistory = 0;
@@ -15178,6 +15200,10 @@ function initERPWhenReady() {
       }
       if (firestoreDB._processedOrders && firestoreDB._processedOrders.length > 0) merged._processedOrders = firestoreDB._processedOrders;
       else if (localDB._processedOrders && localDB._processedOrders.length > 0) merged._processedOrders = localDB._processedOrders;
+      // v1.9.110 — 재고 마이그레이션 플래그 복원 (true가 있으면 유지)
+      if (firestoreDB._stockMigrationV110Done === true || localDB._stockMigrationV110Done === true) {
+        merged._stockMigrationV110Done = true;
+      }
       // gdocs 복원 (구글 문서 공유)
       if (firestoreDB.gdocs && firestoreDB.gdocs.length > 0) {
         merged.gdocs = firestoreDB.gdocs;
