@@ -3633,6 +3633,8 @@ function backfillProductionsFromOrders() {
 }
 
 // 입고완료 발주서와 연결된 생산 레코드 → 생산완료 자동 동기화
+// v1.9.108 — matchItem은 레거시 데이터(serial/orderId 없음)에만 적용해
+//           같은 품목의 다른 발주서 생산 레코드가 잘못 완료 처리되는 버그 방지
 function syncProductionStatusFromOrders() {
   let changed = false;
   (DB.orders||[]).forEach(o => {
@@ -3641,7 +3643,9 @@ function syncProductionStatusFromOrders() {
       if (p.status === '생산완료' || p.status === '입고완료') return;
       const matchSerial = o.serial && p.serial === o.serial;
       const matchOrderId = o.id && p.orderId === o.id;
-      const matchItem = (o.rows||[]).some(r => r.itemId && r.itemId === p.productId);
+      // itemId 매칭은 생산 레코드에 serial/orderId 연결이 없는 레거시 데이터에만 허용
+      const matchItem = !p.serial && !p.orderId &&
+        (o.rows||[]).some(r => r.itemId && r.itemId === p.productId);
       if (matchSerial || matchOrderId || matchItem) {
         DB.productions[idx].status = '생산완료';
         DB.productions[idx].progress = 100;
@@ -3653,6 +3657,32 @@ function syncProductionStatusFromOrders() {
     console.log('✅ 입고완료 기준 생산완료 자동 동기화 완료');
     try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
   }
+}
+
+// v1.9.108 — 버그로 잘못 생산완료 처리된 레코드 복구
+// 연결된 발주서의 stockStatus가 '입고완료'가 아닌데 생산완료 상태인 레코드를 '생산중'으로 되돌림
+function repairIncorrectProductionCompletion() {
+  let repaired = 0;
+  (DB.productions||[]).forEach((p, idx) => {
+    if (p.status !== '생산완료') return;
+    // 연결된 발주서 탐색 (orderId 우선, 없으면 serial)
+    let linked = null;
+    if (p.orderId) linked = (DB.orders||[]).find(o => o.id === p.orderId);
+    if (!linked && p.serial) linked = (DB.orders||[]).find(o => o.serial === p.serial);
+    if (!linked) return; // 연결 발주서 없으면 건드리지 않음 (수동 생산완료 가능성 존중)
+    // 연결 발주서가 입고완료가 아니면 → 생산중으로 복구
+    if (linked.stockStatus !== '입고완료') {
+      DB.productions[idx].status = '생산중';
+      DB.productions[idx].progress = 50;
+      DB.productions[idx].checks = [false, false, false, false, false];
+      repaired++;
+    }
+  });
+  if (repaired > 0) {
+    console.warn(`🔧 ${repaired}건의 잘못 생산완료된 생산 레코드를 '생산중'으로 복구했습니다.`);
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
+  }
+  return repaired;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -9957,16 +9987,18 @@ function autoRegisterProduction(rows, orderData) {
 }
 
 // 입고완료 시 연결된 생산건 → 생산완료 처리
+// v1.9.108 — matchItem은 레거시 데이터(serial 없음)에만 적용해
+//           같은 품목의 다른 발주서 생산 레코드가 잘못 완료 처리되는 버그 방지
 function completeRelatedProductions(rows, serial) {
   if (!serial && !rows.length) return;
   let completedCount = 0;
   rows.forEach(row => {
     const itemId = row.itemId || null;
-    // serial 또는 itemId로 매칭
     DB.productions.forEach((p, idx) => {
       if (p.status === '생산완료') return;
       const matchSerial = serial && p.serial === serial;
-      const matchItem = itemId && p.productId === itemId;
+      // itemId 매칭은 생산 레코드에 serial/orderId 연결이 없는 레거시 데이터에만 허용
+      const matchItem = itemId && p.productId === itemId && !p.serial && !p.orderId;
       if (matchSerial || matchItem) {
         DB.productions[idx].status = '생산완료';
         DB.productions[idx].progress = 100;
@@ -15120,6 +15152,7 @@ function initERPWhenReady() {
       cleanOrphanProductions();
       const _backfillCreated = backfillProductionsFromOrders();     // v1.9.107 — 누락된 생산관리 레코드 보충 (외주가공 포함)
       syncProductionStatusFromOrders();
+      repairIncorrectProductionCompletion();  // v1.9.108 — 잘못 생산완료된 레코드 복구
       try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
       _firestoreDataLoaded = true;  // ✅ Firestore 쓰기 허용
       console.log('✅ Firestore 데이터 로드 완료 — Firestore 쓰기 활성화');
