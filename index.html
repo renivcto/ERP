@@ -12393,8 +12393,28 @@ function toggleNpDonePanel() {
   if (btn) btn.textContent = open ? '목록 닫기' : '목록 보기';
 }
 
+// ── 신제품 카드 전체 접기/펼치기 (카드 우상단 토글) ──
+function _getNpFullCardCollapsed() {
+  try { return JSON.parse(localStorage.getItem('reniv_np_full_collapse') || '{}') || {}; } catch(e) { return {}; }
+}
+function toggleNpFullCard(id, ev) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault && ev.preventDefault(); }
+  const map = _getNpFullCardCollapsed();
+  map[id] = !map[id];
+  try { localStorage.setItem('reniv_np_full_collapse', JSON.stringify(map)); } catch(e) {}
+  const body = document.getElementById('np-full-body-' + id);
+  const btn = document.getElementById('np-full-toggle-' + id);
+  const chev = document.getElementById('np-full-chev-' + id);
+  if (body) body.style.display = map[id] ? 'none' : 'flex';
+  if (chev) chev.textContent = map[id] ? '▸' : '▾';
+  if (btn) btn.title = map[id] ? '카드 펼치기' : '카드 접기';
+}
+
 // ── 신제품 카드 (세로 카드 한 장 = 프로젝트 하나) ──
 function renderNpCard(it, stageMeta) {
+  // 전체 카드 접힘 상태
+  const _fullCollapseMap = _getNpFullCardCollapsed();
+  const _fullCollapsed = !!_fullCollapseMap[it.id];
   // 상태 배지 — DOING/ON HOLD/DROP 색상
   const statusNorm = _migrateNpStatus(it.status);
   const statusStyle = statusNorm === 'DOING' ? 'background:#16a34a;color:#fff'
@@ -12508,13 +12528,14 @@ BOM 마진 ${estMarginNum !== null ? estMarginNum.toLocaleString()+'원' : '-'}
     : `<div style="${muted};padding:4px 2px">아직 코멘트가 없습니다</div>`;
 
   return `<div onclick="openNewProductModal('${it.id}')" style="background:#fff;border:1px solid var(--gray-200);border-radius:12px;padding:13px 8px;cursor:pointer;transition:all .15s;box-shadow:0 1px 2px rgba(0,0,0,0.03)" onmouseenter="this.style.boxShadow='0 4px 14px rgba(0,0,0,0.08)';this.style.transform='translateY(-1px)';this.style.borderColor='${stageMeta.border}'" onmouseleave="this.style.boxShadow='0 1px 2px rgba(0,0,0,0.03)';this.style.transform='translateY(0)';this.style.borderColor='var(--gray-200)'">
-    <!-- 제목 + 상태 -->
+    <!-- 제목 + 상태 + 전체 접기/펼치기 토글 -->
     <div style="display:flex;align-items:center;gap:6px;margin:0 6px 12px 6px;flex-wrap:wrap">
       <span style="font-size:16px;font-weight:800;color:var(--gray-800);line-height:1.3;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(it.name)}</span>
       ${statusBadge}
+      <button type="button" id="np-full-toggle-${it.id}" onclick="toggleNpFullCard('${it.id}',event)" title="${_fullCollapsed ? '카드 펼치기' : '카드 접기'}" style="flex-shrink:0;background:linear-gradient(135deg,#dbeafe 0%,#bfdbfe 100%);color:#1e40af;border:1px solid #93c5fd;border-radius:6px;width:24px;height:24px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;line-height:1;padding:0;box-shadow:0 1px 2px rgba(30,64,175,0.15);transition:background .12s, box-shadow .12s, transform .12s" onmouseenter="this.style.background='linear-gradient(135deg,#bfdbfe 0%,#93c5fd 100%)';this.style.boxShadow='0 2px 6px rgba(30,64,175,0.25)';this.style.transform='translateY(-1px)'" onmouseleave="this.style.background='linear-gradient(135deg,#dbeafe 0%,#bfdbfe 100%)';this.style.boxShadow='0 1px 2px rgba(30,64,175,0.15)';this.style.transform='translateY(0)'"><span id="np-full-chev-${it.id}">${_fullCollapsed ? '▸' : '▾'}</span></button>
     </div>
     <!-- 4개 요약 미니 카드 세로 일렬 — 각 카드 클릭 시 해당 탭으로 이동 / 우상단 토글로 접기·펼치기 -->
-    <div style="display:flex;flex-direction:column;gap:8px">
+    <div id="np-full-body-${it.id}" style="display:${_fullCollapsed ? 'none' : 'flex'};flex-direction:column;gap:8px">
 
       <!-- 📋 개요 → basic 탭 (NAME / USP / 런칭) — 세로 중앙 정렬 -->
       ${_npMiniCard(it, 'basic', `
