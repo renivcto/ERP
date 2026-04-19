@@ -107,7 +107,9 @@ exports.scheduledFirestoreExport = functions
   .timeZone('Asia/Seoul')
   .onRun(async (context) => {
     const today = kstDate();                                  // 2026-04-19 (KST)
-    const outputPrefix = `${BUCKET}/daily/${today}`;
+    const ts = kstTimestampForFilename();                     // 2026-04-19_03-00-15
+    // 같은 날 여러 번 실행해도 충돌 없도록 날짜/시각 2단 구조
+    const outputPrefix = `${BUCKET}/daily/${today}/${ts}`;
 
     try {
       const [response] = await client.exportDocuments({
