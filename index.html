@@ -3528,11 +3528,31 @@ let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
 // (function applyInitialStockIn() { ... })();
 
 // Firestore 로드 후 미처리 입고완료 발주서 재고 반영
+// v1.9.109 — 방어적 코드: stockHistory에 이미 해당 발주서 관련 입고 기록이 있으면 재반영하지 않음
+//            (이전 버전에서 _processedOrders에 기록되지 않은 채 재고 반영된 케이스 방지)
 function applyPendingStockIn() {
   const processed = DB._processedOrders || [];
   let changed = false;
+  let alreadyInHistory = 0;
   (DB.orders || []).forEach(o => {
     if (o.stockStatus === '입고완료' && processed.indexOf(o.id) === -1) {
+      // 🛡️ 방어: stockHistory에 이 발주서(serial 또는 id) 관련 입고 기록이 이미 있으면 스킵
+      const serialMark = o.serial || '';
+      const idMark = '발주서 ' + o.id;
+      const hasHistoryEntry = (DB.stockHistory || []).some(h => {
+        if (h.type !== 'in' || !h.note) return false;
+        if (serialMark && h.note.indexOf(serialMark) !== -1) return true;
+        if (h.note.indexOf(idMark) !== -1) return true;
+        if (serialMark && h.lot === serialMark) return true;
+        return false;
+      });
+      if (hasHistoryEntry) {
+        // 이미 반영된 것으로 판단 — processed에만 기록하고 재고는 건드리지 않음
+        processed.push(o.id);
+        alreadyInHistory++;
+        changed = true;  // _processedOrders 변경 저장 필요
+        return;
+      }
       (o.rows || []).forEach(row => {
         if (!row.qty) return;
         let item = null;
@@ -3559,7 +3579,11 @@ function applyPendingStockIn() {
     }
   });
   DB._processedOrders = processed;
+  if (alreadyInHistory > 0) {
+    console.log('🛡️ applyPendingStockIn: ' + alreadyInHistory + '건은 이미 재고반영 이력이 있어 스킵 (processed에만 기록)');
+  }
   if (changed) { try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {} }
+  return changed;
 }
 
 // 발주서 없이 남은 고아 생산 레코드 자동 정리
@@ -9164,8 +9188,8 @@ function deleteOrderByIdx(idx) {
       if (order.serial && order.serial !== '' && p.serial === order.serial) return false;
       return true;
     });
-    // _processedOrders에서도 제거
-    if (order.serial) DB._processedOrders = (DB._processedOrders||[]).filter(s => s !== order.serial);
+    // _processedOrders에서도 제거 (v1.9.109 — id 기준으로 수정)
+    if (order.id != null) DB._processedOrders = (DB._processedOrders||[]).filter(x => x !== order.id);
   }
   DB.orders.splice(idx, 1);
   saveData(); closeModal('add-order'); renderOrderTable(); renderDashboard(); updateBadges(); showNotif('발주서가 삭제되었습니다');
@@ -9331,7 +9355,7 @@ function quickStockIn(orderId) {
   o.status = '완료';
   DB.orders[idx] = o;
 
-  processOrderStockIn(o.rows, o.inDate || today(), o.serial || '', o.vendorId);
+  processOrderStockIn(o.rows, o.inDate || today(), o.serial || '', o.vendorId, o.id);
   completeRelatedProductions(o.rows, o.serial || '');
   saveData();
   renderOrderTable();
@@ -9919,22 +9943,30 @@ function saveOrder() {
     stampData:_orderStampData|| existing.stampData|| null,
     stampUploadedAt: _orderStampData ? Date.now() : (existing.stampUploadedAt || 0),
   };
+  let _savedOrderId = null;
   if (isEdit && dbIdx >= 0) {
     DB.orders[dbIdx] = {...existing, ...data};
+    _savedOrderId = DB.orders[dbIdx].id;
     showNotif('발주서가 수정되었습니다','success');
   } else {
-    DB.orders.push({id:nextId('order'), ...data});
+    const _newOrderId = nextId('order');
+    DB.orders.push({id:_newOrderId, ...data});
+    _savedOrderId = _newOrderId;
     showNotif('발주서가 저장되었습니다','success');
   }
 
   // ── 입고완료로 변경 시 재고 자동 반영 + 생산완료 처리 ─────
   if (newStockStatus === '입고완료' && prevStockStatus !== '입고완료') {
-    processOrderStockIn(rows, $('o-inDate') ? $('o-in-date').value : today(), data.serial || '', data.vendorId);
+    processOrderStockIn(rows, $('o-inDate') ? $('o-in-date').value : today(), data.serial || '', data.vendorId, _savedOrderId);
     completeRelatedProductions(rows, data.serial || '');
   }
   // ── 입고완료 → 다른 상태로 되돌릴 시 재고 차감 ──────────
   if (prevStockStatus === '입고완료' && newStockStatus !== '입고완료') {
     processOrderStockOut(rows, today(), data.serial || '', data.vendorId);
+    // v1.9.109 — _processedOrders에서 제거: 다시 입고완료로 변경 시 재반영 가능하도록
+    if (_savedOrderId != null && DB._processedOrders) {
+      DB._processedOrders = DB._processedOrders.filter(id => id !== _savedOrderId);
+    }
   }
 
   // ── 신규 발주서 저장 시 생산관리에 자동 등록 ──────────────
@@ -10013,7 +10045,9 @@ function completeRelatedProductions(rows, serial) {
 
 // 발주서 입고완료 → 재고 자동 입고 처리
 // v1.9.105 — 외주가공(업체/품목)은 서비스(인쇄·가공 등)이므로 재고에 반영하지 않음
-function processOrderStockIn(rows, date, serial, orderVendorId) {
+// v1.9.109 — orderId 파라미터 추가: 재고 반영 후 _processedOrders에 기록하여
+//            새로고침 시 applyPendingStockIn()이 중복 반영하는 문제 방지
+function processOrderStockIn(rows, date, serial, orderVendorId, orderId) {
   const orderVendor = orderVendorId ? (DB.vendors||[]).find(v => v.id === orderVendorId) : null;
   const orderVendorIsOutsource = orderVendor && orderVendor.type === '외주가공';
 
@@ -10091,6 +10125,13 @@ function processOrderStockIn(rows, date, serial, orderVendorId) {
       addedCount++;
     }
   });
+  // v1.9.109 — orderId를 _processedOrders에 기록: 새로고침 시 applyPendingStockIn이 중복 반영하지 않도록
+  if (orderId != null) {
+    if (!DB._processedOrders) DB._processedOrders = [];
+    if (DB._processedOrders.indexOf(orderId) === -1) {
+      DB._processedOrders.push(orderId);
+    }
+  }
   if (addedCount > 0) {
     const extra = skippedOutsource > 0 ? ` (외주가공 ${skippedOutsource}건 재고 제외)` : '';
     showNotif('✅ 입고완료! ' + addedCount + '개 품목 재고가 자동 반영되었습니다' + extra, 'success');
@@ -10100,6 +10141,9 @@ function processOrderStockIn(rows, date, serial, orderVendorId) {
   } else if (skippedOutsource > 0) {
     showNotif(`✅ 입고완료! 외주가공 ${skippedOutsource}건은 재고 반영 없이 생산완료 처리됩니다`, 'success');
     completeRelatedProductions(rows, serial);
+    saveData();
+  } else if (orderId != null) {
+    // 추가된 품목은 없지만 processed 기록은 저장
     saveData();
   }
 }
@@ -10151,7 +10195,8 @@ function deleteOrder(id) {
       if (order.serial && order.serial !== '' && p.serial === order.serial) return false;
       return true;
     });
-    if (order.serial) DB._processedOrders = (DB._processedOrders||[]).filter(s => s !== order.serial);
+    // v1.9.109 — id 기준으로 수정
+    if (order.id != null) DB._processedOrders = (DB._processedOrders||[]).filter(x => x !== order.id);
   }
   DB.orders = DB.orders.filter(o=>o.id!==id);
   saveData(); renderOrderTable(); renderDashboard(); updateBadges(); showNotif('삭제되었습니다');
@@ -10166,7 +10211,8 @@ function deleteOrderFromModal(id) {
       if (order.serial && order.serial !== '' && p.serial === order.serial) return false;
       return true;
     });
-    if (order.serial) DB._processedOrders = (DB._processedOrders||[]).filter(s => s !== order.serial);
+    // v1.9.109 — id 기준으로 수정
+    if (order.id != null) DB._processedOrders = (DB._processedOrders||[]).filter(x => x !== order.id);
   }
   DB.orders = DB.orders.filter(o=>o.id!==id);
   saveData(); closeModal('add-order'); renderOrderTable(); renderDashboard(); updateBadges(); showNotif('발주서가 삭제되었습니다');
@@ -15148,7 +15194,7 @@ function initERPWhenReady() {
       if (!DB.newProducts) DB.newProducts = [];
       _loadDiagMsg = '✅ Firestore→머지 완료';
       console.log('✅ 머지 완료 - shopOrders:', DB.shopOrders.length, 'shops:', DB.shops.length, 'cs:', DB.cs.length);
-      applyPendingStockIn();
+      const _pendingStockChanged = applyPendingStockIn();  // v1.9.109 — 변경 여부 받기
       cleanOrphanProductions();
       const _backfillCreated = backfillProductionsFromOrders();     // v1.9.107 — 누락된 생산관리 레코드 보충 (외주가공 포함)
       syncProductionStatusFromOrders();
@@ -15156,10 +15202,10 @@ function initERPWhenReady() {
       try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
       _firestoreDataLoaded = true;  // ✅ Firestore 쓰기 허용
       console.log('✅ Firestore 데이터 로드 완료 — Firestore 쓰기 활성화');
-      // 백필로 생성된 생산 레코드가 있으면 Firestore에도 반영
-      if (_backfillCreated > 0) {
-        console.log('💾 백필 ' + _backfillCreated + '건 Firestore 저장 요청');
-        if (typeof _doSaveData === 'function') _doSaveData().catch(e => console.warn('백필 저장 실패:', e));
+      // 백필로 생성된 생산 레코드 또는 _processedOrders 변경이 있으면 Firestore에도 반영
+      if (_backfillCreated > 0 || _pendingStockChanged) {
+        console.log('💾 초기화 변경사항 Firestore 저장 요청 (백필:' + _backfillCreated + ', stockProcessed변경:' + _pendingStockChanged + ')');
+        if (typeof _doSaveData === 'function') _doSaveData().catch(e => console.warn('초기화 저장 실패:', e));
         else if (typeof saveData === 'function') saveData();
       }
       // 🛟 [SYNC RECOVERY] localStorage에만 있던 항목을 복구했다면 Firestore에 다시 저장
