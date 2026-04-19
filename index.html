@@ -9195,13 +9195,16 @@ function renderOrderTable() {
   // 모든 뱃지 공통 스타일 (결재 날인 버튼과 동일 크기)
   const BADGE_STYLE = 'font-size:10px;padding:2px 9px;min-width:72px;display:inline-flex;align-items:center;justify-content:center;gap:3px;box-sizing:border-box;line-height:1.5';
   const stockStatusBadge = (s, orderId) => {
-    const map = {'입고전':'gray','입고완료':'green','부분입고':'amber','입고반려':'red'};
+    const map = {'입고전':'red','입고완료':'green','부분입고':'amber','입고반려':'red'};
     const icon = {'입고전':'📦','입고완료':'✅','부분입고':'⚠️','입고반려':'❌'};
-    const cls = map[s]||'gray';
+    // 표시용 라벨(띄어쓰기 포함) — 내부 데이터 키는 기존 유지
+    const label = {'입고전':'입고 전','입고완료':'입고 완료','부분입고':'부분 입고','입고반려':'입고 반려'};
+    const cls = map[s]||'red';
+    const txt = label[s] || s || '입고 전';
     if (s !== '입고완료') {
-      return `<span class="badge ${cls}" style="cursor:pointer;${BADGE_STYLE}" onclick="quickStockIn(${orderId})" title="클릭하면 입고완료 처리">${icon[s]||'📦'} ${s||'입고 전'}</span>`;
+      return `<span class="badge ${cls}" style="cursor:pointer;${BADGE_STYLE}" onclick="quickStockIn(${orderId})" title="클릭하면 입고완료 처리">${icon[s]||'📦'} ${txt}</span>`;
     }
-    return `<span class="badge ${cls}" style="${BADGE_STYLE}">${icon[s]||'📦'} ${s||'입고 전'}</span>`;
+    return `<span class="badge ${cls}" style="${BADGE_STYLE}">${icon[s]||'📦'} ${txt}</span>`;
   };
   // 입고완료/완료는 아래로, 나머지는 최신 등록순(id 내림차순)
   const sorted = [...DB.orders].sort((a, b) => {
@@ -9225,9 +9228,10 @@ function renderOrderTable() {
     const showNew = stampUploadedAt && (Date.now() - stampUploadedAt < 2*24*60*60*1000);
     const newBadge = showNew ? `<span class="stamp-new-badge">NEW</span>` : '';
     // 결재 날인 - 공통 BADGE_STYLE 사용
+    // 결재 완료: 결재 전(gray-50/gray-200)보다 조금 더 진한 회색 톤 (gray-100/gray-300/gray-700)으로 구별
     const stampBadge = o.stampName
       ? `<span style="position:relative;display:inline-block">
-           <span class="badge red" style="cursor:pointer;${BADGE_STYLE}" onclick="viewOrderPDFByIdx(${dbIdx},'stamp')" title="${o.stampName}"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#b91c1c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><polyline points="9 15 11 17 15 13"/></svg>완료</span>
+           <span class="badge" style="cursor:pointer;${BADGE_STYLE};background:var(--gray-100);color:var(--gray-700);border-color:var(--gray-300)" onclick="viewOrderPDFByIdx(${dbIdx},'stamp')" title="${o.stampName}"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><polyline points="9 15 11 17 15 13"/></svg>결재 완료</span>
            ${newBadge}
          </span>`
       : `<label class="badge gray" style="cursor:pointer;${BADGE_STYLE}" title="클릭해서 결재 날인본 업로드">
