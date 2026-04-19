@@ -1150,7 +1150,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <!-- ══════════════ ORDER ══════════════ -->
     <div class="page" id="page-order">
       <div style="display:flex;justify-content:flex-start;margin-bottom:14px">
-        <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-order']=null;const b=$('order-delete-btn');if(b)b.style.display='none';populateVendorSelect('o-vendor');$('o-vendor').value='';$('o-date').value=today();$('o-in-date').value='';$('o-pay-date').value='';$('o-receiver').value='';$('o-addr').value='';$('o-serial').value='';$('o-contact').value='';$('o-phone').value='';$('o-note').value='';$('o-status').value='진행중';$('o-stock-status').value='입고전';$('o-footer').value='※ 납기 일자 확인 및 준수를 부탁드립니다.\n납기 지연이 예상될 경우, 아래 연락처로 사전 공유해 주시면 감사하겠습니다.\n(송희강 이사 010-3328-3652 / 권다빈 이사 010-8874-5722)';$('order-modal-rows').innerHTML='';_orderPdfData=null;_orderPdfName=null;_orderStampData=null;_orderStampName=null;$('o-pdf-preview').style.display='none';$('o-stamp-preview').style.display='none';openModal('add-order')}">+ 발주서 작성</button>
+        <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-order']=null;const b=$('order-delete-btn');if(b)b.style.display='none';populateVendorSelect('o-vendor');$('o-vendor').value='';$('o-date').value=today();$('o-in-date').value='';$('o-pay-date').value='';$('o-receiver').value='';$('o-addr').value='';$('o-serial').value='';$('o-contact').value='';$('o-phone').value='';$('o-note').value='';$('o-status').value='진행중';$('o-stock-status').value='입고전';$('o-footer').value='※ 납기 일자 확인 및 준수를 부탁드립니다.\n납기 지연이 예상될 경우, 아래 연락처로 사전 공유해 주시면 감사하겠습니다.\n(송희강 이사 010-3328-3652 / 권다빈 이사 010-8874-5722)';$('order-modal-rows').innerHTML='';_orderPdfData=null;_orderPdfName=null;_orderStampData=null;_orderStampName=null;$('o-pdf-preview').style.display='none';$('o-stamp-preview').style.display='none';if($('o-stamp-not-required'))$('o-stamp-not-required').checked=false;openModal('add-order')}">+ 발주서 작성</button>
       </div>
       <div class="card">
         <div class="card-body p0 tbl-wrap">
@@ -2666,6 +2666,12 @@ EXP YYYYMMDD 까지</textarea></div>
         </div>
         <div class="fg">
           <label>🔴 결재 완료 PDF <span style="color:var(--gray-400);font-weight:400">(도장 날인)</span></label>
+          <!-- v1.9.111 — 결재 날인 필요 없음 체크박스 -->
+          <label for="o-stamp-not-required" style="display:flex;align-items:center;gap:6px;margin:4px 0 8px;font-size:12px;font-weight:500;color:var(--gray-600);cursor:pointer;user-select:none">
+            <input type="checkbox" id="o-stamp-not-required" style="cursor:pointer;width:14px;height:14px">
+            <span>결재 날인 필요 없음</span>
+            <span style="font-size:10px;color:var(--gray-400);font-weight:400">(체크 시 목록에서 '결재 불필요'로 표시)</span>
+          </label>
           <input type="file" id="o-stamp-pdf" accept=".pdf,.jpg,.jpeg,.png" onchange="handleOrderFile(this,'stamp')">
           <div id="o-stamp-preview" style="margin-top:8px;display:none">
             <div style="display:flex;align-items:center;gap:8px;background:var(--red-50);border:1px solid var(--red-400);border-radius:7px;padding:8px 12px;font-size:12px;color:var(--red-700)">
@@ -9190,6 +9196,8 @@ function _editOrderDirect(o, dbIdx) {
   $('o-stamp-preview').style.display='none';
   if (o.stampName) { $('o-stamp-existing-name').textContent=o.stampName; $('o-stamp-existing').style.display='block'; }
   else { $('o-stamp-existing').style.display='none'; }
+  // v1.9.111 — 결재 날인 필요 없음 체크박스 상태 복원
+  if ($('o-stamp-not-required')) $('o-stamp-not-required').checked = !!o.stampNotRequired;
   openModal('add-order');
   setTimeout(()=>{ if($('o-vendor')) $('o-vendor').value=_savedVendorId; }, 10);
   const oDelBtn = $('order-delete-btn');
@@ -9249,17 +9257,24 @@ function renderOrderTable() {
     const stampUploadedAt = o.stampUploadedAt || 0;
     const showNew = stampUploadedAt && (Date.now() - stampUploadedAt < 2*24*60*60*1000);
     const newBadge = showNew ? `<span class="stamp-new-badge">NEW</span>` : '';
-    // 결재 날인 - 공통 BADGE_STYLE 사용
-    // 결재 완료: 결재 전(gray-50/gray-200)보다 조금 더 진한 회색 톤 (gray-100/gray-300/gray-700)으로 구별
-    const stampBadge = o.stampName
-      ? `<span style="position:relative;display:inline-block">
-           <span class="badge" style="cursor:pointer;${BADGE_STYLE};background:var(--gray-100);color:var(--gray-700);border-color:var(--gray-300)" onclick="viewOrderPDFByIdx(${dbIdx},'stamp')" title="${o.stampName}"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><polyline points="9 15 11 17 15 13"/></svg>결재 완료</span>
+    // 결재 날인 - 3-state 배지 (스카이 블루 톤)
+    // 1) stampName 있음 → 결재 완료 (연한 스카이 블루)
+    // 2) stampNotRequired === true → 결재 불필요 (회색)
+    // 3) 그 외 → 결재 전 (진한 스카이 블루)
+    let stampBadge;
+    if (o.stampName) {
+      stampBadge = `<span style="position:relative;display:inline-block">
+           <span class="badge" style="cursor:pointer;${BADGE_STYLE};background:var(--sky-50);color:var(--sky-700);border-color:var(--sky-200)" onclick="viewOrderPDFByIdx(${dbIdx},'stamp')" title="${o.stampName}"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--sky-700)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><polyline points="9 15 11 17 15 13"/></svg>결재 완료</span>
            ${newBadge}
-         </span>`
-      : `<label class="badge gray" style="cursor:pointer;${BADGE_STYLE}" title="클릭해서 결재 날인본 업로드">
+         </span>`;
+    } else if (o.stampNotRequired) {
+      stampBadge = `<span class="badge" style="cursor:pointer;${BADGE_STYLE};background:var(--gray-100);color:var(--gray-600);border-color:var(--gray-300)" onclick="toggleStampNotRequired(${o.id})" title="클릭하면 '결재 전'으로 되돌립니다">⊘ 결재 불필요</span>`;
+    } else {
+      stampBadge = `<label class="badge" style="cursor:pointer;${BADGE_STYLE};background:var(--sky-100);color:var(--sky-800);border-color:var(--sky-400);font-weight:600" title="클릭해서 결재 날인본 업로드">
            <input type="file" accept="application/pdf,image/*" style="display:none" onchange="uploadStampForOrder(${o.id}, this)">
            결재 전
          </label>`;
+    }
     // 작은 D-day 뱃지 스타일 (글씨 크기에 맞춤, 지난 건 표시 없음)
     const ddayChip = (d) => {
       if (d === null || d < 0) return '';
@@ -9543,6 +9558,19 @@ let _orderPdfData = null;   // 원본
 let _orderPdfName = null;
 let _orderStampData = null; // 도장 날인본
 let _orderStampName = null;
+
+// 결재 불필요 → 결재 전으로 되돌리기 (확인 후)
+function toggleStampNotRequired(orderId) {
+  const idx = DB.orders.findIndex(o => o.id === orderId);
+  if (idx < 0) { showNotif('발주서를 찾을 수 없습니다','warning'); return; }
+  const o = DB.orders[idx];
+  if (!o.stampNotRequired) return;
+  if (!confirm(`[${o.serial || 'PO-' + String(o.id).padStart(3,'0')}]\n'결재 불필요' 상태를 해제하고 '결재 전'으로 되돌리시겠습니까?`)) return;
+  DB.orders[idx].stampNotRequired = false;
+  saveData();
+  renderOrderTable();
+  showNotif("'결재 전' 상태로 변경되었습니다",'success');
+}
 
 // 발주서 표에서 '없음' 클릭 시 바로 날인본 업로드
 function uploadStampForOrder(orderId, inputEl) {
@@ -9964,6 +9992,8 @@ function saveOrder() {
     stampName:_orderStampName|| existing.stampName|| '',
     stampData:_orderStampData|| existing.stampData|| null,
     stampUploadedAt: _orderStampData ? Date.now() : (existing.stampUploadedAt || 0),
+    // v1.9.111 — 결재 날인 필요 없음 플래그
+    stampNotRequired: !!($('o-stamp-not-required') && $('o-stamp-not-required').checked),
   };
   let _savedOrderId = null;
   if (isEdit && dbIdx >= 0) {
