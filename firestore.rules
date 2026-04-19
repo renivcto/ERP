@@ -1,0 +1,112 @@
+// =============================================================================
+// Reniv ERP — Firestore Security Rules (v2.0, 2026-04)
+// =============================================================================
+// 게시 방법:
+//   1) Firebase Console → Firestore Database → 규칙 탭에서 직접 붙여넣기
+//   또는
+//   2) firebase deploy --only firestore:rules
+// =============================================================================
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─────────────────────────────────────────────────────────────
+    // 헬퍼 함수
+    // ─────────────────────────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function myData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActive() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && myData().status == '활성';
+    }
+
+    function isAdmin() {
+      return isActive() && myData().isAdmin == true;
+    }
+
+    function canWrite() {
+      return isActive() && (myData().isAdmin == true || myData().permission == 'write');
+    }
+
+    // 화이트리스트 관리자 이메일 (index.html의 ADMIN_EMAILS와 동일해야 함)
+    function isWhitelistedAdminEmail() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in ['reniv.cto@gmail.com'];
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // users/{uid} — 사용자 프로필
+    // ─────────────────────────────────────────────────────────────
+    match /users/{uid} {
+
+      allow get:  if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+
+      allow create: if isSignedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && (
+          (isWhitelistedAdminEmail()
+            && request.resource.data.isAdmin == true
+            && request.resource.data.status == '활성')
+          || (request.resource.data.isAdmin == false
+            && request.resource.data.status == '승인대기'
+            && request.resource.data.permission in ['read', null])
+        );
+
+      allow update: if isSignedIn() && (
+        // 본인은 lastLogin만 업데이트
+        (request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['lastLogin']))
+        // 관리자는 모든 필드 변경 가능 (단, 자기 자신의 isAdmin 해제는 금지 — 락아웃 방지)
+        || (isAdmin() && !(request.auth.uid == uid
+             && resource.data.isAdmin == true
+             && request.resource.data.isAdmin == false))
+      );
+
+      allow delete: if false;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // erp_data/{doc} — 메인 ERP 데이터 (meta, shopOrders 등)
+    // ─────────────────────────────────────────────────────────────
+    match /erp_data/{docId} {
+      allow read:  if isActive();
+      allow write: if canWrite();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // shared/{doc} — 공유 문서 (gdocs 등)
+    // ─────────────────────────────────────────────────────────────
+    match /shared/{docId} {
+      allow read:  if isActive();
+      allow write: if canWrite();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // settings/{key} — API 키 등 민감 설정 (관리자 전용)
+    // ─────────────────────────────────────────────────────────────
+    match /settings/{key} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 그 외 모든 경로 — 명시적 거부 (안전장치)
+    // ─────────────────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
