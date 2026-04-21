@@ -6371,16 +6371,142 @@ function renderDashStats() {
 }
 
 // v1.9.257: NOTES 카드 캐러셀 네비게이션
+// v1.9.263: 동그라미 스타일 변경 — background/border 로 상태 표시
 window._notesCarouselGo = function(idx) {
   try {
     const slides = document.querySelectorAll('.notes-slide');
     const dots = document.querySelectorAll('.notes-dot');
     slides.forEach((el, i) => { el.style.display = i === idx ? 'block' : 'none'; });
     dots.forEach((el, i) => {
-      el.textContent = i === idx ? '●' : '○';
-      el.style.color = i === idx ? '#7c6dd0' : '#cbd5e1';
+      const active = i === idx;
+      el.style.background = active ? '#7c6dd0' : '#e2e8f0';
+      el.style.borderColor = active ? '#7c6dd0' : '#cbd5e1';
     });
   } catch(e) { console.warn('notes carousel:', e); }
+};
+
+// v1.9.263: NOTES 포스트 내 이미지 캐러셀 — 포스트 1개 내부에서 이미지 전환
+window._notesImgGo = function(postIdx, imgIdx) {
+  try {
+    const slides = document.querySelectorAll(`.notes-img-slide[data-post="${postIdx}"]`);
+    const dots = document.querySelectorAll(`.notes-img-dot[data-post="${postIdx}"]`);
+    const counter = document.querySelector(`.notes-img-counter[data-post="${postIdx}"]`);
+    const badge = document.querySelector(`.notes-img-badge[data-post="${postIdx}"]`);
+    const total = slides.length;
+    slides.forEach((el, i) => { el.style.display = i === imgIdx ? 'block' : 'none'; });
+    dots.forEach((el, i) => {
+      const active = i === imgIdx;
+      el.style.background = active ? '#7c6dd0' : '#e2e8f0';
+      el.style.borderColor = active ? '#7c6dd0' : '#cbd5e1';
+    });
+    if (counter) counter.textContent = `${imgIdx+1} / ${total}`;
+    if (badge) badge.textContent = `${imgIdx+1}/${total}`;
+  } catch(e) { console.warn('notes img carousel:', e); }
+};
+
+// v1.9.263: NOTES 이미지 라이트박스 — 큰 이미지로 보기 + 좌/우 이동
+window._notesOpenLightbox = function(postIdx, imgIdx) {
+  try {
+    const posts = (DB.feedPosts||[])
+      .filter(p => p && p.id != null)
+      .slice()
+      .sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+    const post = posts[postIdx];
+    if (!post) return;
+    const images = Array.isArray(post.images) ? post.images.filter(Boolean) : [];
+    if (!images.length) return;
+    let cur = Math.max(0, Math.min(imgIdx || 0, images.length - 1));
+
+    // 기존 라이트박스 제거
+    const old = document.getElementById('notes-lightbox');
+    if (old) old.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'notes-lightbox';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:999999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px;cursor:zoom-out;animation:fadeIn .15s';
+
+    const imgEl = document.createElement('img');
+    imgEl.src = images[cur];
+    imgEl.style.cssText = 'max-width:min(90vw,1200px);max-height:82vh;object-fit:contain;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.4);cursor:default';
+    imgEl.addEventListener('click', e => e.stopPropagation());
+
+    const counter = document.createElement('div');
+    counter.style.cssText = 'position:absolute;top:20px;left:50%;transform:translateX(-50%);color:#fff;font-size:14px;font-weight:600;padding:6px 14px;background:rgba(0,0,0,.5);border-radius:999px';
+    const updateCounter = () => { counter.textContent = `${cur+1} / ${images.length}`; };
+    updateCounter();
+
+    const closeBtn = document.createElement('button');
+    closeBtn.innerHTML = '✕';
+    closeBtn.title = '닫기 (ESC)';
+    closeBtn.style.cssText = 'position:absolute;top:16px;right:20px;background:rgba(255,255,255,.1);color:#fff;border:none;font-size:24px;width:44px;height:44px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .12s';
+    closeBtn.addEventListener('mouseenter', () => closeBtn.style.background = 'rgba(255,255,255,.25)');
+    closeBtn.addEventListener('mouseleave', () => closeBtn.style.background = 'rgba(255,255,255,.1)');
+    closeBtn.addEventListener('click', e => { e.stopPropagation(); overlay.remove(); cleanup(); });
+
+    const mkNav = (dir) => {
+      const btn = document.createElement('button');
+      btn.innerHTML = dir < 0 ? '‹' : '›';
+      btn.title = dir < 0 ? '이전' : '다음';
+      btn.style.cssText = `position:absolute;top:50%;${dir<0?'left:20px':'right:20px'};transform:translateY(-50%);background:rgba(255,255,255,.1);color:#fff;border:none;font-size:40px;width:56px;height:56px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;transition:background .12s`;
+      btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(255,255,255,.25)');
+      btn.addEventListener('mouseleave', () => btn.style.background = 'rgba(255,255,255,.1)');
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        cur = (cur + dir + images.length) % images.length;
+        imgEl.src = images[cur];
+        updateCounter();
+        syncDots();
+      });
+      return btn;
+    };
+
+    const dotsWrap = document.createElement('div');
+    dotsWrap.style.cssText = 'position:absolute;bottom:24px;left:50%;transform:translateX(-50%);display:flex;gap:10px';
+    const dotEls = images.map((_, i) => {
+      const d = document.createElement('span');
+      d.style.cssText = `width:11px;height:11px;border-radius:50%;background:${i===cur?'#fff':'rgba(255,255,255,.35)'};border:1.5px solid ${i===cur?'#fff':'rgba(255,255,255,.5)'};cursor:pointer;transition:all .12s`;
+      d.addEventListener('click', e => {
+        e.stopPropagation();
+        cur = i;
+        imgEl.src = images[cur];
+        updateCounter();
+        syncDots();
+      });
+      dotsWrap.appendChild(d);
+      return d;
+    });
+    const syncDots = () => {
+      dotEls.forEach((d, i) => {
+        d.style.background = i === cur ? '#fff' : 'rgba(255,255,255,.35)';
+        d.style.borderColor = i === cur ? '#fff' : 'rgba(255,255,255,.5)';
+      });
+    };
+
+    overlay.appendChild(counter);
+    overlay.appendChild(closeBtn);
+    if (images.length > 1) {
+      overlay.appendChild(mkNav(-1));
+      overlay.appendChild(mkNav(+1));
+      overlay.appendChild(dotsWrap);
+    }
+    overlay.appendChild(imgEl);
+
+    const onKey = (e) => {
+      if (e.key === 'Escape') { overlay.remove(); cleanup(); }
+      else if (e.key === 'ArrowLeft' && images.length > 1) {
+        cur = (cur - 1 + images.length) % images.length;
+        imgEl.src = images[cur]; updateCounter(); syncDots();
+      } else if (e.key === 'ArrowRight' && images.length > 1) {
+        cur = (cur + 1) % images.length;
+        imgEl.src = images[cur]; updateCounter(); syncDots();
+      }
+    };
+    const cleanup = () => document.removeEventListener('keydown', onKey);
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', () => { overlay.remove(); cleanup(); });
+
+    document.body.appendChild(overlay);
+  } catch(e) { console.warn('notes lightbox:', e); }
 };
 
 // ══════════════ CS 관리 ══════════════
