@@ -1312,9 +1312,9 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             <table>
               <thead><tr>
                 <th style="width:110px">상태</th>
-                <th style="width:110px">분류</th>
+                <th style="width:130px">분류</th>
                 <th>제목</th>
-                <th style="width:120px">금액</th>
+                <th style="width:80px;text-align:center">📎</th>
                 <th style="width:110px">요청일</th>
                 <th style="width:130px">결재</th>
                 <th style="width:145px;text-align:center">💬 관리</th>
@@ -3020,24 +3020,26 @@ EXP YYYYMMDD 까지</textarea></div>
 </div>
 
 <!-- v1.9.196 — 결재 요청 그룹웨어 모달 -->
-<!-- 발주서 외 결재 -->
+<!-- 일반 결재 요청 (v1.9.230: 비용 분류 제거 → 결재 포맷 자동화 · 다중 파일 · 이미지 붙여넣기) -->
 <div class="overlay" id="overlay-ap-nonpo">
-  <div class="modal" style="width:560px">
-    <div class="modal-hdr"><span class="modal-ttl">📝 발주서 외 결재 요청</span><button class="modal-x" onclick="closeModal('ap-nonpo')">✕</button></div>
+  <div class="modal" style="width:640px;max-width:95vw">
+    <div class="modal-hdr"><span class="modal-ttl">📝 일반 결재 요청</span><button class="modal-x" onclick="closeModal('ap-nonpo')">✕</button></div>
     <div class="modal-body">
       <div class="fg2">
         <div class="fg">
           <label>분류<span class="req">*</span></label>
-          <select class="fs" id="apn-category">
-            <option>출장비</option>
-            <option>식대/회식</option>
-            <option>사무용품</option>
-            <option>소프트웨어/라이선스</option>
-            <option>광고/마케팅</option>
-            <option>교육/세미나</option>
-            <option>출장/운송비</option>
-            <option>외주/용역</option>
-            <option>기타</option>
+          <select class="fs" id="apn-category" onchange="onApnCategoryChange()">
+            <option value="품의서">품의서</option>
+            <option value="기안서">기안서</option>
+            <option value="보고서">보고서</option>
+            <option value="출장 신청">출장 신청</option>
+            <option value="휴가 신청">휴가 신청</option>
+            <option value="인사/채용">인사/채용</option>
+            <option value="계약 검토">계약 검토</option>
+            <option value="업무 협조">업무 협조</option>
+            <option value="신제품 개발 품의">신제품 개발 품의</option>
+            <option value="연구개발 품의">연구개발 품의</option>
+            <option value="기타">기타</option>
           </select>
         </div>
         <div class="fg">
@@ -3045,17 +3047,36 @@ EXP YYYYMMDD 까지</textarea></div>
           <input class="fi" id="apn-date" type="date">
         </div>
       </div>
-      <div class="fg"><label>제목<span class="req">*</span></label><input class="fi" id="apn-title" placeholder="예: 2026년 1분기 팀 회식비"></div>
-      <div class="fg2">
-        <div class="fg"><label>금액 (원)</label><input class="fi" id="apn-amount" type="number" min="0" placeholder="VAT 포함"></div>
-        <div class="fg">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;margin-top:22px">
-            <input type="checkbox" id="apn-urgent" style="cursor:pointer;width:14px;height:14px">
-            <span style="font-weight:600;color:#dc2626">🚨 응급 (깜빡이는 결재 요청)</span>
-          </label>
-        </div>
+      <div class="fg"><label>제목<span class="req">*</span></label><input class="fi" id="apn-title" placeholder=""></div>
+      <div class="fg">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none">
+          <input type="checkbox" id="apn-urgent" style="cursor:pointer;width:14px;height:14px">
+          <span style="font-weight:600;color:#dc2626">🚨 응급 (깜빡이는 결재 요청)</span>
+        </label>
       </div>
-      <div class="fg"><label>상세 내용</label><textarea class="fta" id="apn-note" rows="4" placeholder="사유, 첨부 안내 등"></textarea></div>
+      <div class="fg">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <label style="margin:0">상세 내용</label>
+          <button type="button" onclick="resetApnNoteToTemplate()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:3px 9px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer" title="선택한 분류의 기본 포맷으로 되돌리기">🔄 기본 포맷</button>
+        </div>
+        <textarea class="fta" id="apn-note" rows="10" placeholder="분류를 선택하면 기본 포맷이 자동 채워집니다" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.55"></textarea>
+      </div>
+      <div class="fg">
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          📎 파일 / 이미지 첨부
+          <span style="font-size:10.5px;color:#64748b;font-weight:500">(여러 파일 가능 · 상세 내용 영역에 Ctrl+V로 이미지 붙여넣기 가능)</span>
+        </label>
+        <div id="apn-drop-zone" style="border:2px dashed #cbd5e1;background:#f8fafc;border-radius:8px;padding:14px;text-align:center;cursor:pointer;transition:all .15s"
+             onclick="document.getElementById('apn-file-input').click()"
+             ondragover="event.preventDefault();this.style.borderColor='#6366f1';this.style.background='#eef2ff'"
+             ondragleave="this.style.borderColor='#cbd5e1';this.style.background='#f8fafc'"
+             ondrop="event.preventDefault();this.style.borderColor='#cbd5e1';this.style.background='#f8fafc';handleApnFilesDrop(event)">
+          <div style="font-size:12.5px;color:#475569;font-weight:600">📎 클릭해서 파일 선택 · 또는 여기로 드래그</div>
+          <div style="font-size:10.5px;color:#94a3b8;margin-top:3px">이미지 · PDF · 문서 파일 모두 가능 (파일당 10MB 이하 권장)</div>
+        </div>
+        <input type="file" id="apn-file-input" multiple style="display:none" onchange="handleApnFilesSelect(this.files);this.value=''">
+        <div id="apn-attach-list" style="margin-top:8px;display:flex;flex-direction:column;gap:5px"></div>
+      </div>
     </div>
     <div class="modal-ft" style="justify-content:flex-end;gap:8px">
       <button class="btn btn-outline" onclick="closeModal('ap-nonpo')">취소</button>
@@ -13085,33 +13106,278 @@ function deleteSample(id) {
 }
 
 // ═══════════ 발주서 외 결재 모달 ═══════════
+// v1.9.230: 일반 결재 분류별 기본 포맷 (일반적인 회사 결재 양식)
+const APN_TEMPLATES = {
+  '품의서': `■ 제목:
+■ 기안자:
+■ 기안 목적:
+
+■ 배경 및 필요성:
+
+■ 세부 내용:
+  1.
+  2.
+  3.
+
+■ 기대 효과:
+
+■ 예상 비용: (해당 시)
+
+■ 첨부 자료:`,
+  '기안서': `■ 기안 목적:
+
+■ 배경 및 필요성:
+
+■ 세부 내용:
+  -
+
+■ 시행 일정:
+
+■ 참고 사항:`,
+  '보고서': `■ 보고 일자:
+■ 보고자:
+
+■ 보고 내용 요약:
+
+■ 진행 현황:
+  -
+
+■ 이슈 / 리스크:
+  -
+
+■ 향후 계획:
+  -`,
+  '출장 신청': `■ 출장 목적:
+■ 출장지:
+■ 출장 기간: ~
+■ 동행자:
+■ 교통편:
+■ 숙박:
+
+■ 출장 업무 개요:
+  -
+
+■ 예상 경비:
+  · 교통비:
+  · 숙박비:
+  · 식비:
+  · 기타:
+  합계: `,
+  '휴가 신청': `■ 휴가 종류: (연차 / 반차 / 병가 / 경조사 / 기타)
+■ 휴가 기간: ~
+■ 휴가 일수:
+
+■ 사유:
+
+■ 업무 인수인계:
+  · 담당자:
+  · 인계 내용:
+
+■ 비상 연락처:`,
+  '인사/채용': `■ 구분: (채용 / 전보 / 승진 / 징계 / 계약 종료 / 기타)
+■ 대상자:
+■ 시행 일자:
+
+■ 사유 / 배경:
+
+■ 세부 내용:
+  -
+
+■ 후속 조치:`,
+  '계약 검토': `■ 계약 상대방:
+■ 계약 종류:
+■ 계약 금액:
+■ 계약 기간: ~
+
+■ 주요 조건:
+  -
+
+■ 검토 의견 / 특이 사항:
+
+■ 첨부: 계약서 초안`,
+  '업무 협조': `■ 협조 요청 부서 / 담당자:
+■ 협조 요청 내용:
+
+■ 배경 / 필요성:
+
+■ 협조 시점:
+■ 기대 효과:
+
+■ 참고 사항:`,
+  '신제품 개발 품의': `■ 제품명 / 코드:
+■ 카테고리:
+■ 타깃 고객:
+
+■ 기획 배경:
+
+■ 제품 컨셉:
+
+■ 주요 성분 / 특징:
+  -
+
+■ 용기 / 패키지 방향:
+
+■ 예상 원가 / 판매가:
+■ 예상 개발 일정:
+■ 예상 개발비:`,
+  '연구개발 품의': `■ 과제명:
+■ 담당 연구원:
+■ 연구 기간: ~
+
+■ 연구 배경 / 필요성:
+
+■ 연구 목표:
+
+■ 주요 내용 / 방법:
+  -
+
+■ 기대 효과 / 활용 방안:
+
+■ 소요 예산:`,
+  '기타': `■ 요청 내용:
+
+■ 배경 / 사유:
+
+■ 기대 효과:
+
+■ 참고 사항:`
+};
+
+// v1.9.230: 첨부 파일 임시 저장 (모달 열릴 때마다 초기화)
+let _apnAttachments = [];
+
+function onApnCategoryChange() {
+  const cat = ($('apn-category') && $('apn-category').value) || '기타';
+  const ta = $('apn-note');
+  if (!ta) return;
+  const cur = (ta.value || '').trim();
+  // 현재 내용이 비어있거나 다른 템플릿과 일치하면 자동 교체, 그렇지 않으면 확인 후 교체
+  const isTemplate = !cur || Object.values(APN_TEMPLATES).some(t => t.trim() === cur);
+  if (isTemplate) {
+    ta.value = APN_TEMPLATES[cat] || APN_TEMPLATES['기타'];
+  }
+}
+
+function resetApnNoteToTemplate() {
+  const cat = ($('apn-category') && $('apn-category').value) || '기타';
+  const ta = $('apn-note');
+  if (!ta) return;
+  const cur = (ta.value || '').trim();
+  if (cur && !Object.values(APN_TEMPLATES).some(t => t.trim() === cur)) {
+    if (!confirm('작성 중인 내용이 있습니다. 기본 포맷으로 덮어쓸까요?')) return;
+  }
+  ta.value = APN_TEMPLATES[cat] || APN_TEMPLATES['기타'];
+  ta.focus();
+}
+
+function renderApnAttachList() {
+  const box = $('apn-attach-list');
+  if (!box) return;
+  if (!_apnAttachments.length) { box.innerHTML = ''; return; }
+  box.innerHTML = _apnAttachments.map((at, idx) => {
+    const isImg = (at.type||'').startsWith('image/');
+    const sizeKb = at.size ? (at.size >= 1024*1024 ? (at.size/1024/1024).toFixed(1)+'MB' : Math.round(at.size/1024)+'KB') : '';
+    const preview = isImg
+      ? `<img src="${at.data}" style="width:38px;height:38px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0;cursor:pointer;flex-shrink:0" onclick="window.open('${at.data}','_blank')" title="클릭해 크게 보기">`
+      : `<div style="width:38px;height:38px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">📄</div>`;
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px">
+      ${preview}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${at.name||'첨부파일'}</div>
+        <div style="font-size:10.5px;color:#64748b">${sizeKb}${at.type?' · '+at.type:''}</div>
+      </div>
+      <button type="button" onclick="removeApnAttachment(${idx})" title="제거" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;padding:3px 8px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function removeApnAttachment(idx) {
+  _apnAttachments.splice(idx, 1);
+  renderApnAttachList();
+}
+
+function addApnAttachmentFromFile(file) {
+  if (!file) return;
+  if (file.size > 15 * 1024 * 1024) {
+    showNotif(`"${file.name}" 은(는) 15MB를 초과합니다`, 'warning');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    _apnAttachments.push({
+      name: file.name || ('pasted-'+Date.now()),
+      type: file.type || 'application/octet-stream',
+      size: file.size || 0,
+      data: e.target.result
+    });
+    renderApnAttachList();
+  };
+  reader.readAsDataURL(file);
+}
+
+function handleApnFilesSelect(files) {
+  if (!files || !files.length) return;
+  Array.from(files).forEach(f => addApnAttachmentFromFile(f));
+}
+
+function handleApnFilesDrop(ev) {
+  const files = ev.dataTransfer && ev.dataTransfer.files;
+  if (!files || !files.length) return;
+  Array.from(files).forEach(f => addApnAttachmentFromFile(f));
+}
+
+// v1.9.230: 모달에서 이미지 붙여넣기 (Ctrl+V) 처리
+function _apnPasteHandler(ev) {
+  const ov = document.getElementById('overlay-ap-nonpo');
+  if (!ov || ov.style.display === 'none' || !ov.classList.contains('active')) return;
+  const items = (ev.clipboardData && ev.clipboardData.items) || [];
+  let imageHandled = false;
+  for (const it of items) {
+    if (it.kind === 'file' && (it.type||'').startsWith('image/')) {
+      const file = it.getAsFile();
+      if (file) {
+        addApnAttachmentFromFile(file);
+        imageHandled = true;
+      }
+    }
+  }
+  if (imageHandled) {
+    ev.preventDefault();
+    showNotif('📷 이미지가 첨부되었습니다','success');
+  }
+}
+try { document.addEventListener('paste', _apnPasteHandler); } catch(_){}
+
 function openNonPoApprovalModal() {
   _editingNonPoId = null; // v1.9.229: 신규 등록 모드
+  _apnAttachments = []; // v1.9.230: 첨부 초기화
   openModal('ap-nonpo');
   const today = new Date().toISOString().slice(0,10);
-  if ($('apn-category')) $('apn-category').value = '기타';
+  if ($('apn-category')) $('apn-category').value = '품의서';
   if ($('apn-title')) $('apn-title').value = '';
-  if ($('apn-amount')) $('apn-amount').value = '';
-  if ($('apn-note')) $('apn-note').value = '';
+  if ($('apn-note')) $('apn-note').value = APN_TEMPLATES['품의서'] || '';
   if ($('apn-urgent')) $('apn-urgent').checked = false;
   if ($('apn-date')) $('apn-date').value = today;
+  renderApnAttachList();
 }
 
 function saveNonPoApproval() {
   const title = $('apn-title').value.trim();
   if (!title) { showNotif('제목을 입력하세요', 'warning'); return; }
-  // v1.9.229: 수정 모드 지원
+  // v1.9.229: 수정 모드 지원 / v1.9.230: 금액 제거 · 첨부 파일 지원
   if (_editingNonPoId) {
     const a = (DB.approvals||[]).find(x => x.id === _editingNonPoId);
     if (a) {
       a.category = $('apn-category').value || '기타';
       a.title = title;
-      a.amount = parseFloat($('apn-amount').value) || 0;
+      // v1.9.230: amount 필드는 더 이상 입력받지 않음. 기존 값은 유지.
       a.priority = $('apn-urgent').checked ? 'urgent' : 'normal';
       a.note = $('apn-note').value || '';
+      a.attachments = Array.isArray(_apnAttachments) ? _apnAttachments.slice() : [];
       try { saveData(); } catch(_){}
       closeModal('ap-nonpo');
       _editingNonPoId = null;
+      _apnAttachments = [];
       renderApprovalPage();
       updateApprovalBadges();
       showNotif('✅ 결재 요청 수정 완료', 'success');
@@ -13125,10 +13391,11 @@ function saveNonPoApproval() {
     refId: null,
     category: $('apn-category').value || '기타',
     title,
-    amount: parseFloat($('apn-amount').value) || 0,
+    amount: 0, // v1.9.230: 일반 결재는 금액 사용 안 함 (비용은 지출결의서에서)
     status: 'pending',
     priority: $('apn-urgent').checked ? 'urgent' : 'normal',
     note: $('apn-note').value || '',
+    attachments: Array.isArray(_apnAttachments) ? _apnAttachments.slice() : [],
     createdAt: Date.now(),
     approvedAt: 0,
   };
@@ -13136,6 +13403,7 @@ function saveNonPoApproval() {
   try { saveData(); } catch(_){}
   slackNotify('approval_request', a);
   closeModal('ap-nonpo');
+  _apnAttachments = [];
   renderApprovalPage();
   updateApprovalBadges();
   showNotif('✅ 결재 요청 등록 완료', 'success');
@@ -13147,13 +13415,14 @@ function editNonPo(id) {
   const a = (DB.approvals||[]).find(x => x.id === id);
   if (!a) return;
   _editingNonPoId = id;
+  _apnAttachments = Array.isArray(a.attachments) ? a.attachments.slice() : [];
   openModal('ap-nonpo');
   if ($('apn-category')) $('apn-category').value = a.category || '기타';
   if ($('apn-title')) $('apn-title').value = a.title || '';
-  if ($('apn-amount')) $('apn-amount').value = a.amount || '';
   if ($('apn-note')) $('apn-note').value = a.note || '';
   if ($('apn-urgent')) $('apn-urgent').checked = a.priority === 'urgent';
   if ($('apn-date')) $('apn-date').value = a.createdAt ? new Date(a.createdAt).toISOString().slice(0,10) : (new Date().toISOString().slice(0,10));
+  renderApnAttachList();
 }
 
 // ═══════════ 지출결의서 모달 ═══════════
