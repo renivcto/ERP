@@ -3085,35 +3085,70 @@ EXP YYYYMMDD 까지</textarea></div>
   </div>
 </div>
 
-<!-- 지출 결의서 -->
+<!-- 지출 결의서 (v1.9.233: 분류 확장 · 분류별 포맷 · 계좌번호 · 다중 첨부 · 이미지 인라인 표시) -->
 <div class="overlay" id="overlay-ap-expense">
-  <div class="modal" style="width:560px">
+  <div class="modal" style="width:640px;max-width:95vw">
     <div class="modal-hdr"><span class="modal-ttl">💳 지출 결의서</span><button class="modal-x" onclick="closeModal('ap-expense')">✕</button></div>
     <div class="modal-body">
       <div class="fg2">
         <div class="fg">
           <label>분류<span class="req">*</span></label>
-          <select class="fs" id="ape-category">
+          <select class="fs" id="ape-category" onchange="onApeCategoryChange()">
             <option value="other">기타</option>
+            <option value="ad">광고비</option>
+            <option value="travel">출장비</option>
+            <option value="cash_reimburse">현금 지출 비용 (직원 환급)</option>
             <option value="sample">샘플 구매</option>
             <option value="po_prepay">발주 선급금 (직접등록)</option>
             <option value="po_balance">발주 잔금 (직접등록)</option>
           </select>
         </div>
-        <div class="fg"><label>결제 예정일</label><input class="fi" id="ape-duedate" type="date"></div>
+        <div class="fg"><label>지급 요청일</label><input class="fi" id="ape-duedate" type="date"></div>
       </div>
-      <div class="fg"><label>제목<span class="req">*</span></label><input class="fi" id="ape-title" placeholder="예: Canva Pro 연간 구독"></div>
+      <div class="fg"><label>제목<span class="req">*</span></label><input class="fi" id="ape-title" placeholder=""></div>
       <div class="fg2">
-        <div class="fg"><label>지급처/업체</label><input class="fi" id="ape-vendor" placeholder="회사명 또는 개인"></div>
+        <div class="fg"><label>지급처/업체</label><input class="fi" id="ape-vendor" placeholder=""></div>
         <div class="fg"><label>금액 (원)<span class="req">*</span></label><input class="fi" id="ape-amount" type="number" min="0"></div>
       </div>
-      <div class="fg">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none">
-          <input type="checkbox" id="ape-urgent" style="cursor:pointer;width:14px;height:14px">
-          <span style="font-weight:600;color:#dc2626">🚨 응급 (깜빡이는 지급 요청)</span>
-        </label>
+      <!-- v1.9.233: 계좌번호 행 -->
+      <div class="fg2">
+        <div class="fg"><label>은행 · 계좌번호</label><input class="fi" id="ape-account" placeholder="예: 국민은행 000-000-000000"></div>
+        <div class="fg"><label>예금주</label><input class="fi" id="ape-account-holder" placeholder=""></div>
       </div>
-      <div class="fg"><label>비고</label><textarea class="fta" id="ape-note" rows="3"></textarea></div>
+      <!-- v1.9.233: 응급 버튼 — 발주서 페이지와 동일한 파스텔 필(pill) 스타일 -->
+      <div class="fg">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:11.5px;color:var(--gray-600);font-weight:700;margin-right:2px">🚨 응급</span>
+          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;background:#fef2f2;border:1px solid #fecaca;padding:5px 9px;border-radius:7px;white-space:nowrap;margin:0">
+            <input type="checkbox" id="ape-urgent" style="cursor:pointer;width:13px;height:13px;margin:0">
+            <span style="font-weight:600;color:#b91c1c;font-size:11.5px">지급</span>
+          </label>
+        </div>
+      </div>
+      <div class="fg">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <label style="margin:0">비고 / 상세 내용</label>
+          <button type="button" onclick="resetApeNoteToTemplate()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:3px 9px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer" title="선택한 분류의 기본 포맷으로 되돌리기">🔄 기본 포맷</button>
+        </div>
+        <textarea class="fta" id="ape-note" rows="8" placeholder="분류를 선택하면 기본 포맷이 자동 채워집니다" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.55"></textarea>
+      </div>
+      <!-- v1.9.233: 파일 / 이미지 첨부 (다중, 이미지 붙여넣기 지원) -->
+      <div class="fg">
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          📎 영수증 / 이미지 / 파일 첨부
+          <span style="font-size:10.5px;color:#64748b;font-weight:500">(여러 파일 가능 · 상세 내용 영역에 Ctrl+V로 이미지 붙여넣기 가능)</span>
+        </label>
+        <div id="ape-drop-zone" style="border:2px dashed #cbd5e1;background:#f8fafc;border-radius:8px;padding:14px;text-align:center;cursor:pointer;transition:all .15s"
+             onclick="document.getElementById('ape-file-input').click()"
+             ondragover="event.preventDefault();this.style.borderColor='#6366f1';this.style.background='#eef2ff'"
+             ondragleave="this.style.borderColor='#cbd5e1';this.style.background='#f8fafc'"
+             ondrop="event.preventDefault();this.style.borderColor='#cbd5e1';this.style.background='#f8fafc';handleApeFilesDrop(event)">
+          <div style="font-size:12.5px;color:#475569;font-weight:600">📎 클릭해서 파일 선택 · 또는 여기로 드래그</div>
+          <div style="font-size:10.5px;color:#94a3b8;margin-top:3px">영수증 · 카드 명세 · 이미지 · PDF 모두 가능 (파일당 15MB 이하)</div>
+        </div>
+        <input type="file" id="ape-file-input" multiple style="display:none" onchange="handleApeFilesSelect(this.files);this.value=''">
+        <div id="ape-attach-list" style="margin-top:8px;display:flex;flex-direction:column;gap:5px"></div>
+      </div>
     </div>
     <div class="modal-ft" style="justify-content:flex-end;gap:8px">
       <button class="btn btn-outline" onclick="closeModal('ap-expense')">취소</button>
@@ -13431,17 +13466,207 @@ function editNonPo(id) {
 }
 
 // ═══════════ 지출결의서 모달 ═══════════
+// v1.9.233: 지출결의서 분류별 기본 포맷 (실무에서 사용하는 포맷)
+const APE_TEMPLATES = {
+  'other': `■ 지출 목적:
+
+■ 지출 내역:
+  -
+
+■ 비고:`,
+  'ad': `■ 광고 캠페인명:
+■ 매체 / 플랫폼:  (예: 네이버, 인스타그램, 페이스북, 구글, 블로거)
+■ 집행 기간:  ~
+
+■ 광고 목적 / 타깃:
+
+■ 집행 내역:
+  · 소재:
+  · 노출/클릭 예상:
+
+■ 집행 금액 내역:
+  · 광고비:
+  · 제작비:
+  · 대행 수수료:
+  합계:
+
+■ 기대 효과 / 성과 지표:`,
+  'travel': `■ 출장자:
+■ 출장 목적:
+■ 출장지:
+■ 출장 기간:  ~
+
+■ 세부 일정:
+  ·
+
+■ 지출 내역:
+  · 교통비:
+  · 숙박비:
+  · 식비:
+  · 기타:
+  합계:
+
+■ 첨부: 영수증 / 교통 내역`,
+  'cash_reimburse': `■ 지출자 (직원명):
+■ 소속 / 직책:
+■ 지출 일자:
+■ 지출 장소 / 상대처:
+
+■ 지출 사유:
+
+■ 지출 내역:
+  ·
+  ·
+  합계:
+
+■ 결제 수단: 현금 / 개인카드
+■ 환급 계좌: (위 계좌번호 란 참조)
+
+■ 첨부: 영수증 사본`,
+  'sample': `■ 샘플 용도:
+■ 샘플명 / 품목:
+■ 수량:
+
+■ 구매처:
+■ 구매일:
+
+■ 단가 / 합계:
+
+■ 비고:`,
+  'po_prepay': `■ 발주 건명:
+■ 업체:
+■ 발주 총액:
+■ 선급금 비율:
+■ 선급금액:
+
+■ 지급 근거 (계약·발주서):
+
+■ 비고:`,
+  'po_balance': `■ 발주 건명:
+■ 업체:
+■ 발주 총액:
+■ 잔금 비율:
+■ 잔금액:
+
+■ 입고 / 납품 확인:
+
+■ 비고:`
+};
+
+// v1.9.233: 지출결의서 첨부파일 임시 저장
+let _apeAttachments = [];
+
+function onApeCategoryChange() {
+  const cat = ($('ape-category') && $('ape-category').value) || 'other';
+  const ta = $('ape-note');
+  if (!ta) return;
+  const cur = (ta.value || '').trim();
+  // 비어있거나 이전 템플릿과 일치하면 자동 교체
+  const isTemplate = !cur || Object.values(APE_TEMPLATES).some(t => t.trim() === cur);
+  if (isTemplate) {
+    ta.value = APE_TEMPLATES[cat] || APE_TEMPLATES['other'];
+  }
+}
+
+function resetApeNoteToTemplate() {
+  const cat = ($('ape-category') && $('ape-category').value) || 'other';
+  const ta = $('ape-note');
+  if (!ta) return;
+  const cur = (ta.value || '').trim();
+  if (cur && !Object.values(APE_TEMPLATES).some(t => t.trim() === cur)) {
+    if (!confirm('작성 중인 내용이 있습니다. 기본 포맷으로 덮어쓸까요?')) return;
+  }
+  ta.value = APE_TEMPLATES[cat] || APE_TEMPLATES['other'];
+  ta.focus();
+}
+
+function renderApeAttachList() {
+  const box = $('ape-attach-list');
+  if (!box) return;
+  if (!_apeAttachments.length) { box.innerHTML = ''; return; }
+  box.innerHTML = _apeAttachments.map((at, idx) => {
+    const isImg = (at.type||'').startsWith('image/');
+    const sizeKb = at.size ? (at.size >= 1024*1024 ? (at.size/1024/1024).toFixed(1)+'MB' : Math.round(at.size/1024)+'KB') : '';
+    const preview = isImg
+      ? `<img src="${at.data}" style="width:38px;height:38px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0;cursor:pointer;flex-shrink:0" onclick="window.open('${at.data}','_blank')" title="클릭해 크게 보기">`
+      : `<div style="width:38px;height:38px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">📄</div>`;
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px">
+      ${preview}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${at.name||'첨부파일'}</div>
+        <div style="font-size:10.5px;color:#64748b">${sizeKb}${at.type?' · '+at.type:''}</div>
+      </div>
+      <button type="button" onclick="removeApeAttachment(${idx})" title="제거" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;padding:3px 8px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function removeApeAttachment(idx) {
+  _apeAttachments.splice(idx, 1);
+  renderApeAttachList();
+}
+
+function addApeAttachmentFromFile(file) {
+  if (!file) return;
+  if (file.size > 15 * 1024 * 1024) {
+    showNotif(`"${file.name}" 은(는) 15MB를 초과합니다`, 'warning');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = ev => {
+    _apeAttachments.push({
+      name: file.name || ('pasted-'+Date.now()),
+      type: file.type || 'application/octet-stream',
+      size: file.size || 0,
+      data: ev.target.result
+    });
+    renderApeAttachList();
+  };
+  reader.readAsDataURL(file);
+}
+
+function handleApeFilesSelect(files) {
+  if (!files || !files.length) return;
+  Array.from(files).forEach(f => addApeAttachmentFromFile(f));
+}
+
+function handleApeFilesDrop(ev) {
+  const files = ev.dataTransfer && ev.dataTransfer.files;
+  if (!files || !files.length) return;
+  Array.from(files).forEach(f => addApeAttachmentFromFile(f));
+}
+
+// v1.9.233: 지출결의서 모달에서 이미지 붙여넣기 (Ctrl+V) 처리
+function _apePasteHandler(ev) {
+  const ov = document.getElementById('overlay-ap-expense');
+  if (!ov || !ov.classList.contains('show')) return;
+  const items = (ev.clipboardData && ev.clipboardData.items) || [];
+  let handled = false;
+  for (const it of items) {
+    if (it.kind === 'file' && (it.type||'').startsWith('image/')) {
+      const file = it.getAsFile();
+      if (file) { addApeAttachmentFromFile(file); handled = true; }
+    }
+  }
+  if (handled) { ev.preventDefault(); showNotif('📷 이미지가 첨부되었습니다','success'); }
+}
+try { document.addEventListener('paste', _apePasteHandler); } catch(_){}
+
 function openExpenseModal() {
   _editingExpenseId = null; // v1.9.229: 신규 등록 모드
+  _apeAttachments = []; // v1.9.233: 첨부 초기화
   openModal('ap-expense');
   const today = new Date().toISOString().slice(0,10);
   if ($('ape-category')) $('ape-category').value = 'other';
   if ($('ape-title')) $('ape-title').value = '';
   if ($('ape-vendor')) $('ape-vendor').value = '';
   if ($('ape-amount')) $('ape-amount').value = '';
+  if ($('ape-account')) $('ape-account').value = '';
+  if ($('ape-account-holder')) $('ape-account-holder').value = '';
   if ($('ape-duedate')) $('ape-duedate').value = today;
-  if ($('ape-note')) $('ape-note').value = '';
+  if ($('ape-note')) $('ape-note').value = APE_TEMPLATES['other'] || '';
   if ($('ape-urgent')) $('ape-urgent').checked = false;
+  renderApeAttachList();
 }
 
 // v1.9.229: 지출결의서 수정
@@ -13451,14 +13676,18 @@ function editExpense(id) {
   if (!e) return;
   if (e.orderId) { alert('발주서와 연결된 지출결의서는 발주서에서 수정해 주세요.'); return; }
   _editingExpenseId = id;
+  _apeAttachments = Array.isArray(e.attachments) ? e.attachments.slice() : [];
   openModal('ap-expense');
   if ($('ape-category')) $('ape-category').value = e.category || 'other';
   if ($('ape-title')) $('ape-title').value = e.title || '';
   if ($('ape-vendor')) $('ape-vendor').value = e.vendor || '';
   if ($('ape-amount')) $('ape-amount').value = e.amount || '';
+  if ($('ape-account')) $('ape-account').value = e.account || '';
+  if ($('ape-account-holder')) $('ape-account-holder').value = e.accountHolder || '';
   if ($('ape-duedate')) $('ape-duedate').value = e.dueDate || '';
   if ($('ape-note')) $('ape-note').value = e.note || '';
   if ($('ape-urgent')) $('ape-urgent').checked = !!e.urgent;
+  renderApeAttachList();
 }
 
 function saveExpense() {
@@ -13466,7 +13695,7 @@ function saveExpense() {
   if (!title) { showNotif('제목을 입력하세요', 'warning'); return; }
   const amount = parseFloat($('ape-amount').value) || 0;
   if (!amount) { showNotif('금액을 입력하세요', 'warning'); return; }
-  // v1.9.229: 수정 모드 지원
+  // v1.9.229: 수정 모드 지원 / v1.9.233: 계좌번호 · 다중 첨부 지원
   if (_editingExpenseId) {
     const ex = (DB.expenses||[]).find(x => x.id === _editingExpenseId);
     if (ex) {
@@ -13474,12 +13703,16 @@ function saveExpense() {
       ex.title = title;
       ex.vendor = $('ape-vendor').value || '';
       ex.amount = amount;
+      ex.account = ($('ape-account') && $('ape-account').value) || '';
+      ex.accountHolder = ($('ape-account-holder') && $('ape-account-holder').value) || '';
       ex.dueDate = $('ape-duedate').value || '';
       ex.urgent = $('ape-urgent').checked;
       ex.note = $('ape-note').value || '';
+      ex.attachments = Array.isArray(_apeAttachments) ? _apeAttachments.slice() : [];
       try { saveData(); } catch(_){}
       closeModal('ap-expense');
       _editingExpenseId = null;
+      _apeAttachments = [];
       renderApprovalPage();
       updateApprovalBadges();
       showNotif('✅ 지출결의서 수정 완료', 'success');
@@ -13495,6 +13728,8 @@ function saveExpense() {
     title,
     vendor: $('ape-vendor').value || '',
     amount,
+    account: ($('ape-account') && $('ape-account').value) || '',
+    accountHolder: ($('ape-account-holder') && $('ape-account-holder').value) || '',
     dueDate: $('ape-duedate').value || '',
     paidDate: '',
     paidStatus: 'requested',
@@ -13502,11 +13737,13 @@ function saveExpense() {
     urgent: $('ape-urgent').checked,
     createdAt: Date.now(),
     note: $('ape-note').value || '',
+    attachments: Array.isArray(_apeAttachments) ? _apeAttachments.slice() : [],
   };
   DB.expenses.push(e);
   try { saveData(); } catch(_){}
   slackNotify('pay_request', e);
   closeModal('ap-expense');
+  _apeAttachments = [];
   renderApprovalPage();
   updateApprovalBadges();
   showNotif('✅ 지출결의서 등록 완료', 'success');
@@ -13960,16 +14197,52 @@ function openExpenseDetail(expenseId) {
   openModal('ap-detail');
   const body = $('ap-detail-body');
   if (!body) return;
+  // v1.9.233: 첨부 파일 — 이미지는 인라인 표시, 파일은 다운로드 링크
+  const attaches = Array.isArray(e.attachments) ? e.attachments : [];
+  const imgs = attaches.filter(at => (at.type||'').startsWith('image/'));
+  const files = attaches.filter(at => !(at.type||'').startsWith('image/'));
+  const imageStrip = imgs.length ? `
+    <div style="margin-top:12px">
+      <div style="font-size:12px;font-weight:700;color:var(--gray-700);margin-bottom:6px">🖼️ 첨부 이미지 (${imgs.length})</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">
+        ${imgs.map(at => `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:6px;cursor:zoom-in" onclick="window.open('${at.data}','_blank')" title="클릭해 크게 보기">
+          <img src="${at.data}" style="width:100%;height:140px;object-fit:cover;border-radius:4px;display:block">
+          <div style="font-size:10.5px;font-weight:600;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${at.name||''}</div>
+        </div>`).join('')}
+      </div>
+    </div>` : '';
+  const fileList = files.length ? `
+    <div style="margin-top:10px">
+      <div style="font-size:12px;font-weight:700;color:var(--gray-700);margin-bottom:6px">📎 첨부 파일 (${files.length})</div>
+      <div style="display:flex;flex-direction:column;gap:5px">
+        ${files.map(at => {
+          const sizeKb = at.size ? (at.size >= 1024*1024 ? (at.size/1024/1024).toFixed(1)+'MB' : Math.round(at.size/1024)+'KB') : '';
+          return `<a href="${at.data}" download="${(at.name||'file').replace(/"/g,'&quot;')}" style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;display:flex;align-items:center;gap:8px;text-decoration:none;color:#0f172a">
+            <div style="font-size:18px">📄</div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${at.name||'파일'}</div>
+              <div style="font-size:10.5px;color:#64748b">${sizeKb}${at.type?' · '+at.type:''}</div>
+            </div>
+            <span style="font-size:10.5px;color:#6366f1;font-weight:700">⬇️ 다운로드</span>
+          </a>`;
+        }).join('')}
+      </div>
+    </div>` : '';
+  const acctLine = (e.account || e.accountHolder) ? `<div style="margin-top:8px;padding:8px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;color:#0f172a"><span style="color:#64748b;font-weight:700;margin-right:8px">💳 입금 계좌</span>${e.account||''}${e.accountHolder?` <span style="color:#64748b">· 예금주</span> ${e.accountHolder}`:''}</div>` : '';
   body.innerHTML = `
     <div style="background:#f9fafb;padding:14px;border-radius:8px;margin-bottom:14px">
-      <div style="font-size:11px;color:var(--gray-500);font-weight:600">💳 지출 결의서</div>
+      <div style="font-size:11px;color:var(--gray-500);font-weight:600">💳 지출 결의서${e.category?' · '+e.category:''}</div>
       <div style="font-size:16px;font-weight:700;margin-top:4px">${e.title||'-'}</div>
-      <div style="margin-top:6px;display:flex;gap:12px;font-size:12px;color:var(--gray-700)">
+      <div style="margin-top:6px;display:flex;gap:12px;font-size:12px;color:var(--gray-700);flex-wrap:wrap">
         <span>💰 ${fmtWon(e.amount||0)}</span>
         <span>${e.vendor?'🏢 '+e.vendor:''}</span>
+        <span>${e.dueDate?'📅 요청일 '+e.dueDate:''}</span>
         <span>${e.paidStatus==='paid'?'✅ 지급완료':'⏳ 지급대기'}</span>
       </div>
-      ${e.note?`<div style="margin-top:10px;padding:10px;background:#fff;border-radius:6px;font-size:12.5px;color:var(--gray-700);white-space:pre-wrap">${e.note}</div>`:''}
+      ${acctLine}
+      ${e.note?`<div style="margin-top:10px;padding:10px;background:#fff;border-radius:6px;font-size:12.5px;color:var(--gray-700);white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.55">${e.note}</div>`:''}
+      ${imageStrip}
+      ${fileList}
     </div>
     ${renderCommentSectionShell()}
   `;
