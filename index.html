@@ -13329,6 +13329,147 @@ function _feedCarouselCurrent(postId){
 function _feedCarouselPrev(postId){ _feedCarouselGoto(postId, _feedCarouselCurrent(postId) - 1); }
 function _feedCarouselNext(postId){ _feedCarouselGoto(postId, _feedCarouselCurrent(postId) + 1); }
 
+// ── 리치 텍스트 에디터 헬퍼 (v1.9.276) ─────────────────
+//   툴바 버튼이 호출하는 window._feedExec / _feedExecLink / _feedExecHiliteColor
+//   그리고 저장·불러오기 시 쓰는 HTML 화이트리스트 sanitizer _sanitizeFeedHtml.
+//
+//   document.execCommand 는 스펙상 deprecated 이지만 Chrome·Safari·Firefox·Edge 모두 여전히 동작.
+//   contentEditable 에디터에서 포커스를 유지한 채 서식을 적용하려면:
+//     1) 툴바 버튼에 mousedown → event.preventDefault() 로 focus 가 빠지지 않게 막고
+//     2) click 시점에 edit 영역을 focus 한 뒤 execCommand 실행.
+//   만약 선택 영역(selection)이 에디터 바깥에 있으면 execCommand 는 조용히 실패하므로
+//   fallback 으로 에디터 끝에 커서를 강제 배치한다.
+window._feedEnsureEditorSelection = function() {
+  const editor = document.getElementById('feed-post-content');
+  if (!editor) return null;
+  editor.focus();
+  const sel = window.getSelection();
+  if (!sel) return editor;
+  // 현재 선택이 editor 바깥이면 에디터 끝으로 커서 이동
+  let inside = false;
+  if (sel.rangeCount > 0) {
+    const r = sel.getRangeAt(0);
+    let node = r.commonAncestorContainer;
+    while (node) { if (node === editor) { inside = true; break; } node = node.parentNode; }
+  }
+  if (!inside) {
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false); // 끝으로
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  return editor;
+};
+
+window._feedExec = function(cmd, arg) {
+  try {
+    const editor = _feedEnsureEditorSelection();
+    if (!editor) return;
+    // styleWithCSS 를 켜면 execCommand 가 <span style="..."> 형태로 결과를 만들어서 나중에 sanitize 할 때 더 예측 가능함
+    try { document.execCommand('styleWithCSS', false, true); } catch(_){}
+    document.execCommand(cmd, false, arg == null ? null : arg);
+    editor.focus();
+  } catch(e) {
+    console.warn('_feedExec', cmd, e);
+  }
+};
+
+window._feedExecLink = function() {
+  const url = prompt('링크 URL 을 입력하세요 (예: https://...)', 'https://');
+  if (!url) return;
+  // 간단한 URL 검증 (http, https, mailto 만 허용)
+  if (!/^(https?:|mailto:)/i.test(url)) { showNotif('http, https, mailto 링크만 입력할 수 있습니다', 'warning'); return; }
+  _feedExec('createLink', url);
+  // execCommand 로 생긴 <a> 에 target="_blank" 추가
+  try {
+    const editor = document.getElementById('feed-post-content');
+    if (editor) {
+      editor.querySelectorAll('a[href]').forEach(a => {
+        if (!a.getAttribute('target')) { a.setAttribute('target','_blank'); a.setAttribute('rel','noopener noreferrer'); }
+      });
+    }
+  } catch(_){}
+};
+
+window._feedExecHiliteColor = function(color) {
+  // Firefox = hiliteColor, Chrome/Safari = backColor. 둘 다 시도.
+  try {
+    _feedEnsureEditorSelection();
+    try { document.execCommand('styleWithCSS', false, true); } catch(_){}
+    if (!document.execCommand('hiliteColor', false, color)) {
+      document.execCommand('backColor', false, color);
+    }
+  } catch(e) { console.warn('hiliteColor', e); }
+};
+
+// HTML 화이트리스트 sanitizer — 허용 태그·속성 외에는 텍스트로 교체하거나 제거
+//   허용 태그: B, STRONG, I, EM, U, S, STRIKE, BR, P, DIV, SPAN, A, UL, OL, LI, BLOCKQUOTE, CODE, FONT
+//   허용 속성: href/target/rel (A), style(색상·배경·굵기·기울임·밑줄·취소선만)
+//   그 외 모든 속성 제거 — 이벤트 핸들러(on*) 와 script 주입 방지
+window._sanitizeFeedHtml = function(html) {
+  if (!html) return '';
+  const ALLOWED_TAGS = /^(B|STRONG|I|EM|U|S|STRIKE|BR|P|DIV|SPAN|A|UL|OL|LI|BLOCKQUOTE|CODE|FONT|H1|H2|H3|H4|BR)$/;
+  const SAFE_STYLE_RE = /^(color|background-color|background|font-weight|font-style|text-decoration|text-decoration-line|text-decoration-color|font-size)$/i;
+  const container = document.createElement('div');
+  container.innerHTML = String(html);
+  // Walk depth-first and clean
+  const walk = (node) => {
+    const children = Array.from(node.childNodes);
+    children.forEach(child => {
+      if (child.nodeType === 1) { // element
+        const tag = child.tagName;
+        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'IFRAME' || tag === 'OBJECT' || tag === 'EMBED' || tag === 'META' || tag === 'LINK') {
+          child.remove();
+          return;
+        }
+        if (!ALLOWED_TAGS.test(tag)) {
+          // 알 수 없는 태그는 자식을 꺼내서 현재 노드로 올리고 자신은 제거
+          while (child.firstChild) node.insertBefore(child.firstChild, child);
+          child.remove();
+          return;
+        }
+        // 속성 정리
+        Array.from(child.attributes).forEach(attr => {
+          const name = attr.name.toLowerCase();
+          const val = attr.value || '';
+          if (/^on/.test(name)) { child.removeAttribute(attr.name); return; }
+          if (tag === 'A' && (name === 'href' || name === 'target' || name === 'rel')) {
+            if (name === 'href') {
+              // javascript:, data: 등 위험 스킴 차단
+              if (!/^(https?:|mailto:|#|\/)/i.test(val.trim())) { child.removeAttribute('href'); return; }
+            }
+            return; // keep
+          }
+          if (tag === 'FONT' && (name === 'color' || name === 'face' || name === 'size')) return; // keep font attrs
+          if (name === 'style') {
+            // 허용된 프로퍼티만 남기기
+            const safe = val.split(';')
+              .map(s => s.trim())
+              .filter(s => {
+                const m = s.match(/^([a-z-]+)\s*:/i);
+                if (!m) return false;
+                return SAFE_STYLE_RE.test(m[1]);
+              })
+              .join('; ');
+            if (safe) child.setAttribute('style', safe);
+            else child.removeAttribute('style');
+            return;
+          }
+          // 그 외 전부 제거
+          child.removeAttribute(attr.name);
+        });
+        walk(child); // 재귀
+      } else if (child.nodeType === 8) { // comment
+        child.remove();
+      }
+      // text nodes 는 그대로 유지
+    });
+  };
+  walk(container);
+  return container.innerHTML;
+};
+
 // ── 모달: 작성 / 수정 ──────────────────────────────────
 function openFeedPostModal(postId){
   _feedEditingImages = [];
@@ -13741,7 +13882,11 @@ async function _resolveGeminiTextModel(apiKey) {
 }
 
 async function summarizeFeedPostWithGemini(){
-  const content = (document.getElementById('feed-post-content').value||'').trim();
+  // v1.9.276: contentEditable 로 바뀌어서 .value 는 undefined — innerHTML/textContent 사용
+  const contentEl = document.getElementById('feed-post-content');
+  const contentHtml = contentEl ? (contentEl.innerHTML || '') : '';
+  const contentText = contentEl ? ((contentEl.innerText || contentEl.textContent || '').trim()) : '';
+  const content = contentText;  // Gemini 에는 plain text 로 전달
   const title = (document.getElementById('feed-post-title').value||'').trim();
   if (!content) { showNotif('본문을 먼저 입력해주세요', 'warning'); return; }
   const key = (DB.appSettings && DB.appSettings.geminiApiKey) || localStorage.getItem('reniv_gemini_api_key') || '';
