@@ -3711,7 +3711,7 @@ EXP YYYYMMDD 까지</textarea></div>
 <!-- 결재 상세 + 댓글 -->
 <div class="overlay" id="overlay-ap-detail">
   <div class="modal" style="width:620px;max-height:86vh;display:flex;flex-direction:column">
-    <div class="modal-hdr"><span class="modal-ttl">💬 결재 상세</span><button class="modal-x" onclick="closeModal('ap-detail')">✕</button></div>
+    <div class="modal-hdr" id="ap-detail-hdr"><span class="modal-ttl">💬 결재 상세</span><button class="modal-x" onclick="closeModal('ap-detail')">✕</button></div>
     <div class="modal-body" id="ap-detail-body" style="overflow-y:auto"></div>
   </div>
 </div>
@@ -6300,6 +6300,11 @@ function openModal(id) {
       _startOrderDraftAutoSave();
     }
     if (id === 'add-qc') { populateQCProductSelect(); $('qc-date').value = today(); }
+    // v1.9.318: ap-detail 모달 헤더 초기화 — openNonPoApprovalDetail이 이후에 커스텀 헤더로 덮어씀
+    if (id === 'ap-detail') {
+      const hdr = document.getElementById('ap-detail-hdr');
+      if (hdr) hdr.innerHTML = '<span class="modal-ttl">💬 결재 상세</span><button class="modal-x" onclick="closeModal(\'ap-detail\')">✕</button>';
+    }
   }
 }
 
@@ -17219,12 +17224,13 @@ function _renderApCommentNode(c, depth) {
   </div>`;
 }
 
-function renderApprovalComments(refKey) {
+function renderApprovalComments(refKey, hideEmptyState) {
   const list = $('ap-comments-list');
   if (!list) return;
   const all = DB.approvalComments.filter(c => String(c.approvalId) === String(refKey));
   if (!all.length) {
-    list.innerHTML = '<div style="color:var(--gray-400);font-size:13px;padding:18px;text-align:center;background:#f9fafb;border-radius:10px">아직 남겨진 의견이 없습니다. 첫 의견을 남겨 보세요!</div>';
+    // v1.9.318: 일반 결재 상세(기안서 문서 포맷)에서는 안내 문구를 숨김
+    list.innerHTML = hideEmptyState ? '' : '<div style="color:var(--gray-400);font-size:13px;padding:18px;text-align:center;background:#f9fafb;border-radius:10px">아직 남겨진 의견이 없습니다. 첫 의견을 남겨 보세요!</div>';
     return;
   }
   // 트리 구성: parentId가 있으면 children 배열에 연결
