@@ -1278,8 +1278,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           </div>
         </div>
       </div>
-      <!-- v1.9.315 — 제품 라인(코드 접두어) 하위 필터 칩: 분류 탭 아래 전체 폭에서 가운데 정렬 -->
-      <div id="item-product-line-chips" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:center;margin-bottom:14px"></div>
+      <!-- v1.9.317 — 제품 라인 하위 필터 칩: 활성 분류 탭 정중앙 아래 정렬 (padding-left 동적 계산) -->
+      <div id="item-product-line-chips" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-start;margin-bottom:14px"></div>
       <div class="card">
         <div class="card-body p0 tbl-wrap">
           <table>
@@ -9398,6 +9398,41 @@ function _extractProductLine(code) {
   return parts.length >= 2 ? parts[1] : '';
 }
 
+// v1.9.317 — 활성 분류 탭의 정중앙 아래로 제품 라인 칩 행을 정렬
+//   탭마다 너비가 달라 CSS 만으로는 표현 불가 → JS 로 getBoundingClientRect 측정 후 padding-left 보정
+function _alignProductLineChipsUnderActiveTab() {
+  try {
+    const row = document.getElementById('item-product-line-chips');
+    if (!row || row.style.display === 'none' || !row.children.length) return;
+    const activeTab = document.querySelector('#item-filter-chips .pg-chip.active');
+    if (!activeTab) return;
+    const tabRect = activeTab.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const tabCenterViewport = tabRect.left + tabRect.width / 2;
+    // 칩 콘텐츠 실제 너비 = 마지막 자식의 right − 첫 자식의 left
+    const children = row.children;
+    const firstRect = children[0].getBoundingClientRect();
+    const lastRect  = children[children.length - 1].getBoundingClientRect();
+    const chipsContentWidth = lastRect.right - firstRect.left;
+    // 목표: 칩 콘텐츠의 중심이 탭의 중심과 일치
+    //   row 내부 content 의 현재 left(뷰포트) = firstRect.left
+    //   row 의 (border-box) left = rowRect.left, 그 안쪽 padding-left 만큼 콘텐츠가 밀려있음
+    //   원하는 contentLeft = tabCenterViewport − chipsContentWidth/2
+    //   desiredPaddingLeft = 원하는 contentLeft − rowRect.left
+    const desiredPaddingLeft = (tabCenterViewport - chipsContentWidth / 2) - rowRect.left;
+    row.style.justifyContent = 'flex-start';
+    row.style.paddingLeft = Math.max(0, Math.round(desiredPaddingLeft)) + 'px';
+  } catch (e) { console.warn('_alignProductLineChipsUnderActiveTab:', e); }
+}
+
+// 윈도우 리사이즈 시 품목 현황 페이지가 활성이면 재정렬
+window.addEventListener('resize', () => {
+  try {
+    const pg = document.getElementById('page-item');
+    if (pg && pg.classList.contains('active')) _alignProductLineChipsUnderActiveTab();
+  } catch(_){}
+});
+
 function renderItemTable() {
   const fixedTypes = ['원자재','부자재','OEM','외주가공','완제품'];
   const extraTypes = [...new Set(DB.items.map(i=>i.type))].filter(t => !fixedTypes.includes(t));
@@ -9446,6 +9481,10 @@ function renderItemTable() {
       });
       plChipsEl.innerHTML = html;
       plChipsEl.style.display = 'flex';
+      // v1.9.317 — 페이지 가운데가 아니라 "활성 분류 탭의 정중앙 아래" 에 칩 행을 정렬
+      //            renderItemTable 이 호출될 때마다 재계산 (탭 선택 변경, 검색 등)
+      //            레이아웃이 적용된 다음 프레임에 측정·보정
+      requestAnimationFrame(() => _alignProductLineChipsUnderActiveTab());
     } else {
       plChipsEl.innerHTML = '';
       plChipsEl.style.display = 'none';
