@@ -21939,10 +21939,23 @@ BOM 마진 ${estMarginNum !== null ? estMarginNum.toLocaleString()+'원' : '-'}
     ? comments.map((c, idx) => _renderNpCommentItem(c, it.id, idx)).join('')
     : `<div style="${muted};padding:4px 2px">아직 코멘트가 없습니다</div>`;
 
+  // v1.9.312 — NEW 배지: 본인이 아직 해당 버전을 열람하지 않았으면 "편집자명 +NEW" 노출
+  //   - viewedBy 가 배열로 존재하고, 내 email 이 없으면 NEW
+  //   - 본인이 직접 편집한 직후에는 viewedBy 에 본인만 들어있어 본인에게는 노출되지 않음
+  //   - 레거시 데이터 (viewedBy 필드 없음) 는 배지 미표시
+  const _myEmailNp = (window._currentUser && window._currentUser.email) || '';
+  const _viewedBy  = Array.isArray(it.viewedBy) ? it.viewedBy : null;
+  const _isNewForMe = _viewedBy !== null && _myEmailNp && _viewedBy.indexOf(_myEmailNp) < 0;
+  const _editorName = (it.lastEditorName || it.author || '').trim();
+  const newBadge = _isNewForMe
+    ? `<span title="${escapeHtml(_editorName)} 님이 작성/수정한 내용입니다. 카드를 열면 사라집니다." style="flex-shrink:0;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:99px;background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border:1px solid #fcd34d;color:#92400e;font-size:10.5px;font-weight:800;letter-spacing:.2px;box-shadow:0 1px 2px rgba(146,64,14,.15)"><span style="font-size:9.5px;font-weight:700">${_editorName ? escapeHtml(_editorName) : '팀원'}</span><span style="background:#dc2626;color:#fff;padding:1px 6px;border-radius:99px;font-size:9.5px;font-weight:800;letter-spacing:.3px">NEW</span></span>`
+    : '';
+
   return `<div onclick="openNewProductModal('${it.id}')" style="background:#fff;border:1px solid var(--gray-200);border-radius:12px;padding:13px 8px;cursor:pointer;transition:all .15s;box-shadow:0 1px 2px rgba(0,0,0,0.03)" onmouseenter="this.style.boxShadow='0 4px 14px rgba(0,0,0,0.08)';this.style.transform='translateY(-1px)';this.style.borderColor='${stageMeta.border}'" onmouseleave="this.style.boxShadow='0 1px 2px rgba(0,0,0,0.03)';this.style.transform='translateY(0)';this.style.borderColor='var(--gray-200)'">
-    <!-- 제목 + 상태 + 전체 접기/펼치기 토글 -->
+    <!-- 제목 + 상태 + NEW 배지 + 전체 접기/펼치기 토글 -->
     <div style="display:flex;align-items:center;gap:6px;margin:0 6px 12px 6px;flex-wrap:wrap">
       <span style="font-size:16px;font-weight:800;color:var(--gray-800);line-height:1.2;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center">${escapeHtml(it.name)}</span>
+      ${newBadge}
       ${statusBadge}
       <button type="button" id="np-full-toggle-${it.id}" onclick="toggleNpFullCard('${it.id}',event)" title="${_fullCollapsed ? '카드 펼치기' : '카드 접기'}" style="flex-shrink:0;background:linear-gradient(135deg,#e0f2fe 0%,#bae6fd 100%);color:#3b82f6;border:1px solid #93c5fd;border-radius:5px;width:20px;height:20px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;line-height:1;padding:0;box-shadow:0 1px 2px rgba(30,64,175,0.1);transition:background .12s, box-shadow .12s, transform .12s;vertical-align:middle" onmouseenter="this.style.background='linear-gradient(135deg,#bae6fd 0%,#7dd3fc 100%)';this.style.boxShadow='0 2px 6px rgba(30,64,175,0.2)';this.style.transform='translateY(-1px)'" onmouseleave="this.style.background='linear-gradient(135deg,#e0f2fe 0%,#bae6fd 100%)';this.style.boxShadow='0 1px 2px rgba(30,64,175,0.1)';this.style.transform='translateY(0)'"><span id="np-full-chev-${it.id}" style="display:flex;align-items:center;justify-content:center;line-height:1;transform:translateY(-1px)">${_fullCollapsed ? '▸' : '▾'}</span></button>
     </div>
@@ -22526,6 +22539,22 @@ function openNewProductModal(editId) {
   // 첫 번째 탭으로 리셋
   setNpModalTab('basic', document.querySelector('.np-mtab'));
   openModal('add-newproduct');
+
+  // v1.9.312 — 카드를 연 사용자를 viewedBy 에 추가하여 NEW 배지 숨김
+  //   (기존 레코드에 viewedBy 가 없으면 배지 자체가 안 뜨므로 아무것도 안 함)
+  try {
+    if (editId) {
+      const itView = (DB.newProducts || []).find(x => x.id === editId);
+      const _myEmail = (window._currentUser && window._currentUser.email) || '';
+      if (itView && _myEmail && Array.isArray(itView.viewedBy) && itView.viewedBy.indexOf(_myEmail) < 0) {
+        itView.viewedBy.push(_myEmail);
+        if (typeof saveDataNow === 'function') saveDataNow().catch(e => console.warn('viewedBy 저장 실패:', e));
+        else if (typeof saveData === 'function') saveData();
+        // 카드를 다시 그려 NEW 배지 제거
+        setTimeout(() => { try { renderNewProductKanban(); } catch(_) {} }, 0);
+      }
+    }
+  } catch (e) { console.warn('viewedBy 처리 스킵:', e); }
 }
 
 // ── 저장 ──
@@ -22576,6 +22605,18 @@ function saveNewProduct() {
     dateMemo: (document.getElementById('np-date-memo')||{}).value || '',
     author: (window._currentUser && (window._currentUser.displayName || window._currentUser.email)) || '',
   };
+
+  // v1.9.312 — NEW 배지용 메타데이터: 마지막 편집자 + 본인 viewedBy 초기화
+  //   저장한 순간 본인은 이미 내용을 알고 있으므로 viewedBy 에 본인만 포함.
+  //   다른 사용자는 자신의 email 이 viewedBy 에 없으므로 카드에 NEW 배지가 노출되고,
+  //   카드를 열면 openNewProductModal 에서 본인 email 이 추가되어 배지가 사라진다.
+  const _myEmail_np = (window._currentUser && window._currentUser.email) || '';
+  const _myName_np  = (window._currentUser && (window._currentUser.displayName || window._currentUser.name))
+                      || (window._currentUser && window._currentUser.email)
+                      || '';
+  data.lastEditorName  = _myName_np;
+  data.lastEditorEmail = _myEmail_np;
+  data.viewedBy        = _myEmail_np ? [_myEmail_np] : [];
 
   if (_npEditId) {
     const idx = DB.newProducts.findIndex(x => x.id === _npEditId);
