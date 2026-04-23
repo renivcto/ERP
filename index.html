@@ -1680,6 +1680,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
                 style="display:inline-flex;align-items:center;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #fde68a;background:#fffbeb;color:#b45309;transition:all .12s">🏭 발주 잔금</button>
               <button class="ap-exp-filter" data-flt="sample" onclick="filterExpense('sample')"
                 style="display:inline-flex;align-items:center;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #bbf7d0;background:#f0fdf4;color:#15803d;transition:all .12s">🧪 샘플 구매</button>
+              <button class="ap-exp-filter" data-flt="ad" onclick="filterExpense('ad')"
+                style="display:inline-flex;align-items:center;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #fbcfe8;background:#fdf2f8;color:#be185d;transition:all .12s">📢 광고비</button>
               <button class="ap-exp-filter" data-flt="other" onclick="filterExpense('other')"
                 style="display:inline-flex;align-items:center;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #ddd6fe;background:#f5f3ff;color:#6d28d9;transition:all .12s">📌 기타</button>
             </div>
@@ -15198,6 +15200,7 @@ const EXPENSE_CAT_PALETTE = {
   po_prepay: { bg:'#f0f9ff', fg:'#0369a1', bd:'#bae6fd', accent:'#0284c7' }, // sky
   po_balance:{ bg:'#fffbeb', fg:'#b45309', bd:'#fde68a', accent:'#d97706' }, // amber
   sample:    { bg:'#f0fdf4', fg:'#15803d', bd:'#bbf7d0', accent:'#16a34a' }, // emerald
+  ad:        { bg:'#fdf2f8', fg:'#be185d', bd:'#fbcfe8', accent:'#db2777' }, // rose (광고비)
   other:     { bg:'#f5f3ff', fg:'#6d28d9', bd:'#ddd6fe', accent:'#7c3aed' }  // violet
 };
 
@@ -15234,7 +15237,7 @@ function filterExpense(f) {
 //   - 라벨은 '금액' 단일 용어로 통일 (헷갈림 방지)
 function updateExpenseFilterAmounts() {
   try {
-    const sums = { all:0, po_prepay:0, po_balance:0, sample:0, other:0 };
+    const sums = { all:0, po_prepay:0, po_balance:0, sample:0, ad:0, other:0 };
     (DB.expenses||[]).forEach(e => {
       if (!e) return;
       // v1.9.227: 지급완료 여부와 관계없이 '표에 보이는 리스트의 합계' 로 집계
@@ -15291,11 +15294,12 @@ function renderApprovalExpenseTable() {
   }
   // v1.9.223: 필터 버튼과 동일한 통합 팔레트 공유
   try { updateExpenseFilterAmounts(); } catch(_){}
-  const catLabel = { po_prepay:'🏭 발주 선급금', po_balance:'🏭 발주 잔금', sample:'🧪 샘플 구매', other:'📌 기타' };
+  const catLabel = { po_prepay:'🏭 발주 선급금', po_balance:'🏭 발주 잔금', sample:'🧪 샘플 구매', ad:'📢 광고비', other:'📌 기타' };
   const CAT_PAL = (typeof EXPENSE_CAT_PALETTE !== 'undefined') ? EXPENSE_CAT_PALETTE : {
     po_prepay: { bg:'#f0f9ff', fg:'#0369a1', bd:'#bae6fd' },
     po_balance:{ bg:'#fffbeb', fg:'#b45309', bd:'#fde68a' },
     sample:    { bg:'#f0fdf4', fg:'#15803d', bd:'#bbf7d0' },
+    ad:        { bg:'#fdf2f8', fg:'#be185d', bd:'#fbcfe8' },
     other:     { bg:'#f5f3ff', fg:'#6d28d9', bd:'#ddd6fe' }
   };
   // v1.9.215: 지급 요청 버튼을 발주서 결재 페이지와 동일한 스타일로 통일 (살구 크림 / 살몬 핑크 응급)
@@ -16202,14 +16206,19 @@ function openExpenseModal() {
   _apeAttachments = []; // v1.9.233: 첨부 초기화
   openModal('ap-expense');
   const today = new Date().toISOString().slice(0,10);
-  if ($('ape-category')) $('ape-category').value = 'other';
+  // 현재 선택된 필터(_apExpFilter)에 따라 분류 기본값 자동 선택
+  // - all 또는 미지정이면 'other'
+  // - 필터가 지출결의서 분류 옵션(po_prepay/po_balance/sample/ad/other)이면 그대로 적용
+  const VALID_PRESELECT = ['po_prepay','po_balance','sample','ad','other'];
+  const preCat = VALID_PRESELECT.indexOf(_apExpFilter) >= 0 ? _apExpFilter : 'other';
+  if ($('ape-category')) $('ape-category').value = preCat;
   if ($('ape-title')) $('ape-title').value = '';
   if ($('ape-vendor')) $('ape-vendor').value = '';
   if ($('ape-amount')) $('ape-amount').value = '';
   if ($('ape-account')) $('ape-account').value = '';
   if ($('ape-account-holder')) $('ape-account-holder').value = '';
   if ($('ape-duedate')) $('ape-duedate').value = today;
-  if ($('ape-note')) $('ape-note').value = APE_TEMPLATES['other'] || '';
+  if ($('ape-note')) $('ape-note').value = APE_TEMPLATES[preCat] || APE_TEMPLATES['other'] || '';
   if ($('ape-urgent')) $('ape-urgent').checked = false;
   // v1.9.308: 지급 방법 기본 계좌이체 + 힌트/계좌 행 표시 상태 동기화
   if ($('ape-paymethod')) $('ape-paymethod').value = '계좌이체';
