@@ -9390,14 +9390,8 @@ function sortByCode(a, b) {
 
 // v1.9.314 — 제품 라인(코드 접두어) 필터
 //   품목코드 구조: [M|O|P]-[라인코드]-[순번]  (예: M-3X-01, O-3X-02, P-GS-01, M-6E-01)
-//   두 번째 세그먼트 '3X' / 'GS' / '6E' 등이 제품 라인 식별자.
-//   라벨 맵에 없는 라인은 코드 그대로 표시.
+//   두 번째 세그먼트 '3X' / 'GS' / '6E' 등을 그대로 칩 라벨로 사용.
 if (typeof window.itemProductLineFilter === 'undefined') window.itemProductLineFilter = '전체';
-const PRODUCT_LINE_LABELS = {
-  '3X': '🧴 3중 장벽 크림',
-  'GS': '💧 글로우샷',
-  '6E': '✨ 에센스'
-};
 function _extractProductLine(code) {
   if (!code) return '';
   const parts = String(code).split('-');
@@ -9438,18 +9432,17 @@ function renderItemTable() {
     const lines = Object.keys(lineCounts).sort();
     // 라인이 2개 이상일 때만 노출 (1개면 필터 의미 없음)
     if (lines.length >= 2) {
+      // 같은 라인을 다시 클릭하면 해제(전체로 복귀) — '전체' 칩 제거로 인한 리셋 경로 확보
       const mkChip = (key, label, count, isActive) => {
         const bg = isActive ? '#0f172a' : '#f8fafc';
         const color = isActive ? '#fff' : '#475569';
         const border = isActive ? '#0f172a' : '#e2e8f0';
-        return `<div onclick="window.itemProductLineFilter='${key}';renderItemTable()" style="display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:999px;font-size:11.5px;font-weight:${isActive?700:600};cursor:pointer;background:${bg};color:${color};border:1px solid ${border};transition:all .12s;letter-spacing:-.1px">${label}<span style="background:${isActive?'rgba(255,255,255,0.2)':'#e2e8f0'};color:${isActive?'#fff':'#64748b'};padding:1px 6px;border-radius:99px;font-size:10px;font-weight:700">${count}</span></div>`;
+        const nextKey = isActive ? '전체' : key;
+        return `<div onclick="window.itemProductLineFilter='${nextKey}';renderItemTable()" title="${isActive?'클릭해 해제':''}" style="display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:999px;font-size:11.5px;font-weight:${isActive?700:600};cursor:pointer;background:${bg};color:${color};border:1px solid ${border};transition:all .12s;letter-spacing:-.1px">${label}<span style="background:${isActive?'rgba(255,255,255,0.2)':'#e2e8f0'};color:${isActive?'#fff':'#64748b'};padding:1px 6px;border-radius:99px;font-size:10px;font-weight:700">${count}</span></div>`;
       };
-      const totalCount = baseList.length;
-      let html = `<span style="font-size:11px;color:var(--gray-500);font-weight:600;margin-right:2px">제품 라인:</span>`;
-      html += mkChip('전체', '전체', totalCount, window.itemProductLineFilter === '전체');
+      let html = '';
       lines.forEach(ln => {
-        const label = PRODUCT_LINE_LABELS[ln] || ln;
-        html += mkChip(ln, label, lineCounts[ln], window.itemProductLineFilter === ln);
+        html += mkChip(ln, ln, lineCounts[ln], window.itemProductLineFilter === ln);
       });
       plChipsEl.innerHTML = html;
       plChipsEl.style.display = '';
