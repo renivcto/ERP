@@ -5067,8 +5067,6 @@ const DEFAULT_DB = {
   items: [
     // ── 부재료 (르니브 3중 장벽 20층 리뉴 크림) ──
     {id:6,  type:'부자재', code:'M-3X-06', name:'르니브 3중 장벽 20층 리뉴 크림 열림방지 스티커', spec:'20mm', price:20, stock:0, minStock:0, maxStock:0, lot:'', expiry:'', vendorId:3, material:'투명 비닐', note:''},
-    {id:7,  type:'부자재', code:'M-3X-07', name:'르니브 스파츌러', spec:'50', price:50, stock:0, minStock:0, maxStock:0, lot:'', expiry:'', vendorId:4, material:'ABS', note:'입고 시 검은 점 또는 회색 점이 많이 있음'},
-    {id:8,  type:'부자재', code:'M-3X-08', name:'르니브 스파츌러 비닐', spec:'18.7', price:0, stock:0, minStock:0, maxStock:0, lot:'', expiry:'', vendorId:4, material:'OPP', note:''},
     {id:9,  type:'부자재', code:'M-3X-09', name:'르니브 3중 장벽 20층 용기 60g', spec:'60g', price:1130, stock:0, minStock:0, maxStock:0, lot:'', expiry:'', vendorId:5, material:'용기:유리 / 캡:ABS / 리드:PP', note:'중국 알리바바'},
     {id:10, type:'부자재', code:'M-3X-10', name:'르니브 3중 장벽 20층 용기 30g', spec:'30g', price:985, stock:0, minStock:0, maxStock:0, lot:'', expiry:'', vendorId:5, material:'용기:유리 / 캡:ABS 리드:PP', note:'중국 알리바바'},
     // ── 부재료 (르니브 글로우샷) ──
@@ -5135,6 +5133,8 @@ const DEFAULT_DB = {
     {id:3,  type:'부자재', code:'M-3X-03', name:'르니브 3중 장벽 20층 리뉴 크림 카톤박스', spec:'32개입 (310x305x170mm)', price:1500, stock:0, minStock:0, maxStock:0, lot:'', expiry:'', vendorId:2, material:'SK.3S.K / DW골', note:'', _archivedAt:'2026-04-23'},
     {id:4,  type:'부자재', code:'M-3X-04', name:'르니브 3중 장벽 20층 리뉴 크림 리드', spec:'50g', price:80, stock:0, minStock:0, maxStock:0, lot:'', expiry:'', vendorId:1, material:'PP', note:'', _archivedAt:'2026-04-23'},
     {id:5,  type:'부자재', code:'M-3X-05', name:'르니브 3중 장벽 20층 리뉴 크림 캡', spec:'50g / 69∮', price:550, stock:0, minStock:0, maxStock:0, lot:'', expiry:'', vendorId:1, material:'PP', note:'', _archivedAt:'2026-04-23'},
+    {id:7,  type:'부자재', code:'M-3X-07', name:'르니브 스파츌러', spec:'50', price:50, stock:0, minStock:0, maxStock:0, lot:'', expiry:'', vendorId:4, material:'ABS', note:'입고 시 검은 점 또는 회색 점이 많이 있음', _archivedAt:'2026-04-23'},
+    {id:8,  type:'부자재', code:'M-3X-08', name:'르니브 스파츌러 비닐', spec:'18.7', price:0, stock:0, minStock:0, maxStock:0, lot:'', expiry:'', vendorId:4, material:'OPP', note:'', _archivedAt:'2026-04-23'},
   ],
   tasks: [
     {id:1, title:'신규 세럼 BOM 작성', due:'2025-04-15', category:'R&D', status:'계획', priority:'높음', progress:10, note:''},
@@ -5313,17 +5313,17 @@ let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
   } catch (e) { console.warn('stamp reapprove backfill skipped:', e); }
 })();
 
-// v1.9.310 — M-3X-01 ~ M-3X-05 (르니브 3중 장벽 20층 리뉴 크림 부자재 5건) 강제 아카이브
+// v1.9.311 — M-3X-01~05 + M-3X-07~08 (르니브 3중 장벽 20층 리뉴 크림 부자재 + 스파츌러) 강제 아카이브
 //   사용자가 아카이브 처리했으나 Firestore 병합 시 items 로 되돌아오는 버그를 1회성 마이그레이션으로 영구 고정.
 //   - items 에 있으면 archivedItems 로 이동(_archivedAt 보강)
 //   - 이미 archivedItems 에 있어도 _archivedAt 이 비어있으면 채움
-//   - DB._mxArchiveEnforcedV310 = true 로 1회만 실행
+//   - DB._mxArchiveEnforcedV311 = true 로 1회만 실행 (v310 플래그 보유자도 v311 로 재실행)
 function enforceMxArchiveV310() {
   try {
-    if (DB._mxArchiveEnforcedV310) return { moved:0, normalized:0 };
+    if (DB._mxArchiveEnforcedV311) return { moved:0, normalized:0 };
     if (!Array.isArray(DB.items)) return { moved:0, normalized:0 };
     if (!Array.isArray(DB.archivedItems)) DB.archivedItems = [];
-    const TARGET_CODES = new Set(['M-3X-01','M-3X-02','M-3X-03','M-3X-04','M-3X-05']);
+    const TARGET_CODES = new Set(['M-3X-01','M-3X-02','M-3X-03','M-3X-04','M-3X-05','M-3X-07','M-3X-08']);
     const ARCHIVE_DATE = '2026-04-23';
     let moved = 0, normalized = 0;
     // 1) items → archivedItems 이동
@@ -5349,13 +5349,13 @@ function enforceMxArchiveV310() {
         normalized++;
       }
     });
-    DB._mxArchiveEnforcedV310 = true;
+    DB._mxArchiveEnforcedV311 = true;
     try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
     if (moved > 0 || normalized > 0) {
-      console.log(`✅ v1.9.310 M-3X-01~05 아카이브 강제 적용 — 이동 ${moved}건, 보강 ${normalized}건`);
+      console.log(`✅ v1.9.311 M-3X-01~05/07~08 아카이브 강제 적용 — 이동 ${moved}건, 보강 ${normalized}건`);
     }
     return { moved, normalized };
-  } catch (e) { console.warn('v1.9.310 archive enforce skipped:', e); return { moved:0, normalized:0 }; }
+  } catch (e) { console.warn('v1.9.311 archive enforce skipped:', e); return { moved:0, normalized:0 }; }
 }
 (function enforceMxArchiveV310IIFE() { enforceMxArchiveV310(); })();
 
@@ -25027,20 +25027,20 @@ function initERPWhenReady() {
           }
         }
       } catch (e) { console.warn('v1.9.218 post-merge dedup skipped:', e); }
-      // v1.9.310 — Firestore 병합 직후 M-3X-01~05 아카이브 강제 재적용
+      // v1.9.311 — Firestore 병합 직후 M-3X-01~05 + M-3X-07~08 아카이브 강제 재적용
       //   IIFE 단계에선 로컬 localStorage 기준으로만 실행되므로, Firestore 에서
       //   items 로 복구된 경우를 다시 덮어쓰기 위해 이 시점에 한 번 더 실행.
       let _mxArchiveResaveNeeded = false;
       try {
         if (typeof enforceMxArchiveV310 === 'function') {
           // 머지로 플래그가 덮어써졌을 가능성이 있으므로 강제 재실행
-          if (DB._mxArchiveEnforcedV310) delete DB._mxArchiveEnforcedV310;
+          if (DB._mxArchiveEnforcedV311) delete DB._mxArchiveEnforcedV311;
           const r2 = enforceMxArchiveV310();
           if ((r2.moved || 0) > 0 || (r2.normalized || 0) > 0) {
             _mxArchiveResaveNeeded = true;
           }
         }
-      } catch (e) { console.warn('v1.9.310 post-merge enforce skipped:', e); }
+      } catch (e) { console.warn('v1.9.311 post-merge enforce skipped:', e); }
       try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
       _firestoreDataLoaded = true;  // ✅ Firestore 쓰기 허용
       console.log('✅ Firestore 데이터 로드 완료 — Firestore 쓰기 활성화');
@@ -25071,12 +25071,12 @@ function initERPWhenReady() {
           saveData();
         }
       }
-      // v1.9.310 — M-3X-01~05 아카이브 강제 적용 후 Firestore 재저장
+      // v1.9.311 — M-3X-01~05 + M-3X-07~08 아카이브 강제 적용 후 Firestore 재저장
       //   items 에서 archivedItems 로 이동한 결과를 Firestore 에 반영해 다음 로드에서 되돌아오지 않도록 한다.
       if (_mxArchiveResaveNeeded && !_needsResaveToFirestore && !_v218DedupResaveNeeded) {
-        console.log('💾 [v1.9.310] M-3X-01~05 아카이브 결과 Firestore 재저장');
+        console.log('💾 [v1.9.311] M-3X-01~05/07~08 아카이브 결과 Firestore 재저장');
         if (typeof _doSaveData === 'function') {
-          _doSaveData().catch(e => console.warn('v310 archive resave 실패:', e));
+          _doSaveData().catch(e => console.warn('v311 archive resave 실패:', e));
         } else if (typeof saveData === 'function') {
           saveData();
         }
