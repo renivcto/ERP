@@ -1267,7 +1267,11 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="page" id="page-item">
       <div style="display:flex;justify-content:space-between;margin-bottom:14px;gap:8px;flex-wrap:wrap;align-items:center">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <div style="display:flex;gap:0;flex-wrap:wrap;align-items:center" id="item-filter-chips"></div>
+          <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start">
+            <div style="display:flex;gap:0;flex-wrap:wrap;align-items:center" id="item-filter-chips"></div>
+            <!-- v1.9.314 — 제품 라인(코드 접두어) 하위 필터 칩 -->
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center" id="item-product-line-chips"></div>
+          </div>
           <button class="btn btn-primary btn-sm pg-topbar-btn" style="margin-left:6px" onclick="if(requireWrite()){editingId['add-item']=null;const db=$('item-delete-btn');if(db)db.style.display='none';$('i-type').value=(itemFilter&&itemFilter!=='전체')?itemFilter:'';populateItemVendorSelect();updateBomCostBtnState();updateItemNameEnState();if($('i-name-en'))$('i-name-en').value='';$('i-code').value='';$('i-name').value='';$('i-spec').value='';$('i-price').value='';$('i-stock').value=0;$('i-material').value='';$('i-note').value='';if($('i-barcode'))$('i-barcode').value='';if($('i-vendor'))$('i-vendor').value='';const prev=$('i-img-preview');if(prev)prev.innerHTML='📷';const imgIn=$('i-img');if(imgIn){imgIn.value='';delete imgIn.dataset.compressed;}const bcPrev=$('i-barcode-preview');if(bcPrev)bcPrev.innerHTML='바코드 이미지';const bcIn=$('i-barcode-img');if(bcIn)bcIn.value='';const qExist=$('i-quote-existing');if(qExist)qExist.style.display='none';const qPrev=$('i-quote-preview');if(qPrev)qPrev.innerHTML='';const qFile=$('i-quote-file');if(qFile)qFile.value='';window._clearQuoteFile=false;openModal('add-item')}">+ 품목 등록</button>
           <button class="btn btn-sm" id="archive-items-btn" onclick="archiveSelectedItems()" style="background:#f0f0f0;color:#666;border:1px solid #d0d0d0;font-size:12px;padding:5px 12px;display:none">📥 아카이브</button>
         </div>
@@ -9384,6 +9388,22 @@ function sortByCode(a, b) {
   return ca.localeCompare(cb, 'ko', { numeric: true, sensitivity: 'base' });
 }
 
+// v1.9.314 — 제품 라인(코드 접두어) 필터
+//   품목코드 구조: [M|O|P]-[라인코드]-[순번]  (예: M-3X-01, O-3X-02, P-GS-01, M-6E-01)
+//   두 번째 세그먼트 '3X' / 'GS' / '6E' 등이 제품 라인 식별자.
+//   라벨 맵에 없는 라인은 코드 그대로 표시.
+if (typeof window.itemProductLineFilter === 'undefined') window.itemProductLineFilter = '전체';
+const PRODUCT_LINE_LABELS = {
+  '3X': '🧴 3중 장벽 크림',
+  'GS': '💧 글로우샷',
+  '6E': '✨ 에센스'
+};
+function _extractProductLine(code) {
+  if (!code) return '';
+  const parts = String(code).split('-');
+  return parts.length >= 2 ? parts[1] : '';
+}
+
 function renderItemTable() {
   const fixedTypes = ['원자재','부자재','OEM','외주가공','완제품'];
   const extraTypes = [...new Set(DB.items.map(i=>i.type))].filter(t => !fixedTypes.includes(t));
@@ -9402,10 +9422,50 @@ function renderItemTable() {
     const bg = isActive ? (c.activeBg||c.bg) : c.bg;
     const txtColor = isActive ? (c.activeText||c.text) : c.text;
     const border = isActive ? (c.activeBg||c.border) : c.border;
-    return `<div onclick="itemFilter='${t}';renderItemTable()" class="pg-chip${isActive?' active':''}" style="background:${bg};color:${txtColor};border-color:${border};${isActive?'':'border-bottom-color:transparent'}">${t}(${t==='전체'?DB.items.length:(DB.items||[]).filter(i=>i.type===t).length})</div>`;
+    return `<div onclick="itemFilter='${t}';window.itemProductLineFilter='전체';renderItemTable()" class="pg-chip${isActive?' active':''}" style="background:${bg};color:${txtColor};border-color:${border};${isActive?'':'border-bottom-color:transparent'}">${t}(${t==='전체'?DB.items.length:(DB.items||[]).filter(i=>i.type===t).length})</div>`;
   }).join('');
+
+  // v1.9.314 — 제품 라인 하위 필터 칩 렌더 (현재 분류 탭에 존재하는 라인만)
+  const plChipsEl = $('item-product-line-chips');
+  if (plChipsEl) {
+    const baseList = DB.items.filter(i => itemFilter==='전체' || i.type===itemFilter);
+    const lineCounts = {};
+    baseList.forEach(i => {
+      const ln = _extractProductLine(i.code);
+      if (!ln) return;
+      lineCounts[ln] = (lineCounts[ln] || 0) + 1;
+    });
+    const lines = Object.keys(lineCounts).sort();
+    // 라인이 2개 이상일 때만 노출 (1개면 필터 의미 없음)
+    if (lines.length >= 2) {
+      const mkChip = (key, label, count, isActive) => {
+        const bg = isActive ? '#0f172a' : '#f8fafc';
+        const color = isActive ? '#fff' : '#475569';
+        const border = isActive ? '#0f172a' : '#e2e8f0';
+        return `<div onclick="window.itemProductLineFilter='${key}';renderItemTable()" style="display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:999px;font-size:11.5px;font-weight:${isActive?700:600};cursor:pointer;background:${bg};color:${color};border:1px solid ${border};transition:all .12s;letter-spacing:-.1px">${label}<span style="background:${isActive?'rgba(255,255,255,0.2)':'#e2e8f0'};color:${isActive?'#fff':'#64748b'};padding:1px 6px;border-radius:99px;font-size:10px;font-weight:700">${count}</span></div>`;
+      };
+      const totalCount = baseList.length;
+      let html = `<span style="font-size:11px;color:var(--gray-500);font-weight:600;margin-right:2px">제품 라인:</span>`;
+      html += mkChip('전체', '전체', totalCount, window.itemProductLineFilter === '전체');
+      lines.forEach(ln => {
+        const label = PRODUCT_LINE_LABELS[ln] || ln;
+        html += mkChip(ln, label, lineCounts[ln], window.itemProductLineFilter === ln);
+      });
+      plChipsEl.innerHTML = html;
+      plChipsEl.style.display = '';
+    } else {
+      plChipsEl.innerHTML = '';
+      plChipsEl.style.display = 'none';
+      window.itemProductLineFilter = '전체';
+    }
+  }
+
   const search = ($('item-search') ? $('item-search').value : '').toLowerCase();
   let filtered = DB.items.filter(i => itemFilter==='전체' || i.type===itemFilter);
+  // v1.9.314 — 제품 라인 필터 적용
+  if (window.itemProductLineFilter && window.itemProductLineFilter !== '전체') {
+    filtered = filtered.filter(i => _extractProductLine(i.code) === window.itemProductLineFilter);
+  }
   if (search) filtered = filtered.filter(i => i.name.toLowerCase().includes(search) || i.code.toLowerCase().includes(search));
   filtered = filtered.slice().sort((a,b) => sortByCode(a,b));
   const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray',외주가공:'gray'})[t]||'gray';
