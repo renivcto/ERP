@@ -1385,6 +1385,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div style="display:flex;gap:0;flex-wrap:wrap;align-items:flex-end" id="prod-filter-chips"></div>
         <button class="btn btn-sm pg-topbar-btn" style="background:#800020;color:#fff;border:1px solid #6a001b" onclick="if(requireWrite())openProductionModal()">+ 완제품 생산등록</button>
       </div>
+      <!-- v1.9.318 — 제품 라인 하위 필터 칩: 활성 상태 탭 정중앙 아래 정렬 -->
+      <div id="prod-product-line-chips" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-start;margin-bottom:14px"></div>
       <div class="card">
         <div class="card-body p0 tbl-wrap">
           <table>
@@ -9400,11 +9402,14 @@ function _extractProductLine(code) {
 
 // v1.9.317 — 활성 분류 탭의 정중앙 아래로 제품 라인 칩 행을 정렬
 //   탭마다 너비가 달라 CSS 만으로는 표현 불가 → JS 로 getBoundingClientRect 측정 후 padding-left 보정
-function _alignProductLineChipsUnderActiveTab() {
+//   v1.9.318 — 품목 현황뿐 아니라 생산 현황 등 다른 페이지에서도 재사용 가능하도록 파라미터화
+function _alignProductLineChipsUnderActiveTab(rowId, tabsContainerId) {
   try {
-    const row = document.getElementById('item-product-line-chips');
+    const _rowId  = rowId || 'item-product-line-chips';
+    const _tabsId = tabsContainerId || 'item-filter-chips';
+    const row = document.getElementById(_rowId);
     if (!row || row.style.display === 'none' || !row.children.length) return;
-    const activeTab = document.querySelector('#item-filter-chips .pg-chip.active');
+    const activeTab = document.querySelector('#' + _tabsId + ' .pg-chip.active');
     if (!activeTab) return;
     const tabRect = activeTab.getBoundingClientRect();
     const rowRect = row.getBoundingClientRect();
@@ -9425,11 +9430,13 @@ function _alignProductLineChipsUnderActiveTab() {
   } catch (e) { console.warn('_alignProductLineChipsUnderActiveTab:', e); }
 }
 
-// 윈도우 리사이즈 시 품목 현황 페이지가 활성이면 재정렬
+// 윈도우 리사이즈 시 현재 활성 페이지에 따라 재정렬
 window.addEventListener('resize', () => {
   try {
-    const pg = document.getElementById('page-item');
-    if (pg && pg.classList.contains('active')) _alignProductLineChipsUnderActiveTab();
+    const itemPg = document.getElementById('page-item');
+    if (itemPg && itemPg.classList.contains('active')) _alignProductLineChipsUnderActiveTab('item-product-line-chips', 'item-filter-chips');
+    const prodPg = document.getElementById('page-production');
+    if (prodPg && prodPg.classList.contains('active')) _alignProductLineChipsUnderActiveTab('prod-product-line-chips', 'prod-filter-chips');
   } catch(_){}
 });
 
@@ -9484,7 +9491,7 @@ function renderItemTable() {
       // v1.9.317 — 페이지 가운데가 아니라 "활성 분류 탭의 정중앙 아래" 에 칩 행을 정렬
       //            renderItemTable 이 호출될 때마다 재계산 (탭 선택 변경, 검색 등)
       //            레이아웃이 적용된 다음 프레임에 측정·보정
-      requestAnimationFrame(() => _alignProductLineChipsUnderActiveTab());
+      requestAnimationFrame(() => _alignProductLineChipsUnderActiveTab('item-product-line-chips', 'item-filter-chips'));
     } else {
       plChipsEl.innerHTML = '';
       plChipsEl.style.display = 'none';
@@ -11473,8 +11480,44 @@ function renderProdTable() {
     const c = prodChipColors[s] || prodChipColors['전체'];
     const isActive = s === prodFilter;
     const cnt = s==='전체' ? prodAll.length : prodAll.filter(p=>p.status===s).length;
-    return `<div onclick="prodFilter='${s}';renderProdTable()" class="pg-chip${isActive?' active':''}" style="background:${isActive?(c.activeBg||c.bg):c.bg};color:${isActive?(c.activeText||c.text):c.text};border-color:${isActive?(c.activeBg||c.border):c.border};${isActive?'':'border-bottom-color:transparent'}">${s}(${cnt})</div>`;
+    // 상태 탭 클릭 시 제품 라인 필터 초기화
+    return `<div onclick="prodFilter='${s}';window.prodProductLineFilter='전체';renderProdTable()" class="pg-chip${isActive?' active':''}" style="background:${isActive?(c.activeBg||c.bg):c.bg};color:${isActive?(c.activeText||c.text):c.text};border-color:${isActive?(c.activeBg||c.border):c.border};${isActive?'':'border-bottom-color:transparent'}">${s}(${cnt})</div>`;
   }).join('');
+
+  // v1.9.318 — 제품 라인 하위 필터 칩 렌더
+  if (typeof window.prodProductLineFilter === 'undefined') window.prodProductLineFilter = '전체';
+  const prodPlEl = $('prod-product-line-chips');
+  if (prodPlEl) {
+    // 현재 선택된 상태 탭 기준 생산 레코드에서 제품 라인 추출
+    const baseList = prodFilter === '전체' ? prodAll : prodAll.filter(p => p.status === prodFilter);
+    const lineCounts = {};
+    baseList.forEach(p => {
+      const it = getItem(p.productId);
+      const code = (it && it.code) || '';
+      const ln = _extractProductLine(code);
+      if (!ln) return;
+      lineCounts[ln] = (lineCounts[ln] || 0) + 1;
+    });
+    const lines = Object.keys(lineCounts).sort();
+    if (lines.length >= 2) {
+      const mkChip = (key, label, count, isActive) => {
+        const bg = isActive ? '#0f172a' : '#f8fafc';
+        const color = isActive ? '#fff' : '#475569';
+        const border = isActive ? '#0f172a' : '#e2e8f0';
+        const nextKey = isActive ? '전체' : key;
+        return `<div onclick="window.prodProductLineFilter='${nextKey}';renderProdTable()" title="${isActive?'클릭해 해제':''}" style="display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:999px;font-size:11.5px;font-weight:${isActive?700:600};cursor:pointer;background:${bg};color:${color};border:1px solid ${border};transition:all .12s;letter-spacing:-.1px">${label}<span style="background:${isActive?'rgba(255,255,255,0.2)':'#e2e8f0'};color:${isActive?'#fff':'#64748b'};padding:1px 6px;border-radius:99px;font-size:10px;font-weight:700">${count}</span></div>`;
+      };
+      let html = '';
+      lines.forEach(ln => { html += mkChip(ln, ln, lineCounts[ln], window.prodProductLineFilter === ln); });
+      prodPlEl.innerHTML = html;
+      prodPlEl.style.display = 'flex';
+      requestAnimationFrame(() => _alignProductLineChipsUnderActiveTab('prod-product-line-chips', 'prod-filter-chips'));
+    } else {
+      prodPlEl.innerHTML = '';
+      prodPlEl.style.display = 'none';
+      window.prodProductLineFilter = '전체';
+    }
+  }
   // v1.9.292: 1차 상태 그룹 순서 → 2차 입고예정일(inDate) 오름차순 (과거 → 미래). 빈 입고일은 해당 그룹 맨 뒤.
   const statusOrder = {생산중:0, 지연:1, QC검사:2, 생산완료:3, 입고완료:4};
   const allSorted = [...prodAll].sort((a,b)=>{
@@ -11487,7 +11530,14 @@ function renderProdTable() {
     if (!bd) return -1;
     return ad.localeCompare(bd);
   });
-  const filtered = prodFilter==='전체' ? allSorted : allSorted.filter(p=>p.status===prodFilter);
+  let filtered = prodFilter==='전체' ? allSorted : allSorted.filter(p=>p.status===prodFilter);
+  // v1.9.318 — 제품 라인 필터 적용
+  if (window.prodProductLineFilter && window.prodProductLineFilter !== '전체') {
+    filtered = filtered.filter(p => {
+      const it = getItem(p.productId);
+      return _extractProductLine((it && it.code) || '') === window.prodProductLineFilter;
+    });
+  }
   const statusColor = {입고완료:'var(--green-500)',생산중:'var(--sky-400)',생산완료:'var(--green-400)',생산대기:'var(--amber-500)',지연:'var(--red-500)',QC검사:'var(--purple-500)'};
   $('prod-table').innerHTML = filtered.map(p => {
     const item = getItem(p.productId);
