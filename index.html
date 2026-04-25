@@ -19622,20 +19622,29 @@ async function loadTrelloCards() {
       localStorage.setItem('reniv_trello_lists2', JSON.stringify(lists2));
       localStorage.setItem('reniv_trello_cards2', JSON.stringify(cards2));
     } catch(e) {}
-    // v1.9.261 — saveData() 디바운스 대신 saveDataNow() 즉시 저장 → 새로고침 레이스 방지
-    try {
-      if (typeof saveDataNow === 'function') await saveDataNow();
-      else saveData();
-    } catch(e) { console.warn('Trello 동기화 저장 실패:', e); }
 
+    // v1.9.326 — 즉시 렌더링: localStorage 저장은 이미 끝났으므로 화면을 바로 갱신.
+    //            Firestore 동기화는 백그라운드(비-await)로 돌려 사용자 대기 시간 제거.
+    //            (이전에는 saveDataNow() 를 await 하느라 두 보드 카드가 화면에 반영되기까지 수십 초 걸렸음)
     const totalCards = cards.length + cards2.length;
     showNotif(`✅ Trello 카드 ${totalCards}개 로드 (신제품 ${cards.length} / 운영 ${cards2.length})`, 'success');
     if (statusEl) statusEl.innerHTML = `<span style="color:var(--green-600)">✅ 총 ${totalCards}개 카드 로드 완료</span>`;
-
-    // v1.9.261 — 캘린더도 즉시 재렌더링 (기존엔 칸반만 갱신됨)
     try { renderKanban(); } catch(_){}
     try { renderDashKanban(); } catch(_){}
     try { if (typeof renderTrelloCalendar === 'function') renderTrelloCalendar(); } catch(_){}
+    try { if (typeof renderDashTimeline === 'function') renderDashTimeline(); } catch(_){}
+    try { if (typeof updateWorkflowNewBadges === 'function') updateWorkflowNewBadges(); } catch(_){}
+
+    // 백그라운드 Firestore 동기화 (실패해도 localStorage 안전)
+    (async () => {
+      try {
+        if (typeof saveDataNow === 'function') await saveDataNow();
+        else if (typeof saveData === 'function') saveData();
+      } catch(e) {
+        console.warn('Trello 동기화 Firestore 저장 실패(localStorage에는 저장됨):', e);
+        try { showNotif('☁️ 클라우드 동기화 실패 — 로컬에는 저장되었습니다', 'warning'); } catch(_){}
+      }
+    })();
 
   } catch(e) {
     console.error('Trello error:', e);
