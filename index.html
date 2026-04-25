@@ -17321,7 +17321,7 @@ function openApprovalDetail(approvalId) {
         </div>
       </div>
       <!-- 문서 본문 -->
-      ${a.note?`<div style="padding:18px 22px;font-size:13.5px;color:#1e293b;white-space:pre-wrap;line-height:1.75;font-family:'Noto Sans KR',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">${(a.note||'').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`:'<div style="padding:18px 22px;color:#94a3b8;font-size:12.5px;font-style:italic">(본문 내용 없음)</div>'}
+      ${a.note?`<div style="padding:18px 22px;font-size:13.5px;color:#1e293b;white-space:pre-wrap;line-height:1.75;font-family:'Noto Sans KR',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">${(a.note||'').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`:''}
       ${attaches.length?`<div style="padding:0 20px 16px">${attachHtml.replace('margin-top:10px','margin-top:0')}</div>`:''}
     </div>
     ${renderCommentSectionShell()}
@@ -18259,7 +18259,11 @@ function openExpenseDetail(expenseId) {
 // v1.9.208: 의견 입력 섹션 (공통 쉘) — 이모지 드롭다운 + 2줄 textarea + 대댓글 지원
 function renderCommentSectionShell() {
   return `
-    <div style="font-size:14.5px;font-weight:700;color:var(--gray-700);margin-bottom:10px;display:flex;align-items:center;gap:6px">💬 의견을 남겨 주세요</div>
+    <!-- v1.9.332: 의견 영역 헤더 강조 — 글씨 크기/색상 업, 좌측 컬러 바 -->
+    <div style="display:flex;align-items:center;gap:8px;margin:18px 0 12px 0;padding:10px 14px;background:linear-gradient(90deg,#eef2ff,#f5f3ff);border-left:4px solid #6366f1;border-radius:8px">
+      <span style="font-size:18px">💬</span>
+      <span style="font-size:16px;font-weight:800;color:#3730a3;letter-spacing:-.2px">의견을 남겨 주세요</span>
+    </div>
     <div id="ap-comments-list" style="margin-bottom:12px"></div>
     <div id="ap-reply-hint" style="display:none;font-size:11.5px;color:var(--sky-700);background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:6px 10px;margin-bottom:6px;align-items:center;justify-content:space-between">
       <span id="ap-reply-hint-text"></span>
@@ -18330,8 +18334,10 @@ function _renderApCommentNode(c, depth) {
     <div style="font-size:14px;color:var(--gray-800);white-space:pre-wrap;line-height:1.55">${(c.text||'').replace(/</g,'&lt;')}</div>
     ${reactionBadges?`<div style="margin-top:8px">${reactionBadges}</div>`:''}
     <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <button onclick="event.stopPropagation();toggleApReactionPicker(this, ${c.id})" title="감정 표현" style="background:#fff;border:1px solid var(--gray-200);border-radius:999px;padding:3px 10px;font-size:12.5px;cursor:pointer;color:var(--gray-600)" onmouseenter="this.style.background='#f9fafb'" onmouseleave="this.style.background='#fff'">😊 감정 남기기</button>
-      ${depth < 3 ? `<button onclick="replyToApComment(${c.id})" style="background:#fff;border:1px solid var(--gray-200);border-radius:999px;padding:3px 10px;font-size:12.5px;cursor:pointer;color:var(--sky-700)" onmouseenter="this.style.background='#f0f9ff'" onmouseleave="this.style.background='#fff'">💬 답글</button>` : ''}
+      <!-- v1.9.332: 텍스트 제거, 이모지만 표시 (원형 버튼) -->
+      <button onclick="event.stopPropagation();toggleApReactionPicker(this, ${c.id})" title="감정 표현" style="background:#fff;border:1px solid var(--gray-200);border-radius:50%;width:30px;height:30px;padding:0;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1" onmouseenter="this.style.background='#f3f4f6';this.style.borderColor='var(--sky-400)'" onmouseleave="this.style.background='#fff';this.style.borderColor='var(--gray-200)'">😊</button>
+      <!-- v1.9.332: 답글 버튼에 배경색 추가해 가시성 개선 -->
+      ${depth < 3 ? `<button onclick="replyToApComment(${c.id})" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:999px;padding:4px 12px;font-size:12.5px;font-weight:700;cursor:pointer;color:#1d4ed8" onmouseenter="this.style.background='#dbeafe';this.style.borderColor='#93c5fd'" onmouseleave="this.style.background='#eff6ff';this.style.borderColor='#bfdbfe'">💬 답글</button>` : ''}
       <button onclick="deleteComment(${c.id})" style="background:transparent;border:none;cursor:pointer;color:#9ca3af;font-size:11.5px;margin-left:auto;text-decoration:underline">삭제</button>
     </div>
   </div>`;
@@ -18415,7 +18421,11 @@ function toggleReaction(commentId, emoji) {
   if (!c.reactions) c.reactions = {};
   // 단순 토글 카운트 방식 유지 (숫자 증가)
   c.reactions[emoji] = (c.reactions[emoji] || 0) + 1;
-  try { saveData(); } catch(_){}
+  // v1.9.332: 디바운스(saveData)는 새로고침 직전에 유실될 수 있어 즉시 저장으로 변경
+  try {
+    if (typeof saveDataNow === 'function') saveDataNow().catch(e => console.warn('감정 저장 실패:', e));
+    else if (typeof saveData === 'function') saveData();
+  } catch(_){}
   renderApprovalComments(c.approvalId);
 }
 
