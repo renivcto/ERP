@@ -14880,6 +14880,8 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
 
   // 2) 지출결의서 동기화 (선입금 / 잔금)
   const pct = parseFloat(o.prepayPercent) || 0;
+  // v1.9.323: 텍스트 표시용 1 소수점 반올림 (계산은 정밀값 그대로)
+  const pctDisp = Math.round(pct * 10) / 10;
   const total = apAmount;
   const prepay = Math.round(total * pct / 100);
   const balance = total - prepay;
@@ -14893,7 +14895,7 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
         approvalId: ap.id,
         orderId,
         category: 'po_prepay',
-        title: `[선입금 ${pct}%] ${vendorName(o.vendorId)}`,
+        title: `[선입금 ${pctDisp}%] ${vendorName(o.vendorId)}`,
         vendor: vendorName(o.vendorId),
         amount: prepay,
         dueDate: o.orderDate || '',
@@ -14902,7 +14904,7 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
         taxInvoice: '미수령',
         urgent: !!o.urgentPrepay,  // v1.9.210: 선급금 전용 응급 플래그
         createdAt: Date.now(),
-        note: `${pct}% 선입금 (발주금액 VAT포함 ${fmtWon(total)})`,
+        note: `${pctDisp}% 선입금 (발주금액 VAT포함 ${fmtWon(total)})`,
       };
       DB.expenses.push(expPre);
       // v1.9.280: 발주서 수정 시에는 슬랙 알림을 보내지 않음 (신규 작성 · !isEdit 일 때만 발송)
@@ -14910,11 +14912,11 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
         slackNotify('pay_request', expPre);
       }
     } else {
-      expPre.title = `[선입금 ${pct}%] ${vendorName(o.vendorId)}`;
+      expPre.title = `[선입금 ${pctDisp}%] ${vendorName(o.vendorId)}`;
       expPre.vendor = vendorName(o.vendorId);
       expPre.amount = prepay;
       expPre.urgent = !!o.urgentPrepay;  // v1.9.210
-      expPre.note = `${pct}% 선입금 (발주금액 VAT포함 ${fmtWon(total)})`;
+      expPre.note = `${pctDisp}% 선입금 (발주금액 VAT포함 ${fmtWon(total)})`;
     }
   } else if (expPre) {
     // 선입금% 0으로 수정 시: 아직 미지급이면 삭제, 지급됐으면 남김
@@ -14926,6 +14928,8 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
 
   // 잔금 expense
   let expBal = DB.expenses.find(e => e.category === 'po_balance' && e.orderId === orderId);
+  // v1.9.323: 잔금 표시용 1 소수점 반올림
+  const balPctDisp = Math.round((100 - pct) * 10) / 10;
   if (balance > 0) {
     if (!expBal) {
       expBal = {
@@ -14933,7 +14937,7 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
         approvalId: ap.id,
         orderId,
         category: 'po_balance',
-        title: `[잔금 ${100-pct}%] ${vendorName(o.vendorId)}`,
+        title: `[잔금 ${balPctDisp}%] ${vendorName(o.vendorId)}`,
         vendor: vendorName(o.vendorId),
         amount: balance,
         dueDate: o.balanceDueDate || o.payDate || '',
@@ -14942,16 +14946,16 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
         taxInvoice: '미수령',
         urgent: !!o.urgentBalance,  // v1.9.210: 잔금 전용 응급 플래그
         createdAt: Date.now(),
-        note: `${100-pct}% 잔금 (발주금액 VAT포함 ${fmtWon(total)})`,
+        note: `${balPctDisp}% 잔금 (발주금액 VAT포함 ${fmtWon(total)})`,
       };
       DB.expenses.push(expBal);
     } else {
-      expBal.title = `[잔금 ${100-pct}%] ${vendorName(o.vendorId)}`;
+      expBal.title = `[잔금 ${balPctDisp}%] ${vendorName(o.vendorId)}`;
       expBal.vendor = vendorName(o.vendorId);
       expBal.amount = balance;
       expBal.dueDate = o.balanceDueDate || o.payDate || expBal.dueDate || '';
       expBal.urgent = !!o.urgentBalance;  // v1.9.210
-      expBal.note = `${100-pct}% 잔금 (발주금액 VAT포함 ${fmtWon(total)})`;
+      expBal.note = `${balPctDisp}% 잔금 (발주금액 VAT포함 ${fmtWon(total)})`;
     }
   } else if (expBal && expBal.paidStatus !== 'paid') {
     DB.expenses = DB.expenses.filter(e => e.id !== expBal.id);
@@ -15203,6 +15207,8 @@ function renderApprovalPoTable() {
     // v1.9.211: 선급금 expense — 중복 방지 (paid 우선, 가장 최근 id)
     // v1.9.212: orderId 문자열/숫자 혼재 대응 (Number 정규화)
     const prepayPct = parseFloat(o.prepayPercent) || 0;
+    // v1.9.323: 발주 리스트 표기는 1 소수점 반올림 (계산은 정밀값 그대로 사용)
+    const prepayPctDisp = Math.round(prepayPct * 10) / 10;
     const _oidNum = Number(o.id);
     const _expPreList = DB.expenses.filter(e => e && e.category === 'po_prepay' && (e.orderId === o.id || Number(e.orderId) === _oidNum));
     const expPre = _expPreList.find(e => e.paidStatus === 'paid') || _expPreList.sort((a,b)=>(b.id||0)-(a.id||0))[0];
@@ -15212,7 +15218,7 @@ function renderApprovalPoTable() {
     // v1.9.322: 금액 라인에서 (%) 제거 — 퍼센트는 버튼 안으로 이동해 중복 표기 방지
     const _preAmtLine = expPre ? `<div style="font-size:11px;color:var(--gray-600);margin-top:3px;font-weight:600">${fmtWon(expPre.amount)}</div>` : '';
     // v1.9.322: 버튼 안에 퍼센트를 넣기 위한 span 생성 (완료/예정 텍스트 옆에 작게)
-    const _prePctSpan = `<span style="font-weight:500;font-size:10px;opacity:.85;line-height:1;vertical-align:middle">(${prepayPct}%)</span>`;
+    const _prePctSpan = `<span style="font-weight:500;font-size:10px;opacity:.85;line-height:1;vertical-align:middle">(${prepayPctDisp}%)</span>`;
     if (prepayPct <= 0) {
       preCell = `<span style="color:var(--gray-400);font-size:11px">선입금 없음</span>`;
     } else if (expPre && expPre.paidStatus === 'paid') {
@@ -15224,17 +15230,18 @@ function renderApprovalPoTable() {
     } else {
       // 데이터 복구: expense가 없지만 prepayPct>0이면 fallback 표시 + 동기화 버튼
       const prepayAmt = Math.round(orderTotalVat(o) * prepayPct / 100);
-      preCell = `<div style="font-weight:700;color:#b91c1c;font-size:12.5px">${fmtWon(prepayAmt)}</div><button class="btn btn-sm" onclick="resyncOrderExpenses(${o.id})" style="background:#fde68a;color:#92400e;border:none;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;margin-top:2px;cursor:pointer" title="지출결의서 동기화">🔄 동기화 (${prepayPct}%)</button>`;
+      preCell = `<div style="font-weight:700;color:#b91c1c;font-size:12.5px">${fmtWon(prepayAmt)}</div><button class="btn btn-sm" onclick="resyncOrderExpenses(${o.id})" style="background:#fde68a;color:#92400e;border:none;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;margin-top:2px;cursor:pointer" title="지출결의서 동기화">🔄 동기화 (${prepayPctDisp}%)</button>`;
     }
     // v1.9.211: 잔금 expense — 중복 방지 (paid 우선, 가장 최근 id)
     // v1.9.212: orderId 문자열/숫자 혼재 대응
     const balPct = 100 - prepayPct;
+    const balPctDisp = Math.round(balPct * 10) / 10;
     const _expBalList = DB.expenses.filter(e => e && e.category === 'po_balance' && (e.orderId === o.id || Number(e.orderId) === _oidNum));
     const expBal = _expBalList.find(e => e.paidStatus === 'paid') || _expBalList.sort((a,b)=>(b.id||0)-(a.id||0))[0];
     let balCell;
     // v1.9.322: 금액 라인에서 (%) 제거 — 퍼센트는 버튼 안으로 이동
     const _balAmtLine = expBal ? `<div style="font-size:11px;color:var(--gray-600);margin-top:3px;font-weight:600">${fmtWon(expBal.amount)}</div>` : '';
-    const _balPctSpan = `<span style="font-weight:500;font-size:10px;opacity:.85;line-height:1;vertical-align:middle">(${balPct}%)</span>`;
+    const _balPctSpan = `<span style="font-weight:500;font-size:10px;opacity:.85;line-height:1;vertical-align:middle">(${balPctDisp}%)</span>`;
     if (balPct <= 0) {
       balCell = `<span style="color:var(--gray-400);font-size:11px">-</span>`;
     } else if (expBal && expBal.paidStatus === 'paid') {
@@ -15245,7 +15252,7 @@ function renderApprovalPoTable() {
       balCell = `<button class="btn btn-sm" onclick="openPayDatePicker(${expBal.id},${o.id},'po_balance')" title="클릭하여 지급일 선택" style="background:${urgentBalance?'#ffe4e6':'#fff4e6'};color:${urgentBalance?'#be123c':'#c2410c'};border:1px solid ${urgentBalance?'#fecdd3':'#fed7aa'};${PAY_BTN_STYLE};${urgentBalance?'animation:apBlink .9s infinite;':''}"><span style="line-height:1;vertical-align:middle">예정</span>${_balPctSpan}${urgentBalance?'<span style="margin-left:2px">🚨</span>':''}</button>${_balAmtLine}`;
     } else {
       const balAmt = Math.round(orderTotalVat(o) * balPct / 100);
-      balCell = `<div style="font-weight:700;color:#b91c1c;font-size:12.5px">${fmtWon(balAmt)}</div><button class="btn btn-sm" onclick="resyncOrderExpenses(${o.id})" style="background:#fde68a;color:#92400e;border:none;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;margin-top:2px;cursor:pointer" title="지출결의서 동기화">🔄 동기화 (${balPct}%)</button>`;
+      balCell = `<div style="font-weight:700;color:#b91c1c;font-size:12.5px">${fmtWon(balAmt)}</div><button class="btn btn-sm" onclick="resyncOrderExpenses(${o.id})" style="background:#fde68a;color:#92400e;border:none;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;margin-top:2px;cursor:pointer" title="지출결의서 동기화">🔄 동기화 (${balPctDisp}%)</button>`;
     }
     // v1.9.211: 잔금 예정일 — 잔금이 이미 완납이면 "-"로 표시 (경과일 숨김)
     // v1.9.221: "지급완료된 건은 (N일 경과) 표시 안 함" — 경과 배지는 미지급 + 예정일 지남일 때만
@@ -17600,7 +17607,7 @@ function openPoApprovalDetail(orderId) {
       ? `<span style="color:#166534;font-weight:700">✅ 지급완료${r.paidDate?` · ${r.paidDate}`:''}</span>`
       : `<span style="color:#c2410c;font-weight:700">⏳ 지급예정${r.due&&r.due!=='-'?` · ${r.due}`:''}</span>`;
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 2px;border-bottom:1px dotted #e2e8f0;font-size:12.5px">
-      <span style="color:#334155"><b>${label}</b> <span style="color:#64748b;font-size:11.5px">(${pct}%)</span></span>
+      <span style="color:#334155"><b>${label}</b> <span style="color:#64748b;font-size:11.5px">(${Math.round(pct * 10) / 10}%)</span></span>
       <span style="display:flex;align-items:center;gap:12px">
         <span style="color:#0f172a;font-weight:700;font-variant-numeric:tabular-nums">${fmtWon(r.amt)}</span>
         ${st}
@@ -17862,7 +17869,7 @@ function openPoApprovalPage(orderId) {
       ? `<span style="color:#166534;font-weight:700">✅ 지급완료${r.paidDate?` · ${r.paidDate}`:''}</span>`
       : `<span style="color:#c2410c;font-weight:700">⏳ 지급예정${r.due&&r.due!=='-'?` · ${r.due}`:''}</span>`;
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 2px;border-bottom:1px dotted #e2e8f0;font-size:12.5px">
-      <span style="color:#334155"><b>${label}</b> <span style="color:#64748b;font-size:11.5px">(${pct}%)</span></span>
+      <span style="color:#334155"><b>${label}</b> <span style="color:#64748b;font-size:11.5px">(${Math.round(pct * 10) / 10}%)</span></span>
       <span style="display:flex;align-items:center;gap:12px">
         <span style="color:#0f172a;font-weight:700;font-variant-numeric:tabular-nums">${fmtWon(r.amt)}</span>
         ${st}
@@ -18925,7 +18932,8 @@ function openExpenseApprovalForm(expenseId) {
     if (ord) {
       poSerial = ord.serial || ('PO-'+String(ord.id).padStart(3,'0'));
       const prepayPct = parseFloat(ord.prepayPercent) || 0;
-      percent = e.category === 'po_prepay' ? prepayPct : (100 - prepayPct);
+      // v1.9.323: 표시용 1 소수점 반올림
+      percent = Math.round((e.category === 'po_prepay' ? prepayPct : (100 - prepayPct)) * 10) / 10;
       execRows = (ord.rows||[]).map((r,i) => ({
         no: i+1,
         name: r.name || '-',
