@@ -15294,10 +15294,9 @@ function renderApprovalPoTable() {
     const urgentBadge = urgentAny && urgentLabels.length
       ? `<span title="${urgentLabels.join(', ')} 응급" style="display:inline-block;background:#fecdd3;color:#9f1239;border:1px solid #fda4af;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:800;margin-right:4px;animation:apPulseBadge .9s infinite">🚨 ${urgentLabels.join('·')}</span>`
       : '';
-    // v1.9.208/329: 코멘트 수 표시
-    //   · 발주서(o.id)에 연결된 모든 결재(po_approval) 레코드의 id 를 모아 그 중 하나에라도
-    //     매칭되는 코멘트를 카운트 (string/number 혼재 안전).
-    //   · 일부 환경에서 코멘트가 결재 레코드 대신 발주서 id 로 직접 저장된 경우도 fallback 인정.
+    // v1.9.208/329/331: 코멘트 수 표시
+    //   · 발주서(o.id)에 연결된 모든 결재(po_approval) 레코드의 id 집합과 매칭되는 코멘트만 카운트
+    //   · 발주서 ID 와 결재 ID 는 별개 ID 공간이므로 숫자 우연 일치를 카운트하지 않도록 주의
     const _oidStr = String(o.id);
     const _apIdSet = new Set(
       (DB.approvals||[])
@@ -15306,11 +15305,7 @@ function renderApprovalPoTable() {
     );
     const cmtCount = (DB.approvalComments||[]).reduce((cnt, c) => {
       if (!c) return cnt;
-      const cid = String(c.approvalId);
-      if (_apIdSet.has(cid)) return cnt + 1;
-      // 레거시 fallback: approvalId 가 발주서 id 로 저장된 경우
-      if (cid === _oidStr) return cnt + 1;
-      return cnt;
+      return _apIdSet.has(String(c.approvalId)) ? cnt + 1 : cnt;
     }, 0);
     // v1.9.330: 카운트 배지를 버튼 우측 상단 모서리 알림 스타일로 띄움 (버튼 크기 불변)
     const cmtBadge = cmtCount > 0
@@ -17290,7 +17285,16 @@ function openApprovalDetail(approvalId) {
         ? `<span style="display:inline-block;background:#f5f3ff;color:#6d28d9;border:1px solid #ddd6fe;font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px">📋 사전 품의</span>`
         : `<span style="display:inline-block;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px">🚀 실행 기안</span>`)
     : '';
-  const _statusBadge = a.status === 'approved'
+  // v1.9.331: po_approval 의 경우 연결 발주서의 도장 PDF/'날인 불필요' 상태도 결재 완료로 인정
+  //           (발주 리스트 렌더와 동일한 판정 — a.status 미동기화 데이터 호환)
+  let _isApproved = a.status === 'approved';
+  if (!_isApproved && a.type === 'po_approval' && a.refId != null) {
+    const _linkedOrd = (DB.orders||[]).find(o => o && (o.id === a.refId || Number(o.id) === Number(a.refId)));
+    if (_linkedOrd && (_linkedOrd.stampData || _linkedOrd.stampName || _linkedOrd.stampNotRequired)) {
+      _isApproved = true;
+    }
+  }
+  const _statusBadge = _isApproved
     ? `<span style="display:inline-block;background:#dcfce7;color:#166534;border:1px solid #86efac;font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px">✅ 결재 완료</span>`
     : `<span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fde68a;font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px">⏳ 대기</span>`;
   const _dateStr = a.createdAt ? new Date(a.createdAt).toLocaleString('ko-KR', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
