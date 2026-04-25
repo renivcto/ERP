@@ -3301,7 +3301,7 @@ EXP YYYYMMDD 까지</textarea></div>
             <!-- 선입금 비율 (좁게) -->
             <div style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap">
               <span style="font-size:12.5px;color:var(--gray-700);font-weight:600">선입금 비율</span>
-              <input class="fi" id="o-prepay-pct" type="number" min="0" max="100" step="1" value="0" oninput="updatePrepayPreview()" placeholder="0" style="width:64px;text-align:center;padding:6px 8px">
+              <input class="fi" id="o-prepay-pct" type="number" min="0" max="100" step="any" value="0" oninput="updatePrepayPreview()" placeholder="0" style="width:64px;text-align:center;padding:6px 8px">
               <span style="font-size:12.5px;color:var(--gray-500)">%</span>
             </div>
             <!-- 선입금/잔금 금액 (퍼센트 포함) -->
@@ -14753,9 +14753,10 @@ ${cleanContent}
 let _apCurrentTab = 'po';
 let _apExpFilter = 'all';
 
-// v1.9.319 — 선입금 금액을 직접 편집 가능. 금액을 수정하면 비율(o-prepay-pct)이 자동 역산됨.
-//   · onPrepayAmtInput(): 사용자가 금액 input에 입력할 때 호출 → 비율 재계산 + 잔금/% 라벨만 갱신 (input 자체는 재구성하지 않음)
-//   · onblur 시 updatePrepayPreview() 가 호출되어 포맷팅된 값으로 깔끔하게 재렌더
+// v1.9.319/320 — 선입금 금액 직접 편집 + VAT 포함 금액 표시 + 비율 4자리 정밀도
+//   · 금액 표시는 부가세 포함 (실제 지급/지출결의서 기준과 일치)
+//   · 사용자가 금액 input 을 수정하면 비율(o-prepay-pct)이 4 소수점 정밀도로 역산되어 round-trip 손실 없음
+//   · 라벨은 1 소수점으로 깔끔하게 표시(48.2%), input 내부 값은 정밀(48.2315)
 function updatePrepayPreview() {
   try {
     const pct = parseFloat(($('o-prepay-pct')||{}).value) || 0;
@@ -14766,30 +14767,33 @@ function updatePrepayPreview() {
       const p = parseFloat((tr.querySelector('.row-price')||{}).value) || 0;
       total += q * p;
     });
+    const totalVat = Math.round(total * 1.1); // v1.9.320: VAT 포함 합계 (선입금 기준)
     const pre = $('o-prepay-preview');
     if (!pre) return;
-    if (pct > 0 && total > 0) {
-      const prepay = Math.round(total * pct / 100);
-      const balance = total - prepay;
+    if (pct > 0 && totalVat > 0) {
+      const prepay = Math.round(totalVat * pct / 100);
+      const balance = totalVat - prepay;
       const balPct = Math.round((100 - pct) * 10) / 10;
       const pctRound = Math.round(pct * 10) / 10;
       pre.innerHTML = `
         <span style="background:#dbeafe;color:#1e40af;padding:5px 10px;border-radius:7px;display:inline-flex;align-items:center;gap:4px">
           💰 선입금 <span>₩</span>
-          <input id="o-prepay-amt" type="text" value="${prepay.toLocaleString()}" oninput="onPrepayAmtInput()" onblur="updatePrepayPreview()" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" title="금액을 직접 수정하면 비율이 자동 계산됩니다" style="width:100px;text-align:right;border:1px solid #93c5fd;border-radius:4px;padding:2px 6px;font-weight:700;color:#1e40af;background:#fff;font-size:12.5px">
+          <input id="o-prepay-amt" type="text" value="${prepay.toLocaleString()}" oninput="onPrepayAmtInput()" onblur="updatePrepayPreview()" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" title="VAT 포함 금액. 직접 수정 시 비율이 자동 계산됩니다" style="width:110px;text-align:right;border:1px solid #93c5fd;border-radius:4px;padding:2px 6px;font-weight:700;color:#1e40af;background:#fff;font-size:12.5px">
           <span id="o-prepay-pct-label">(${pctRound}%)</span>
+          <span style="font-size:10px;opacity:.7;margin-left:2px;font-weight:500">VAT 포함</span>
         </span>
-        <span id="o-balance-display" style="background:#fef3c7;color:#92400e;padding:5px 10px;border-radius:7px">💴 잔금 ₩${balance.toLocaleString()} (${balPct}%)</span>`;
-    } else if (total > 0) {
-      pre.innerHTML = `<span style="background:#f3f4f6;color:#374151;padding:5px 10px;border-radius:7px">💴 전액 ₩${total.toLocaleString()} (100%)</span>`;
+        <span id="o-balance-display" style="background:#fef3c7;color:#92400e;padding:5px 10px;border-radius:7px">💴 잔금 ₩${balance.toLocaleString()} (${balPct}%) <span style="font-size:10px;opacity:.7;font-weight:500">VAT 포함</span></span>`;
+    } else if (totalVat > 0) {
+      pre.innerHTML = `<span style="background:#f3f4f6;color:#374151;padding:5px 10px;border-radius:7px">💴 전액 ₩${totalVat.toLocaleString()} (100%) <span style="font-size:10px;opacity:.7;font-weight:500">VAT 포함</span></span>`;
     } else {
       pre.textContent = '';
     }
   } catch(_){}
 }
 
-// v1.9.319 — 선입금 금액 input 이 변경될 때: 비율을 역산해 o-prepay-pct 와 잔금 라벨을 갱신
-//   금액 input 자체는 재렌더하지 않아 사용자의 커서 위치를 유지.
+// v1.9.319/320 — 선입금 금액 input 변경 시: 비율을 역산해 o-prepay-pct 와 잔금 라벨을 갱신
+//   금액 input 자체는 재렌더하지 않아 커서 위치/타이핑 흐름 유지.
+//   비율은 4 소수점 정밀도로 저장 → 역산 시 입력 금액 거의 그대로 복원.
 function onPrepayAmtInput() {
   try {
     const ai = $('o-prepay-amt');
@@ -14801,19 +14805,22 @@ function onPrepayAmtInput() {
       const p = parseFloat((tr.querySelector('.row-price')||{}).value) || 0;
       total += q * p;
     });
-    if (total <= 0) return;
+    const totalVat = Math.round(total * 1.1); // v1.9.320: VAT 포함 기준
+    if (totalVat <= 0) return;
     // 0 ~ 100 사이로 제한 (금액이 총액 이상이면 100%)
-    let pct = (amt / total) * 100;
+    let pct = (amt / totalVat) * 100;
     if (pct < 0) pct = 0;
     if (pct > 100) pct = 100;
-    const pctRound = Math.round(pct * 10) / 10;
-    if ($('o-prepay-pct')) $('o-prepay-pct').value = pctRound;
+    // JS 부동소수점 정밀도(15+자리)를 그대로 input.value 에 저장 → round-trip 손실 0
+    const pctExact   = pct;
+    const pctDisplay = Math.round(pct * 10) / 10; // 라벨용 1자리 반올림
+    if ($('o-prepay-pct')) $('o-prepay-pct').value = pctExact;
     const lbl = document.getElementById('o-prepay-pct-label');
-    if (lbl) lbl.textContent = '(' + pctRound + '%)';
-    const balance = Math.max(0, Math.round(total - amt));
-    const balPct = Math.round((100 - pctRound) * 10) / 10;
+    if (lbl) lbl.textContent = '(' + pctDisplay + '%)';
+    const balance = Math.max(0, Math.round(totalVat - amt));
+    const balPct = Math.round((100 - pctDisplay) * 10) / 10;
     const balEl = document.getElementById('o-balance-display');
-    if (balEl) balEl.innerHTML = '💴 잔금 ₩' + balance.toLocaleString() + ' (' + balPct + '%)';
+    if (balEl) balEl.innerHTML = '💴 잔금 ₩' + balance.toLocaleString() + ' (' + balPct + '%) <span style="font-size:10px;opacity:.7;font-weight:500">VAT 포함</span>';
   } catch(e) { console.warn('onPrepayAmtInput:', e); }
 }
 
