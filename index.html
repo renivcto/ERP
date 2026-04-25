@@ -12941,6 +12941,13 @@ function calcOrderTotal() {
     if (sc) sc.textContent = fmtW(sub);
   });
   $('order-total').textContent = fmtW(total);
+  // v1.9.319 — 합계 변경 시 선입금/잔금 미리보기도 동기화
+  //            (사용자가 선입금 금액 input 에 포커스 중이면 깜빡임을 막기 위해 스킵)
+  try {
+    const focused = document.activeElement;
+    const editingPrepayAmt = focused && focused.id === 'o-prepay-amt';
+    if (!editingPrepayAmt && typeof updatePrepayPreview === 'function') updatePrepayPreview();
+  } catch(_){}
 }
 
 function fillOrderVendor() {
@@ -14746,6 +14753,9 @@ ${cleanContent}
 let _apCurrentTab = 'po';
 let _apExpFilter = 'all';
 
+// v1.9.319 — 선입금 금액을 직접 편집 가능. 금액을 수정하면 비율(o-prepay-pct)이 자동 역산됨.
+//   · onPrepayAmtInput(): 사용자가 금액 input에 입력할 때 호출 → 비율 재계산 + 잔금/% 라벨만 갱신 (input 자체는 재구성하지 않음)
+//   · onblur 시 updatePrepayPreview() 가 호출되어 포맷팅된 값으로 깔끔하게 재렌더
 function updatePrepayPreview() {
   try {
     const pct = parseFloat(($('o-prepay-pct')||{}).value) || 0;
@@ -14761,16 +14771,50 @@ function updatePrepayPreview() {
     if (pct > 0 && total > 0) {
       const prepay = Math.round(total * pct / 100);
       const balance = total - prepay;
-      const balPct = 100 - pct;
+      const balPct = Math.round((100 - pct) * 10) / 10;
+      const pctRound = Math.round(pct * 10) / 10;
       pre.innerHTML = `
-        <span style="background:#dbeafe;color:#1e40af;padding:5px 10px;border-radius:7px">💰 선입금 ₩${prepay.toLocaleString()} (${pct}%)</span>
-        <span style="background:#fef3c7;color:#92400e;padding:5px 10px;border-radius:7px">💴 잔금 ₩${balance.toLocaleString()} (${balPct}%)</span>`;
+        <span style="background:#dbeafe;color:#1e40af;padding:5px 10px;border-radius:7px;display:inline-flex;align-items:center;gap:4px">
+          💰 선입금 <span>₩</span>
+          <input id="o-prepay-amt" type="text" value="${prepay.toLocaleString()}" oninput="onPrepayAmtInput()" onblur="updatePrepayPreview()" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" title="금액을 직접 수정하면 비율이 자동 계산됩니다" style="width:100px;text-align:right;border:1px solid #93c5fd;border-radius:4px;padding:2px 6px;font-weight:700;color:#1e40af;background:#fff;font-size:12.5px">
+          <span id="o-prepay-pct-label">(${pctRound}%)</span>
+        </span>
+        <span id="o-balance-display" style="background:#fef3c7;color:#92400e;padding:5px 10px;border-radius:7px">💴 잔금 ₩${balance.toLocaleString()} (${balPct}%)</span>`;
     } else if (total > 0) {
       pre.innerHTML = `<span style="background:#f3f4f6;color:#374151;padding:5px 10px;border-radius:7px">💴 전액 ₩${total.toLocaleString()} (100%)</span>`;
     } else {
       pre.textContent = '';
     }
   } catch(_){}
+}
+
+// v1.9.319 — 선입금 금액 input 이 변경될 때: 비율을 역산해 o-prepay-pct 와 잔금 라벨을 갱신
+//   금액 input 자체는 재렌더하지 않아 사용자의 커서 위치를 유지.
+function onPrepayAmtInput() {
+  try {
+    const ai = $('o-prepay-amt');
+    if (!ai) return;
+    const amt = parseFloat((ai.value || '').replace(/[^\d.]/g, '')) || 0;
+    let total = 0;
+    document.querySelectorAll('#order-modal-rows tr').forEach(tr => {
+      const q = parseFloat((tr.querySelector('.row-qty')||{}).value) || 0;
+      const p = parseFloat((tr.querySelector('.row-price')||{}).value) || 0;
+      total += q * p;
+    });
+    if (total <= 0) return;
+    // 0 ~ 100 사이로 제한 (금액이 총액 이상이면 100%)
+    let pct = (amt / total) * 100;
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    const pctRound = Math.round(pct * 10) / 10;
+    if ($('o-prepay-pct')) $('o-prepay-pct').value = pctRound;
+    const lbl = document.getElementById('o-prepay-pct-label');
+    if (lbl) lbl.textContent = '(' + pctRound + '%)';
+    const balance = Math.max(0, Math.round(total - amt));
+    const balPct = Math.round((100 - pctRound) * 10) / 10;
+    const balEl = document.getElementById('o-balance-display');
+    if (balEl) balEl.innerHTML = '💴 잔금 ₩' + balance.toLocaleString() + ' (' + balPct + '%)';
+  } catch(e) { console.warn('onPrepayAmtInput:', e); }
 }
 
 function fmtWon(n) { return '₩' + (Math.round(n||0)).toLocaleString(); }
