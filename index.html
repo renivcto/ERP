@@ -15180,9 +15180,16 @@ function renderApprovalPoTable() {
     const itemSummary = (o.rows[0]&&o.rows[0].name||'-') + (o.rows.length>1?` 외 ${o.rows.length-1}건`:'');
     const apStatus = getOrderApprovalStatus(o);
     // v1.9.210: 응급 플래그를 결재/선급금/잔금 3개로 분리 — 각 버튼이 독립적으로 깜빡임
+    // v1.9.327: 선급금/잔금 응급도 해당 지출이 '지급완료' 면 자동 해제 (결재가 approved 시 자동 해제되는 것과 동일 패턴)
+    //           expense 리스트는 아래에서 재사용되므로 여기서 미리 계산.
+    const _oidNumU = Number(o.id);
+    const _expPreListU = DB.expenses.filter(e => e && e.category === 'po_prepay'  && (e.orderId === o.id || Number(e.orderId) === _oidNumU));
+    const _expBalListU = DB.expenses.filter(e => e && e.category === 'po_balance' && (e.orderId === o.id || Number(e.orderId) === _oidNumU));
+    const _prePaidAny = _expPreListU.some(e => e && e.paidStatus === 'paid');
+    const _balPaidAny = _expBalListU.some(e => e && e.paidStatus === 'paid');
     const urgent = !!o.urgent && apStatus !== 'approved';
-    const urgentPrepay = !!o.urgentPrepay;
-    const urgentBalance = !!o.urgentBalance;
+    const urgentPrepay = !!o.urgentPrepay && !_prePaidAny;
+    const urgentBalance = !!o.urgentBalance && !_balPaidAny;
     const urgentAny = urgent || urgentPrepay || urgentBalance;
     const amount = orderTotalVat(o);
     // v1.9.209/213: 결재 날인 버튼 — 지급 요청 버튼과 동일한 크기로 통일 (높이 맞춤)
