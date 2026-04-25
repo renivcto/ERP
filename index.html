@@ -18334,8 +18334,8 @@ function _renderApCommentNode(c, depth) {
     <div style="font-size:14px;color:var(--gray-800);white-space:pre-wrap;line-height:1.55">${(c.text||'').replace(/</g,'&lt;')}</div>
     ${reactionBadges?`<div style="margin-top:8px">${reactionBadges}</div>`:''}
     <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <!-- v1.9.332: 텍스트 제거, 이모지만 표시 (원형 버튼) -->
-      <button onclick="event.stopPropagation();toggleApReactionPicker(this, ${c.id})" title="감정 표현" style="background:#fff;border:1px solid var(--gray-200);border-radius:50%;width:30px;height:30px;padding:0;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1" onmouseenter="this.style.background='#f3f4f6';this.style.borderColor='var(--sky-400)'" onmouseleave="this.style.background='#fff';this.style.borderColor='var(--gray-200)'">😊</button>
+      <!-- v1.9.333: 운영 업무 공유 피드의 feed-reaction-add 스타일 — amber 톤 타원형 -->
+      <button onclick="event.stopPropagation();toggleApReactionPicker(this, ${c.id})" title="감정 반응 남기기" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:1px solid #fcd34d;color:#92400e;border-radius:999px;padding:4px 12px;font-size:12.5px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:5px;line-height:1;letter-spacing:-.1px;transition:transform .12s, box-shadow .12s, background .12s" onmouseenter="this.style.background='linear-gradient(135deg,#fde68a,#fcd34d)';this.style.borderColor='#f59e0b';this.style.transform='translateY(-1px)';this.style.boxShadow='0 2px 6px rgba(245,158,11,.18)'" onmouseleave="this.style.background='linear-gradient(135deg,#fef3c7,#fde68a)';this.style.borderColor='#fcd34d';this.style.transform='translateY(0)';this.style.boxShadow='none'"><span style="font-size:14px;line-height:1">😊</span><span style="font-size:11.5px;line-height:1">반응</span><span style="font-size:11px;font-weight:800;opacity:.7;margin-left:1px">＋</span></button>
       <!-- v1.9.332: 답글 버튼에 배경색 추가해 가시성 개선 -->
       ${depth < 3 ? `<button onclick="replyToApComment(${c.id})" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:999px;padding:4px 12px;font-size:12.5px;font-weight:700;cursor:pointer;color:#1d4ed8" onmouseenter="this.style.background='#dbeafe';this.style.borderColor='#93c5fd'" onmouseleave="this.style.background='#eff6ff';this.style.borderColor='#bfdbfe'">💬 답글</button>` : ''}
       <button onclick="deleteComment(${c.id})" style="background:transparent;border:none;cursor:pointer;color:#9ca3af;font-size:11.5px;margin-left:auto;text-decoration:underline">삭제</button>
@@ -18421,9 +18421,17 @@ function toggleReaction(commentId, emoji) {
   if (!c.reactions) c.reactions = {};
   // 단순 토글 카운트 방식 유지 (숫자 증가)
   c.reactions[emoji] = (c.reactions[emoji] || 0) + 1;
-  // v1.9.332: 디바운스(saveData)는 새로고침 직전에 유실될 수 있어 즉시 저장으로 변경
+  // v1.9.333: localStorage 동기 즉시 저장 → 새로고침 직전 클릭도 유실되지 않도록 보장
+  //   (saveDataNow 는 Firestore 까지 포함 비동기 작업 — 동기 단계에서 STORE_KEY 만 먼저 갱신)
   try {
-    if (typeof saveDataNow === 'function') saveDataNow().catch(e => console.warn('감정 저장 실패:', e));
+    const snap = JSON.parse(JSON.stringify(DB));
+    localStorage.setItem(STORE_KEY, JSON.stringify(snap));
+    // 백업도 함께 갱신
+    try { localStorage.setItem('reniv_approvalComments_backup', JSON.stringify(DB.approvalComments)); } catch(_){}
+  } catch(e) { console.warn('toggleReaction localStorage 저장 실패:', e); }
+  // 백그라운드 Firestore 동기화 (실패해도 localStorage 안전)
+  try {
+    if (typeof saveDataNow === 'function') saveDataNow().catch(e => console.warn('감정 Firestore 저장 실패:', e));
     else if (typeof saveData === 'function') saveData();
   } catch(_){}
   renderApprovalComments(c.approvalId);
