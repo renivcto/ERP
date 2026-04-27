@@ -4436,6 +4436,8 @@ async function _doSaveDataInner() {
       if (src === '__idb__') return; // 이미 오프로드됨
       if (src.length > 1000) {
         try { idbSet('feed_img_' + p.id + '_' + imgi, src); } catch(_){}
+        // v1.9.336: 공유 Firestore 컬렉션에도 저장 → 다른 사용자가 볼 수 있게
+        try { _saveSharedFeedImage(p.id, imgi, src); } catch(_){}
         dbToSave.feedPosts[pi].images[imgi] = '__idb__';
       }
     });
@@ -4856,16 +4858,26 @@ async function restoreIDBData() {
       }
     }
   }
-  // v1.9.293 — 피드 포스트 이미지 복원 (IndexedDB)
-  //   '__idb__' 마커는 복원 시도하되, IDB 에 없으면 마커를 보존해 다른 기기 저장건의 덮어쓰기를 막는다.
+  // v1.9.293/336 — 피드 포스트 이미지 복원 (IndexedDB → Firestore 공유 fallback)
+  //   다른 사용자가 저장한 이미지는 IDB(디바이스별)에 없으므로 Firestore 공유 저장소에서 가져옴.
   for (let pi = 0; pi < (DB.feedPosts||[]).length; pi++) {
     const p = DB.feedPosts[pi];
     if (!p || !Array.isArray(p.images) || !p.images.length) continue;
     for (let ii = 0; ii < p.images.length; ii++) {
       if (p.images[ii] === '__idb__') {
         const img = await idbGet('feed_img_' + p.id + '_' + ii);
-        if (img) DB.feedPosts[pi].images[ii] = img;
-        // else: 마커 보존
+        if (img) {
+          DB.feedPosts[pi].images[ii] = img;
+        } else {
+          // v1.9.336: IDB 미스 → Firestore 공유 컬렉션에서 로드
+          const remoteImg = await _loadSharedFeedImage(p.id, ii);
+          if (remoteImg) {
+            DB.feedPosts[pi].images[ii] = remoteImg;
+            // 로컬 IDB 캐시도 채워 다음번 빠르게
+            try { idbSet('feed_img_' + p.id + '_' + ii, remoteImg); } catch(_){}
+          }
+          // 둘 다 없으면 마커 보존 (이전 동작 유지)
+        }
       }
     }
   }
@@ -13707,14 +13719,17 @@ function markWorkflowSeen(key) {
 }
 
 function _countFeedUnread() {
-  const lastSeen = _getWorkflowLastSeen('feed');
+  // v1.9.336: viewedBy/lastSeen 추적 대신 단순 48시간 룰 — 작성된 지 48시간 이내면 NEW
+  //   본인이 작성한 글은 제외
   const myEmail = (window._currentUser && window._currentUser.email) || '';
+  const now = Date.now();
+  const FORTYEIGHT_HRS = 48 * 60 * 60 * 1000;
   let count = 0;
   (DB.feedPosts||[]).forEach(p => {
     if (!p) return;
-    if (p.authorEmail && p.authorEmail === myEmail) return; // 내가 작성한 글 제외
-    const ts = Date.parse(p.updatedAt || p.createdAt || '') || 0;
-    if (ts > lastSeen) count++;
+    if (p.authorEmail && p.authorEmail === myEmail) return;
+    const ts = Date.parse(p.createdAt || '') || 0;
+    if (ts > 0 && (now - ts) < FORTYEIGHT_HRS) count++;
   });
   return count;
 }
@@ -24869,6 +24884,26 @@ async function loadSharedSetting(key) {
     const s = localStorage.getItem('reniv_shared_' + key);
     if (s) return JSON.parse(s);
   } catch(e) {}
+  return null;
+}
+
+// v1.9.336: 피드 포스트 이미지 공유 저장소 — Firestore feedImages 컬렉션
+//   IDB(_idb_)는 디바이스별이라 다른 사용자가 못 보는 문제 해결.
+//   doc id: '{postId}_{idx}' / field: data(base64), ts
+async function _saveSharedFeedImage(postId, idx, dataUrl) {
+  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return;
+  try {
+    const ref = window._firestoreDoc(window._firebaseDb, 'feedImages', `${postId}_${idx}`);
+    await window._firestoreSetDoc(ref, { data: dataUrl, ts: Date.now() });
+  } catch(e) { console.warn('feedImage Firestore 저장 실패:', e); }
+}
+async function _loadSharedFeedImage(postId, idx) {
+  if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return null;
+  try {
+    const ref = window._firestoreDoc(window._firebaseDb, 'feedImages', `${postId}_${idx}`);
+    const snap = await window._firestoreGetDoc(ref);
+    if (snap.exists()) return snap.data().data || null;
+  } catch(e) { console.warn('feedImage Firestore 로드 실패:', e); }
   return null;
 }
 
