@@ -807,7 +807,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="nav-sub" id="work-sub">
       <div class="nav-item" onclick="go('workflow')"><span class="ico">🔀</span>워크플로우</div>
       <div class="nav-item" onclick="go('calendar')"><span class="ico">📅</span>르니브 캘린더</div>
-      <div class="nav-item" onclick="go('gdrive')"><span class="ico">📁</span>자료실</div>
+      <div class="nav-item" onclick="go('gdrive')"><span class="ico">📁</span>르니브 자료실</div>
     </div>
     <!-- v1.9.196 결재 요청 그룹웨어 -->
     <div class="nav-item" onclick="clickNavItem('approval','approval-sub')" id="nav-approval"><span class="ico">🖋️</span>결재 요청<span class="nav-badge red" id="nb-approval" style="display:none">0</span></div>
@@ -6097,7 +6097,7 @@ function showNotif(msg, type='info') {
 // NAVIGATION
 // ═══════════════════════════════════════════════════════
 const PAGE_TITLES = {
-  dashboard:'HOME',workflow:'🔀 워크플로우',calendar:'📅 르니브 캘린더',gdrive:'📁 자료실',
+  dashboard:'HOME',workflow:'🔀 워크플로우',calendar:'📅 르니브 캘린더',gdrive:'📁 르니브 자료실',
   vendor:'생산 업체',item:'품목 현황',
   archive:'📥 아카이브',
   bom:'BOM 관리',production:'생산 현황',stock:'재고 관리',quote:'견적서',
@@ -14244,7 +14244,9 @@ function openFeedPostModal(postId){
   document.getElementById('feed-post-pinned').checked = false;
   document.getElementById('feed-post-file').value = '';
   if (postId) {
-    const p = (DB.feedPosts||[]).find(x => x.id === postId);
+    // v1.9.345: id 타입 안전 비교 — Firestore 직렬화 후 string/number 혼재 가능
+    const _pidStr = String(postId);
+    const p = (DB.feedPosts||[]).find(x => x && String(x.id) === _pidStr);
     if (p) {
       document.getElementById('feed-post-id').value = p.id;
       document.getElementById('feed-post-title').value = p.title || '';
@@ -14461,25 +14463,45 @@ async function saveFeedPost(){
   })();
 }
 
-function editFeedPost(id){ openFeedPostModal(id); }
+function editFeedPost(id){
+  // v1.9.345: id 타입 비일관 방어 — string 으로 들어오면 number 로 시도하기 위해 openFeedPostModal 에서 자체 매칭
+  openFeedPostModal(id);
+}
 
 async function deleteFeedPost(id){
   if (!confirm('이 글을 삭제하시겠습니까? 댓글과 반응도 함께 사라집니다.')) return;
-  DB.feedPosts = DB.feedPosts.filter(p => p.id !== id);
-  // v1.9.267 — localStorage 즉시 + Firestore 동기 저장
+  // v1.9.345: id 타입 안전 비교 (Firestore 직렬화 후 string 으로 변환되는 경우 대응)
+  const _idStr = String(id);
+  const before = (DB.feedPosts||[]).length;
+  DB.feedPosts = (DB.feedPosts||[]).filter(p => p && String(p.id) !== _idStr);
+  const removed = before - DB.feedPosts.length;
+  if (removed === 0) {
+    console.warn('deleteFeedPost: 매칭되는 글을 찾지 못함 id=', id, '/feedPosts:', DB.feedPosts.map(p=>p && p.id));
+    showNotif('삭제 대상을 찾을 수 없습니다 (새로고침 후 다시 시도)', 'warning');
+    return;
+  }
+  // localStorage 즉시 저장 (이미지 마커 처리 후)
   try {
     const snapshot = JSON.parse(JSON.stringify(DB));
+    (snapshot.feedPosts||[]).forEach(p => {
+      if (!p || !Array.isArray(p.images)) return;
+      p.images.forEach((src, i) => {
+        if (typeof src === 'string' && src !== '__idb__' && src.length > 1000) p.images[i] = '__idb__';
+      });
+    });
     try { localStorage.setItem(STORE_KEY, JSON.stringify(snapshot)); } catch(_) {}
   } catch(_){}
+  // 즉시 화면 갱신 — Firestore 동기화는 그 다음 (사용자 대기 시간 제거)
+  try { renderFeed(); } catch(_){}
+  showNotif('🗑️ 글이 삭제되었습니다', 'info');
+  // Firestore 백그라운드 저장
   try {
     if (typeof saveDataNow === 'function') await saveDataNow();
     else if (typeof saveData === 'function') saveData();
-    showNotif('🗑️ 글이 삭제되었습니다', 'info');
   } catch(e) {
-    console.error('피드 삭제 저장 실패:', e);
-    showNotif('⚠️ 삭제 저장 실패 — 다시 시도해주세요', 'error');
+    console.error('피드 삭제 Firestore 동기화 실패:', e);
+    try { showNotif('⚠️ 클라우드 삭제 동기화 실패 — 새로고침 시 글이 복원될 수 있습니다', 'warning'); } catch(_){}
   }
-  renderFeed();
 }
 
 // ── 반응 ───────────────────────────────────────────────
