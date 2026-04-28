@@ -13719,15 +13719,12 @@ function markWorkflowSeen(key) {
 }
 
 function _countFeedUnread() {
-  // v1.9.336: viewedBy/lastSeen 추적 대신 단순 48시간 룰 — 작성된 지 48시간 이내면 NEW
-  //   본인이 작성한 글은 제외
-  const myEmail = (window._currentUser && window._currentUser.email) || '';
+  // v1.9.337: 단순 48시간 룰 — 본인 작성 글도 포함(저장 직후 NEW로 시각적 확인 가능)
   const now = Date.now();
   const FORTYEIGHT_HRS = 48 * 60 * 60 * 1000;
   let count = 0;
   (DB.feedPosts||[]).forEach(p => {
     if (!p) return;
-    if (p.authorEmail && p.authorEmail === myEmail) return;
     const ts = Date.parse(p.createdAt || '') || 0;
     if (ts > 0 && (now - ts) < FORTYEIGHT_HRS) count++;
   });
@@ -13735,13 +13732,16 @@ function _countFeedUnread() {
 }
 
 function _countTrelloUnread(boardKey) {
-  const lastSeen = _getWorkflowLastSeen(boardKey);
+  // v1.9.337: lastSeen 추적 대신 48시간 룰 — Trello dateLastActivity 기준
+  //   동기화 직후 새로 변경된 카드(48h 이내)가 자동으로 NEW로 표시됨
   const cards = (boardKey === 'trello1') ? (DB._trelloCards||[]) : (DB._trelloCards2||[]);
+  const now = Date.now();
+  const FORTYEIGHT_HRS = 48 * 60 * 60 * 1000;
   let count = 0;
   cards.forEach(c => {
     if (!c) return;
     const ts = Date.parse(c.dateLastActivity || '') || 0;
-    if (ts > lastSeen) count++;
+    if (ts > 0 && (now - ts) < FORTYEIGHT_HRS) count++;
   });
   return count;
 }
@@ -14413,11 +14413,28 @@ async function saveFeedPost(){
     });
     _feedMainPostId = null; // v1.9.244: 새 글이 메인 슬롯에 바로 뜨도록
   }
-  // v1.9.267 — localStorage 즉시 플러시 → 저장 전 닫힘/새로고침 방지
+  // v1.9.267/337 — localStorage 즉시 플러시 → 저장 전 닫힘/새로고침 방지
+  //   이미지가 raw base64 채로 들어가면 quota 초과(5MB)로 silent fail → 새로고침 시 글이 사라지는 버그.
+  //   이미지는 IDB + Firestore 공유 컬렉션에 별도 저장하고 localStorage 에는 '__idb__' 마커만 남긴다.
   try {
     const snapshot = JSON.parse(JSON.stringify(DB));
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(snapshot)); } catch(_) {}
-  } catch(_){}
+    (snapshot.feedPosts||[]).forEach(p => {
+      if (!p || !Array.isArray(p.images)) return;
+      p.images.forEach((src, i) => {
+        if (typeof src === 'string' && src !== '__idb__' && src.length > 1000) {
+          try { idbSet('feed_img_' + p.id + '_' + i, src); } catch(_){}
+          try { _saveSharedFeedImage(p.id, i, src); } catch(_){}
+          p.images[i] = '__idb__';
+        }
+      });
+    });
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(snapshot));
+    } catch(e) {
+      console.error('❌ localStorage 저장 실패(quota 초과 가능):', e && e.message);
+      try { showNotif('⚠️ 로컬 저장 실패 — 클라우드 동기화에 의존합니다', 'warning'); } catch(_){}
+    }
+  } catch(e) { console.warn('saveFeedPost 즉시 플러시 실패:', e); }
   // v1.9.283 — UX 개선: localStorage 저장은 이미 끝났으니 모달을 즉시 닫고 Firestore 동기화는 백그라운드로.
   //   기존에는 saveDataNow() 를 await 하면서 여러 컬렉션을 순차 검증·쓰기하느라 수십 초 동안
   //   버튼이 "⏳ 저장 중..." 에 잠겨 "저장 안 됨"처럼 보이는 문제가 있었음.
