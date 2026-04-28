@@ -3488,11 +3488,12 @@ EXP YYYYMMDD 까지</textarea></div>
   </div>
 </div>
 
-<!-- v1.9.235/346 — 이미지 라이트박스 (z-index 강화: 노트 상세 모달 z-index:10000 보다 위로) -->
-<div class="overlay" id="overlay-feed-lightbox" style="z-index:100000" onclick="if(event.target===this)closeModal('feed-lightbox')">
-  <div class="modal" style="width:auto;max-width:94vw;max-height:94vh;background:transparent;box-shadow:none;border:0;padding:0">
+<!-- v1.9.235/346/350 — 이미지 라이트박스 (최상단 레이어 + 안쪽 X 버튼) -->
+<div class="overlay" id="overlay-feed-lightbox" style="z-index:9999999" onclick="if(event.target===this)closeModal('feed-lightbox')">
+  <div class="modal" style="width:auto;max-width:94vw;max-height:94vh;background:transparent;box-shadow:none;border:0;padding:0;position:relative">
     <img id="feed-lightbox-img" src="" style="max-width:92vw;max-height:92vh;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.5);display:block">
-    <button onclick="closeModal('feed-lightbox')" style="position:absolute;top:-42px;right:0;background:rgba(255,255,255,.15);color:#fff;border:0;border-radius:50%;width:34px;height:34px;font-size:20px;cursor:pointer;backdrop-filter:blur(10px)">✕</button>
+    <!-- v1.9.350: 닫기 버튼을 이미지 안쪽 우측 상단으로 이동 (이전 -42px 위치는 화면 밖으로 잘리는 문제) -->
+    <button onclick="closeModal('feed-lightbox')" title="닫기 (ESC)" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:50%;width:38px;height:38px;font-size:20px;font-weight:700;cursor:pointer;backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;line-height:1;box-shadow:0 4px 12px rgba(0,0,0,.4);transition:background .12s, transform .12s" onmouseenter="this.style.background='rgba(0,0,0,.78)';this.style.transform='scale(1.08)'" onmouseleave="this.style.background='rgba(0,0,0,.55)';this.style.transform='scale(1)'">✕</button>
   </div>
 </div>
 
@@ -14726,7 +14727,22 @@ function openFeedLightbox(encSrc){
   const src = decodeURIComponent(encSrc);
   const img = document.getElementById('feed-lightbox-img');
   if (img) img.src = src;
+  // v1.9.350: 어떤 모달 위에서 호출되든 항상 최상단 레이어로 강제
+  const ov = document.getElementById('overlay-feed-lightbox');
+  if (ov) ov.style.zIndex = '9999999';
   openModal('feed-lightbox');
+  // ESC 키 닫기 (한 번만 등록되도록 매번 제거 후 추가)
+  if (!window._feedLightboxKeyHandler) {
+    window._feedLightboxKeyHandler = (e) => {
+      if (e.key === 'Escape') {
+        const o = document.getElementById('overlay-feed-lightbox');
+        if (o && o.classList.contains('show')) {
+          try { closeModal('feed-lightbox'); } catch(_){}
+        }
+      }
+    };
+    document.addEventListener('keydown', window._feedLightboxKeyHandler);
+  }
 }
 
 // ── 주간 하이라이트 ───────────────────────────────────
