@@ -21954,14 +21954,65 @@ function calcAdCostFromRoas() {
   }
   calcNpMargin();
 }
-// 제품 예상 이미지 : 다중 업로드 / 프리뷰 / 삭제
+// v1.9.339: 신제품 모달 이미지 드래그 reorder 핸들러 (제품 예상 + 제형 공용)
+//   tilesArr: 'product' | 'formulation' — 어느 배열을 다루는지 구분
+let _npDragImgIdx = null;
+let _npDragImgArr = null;
+function _onNpImgDragStart(ev, idx, arr) {
+  _npDragImgIdx = idx;
+  _npDragImgArr = arr;
+  try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', String(idx)); } catch(_){}
+  if (ev.currentTarget) ev.currentTarget.style.opacity = '0.4';
+}
+function _onNpImgDragOver(ev, idx, arr) {
+  if (_npDragImgArr !== arr) return;
+  ev.preventDefault();
+  try { ev.dataTransfer.dropEffect = 'move'; } catch(_){}
+  if (ev.currentTarget && _npDragImgIdx !== idx) {
+    ev.currentTarget.style.outline = '2px dashed #6366f1';
+    ev.currentTarget.style.outlineOffset = '2px';
+  }
+}
+function _onNpImgDragLeave(ev) {
+  if (ev.currentTarget) { ev.currentTarget.style.outline = ''; ev.currentTarget.style.outlineOffset = ''; }
+}
+function _onNpImgDrop(ev, dropIdx, arr) {
+  ev.preventDefault();
+  if (ev.currentTarget) { ev.currentTarget.style.outline = ''; ev.currentTarget.style.outlineOffset = ''; }
+  if (_npDragImgIdx === null || _npDragImgArr !== arr) return;
+  if (_npDragImgIdx === dropIdx) return;
+  const target = (arr === 'product') ? _npProductImgs : _npFormulationImgs;
+  const [moved] = target.splice(_npDragImgIdx, 1);
+  // drag idx 가 drop idx 보다 앞이었으면 drop idx 가 1 줄어든다
+  const insertAt = _npDragImgIdx < dropIdx ? dropIdx - 1 : dropIdx;
+  target.splice(insertAt, 0, moved);
+  if (arr === 'product') renderNpImgsPreview(); else renderNpFormImgsPreview();
+}
+function _onNpImgDragEnd(ev) {
+  if (ev.currentTarget) { ev.currentTarget.style.opacity = ''; ev.currentTarget.style.outline = ''; ev.currentTarget.style.outlineOffset = ''; }
+  // 모든 다른 타일의 outline 도 초기화
+  document.querySelectorAll('#np-imgs-preview > div, #np-form-imgs-preview > div').forEach(el => {
+    el.style.outline = ''; el.style.outlineOffset = '';
+  });
+  _npDragImgIdx = null;
+  _npDragImgArr = null;
+}
+
+// 제품 예상 이미지 : 다중 업로드 / 프리뷰 / 삭제 / 드래그 reorder
 function renderNpImgsPreview() {
   const wrap = document.getElementById('np-imgs-preview');
   if (!wrap) return;
-  const tile = 'width:98px;height:98px;border-radius:8px;overflow:hidden;position:relative;flex:0 0 98px';
+  const tile = 'width:98px;height:98px;border-radius:8px;overflow:hidden;position:relative;flex:0 0 98px;cursor:grab';
   const tiles = _npProductImgs.map((src, i) => `
-    <div style="${tile};border:1px solid var(--gray-200);background:#f3f4f6">
-      <img src="${src}" style="width:100%;height:100%;object-fit:cover">
+    <div draggable="true" title="끌어서 순서 변경"
+         ondragstart="_onNpImgDragStart(event, ${i}, 'product')"
+         ondragover="_onNpImgDragOver(event, ${i}, 'product')"
+         ondragleave="_onNpImgDragLeave(event)"
+         ondrop="_onNpImgDrop(event, ${i}, 'product')"
+         ondragend="_onNpImgDragEnd(event)"
+         style="${tile};border:1px solid var(--gray-200);background:#f3f4f6">
+      <img src="${src}" style="width:100%;height:100%;object-fit:cover;pointer-events:none">
+      <span style="position:absolute;top:3px;left:3px;background:rgba(0,0,0,0.55);color:#fff;font-size:9.5px;font-weight:700;padding:1px 5px;border-radius:99px;letter-spacing:.3px;pointer-events:none">${i+1}</span>
       <button type="button" onclick="removeNpImg(${i})" style="position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,0.6);color:#fff;cursor:pointer;font-size:11px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0">✕</button>
     </div>
   `).join('');
@@ -22002,14 +22053,21 @@ function handleNpImgsAdd(ev) {
 }
 function removeNpImg(i) { _npProductImgs.splice(i, 1); renderNpImgsPreview(); }
 
-// 제형 이미지 : 다중 업로드 / 프리뷰 / 삭제 (나노바나나 레퍼런스로도 사용)
+// 제형 이미지 : 다중 업로드 / 프리뷰 / 삭제 / 드래그 reorder (나노바나나 레퍼런스로도 사용)
 function renderNpFormImgsPreview() {
   const wrap = document.getElementById('np-form-imgs-preview');
   if (!wrap) return;
-  const tile = 'width:88px;height:88px;border-radius:8px;overflow:hidden;position:relative;flex:0 0 88px';
+  const tile = 'width:88px;height:88px;border-radius:8px;overflow:hidden;position:relative;flex:0 0 88px;cursor:grab';
   const tiles = _npFormulationImgs.map((src, i) => `
-    <div style="${tile};border:1px solid var(--gray-200);background:#f3f4f6">
-      <img src="${src}" style="width:100%;height:100%;object-fit:cover">
+    <div draggable="true" title="끌어서 순서 변경"
+         ondragstart="_onNpImgDragStart(event, ${i}, 'formulation')"
+         ondragover="_onNpImgDragOver(event, ${i}, 'formulation')"
+         ondragleave="_onNpImgDragLeave(event)"
+         ondrop="_onNpImgDrop(event, ${i}, 'formulation')"
+         ondragend="_onNpImgDragEnd(event)"
+         style="${tile};border:1px solid var(--gray-200);background:#f3f4f6">
+      <img src="${src}" style="width:100%;height:100%;object-fit:cover;pointer-events:none">
+      <span style="position:absolute;top:3px;left:3px;background:rgba(0,0,0,0.55);color:#fff;font-size:9.5px;font-weight:700;padding:1px 5px;border-radius:99px;letter-spacing:.3px;pointer-events:none">${i+1}</span>
       <button type="button" onclick="removeNpFormImg(${i})" title="삭제" style="position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,0.6);color:#fff;cursor:pointer;font-size:11px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0">✕</button>
     </div>
   `).join('');
