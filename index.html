@@ -22366,16 +22366,18 @@ BOM 마진 ${estMarginNum !== null ? estMarginNum.toLocaleString()+'원' : '-'}
     ? comments.map((c, idx) => _renderNpCommentItem(c, it.id, idx)).join('')
     : `<div style="${muted};padding:4px 2px">아직 코멘트가 없습니다</div>`;
 
-  // v1.9.312 — NEW 배지: 본인이 아직 해당 버전을 열람하지 않았으면 "편집자명 +NEW" 노출
-  //   - viewedBy 가 배열로 존재하고, 내 email 이 없으면 NEW
-  //   - 본인이 직접 편집한 직후에는 viewedBy 에 본인만 들어있어 본인에게는 노출되지 않음
-  //   - 레거시 데이터 (viewedBy 필드 없음) 는 배지 미표시
-  const _myEmailNp = (window._currentUser && window._currentUser.email) || '';
-  const _viewedBy  = Array.isArray(it.viewedBy) ? it.viewedBy : null;
-  const _isNewForMe = _viewedBy !== null && _myEmailNp && _viewedBy.indexOf(_myEmailNp) < 0;
+  // v1.9.312/338 — NEW gif 배지: 작성/수정된 지 48시간 이내면 NEW 표시
+  //   - createdAt 또는 updatedAt 기준 48h 이내 → NEW
+  //   - 다른 두 워크플로우 NEW 배지(피드/Trello)와 동일한 .new-gif-label 클래스 사용
+  //   - 편집자 이름 표시도 유지 (마우스오버 툴팁 + 라벨 텍스트)
   const _editorName = (it.lastEditorName || it.author || '').trim();
-  const newBadge = _isNewForMe
-    ? `<span title="${escapeHtml(_editorName)} 님이 작성/수정한 내용입니다. 카드를 열면 사라집니다." style="flex-shrink:0;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:99px;background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border:1px solid #fcd34d;color:#92400e;font-size:10.5px;font-weight:800;letter-spacing:.2px;box-shadow:0 1px 2px rgba(146,64,14,.15)"><span style="font-size:9.5px;font-weight:700">${_editorName ? escapeHtml(_editorName) : '팀원'}</span><span style="background:#dc2626;color:#fff;padding:1px 6px;border-radius:99px;font-size:9.5px;font-weight:800;letter-spacing:.3px">NEW</span></span>`
+  const _createdMs = Number(it.createdAt) || 0;
+  const _updatedMs = Number(it.updatedAt) || _createdMs;
+  const _latestMs  = Math.max(_createdMs, _updatedMs);
+  const _ageMs     = Date.now() - _latestMs;
+  const _isRecent  = _latestMs > 0 && _ageMs < 48 * 60 * 60 * 1000;
+  const newBadge = _isRecent
+    ? `<span title="${escapeHtml(_editorName)} 님이 최근 48시간 이내 작성/수정" style="flex-shrink:0;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:99px;background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border:1px solid #fcd34d;color:#92400e;font-size:10.5px;font-weight:800;letter-spacing:.2px;box-shadow:0 1px 2px rgba(146,64,14,.15)">${_editorName ? `<span style="font-size:9.5px;font-weight:700">${escapeHtml(_editorName)}</span>` : ''}<span class="new-gif-label">NEW</span></span>`
     : '';
 
   return `<div onclick="openNewProductModal('${it.id}')" style="background:#fff;border:1px solid var(--gray-200);border-radius:12px;padding:13px 8px;cursor:pointer;transition:all .15s;box-shadow:0 1px 2px rgba(0,0,0,0.03)" onmouseenter="this.style.boxShadow='0 4px 14px rgba(0,0,0,0.08)';this.style.transform='translateY(-1px)';this.style.borderColor='${stageMeta.border}'" onmouseleave="this.style.boxShadow='0 1px 2px rgba(0,0,0,0.03)';this.style.transform='translateY(0)';this.style.borderColor='var(--gray-200)'">
