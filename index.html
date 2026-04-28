@@ -5739,14 +5739,68 @@ function applyOrderTombstonesV226() {
   return removedIds.length;
 }
 
+// v1.9.345: 일반 결재(non_po_approval) 중복 정리 — title + authorEmail + 분(createdAt) 단위 동일하면 1건만 유지
+//   approved 상태가 있으면 우선 보존, 없으면 가장 작은 id 보존, 나머지 제거.
+//   딸린 approvalComments 도 winner 의 id 로 리매핑.
+function dedupNonPoApprovalsV345() {
+  if (!Array.isArray(DB.approvals)) return 0;
+  const buckets = new Map();
+  DB.approvals.forEach(a => {
+    if (!a || a.type !== 'non_po_approval') return;
+    const t = (a.title||'').trim();
+    const auth = (a.authorEmail||'').trim();
+    const cat = (a.category||'').trim();
+    const phase = (a.phase||'').trim();
+    // createdAt 을 분 단위로 잘라서 키에 포함 (몇 초 차이 중복도 같은 그룹)
+    const ts = Number(a.createdAt) || 0;
+    const minBucket = ts > 0 ? Math.floor(ts / 60000) : 0;
+    const key = `${t}|${auth}|${cat}|${phase}|${minBucket}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(a);
+  });
+  let removed = 0;
+  const losers = new Set();
+  const remap = new Map(); // loser.id → winner.id
+  buckets.forEach(list => {
+    if (list.length <= 1) return;
+    // approved 우선, 그다음 id 작은 순
+    list.sort((x, y) => {
+      const xa = x.status === 'approved' ? 0 : 1;
+      const ya = y.status === 'approved' ? 0 : 1;
+      if (xa !== ya) return xa - ya;
+      return (Number(x.id)||0) - (Number(y.id)||0);
+    });
+    const winner = list[0];
+    for (let i = 1; i < list.length; i++) {
+      losers.add(list[i].id);
+      remap.set(String(list[i].id), String(winner.id));
+      removed++;
+    }
+  });
+  if (removed > 0) {
+    DB.approvals = DB.approvals.filter(a => !(a && a.type === 'non_po_approval' && losers.has(a.id)));
+    // 코멘트 리매핑
+    if (Array.isArray(DB.approvalComments)) {
+      DB.approvalComments.forEach(c => {
+        if (!c) return;
+        const mapped = remap.get(String(c.approvalId));
+        if (mapped) c.approvalId = isNaN(Number(mapped)) ? mapped : Number(mapped);
+      });
+    }
+  }
+  return removed;
+}
+
 // v1.9.218: 소스 테이블 + expense 한 번에 정리 — page load / Firestore merge 후 모두 호출
 function dedupEverythingV218() {
-  const result = { samples: 0, orders: 0, expenses: 0, tombstoned: 0 };
+  const result = { samples: 0, orders: 0, expenses: 0, tombstoned: 0, nonPoApprovals: 0 };
   try { result.samples = dedupSamplesV218(); } catch (e) { console.warn('dedupSamplesV218 skipped:', e); }
   try { result.orders  = dedupOrdersV218();  } catch (e) { console.warn('dedupOrdersV218 skipped:', e); }
   try { result.expenses = dedupAllExpensesV216(); } catch (e) { console.warn('dedupAllExpensesV216 skipped:', e); }
   // v1.9.226 — dedup 결과에 남아 있더라도 tombstone 에 있으면 끝까지 제거
   try { result.tombstoned = applyOrderTombstonesV226(); } catch (e) { console.warn('applyOrderTombstonesV226 skipped:', e); }
+  // v1.9.345 — 일반 결재(non_po_approval) 중복 정리
+  try { result.nonPoApprovals = dedupNonPoApprovalsV345(); } catch (e) { console.warn('dedupNonPoApprovalsV345 skipped:', e); }
   return result;
 }
 
@@ -5754,10 +5808,10 @@ function dedupEverythingV218() {
 (function autoDedupEverythingV218() {
   try {
     const r = dedupEverythingV218();
-    const total = (r.samples || 0) + (r.orders || 0) + (r.expenses || 0);
+    const total = (r.samples || 0) + (r.orders || 0) + (r.expenses || 0) + (r.nonPoApprovals || 0);
     if (total > 0) {
       try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
-      console.log(`✅ v1.9.218 초기 중복 자동 제거 — 샘플 ${r.samples}건, 발주 ${r.orders}건, 지출결의서 ${r.expenses}건`);
+      console.log(`✅ v1.9.218/345 초기 중복 자동 제거 — 샘플 ${r.samples}건, 발주 ${r.orders}건, 지출결의서 ${r.expenses}건, 일반결재 ${r.nonPoApprovals||0}건`);
     }
   } catch (e) { console.warn('dedup v218 initial skipped:', e); }
 })();
@@ -15977,19 +16031,34 @@ function approveNonPo(id) {
   showNotif('✅ 결재 완료', 'success');
 }
 
-function deleteNonPo(id) {
-  // v1.9.317: 타입 체크 — ID 충돌 시 엉뚱한 발주 결재를 지우지 않도록 방지
-  const a = (DB.approvals||[]).find(x => x.id === id && x.type === 'non_po_approval');
+async function deleteNonPo(id) {
+  // v1.9.317/345: 타입 체크 + id 안전 비교 (Firestore string/number 혼재 대응)
+  const _idStr = String(id);
+  const a = (DB.approvals||[]).find(x => x && String(x.id) === _idStr && x.type === 'non_po_approval');
   if (!a) {
     alert('⚠️ 삭제 대상을 찾을 수 없습니다. 데이터 정합성 문제일 수 있습니다. 새로고침 후 다시 시도해주세요.');
     try { _fixApprovalIdCollisions(); renderApprovalPage(); } catch(_){}
     return;
   }
   if (!confirm('이 결재 요청을 삭제하시겠습니까?\n\n• ' + (a.title||'-'))) return;
-  DB.approvals = DB.approvals.filter(x => !(x.id === id && x.type === 'non_po_approval'));
-  DB.approvalComments = DB.approvalComments.filter(c => c.approvalId !== id);
-  try { saveData(); } catch(_){}
+  // 매칭되는 모든 것을 제거 (혹시 모를 중복까지 한 번에 청소)
+  DB.approvals = (DB.approvals||[]).filter(x => !(x && String(x.id) === _idStr && x.type === 'non_po_approval'));
+  DB.approvalComments = (DB.approvalComments||[]).filter(c => c && String(c.approvalId) !== _idStr);
+  // v1.9.345: 디바운스 saveData 대신 동기 localStorage + 백그라운드 Firestore — 새로고침 직전 클릭 시 유실 방지
+  try {
+    const snapshot = JSON.parse(JSON.stringify(DB));
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(snapshot)); } catch(_) {}
+    try { localStorage.setItem('reniv_approvals_backup', JSON.stringify(DB.approvals||[])); } catch(_){}
+  } catch(_){}
   renderApprovalPage();
+  showNotif('🗑️ 결재 요청이 삭제되었습니다', 'info');
+  try {
+    if (typeof saveDataNow === 'function') await saveDataNow();
+    else if (typeof saveData === 'function') saveData();
+  } catch(e) {
+    console.error('일반 결재 삭제 Firestore 동기화 실패:', e);
+    try { showNotif('⚠️ 클라우드 동기화 실패 — 새로고침 시 복원될 수 있습니다', 'warning'); } catch(_){}
+  }
 }
 
 // ══════════ 샘플 구매 테이블 (v1.9.200) ══════════
@@ -25613,9 +25682,9 @@ function initERPWhenReady() {
       try {
         if (typeof dedupEverythingV218 === 'function') {
           const r = dedupEverythingV218();
-          const total = (r.samples || 0) + (r.orders || 0) + (r.expenses || 0);
+          const total = (r.samples || 0) + (r.orders || 0) + (r.expenses || 0) + (r.nonPoApprovals || 0);
           if (total > 0) {
-            console.log(`✅ v1.9.218 [post-merge] 중복 제거 — 샘플 ${r.samples}건, 발주 ${r.orders}건, 지출결의서 ${r.expenses}건`);
+            console.log(`✅ v1.9.218/345 [post-merge] 중복 제거 — 샘플 ${r.samples}건, 발주 ${r.orders}건, 지출결의서 ${r.expenses}건, 일반결재 ${r.nonPoApprovals||0}건`);
             _v218DedupResaveNeeded = true;
           }
         }
