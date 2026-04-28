@@ -3202,10 +3202,14 @@ EXP YYYYMMDD 까지</textarea></div>
         <div class="fg full">
           <label style="display:flex;align-items:center;gap:6px;font-size:14px">💬 팀 코멘트 <span style="font-size:11px;font-weight:500;color:var(--gray-400)">— 팀원들과 자유롭게 의견을 나눠보세요</span></label>
           <div id="np-comments" style="max-height:460px;min-height:300px;overflow-y:auto;overflow-x:hidden;margin-bottom:10px;padding:8px 6px;background:#fafafa;border:1px solid var(--gray-200);border-radius:10px"></div>
-          <div style="display:flex;gap:6px;align-items:center">
-            <button type="button" onclick="event.stopPropagation();toggleNpInputEmojiPicker(this,'np-comment-input')" title="이모지 넣기" style="padding:6px 10px;background:#fff;border:1px solid var(--gray-300);border-radius:8px;font-size:16px;cursor:pointer;line-height:1;flex-shrink:0" onmouseenter="this.style.background='#f3f4f6';this.style.borderColor='var(--sky-400)'" onmouseleave="this.style.background='#fff';this.style.borderColor='var(--gray-300)'">🙂</button>
-            <input class="fi" id="np-comment-input" placeholder="의견을 남겨주세요..." style="flex:1" onkeydown="if(event.key==='Enter')addNpComment()">
-            <button type="button" onclick="addNpComment()" style="padding:6px 16px;background:var(--sky-500);color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:700">전송</button>
+          <div style="display:flex;gap:6px;align-items:flex-end">
+            <button type="button" onclick="event.stopPropagation();toggleNpInputEmojiPicker(this,'np-comment-input')" title="이모지 넣기" style="padding:6px 10px;background:#fff;border:1px solid var(--gray-300);border-radius:8px;font-size:16px;cursor:pointer;line-height:1;flex-shrink:0;height:36px" onmouseenter="this.style.background='#f3f4f6';this.style.borderColor='var(--sky-400)'" onmouseleave="this.style.background='#fff';this.style.borderColor='var(--gray-300)'">🙂</button>
+            <!-- v1.9.347: textarea + 자동 크기 조절 + Enter 전송 / Shift+Enter 줄바꿈 -->
+            <textarea class="fi" id="np-comment-input" placeholder="의견을 남겨주세요... (Shift+Enter 줄바꿈)" rows="1"
+                      style="flex:1;resize:none;min-height:36px;max-height:160px;line-height:1.5;padding:8px 12px;font-family:inherit;font-size:13px;overflow-y:auto"
+                      oninput="_autoGrowNpCommentInput(this)"
+                      onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();addNpComment();}"></textarea>
+            <button type="button" onclick="addNpComment()" style="padding:6px 16px;background:var(--sky-500);color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:700;height:36px;flex-shrink:0">전송</button>
           </div>
         </div>
       </div>
@@ -3484,8 +3488,8 @@ EXP YYYYMMDD 까지</textarea></div>
   </div>
 </div>
 
-<!-- v1.9.235 — 이미지 라이트박스 -->
-<div class="overlay" id="overlay-feed-lightbox" onclick="if(event.target===this)closeModal('feed-lightbox')">
+<!-- v1.9.235/346 — 이미지 라이트박스 (z-index 강화: 노트 상세 모달 z-index:10000 보다 위로) -->
+<div class="overlay" id="overlay-feed-lightbox" style="z-index:100000" onclick="if(event.target===this)closeModal('feed-lightbox')">
   <div class="modal" style="width:auto;max-width:94vw;max-height:94vh;background:transparent;box-shadow:none;border:0;padding:0">
     <img id="feed-lightbox-img" src="" style="max-width:92vw;max-height:92vh;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.5);display:block">
     <button onclick="closeModal('feed-lightbox')" style="position:absolute;top:-42px;right:0;background:rgba(255,255,255,.15);color:#fff;border:0;border-radius:50%;width:34px;height:34px;font-size:20px;cursor:pointer;backdrop-filter:blur(10px)">✕</button>
@@ -24055,6 +24059,12 @@ function _npMyKey() {
   const u = window._currentUser;
   return (u && (u.email || u.uid || u.displayName)) || 'anon';
 }
+// v1.9.347: 코멘트 textarea 자동 크기 조절 (max 160px)
+function _autoGrowNpCommentInput(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+}
 function addNpComment() {
   const inp = document.getElementById('np-comment-input');
   const text = inp?.value?.trim();
@@ -24074,7 +24084,11 @@ function addNpComment() {
     ts: Date.now(),
     reactions: {}
   });
-  if (inp) inp.value = '';
+  if (inp) {
+    inp.value = '';
+    // v1.9.347: 전송 후 textarea 높이 원복
+    inp.style.height = 'auto';
+  }
   renderNpComments();
 }
 
