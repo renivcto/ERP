@@ -6669,11 +6669,12 @@ function renderDashStats() {
       // v1.9.263: 이미지 블록 — 단일은 크게, 복수는 내부 캐러셀 + 인디케이터
       let imgBlock = '';
       if (images.length > 0) {
+        // v1.9.349: 썸네일 크기 확대(118 → 160) + 선명도 향상 CSS + contain (잘림 방지) 유지하되 cover 로 채움
         const imgSlides = images.map((src, ii) => `
           <img class="notes-img-slide" data-post="${idx}" data-img="${ii}"
                src="${src}" alt=""
                onclick="event.stopPropagation();_notesOpenLightbox(${idx},${ii})"
-               style="width:100%;height:100%;object-fit:cover;cursor:zoom-in;position:absolute;top:0;left:0;display:${ii===0?'block':'none'};border-radius:12px;transition:transform .15s"/>
+               style="width:100%;height:100%;object-fit:cover;cursor:zoom-in;position:absolute;top:0;left:0;display:${ii===0?'block':'none'};border-radius:12px;transition:transform .15s;image-rendering:auto;-webkit-backface-visibility:hidden;backface-visibility:hidden"/>
         `).join('');
         const imgDots = images.length > 1 ? `
           <div style="display:flex;justify-content:center;align-items:center;gap:6px;margin-top:7px">
@@ -6685,8 +6686,8 @@ function renderDashStats() {
             <span style="font-size:10px;color:var(--gray-400);margin-left:4px" class="notes-img-counter" data-post="${idx}">1 / ${images.length}</span>
           </div>` : '';
         imgBlock = `
-          <div style="flex:0 0 118px">
-            <div class="notes-img-wrap" data-post="${idx}" style="position:relative;width:118px;height:118px;border-radius:12px;overflow:hidden;background:#f1f5f9;box-shadow:0 1px 3px rgba(15,23,42,.08)">
+          <div style="flex:0 0 160px">
+            <div class="notes-img-wrap" data-post="${idx}" style="position:relative;width:160px;height:160px;border-radius:12px;overflow:hidden;background:#f1f5f9;box-shadow:0 1px 3px rgba(15,23,42,.08)">
               ${imgSlides}
               ${images.length > 1 ? `<span class="notes-img-badge" data-post="${idx}" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,.6);color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;pointer-events:none">1/${images.length}</span>` : ''}
             </div>
@@ -14369,7 +14370,8 @@ function addFeedImageFromFile(file){
   const reader = new FileReader();
   reader.onload = async e => {
     try {
-      const compressed = await _feedCompressImage(e.target.result, 1600, 0.82);
+      // v1.9.349: 스크린샷/텍스트 가독성 위해 quality 0.82 → 0.92 로 상향
+      const compressed = await _feedCompressImage(e.target.result, 1600, 0.92);
       _feedEditingImages.push(compressed);
     } catch(err) {
       console.warn('피드 이미지 압축 실패, 원본 사용:', err && err.message);
@@ -14399,8 +14401,11 @@ async function _feedCompressImage(dataUrl, maxDim, quality){
         const canvas = document.createElement('canvas');
         canvas.width = tw; canvas.height = th;
         const ctx = canvas.getContext('2d');
+        // v1.9.349: 고품질 리샘플링 — 스크린샷의 텍스트가 흐려지는 것 방지
+        try { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; } catch(_){}
         ctx.drawImage(img, 0, 0, tw, th);
-        const q = (quality != null) ? quality : 0.82;
+        // v1.9.349: 기본 quality 0.82 → 0.92 (스크린샷 텍스트 가독성 우선)
+        const q = (quality != null) ? quality : 0.92;
         const jpeg = canvas.toDataURL('image/jpeg', q);
         resolve(jpeg && jpeg.length < dataUrl.length ? jpeg : dataUrl);
       } catch(err) { reject(err); }
