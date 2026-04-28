@@ -14385,7 +14385,9 @@ async function saveFeedPost(){
   const now = new Date().toISOString();
   const isNew = !id;
   if (id) {
-    const p = DB.feedPosts.find(x => x.id === Number(id));
+    // v1.9.345: id 타입 안전 비교 — Firestore string/number 혼재 대응
+    const _idStr = String(id);
+    const p = DB.feedPosts.find(x => x && String(x.id) === _idStr);
     if (p) {
       p.title = title;
       p.content = content;
@@ -14394,6 +14396,10 @@ async function saveFeedPost(){
       p.pinned = pinned;
       p.aiSummary = aiSummary;
       p.updatedAt = now;
+    } else {
+      console.warn('saveFeedPost: 매칭되는 글 없음 id=', id, '/feedPosts:', DB.feedPosts.map(x=>x && x.id));
+      showNotif('수정 대상을 찾을 수 없습니다 (새로고침 후 다시 시도)', 'warning');
+      return;
     }
   } else {
     const newId = (DB._nextId && DB._nextId.feedPost) || ((DB.feedPosts.reduce((m,p)=>Math.max(m,p.id||0),0))+1);
