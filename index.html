@@ -22151,12 +22151,26 @@ function renderNewProductKanban() {
   document.getElementById('np-count').textContent = visibleItems.length;
 
   const stages = ['idea', 'develop', 'developing'];
+  // v1.9.338: 컬럼 헤더에 NEW 카운트 배지 — 48시간 이내 작성/수정된 카드 수
+  const _NP_NEW_WINDOW = 48 * 60 * 60 * 1000;
+  const _nowMs = Date.now();
+  const _isNewNp = (it) => {
+    const c = Number(it.createdAt) || 0;
+    const u = Number(it.updatedAt) || c;
+    const latest = Math.max(c, u);
+    return latest > 0 && (_nowMs - latest) < _NP_NEW_WINDOW;
+  };
   kanban.innerHTML = stages.map(stg => {
     const meta = NP_STAGES[stg];
     const stgItems = visibleItems.filter(x => x.stage === stg).sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0));
+    const stgNewCount = stgItems.filter(_isNewNp).length;
+    const stgNewBadge = stgNewCount > 0
+      ? `<span title="48시간 이내 새 카드/수정 ${stgNewCount}건" style="display:inline-flex;align-items:center;gap:4px;background:linear-gradient(135deg,#fef2f2 0%,#fecaca 100%);border:1px solid #fca5a5;color:#b91c1c;border-radius:99px;padding:2px 8px;font-size:10.5px;font-weight:800;box-shadow:0 1px 3px rgba(220,38,38,.18)"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#dc2626;animation:apBlink 1.2s infinite"></span>${stgNewCount}<span class="new-gif-label">NEW</span></span>`
+      : '';
     const header = `<div style="display:flex;align-items:center;gap:8px;padding:11px 14px;background:${meta.bg};border:1.5px solid ${meta.border};border-radius:10px 10px 0 0;border-bottom:none">
       <span style="font-size:18px">${meta.emoji}</span>
       <span style="font-size:14px;font-weight:800;color:${meta.color}">${meta.label}</span>
+      ${stgNewBadge}
       <span style="margin-left:auto;font-size:11.5px;background:${meta.color};color:#fff;padding:2px 10px;border-radius:99px;font-weight:700">${stgItems.length}</span>
     </div>`;
     const body = stgItems.length === 0
