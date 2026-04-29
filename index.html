@@ -2163,7 +2163,10 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
               <div class="fg"><label>광고비 (원)</label><input class="fi" id="shop-ads-cost" type="number" min="0" value="0" placeholder="0원 입력 허용"></div>
               <div class="fg"><label>비고</label><input class="fi" id="shop-ads-breakdown" placeholder=""></div>
             </div>
-            <div style="display:flex;justify-content:flex-end;margin-top:6px"><button class="btn btn-outline btn-sm" onclick="addShopAdsCost()">+ 광고비 추가</button></div>
+            <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:6px">
+              <button class="btn btn-outline btn-sm" id="shop-ads-cancel-btn" style="display:none" onclick="cancelEditShopAdsCost()">취소</button>
+              <button class="btn btn-outline btn-sm" id="shop-ads-submit-btn" onclick="submitShopAdsCost()">+ 광고비 추가</button>
+            </div>
             <div id="shop-ads-list" style="margin-top:10px"></div>
             <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px">0원 입력 = 광고 미집행 · 미설정 날짜는 광고비 0원 적용</div>
           </div>
@@ -8642,10 +8645,12 @@ function toggleAdsInputType() {
   if ($('ads-daily-group')) $('ads-daily-group').style.display = type === 'daily' ? '' : 'none';
 }
 
-// 광고비 추가 (날짜 겹침 방지)
-function addShopAdsCost() {
+// v1.9.358: 광고비 추가/수정 통합 — _editingAdsCostId 가 있으면 수정 모드
+let _editingAdsCostId = null;
+
+// 폼에서 입력값 가져와 광고비 저장 (추가 또는 수정)
+function submitShopAdsCost() {
   if (!requireWrite()) return;
-  // 현재 상세보기 중인 쇼핑몰 자동 사용
   let shopId = window._selectedShopId;
   if (!shopId && window._currentShopIdx != null && DB.shops[window._currentShopIdx]) {
     shopId = DB.shops[window._currentShopIdx].id;
@@ -8671,16 +8676,93 @@ function addShopAdsCost() {
     startDate = $('shop-ads-date')?.value; if (!startDate) { alert('날짜를 선택해주세요.'); return; }
     endDate = startDate;
   }
-  // 겹침 검사
-  const overlap = shop.adsCosts.find(a => !(endDate < a.startDate || startDate > a.endDate));
+  // 겹침 검사 — 수정 모드면 자기 자신 제외
+  const overlap = shop.adsCosts.find(a =>
+    a.id !== _editingAdsCostId && !(endDate < a.startDate || startDate > a.endDate)
+  );
   if (overlap) { alert('광고 기간이 겹치지 않도록 설정해 주세요.'); return; }
-  shop.adsCosts.push({ id: Date.now(), type, startDate, endDate, cost, memo });
+  if (_editingAdsCostId != null) {
+    // 수정 모드 — 기존 ROAS 보고서가 기간 키 기반이라면 같이 갱신
+    const idx = shop.adsCosts.findIndex(a => a.id === _editingAdsCostId);
+    if (idx < 0) { alert('수정 대상을 찾을 수 없습니다'); return; }
+    const old = shop.adsCosts[idx];
+    shop.adsCosts[idx] = { ...old, type, startDate, endDate, cost, memo };
+    // 기간이 바뀌었으면 기존 roasReports 의 해당 기간 보고서 키도 갱신
+    if (Array.isArray(shop.roasReports) && (old.startDate !== startDate || old.endDate !== endDate)) {
+      shop.roasReports.forEach(r => {
+        if (r && r.startDate === old.startDate && r.endDate === old.endDate) {
+          r.startDate = startDate; r.endDate = endDate;
+        }
+      });
+    }
+    showNotif('✅ 광고비가 수정되었습니다', 'success');
+  } else {
+    shop.adsCosts.push({ id: Date.now(), type, startDate, endDate, cost, memo });
+    showNotif('+ 광고비가 추가되었습니다', 'success');
+  }
   shop.adsCosts.sort((a,b) => b.startDate.localeCompare(a.startDate));
-  saveData();
+  // 동기 localStorage + 백그라운드 Firestore
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+  try {
+    if (typeof saveDataNow === 'function') saveDataNow().catch(e => console.warn('광고비 저장 실패:', e));
+    else if (typeof saveData === 'function') saveData();
+  } catch(_){}
   renderShopAdsList(shopId);
-  // Reset
+  cancelEditShopAdsCost();
+}
+// v1.9.358 backward-compat 별칭
+function addShopAdsCost() { submitShopAdsCost(); }
+
+// 수정 모드 시작 — 폼에 기존 값 채우고 버튼 라벨 변경
+function editShopAdsCost(shopId, adsId) {
+  if (!requireWrite()) return;
+  const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop) return;
+  const a = (shop.adsCosts||[]).find(x => x.id === adsId); if (!a) { alert('수정할 광고비를 찾을 수 없습니다'); return; }
+  _editingAdsCostId = adsId;
+  // 폼 채우기
+  if ($('shop-ads-type')) { $('shop-ads-type').value = a.type || 'monthly'; toggleAdsInputType(); }
+  if (a.type === 'monthly') {
+    if ($('shop-ads-month')) $('shop-ads-month').value = (a.startDate||'').slice(0,7);
+  } else if (a.type === 'range') {
+    if ($('shop-ads-start')) $('shop-ads-start').value = a.startDate || '';
+    if ($('shop-ads-end'))   $('shop-ads-end').value   = a.endDate   || '';
+  } else {
+    if ($('shop-ads-date'))  $('shop-ads-date').value  = a.startDate || '';
+  }
+  if ($('shop-ads-cost')) $('shop-ads-cost').value = a.cost || 0;
+  if ($('shop-ads-breakdown')) $('shop-ads-breakdown').value = a.memo || '';
+  // 버튼 라벨 변경
+  const submitBtn = $('shop-ads-submit-btn');
+  const cancelBtn = $('shop-ads-cancel-btn');
+  if (submitBtn) {
+    submitBtn.textContent = '✓ 수정 저장';
+    submitBtn.style.background = '#eef2ff';
+    submitBtn.style.color = '#4338ca';
+    submitBtn.style.borderColor = '#c7d2fe';
+  }
+  if (cancelBtn) cancelBtn.style.display = '';
+  // 폼으로 스크롤
+  setTimeout(() => { try { document.getElementById('shop-ads-cost')?.focus(); } catch(_){} }, 50);
+}
+
+// 수정 모드 취소 / 폼 리셋
+function cancelEditShopAdsCost() {
+  _editingAdsCostId = null;
   if ($('shop-ads-cost')) $('shop-ads-cost').value = '0';
   if ($('shop-ads-breakdown')) $('shop-ads-breakdown').value = '';
+  if ($('shop-ads-month')) $('shop-ads-month').value = '';
+  if ($('shop-ads-start')) $('shop-ads-start').value = '';
+  if ($('shop-ads-end')) $('shop-ads-end').value = '';
+  if ($('shop-ads-date')) $('shop-ads-date').value = '';
+  const submitBtn = $('shop-ads-submit-btn');
+  const cancelBtn = $('shop-ads-cancel-btn');
+  if (submitBtn) {
+    submitBtn.textContent = '+ 광고비 추가';
+    submitBtn.style.background = '';
+    submitBtn.style.color = '';
+    submitBtn.style.borderColor = '';
+  }
+  if (cancelBtn) cancelBtn.style.display = 'none';
 }
 
 function calcShopRoas(shopId, startDate, endDate) {
@@ -8855,13 +8937,31 @@ function removeRoasReport(startDate, endDate) {
 function renderShopAdsList(shopId) {
   const container = $('shop-ads-list'); if (!container) return;
   const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop || !shop.adsCosts?.length) { container.innerHTML = '<div style="text-align:center;color:var(--gray-400);padding:10px;font-size:12px">등록된 광고비가 없습니다</div>'; return; }
-  // v1.9.355: 광고비 기간 행 클릭 → 해당 기간으로 ROAS 자동 분석 (인라인 ROAS 컬럼은 ROAS 분석 패널 안에서 관리)
-  container.innerHTML = '<div style="font-size:11px;color:var(--gray-500);margin-bottom:4px;text-align:right">💡 행을 클릭하면 해당 기간으로 ROAS 분석</div>' +
-    '<table class="tbl" style="font-size:11.5px;text-align:center"><thead><tr><th>기간</th><th>방식</th><th>광고비</th><th>비고</th><th></th></tr></thead><tbody>' +
+  // v1.9.355/358: 광고비 기간 행 클릭 → 해당 기간으로 ROAS 분석 + ROAS pill + 수정/삭제 버튼
+  const _reports = Array.isArray(shop.roasReports) ? shop.roasReports : [];
+  container.innerHTML = '<div style="font-size:11px;color:var(--gray-500);margin-bottom:4px;text-align:right">💡 행을 클릭하면 해당 기간으로 ROAS 분석 (각 기간별 결과 자동 저장)</div>' +
+    '<table class="tbl" style="font-size:11.5px;text-align:center"><thead><tr><th>기간</th><th>방식</th><th>광고비</th><th>ROAS</th><th>비고</th><th style="width:70px"></th></tr></thead><tbody>' +
     shop.adsCosts.map(a => {
       const typeLabel = a.type === 'monthly' ? '월별' : a.type === 'range' ? '기간별' : '일별';
       const period = a.startDate === a.endDate ? a.startDate : `${a.startDate} ~ ${a.endDate}`;
-      return `<tr style="cursor:pointer;transition:background .12s" onmouseenter="this.style.background='#eef6ff'" onmouseleave="this.style.background=''" onclick="useAdPeriodForRoas('${a.startDate}','${a.endDate}')" title="이 기간으로 ROAS 분석"><td style="white-space:nowrap">${period}</td><td>${typeLabel}</td><td>${Number(a.cost).toLocaleString()}원</td><td>${a.memo||'-'}</td><td><button class="btn btn-outline btn-sm" style="font-size:10px;padding:1px 6px;color:var(--red-500)" onclick="event.stopPropagation();removeShopAdsCost('${shopId}',${a.id})">삭제</button></td></tr>`;
+      // 이 기간에 저장된 ROAS 보고서 검색
+      const _report = _reports.find(r => r && r.startDate === a.startDate && r.endDate === a.endDate);
+      let roasCell;
+      if (_report && _report.roas != null) {
+        const _color = _report.roas >= 300 ? '#16a34a' : _report.roas >= 100 ? '#d97706' : '#dc2626';
+        const _bg    = _report.roas >= 300 ? '#f0fdf4' : _report.roas >= 100 ? '#fffbeb' : '#fef2f2';
+        roasCell = `<span title="매출 ${(_report.revenue||0).toLocaleString()}원 / 주문 ${_report.orderCount||0}건" style="display:inline-block;background:${_bg};color:${_color};font-weight:700;padding:2px 8px;border-radius:99px;font-size:11px">${Math.round(_report.roas)}%</span>`;
+      } else if (_report && _report.roas == null) {
+        roasCell = '<span style="color:var(--gray-400);font-size:10.5px">광고비 0</span>';
+      } else {
+        roasCell = '<span style="color:var(--gray-400);font-size:10.5px">미분석</span>';
+      }
+      // 수정/삭제 버튼 — 색상 구분 (수정: indigo, 삭제: red)
+      const actionCell = `<div style="display:inline-flex;flex-direction:column;gap:3px;align-items:stretch">
+        <button class="btn btn-sm" title="수정" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:2px 8px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer;line-height:1" onclick="event.stopPropagation();editShopAdsCost('${shopId}',${a.id})">✏️ 수정</button>
+        <button class="btn btn-sm" title="삭제" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;padding:2px 8px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer;line-height:1" onclick="event.stopPropagation();removeShopAdsCost('${shopId}',${a.id})">🗑️ 삭제</button>
+      </div>`;
+      return `<tr style="cursor:pointer;transition:background .12s" onmouseenter="this.style.background='#eef6ff'" onmouseleave="this.style.background=''" onclick="useAdPeriodForRoas('${a.startDate}','${a.endDate}')" title="이 기간으로 ROAS 분석"><td style="white-space:nowrap">${period}</td><td>${typeLabel}</td><td>${Number(a.cost).toLocaleString()}원</td><td>${roasCell}</td><td>${a.memo||'-'}</td><td style="padding:6px 8px">${actionCell}</td></tr>`;
     }).join('') + '</tbody></table>';
 }
 
