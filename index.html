@@ -20843,6 +20843,7 @@ function selectGdocType(type) {
   if (box) box.style.borderColor = type ? 'var(--sky-400)' : 'var(--gray-300)';
 }
 
+// v1.9.352: 모달을 Firestore 동기화 끝나기 전에 즉시 닫음 — 사용자 대기 시간 제거
 async function saveGdoc() {
   const title = document.getElementById('gdoc-title-inp').value.trim();
   const url = document.getElementById('gdoc-url-inp').value.trim();
@@ -20857,9 +20858,14 @@ async function saveGdoc() {
     _gdocList.push({ id:'gdoc_'+Date.now(), type:_gdocSelectedType, title, url });
     showNotif('문서가 추가되었습니다','success');
   }
-  await saveGdocsToFirestore();
+  // 즉시 화면 갱신 + 모달 닫기 (Firestore 동기화는 백그라운드)
   renderGdocList();
   closeGdocModal();
+  // 백그라운드 Firestore 저장 (실패해도 localStorage 안전)
+  saveGdocsToFirestore().catch(e => {
+    console.warn('saveGdocsToFirestore 실패:', e);
+    try { showNotif('☁️ 클라우드 동기화 실패 — 로컬에는 저장됨', 'warning'); } catch(_){}
+  });
 }
 
 async function deleteGdoc() {
@@ -20867,10 +20873,15 @@ async function deleteGdoc() {
   const doc = _gdocList.find(d=>d.id===_gdocEditId);
   if (!confirm(`'${doc?.title}' 문서를 삭제합니까?`)) return;
   _gdocList = _gdocList.filter(d=>d.id!==_gdocEditId);
-  await saveGdocsToFirestore();
+  // 즉시 화면 갱신 + 모달 닫기
   renderGdocList();
   closeGdocModal();
   showNotif('문서가 삭제되었습니다');
+  // 백그라운드 Firestore 저장
+  saveGdocsToFirestore().catch(e => {
+    console.warn('saveGdocsToFirestore 실패:', e);
+    try { showNotif('☁️ 클라우드 동기화 실패 — 로컬에는 저장됨', 'warning'); } catch(_){}
+  });
 }
 
 // ═══════════════════════════════════════════════════════
@@ -22341,8 +22352,9 @@ function renderNewProductKanban() {
     const meta = NP_STAGES[stg];
     const stgItems = visibleItems.filter(x => x.stage === stg).sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0));
     const stgNewCount = stgItems.filter(_isNewNp).length;
+    // v1.9.351: 워크플로우 NEW 배지와 동일한 amber/cream 톤으로 통일
     const stgNewBadge = stgNewCount > 0
-      ? `<span title="48시간 이내 새 카드/수정 ${stgNewCount}건" style="display:inline-flex;align-items:center;gap:4px;background:linear-gradient(135deg,#fef2f2 0%,#fecaca 100%);border:1px solid #fca5a5;color:#b91c1c;border-radius:99px;padding:2px 8px;font-size:10.5px;font-weight:800;box-shadow:0 1px 3px rgba(220,38,38,.18)"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#dc2626;animation:apBlink 1.2s infinite"></span>${stgNewCount}<span class="new-gif-label">NEW</span></span>`
+      ? `<span title="48시간 이내 새 카드/수정 ${stgNewCount}건" style="display:inline-flex;align-items:center;gap:4px;background:linear-gradient(135deg,#fffbeb 0%,#fef3c7 100%);border:1.5px solid #fde68a;color:#92400e;border-radius:99px;padding:2px 8px;font-size:10.5px;font-weight:800;box-shadow:0 1px 3px rgba(217,119,6,.15)"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f59e0b;animation:apBlink 1.2s infinite"></span>${stgNewCount}<span class="new-gif-label">NEW</span></span>`
       : '';
     const header = `<div style="display:flex;align-items:center;gap:8px;padding:11px 14px;background:${meta.bg};border:1.5px solid ${meta.border};border-radius:10px 10px 0 0;border-bottom:none">
       <span style="font-size:18px">${meta.emoji}</span>
@@ -22571,8 +22583,9 @@ BOM 마진 ${estMarginNum !== null ? estMarginNum.toLocaleString()+'원' : '-'}
   const _editorAvatar = (typeof feedAvatarHtml === 'function')
     ? feedAvatarHtml(_editorName, _editorEmail, 16)
     : '';
+  // v1.9.351: 컬럼 헤더 / 워크플로우 NEW 배지와 동일한 amber/cream 톤으로 통일
   const newBadge = _isRecent
-    ? `<span title="${escapeHtml(_editorName)} 님이 최근 48시간 이내 작성/수정" style="flex-shrink:0;display:inline-flex;align-items:center;gap:4px;padding:2px 7px 2px 3px;border-radius:99px;background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border:1px solid #fcd34d;color:#92400e;font-size:10.5px;font-weight:800;letter-spacing:.2px;box-shadow:0 1px 2px rgba(146,64,14,.15)">${_editorAvatar}<span class="new-gif-label">NEW</span></span>`
+    ? `<span title="${escapeHtml(_editorName)} 님이 최근 48시간 이내 작성/수정" style="flex-shrink:0;display:inline-flex;align-items:center;gap:4px;padding:2px 7px 2px 3px;border-radius:99px;background:linear-gradient(135deg,#fffbeb 0%,#fef3c7 100%);border:1.5px solid #fde68a;color:#92400e;font-size:10.5px;font-weight:800;letter-spacing:.2px;box-shadow:0 1px 2px rgba(217,119,6,.15)">${_editorAvatar}<span class="new-gif-label">NEW</span></span>`
     : '';
 
   return `<div onclick="openNewProductModal('${it.id}')" style="background:#fff;border:1px solid var(--gray-200);border-radius:12px;padding:13px 8px;cursor:pointer;transition:all .15s;box-shadow:0 1px 2px rgba(0,0,0,0.03)" onmouseenter="this.style.boxShadow='0 4px 14px rgba(0,0,0,0.08)';this.style.transform='translateY(-1px)';this.style.borderColor='${stageMeta.border}'" onmouseleave="this.style.boxShadow='0 1px 2px rgba(0,0,0,0.03)';this.style.transform='translateY(0)';this.style.borderColor='var(--gray-200)'">
