@@ -2069,8 +2069,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
           <div style="display:flex;gap:6px;align-items:center">
-            <select class="fs" id="mg-period" style="width:120px;padding:5px;font-size:11px"><option>이번 달</option><option>지난 달</option><option>최근 7일</option><option>직접 선택</option></select>
-            <select class="fs" id="mg-shop-filter" style="width:120px;padding:5px;font-size:11px"><option value="">전체 쇼핑몰</option></select>
+            <select class="fs" id="mg-period" onchange="renderMarginAnalysis()" style="width:120px;padding:5px;font-size:11px"><option>이번 달</option><option>지난 달</option><option>최근 7일</option><option>전체</option></select>
+            <select class="fs" id="mg-shop-filter" onchange="renderMarginAnalysis()" style="width:140px;padding:5px;font-size:11px"><option value="">전체 쇼핑몰</option></select>
           </div>
           <div style="display:flex;gap:6px">
             <button class="btn btn-outline btn-sm" id="mg-bulk-btn" onclick="openBulkEdit()" disabled>✏️ 일괄 수정 (<span id="mg-sel-count">0</span>건)</button>
@@ -7698,6 +7698,7 @@ function switchSalesTab(tab) {
     el.classList.toggle('active', tabs[i] === tab);
   });
   if (tab === 'orders') { renderOrderShopTabs(); renderShopOrderTable(); }
+  if (tab === 'margin') { try { renderMarginAnalysis(); } catch(e) { console.warn('renderMarginAnalysis:', e); } }
   if (tab === 'shops') {
     // 탭 진입 시 항상 목록 뷰로
     const lv = $('shop-list-view'); if (lv) lv.style.display = '';
@@ -8422,6 +8423,151 @@ function applyProductMapping() {
   });
   closeProductMappingModal();
   finalizeOrderUpload(orders, shopId);
+}
+
+// ─────────────────────────────────────────────────────────
+// v1.9.361: 마진 분석 — 실제 계산 로직 구현
+//   ① 쇼핑몰 드롭다운에 DB.shops(와디즈, 쿠팡 등) 자동 채움
+//   ② 기간/쇼핑몰 필터로 shopOrders 추려서 행별 마진 계산
+//   ③ KPI: 총 주문 / Gross / Contribution / Net Margin / 평균 ROAS
+// ─────────────────────────────────────────────────────────
+function _mgComputePeriod(label) {
+  const today = new Date();
+  const fmt = dt => dt.toISOString().slice(0,10);
+  const yyyy = today.getFullYear();
+  const mm = today.getMonth();
+  if (label === '이번 달') {
+    return { start: fmt(new Date(yyyy, mm, 1)), end: fmt(new Date(yyyy, mm+1, 0)) };
+  } else if (label === '지난 달') {
+    return { start: fmt(new Date(yyyy, mm-1, 1)), end: fmt(new Date(yyyy, mm, 0)) };
+  } else if (label === '최근 7일') {
+    const s = new Date(yyyy, mm, today.getDate() - 6);
+    return { start: fmt(s), end: fmt(today) };
+  }
+  // '전체' 또는 알 수 없음 → 무제한
+  return { start: '', end: '' };
+}
+
+function _mgLookupCogs(o) {
+  // 주문 한 건의 COGS — 완제품 BOM/단가 또는 직접 매핑된 itemId
+  const items = DB.items || [];
+  let item = null;
+  const itemId = o.itemId || o.linkedItemId;
+  if (itemId != null) item = items.find(i => i.id == itemId || i.code === itemId);
+  if (!item && o.productName) {
+    const lower = String(o.productName).toLowerCase().trim();
+    // 완제품(type === '완제품') 우선, 그 다음 전체 items 에서 부분 매칭
+    item = items.find(i => i.type === '완제품' && i.name && lower.includes(i.name.toLowerCase()));
+    if (!item) item = items.find(i => i.name && lower.includes(i.name.toLowerCase()));
+    if (!item) item = items.find(i => i.name && i.name.toLowerCase().includes(lower));
+  }
+  if (!item) return { cogs: 0, item: null };
+  const qty = parseInt(o.qty || o.quantity || 1, 10) || 1;
+  // bomCost(BOM 합산) 우선, 없으면 price(완제품 단가) 사용
+  const unit = parseFloat(item.bomCost) || parseFloat(item.cogs) || parseFloat(item.price) || 0;
+  return { cogs: unit * qty, item };
+}
+
+function _mgAllocateAds(order, shop) {
+  // 광고비를 매출 비례로 주문에 배분 — 주문일이 포함된 광고비 기간만 대상
+  if (!shop || !Array.isArray(shop.adsCosts) || !shop.adsCosts.length) return 0;
+  const orderDate = (order.orderDate || order.date || '').slice(0,10);
+  if (!orderDate) return 0;
+  const a = shop.adsCosts.find(x => x.startDate <= orderDate && orderDate <= x.endDate);
+  if (!a) return 0;
+  const adCost = parseFloat(a.cost) || 0;
+  if (adCost <= 0) return 0;
+  // 같은 광고비 기간 내 매출 합 (취소/반품 제외)
+  const totalRevInPeriod = (DB.shopOrders||[]).reduce((s, o) => {
+    if (o.shopId !== shop.id) return s;
+    if (o.status === '취소' || o.status === '반품') return s;
+    const d = (o.orderDate||o.date||'').slice(0,10);
+    if (d < a.startDate || d > a.endDate) return s;
+    return s + (parseFloat(o.paymentAmount||o.totalPrice||0) || 0);
+  }, 0);
+  if (totalRevInPeriod <= 0) return 0;
+  const orderRev = parseFloat(order.paymentAmount||order.totalPrice||0) || 0;
+  return adCost * orderRev / totalRevInPeriod;
+}
+
+function _mgPopulateShopFilter() {
+  const sel = $('mg-shop-filter');
+  if (!sel) return;
+  const cur = sel.value;
+  const shops = (DB.shops||[]).slice();
+  sel.innerHTML = '<option value="">전체 쇼핑몰</option>' +
+    shops.map(s => `<option value="${s.id}">${(s.name||'쇼핑몰').replace(/</g,'&lt;')}</option>`).join('');
+  if (cur && shops.find(s => s.id === cur)) sel.value = cur;
+}
+
+function renderMarginAnalysis() {
+  _mgPopulateShopFilter();
+  const periodLabel = $('mg-period')?.value || '이번 달';
+  const { start, end } = _mgComputePeriod(periodLabel);
+  const shopFilter = $('mg-shop-filter')?.value || '';
+
+  // 1) 주문 필터링
+  let orders = (DB.shopOrders||[]).filter(o => {
+    if (!o) return false;
+    if (o.status === '취소' || o.status === '반품') return false;
+    const d = (o.orderDate || o.date || '').slice(0,10);
+    if (start && d < start) return false;
+    if (end && d > end) return false;
+    if (shopFilter && o.shopId !== shopFilter) return false;
+    return true;
+  });
+
+  // 2) 행별 계산 + 합계
+  let sumRev = 0, sumCogs = 0, sumFee = 0, sumAds = 0;
+  const rows = orders.map(o => {
+    const shop = (DB.shops||[]).find(s => s.id === o.shopId) || {};
+    const revenue = parseFloat(o.paymentAmount || o.totalPrice || 0) || 0;
+    const { cogs } = _mgLookupCogs(o);
+    const fee = revenue * (parseFloat(shop.commissionBase) || 0) / 100;
+    const ads = _mgAllocateAds(o, shop);
+    const net = revenue - cogs - fee - ads;
+    const pct = revenue > 0 ? (net / revenue * 100) : 0;
+    sumRev += revenue; sumCogs += cogs; sumFee += fee; sumAds += ads;
+    return { o, shop, revenue, cogs, fee, ads, net, pct };
+  });
+
+  // 3) 상단 KPI 갱신
+  const fmtPct = v => isFinite(v) ? v.toFixed(1) + '%' : '-';
+  if ($('mg-total-orders')) $('mg-total-orders').textContent = orders.length + '건';
+  const grossPct = sumRev > 0 ? (sumRev - sumCogs) / sumRev * 100 : 0;
+  const contribPct = sumRev > 0 ? (sumRev - sumCogs - sumFee) / sumRev * 100 : 0;
+  const netPct = sumRev > 0 ? (sumRev - sumCogs - sumFee - sumAds) / sumRev * 100 : 0;
+  const roasPct = sumAds > 0 ? sumRev / sumAds * 100 : null;
+  if ($('mg-gross'))  $('mg-gross').textContent  = sumRev > 0 ? fmtPct(grossPct) : '-';
+  if ($('mg-contrib'))$('mg-contrib').textContent= sumRev > 0 ? fmtPct(contribPct) : '-';
+  if ($('mg-net'))    $('mg-net').textContent    = sumRev > 0 ? fmtPct(netPct) : '-';
+  if ($('mg-roas'))   $('mg-roas').textContent   = roasPct == null ? '-' : Math.round(roasPct) + '%';
+
+  // 4) 테이블 갱신
+  const tb = $('margin-table');
+  if (!tb) return;
+  if (!rows.length) {
+    tb.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--gray-400);padding:30px;font-size:12.5px">조회 기간에 주문 데이터가 없습니다 — 주문 관리 탭에서 데이터를 수집해 주세요</td></tr>`;
+    return;
+  }
+  tb.innerHTML = rows.map(r => {
+    const _color = r.pct >= 30 ? '#16a34a' : r.pct >= 10 ? '#d97706' : r.pct >= 0 ? '#475569' : '#dc2626';
+    const _won = n => Math.round(n).toLocaleString() + '원';
+    const dim = 'color:var(--gray-400)';
+    return `<tr>
+      <td style="text-align:center"><input type="checkbox" class="mg-row-check" data-id="${r.o.id||r.o.orderNo||''}" onchange="updateBulkCount()"></td>
+      <td style="text-align:center">${(r.shop.name||'-').replace(/</g,'&lt;')}</td>
+      <td style="text-align:center;font-family:monospace;font-size:11px">${(r.o.orderNo||'-').replace(/</g,'&lt;')}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(r.o.productName||'-').replace(/</g,'&lt;')}</td>
+      <td style="text-align:right">${_won(r.revenue)}</td>
+      <td style="text-align:right;${r.cogs>0?'':dim}">${r.cogs>0 ? _won(r.cogs) : '-'}</td>
+      <td style="text-align:right;${r.fee>0?'':dim}">${r.fee>0 ? _won(r.fee) : '-'}</td>
+      <td style="text-align:right;${r.ads>0?'':dim}">${r.ads>0 ? _won(r.ads) : '-'}</td>
+      <td style="text-align:right;font-weight:700;color:${_color}">${_won(r.net)}</td>
+      <td style="text-align:right;font-weight:700;color:${_color}">${r.pct.toFixed(1)}%</td>
+    </tr>`;
+  }).join('');
+  updateBulkCount();
 }
 
 // 마진 분석
