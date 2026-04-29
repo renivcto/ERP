@@ -7701,6 +7701,7 @@ function switchSalesTab(tab) {
     const tabs = ['dashboard','orders','margin','shops'];
     el.classList.toggle('active', tabs[i] === tab);
   });
+  if (tab === 'dashboard') { try { renderSalesDashboard(); } catch(e) { console.warn('renderSalesDashboard:', e); } }
   if (tab === 'orders') { renderOrderShopTabs(); renderShopOrderTable(); }
   if (tab === 'margin') { try { renderMarginAnalysis(); } catch(e) { console.warn('renderMarginAnalysis:', e); } }
   if (tab === 'shops') {
@@ -8427,6 +8428,103 @@ function applyProductMapping() {
   });
   closeProductMappingModal();
   finalizeOrderUpload(orders, shopId);
+}
+
+// ─────────────────────────────────────────────────────────
+// v1.9.367: 매출 대시보드 — 실제 계산 + 쇼핑몰별 차트 + TOP 3
+// ─────────────────────────────────────────────────────────
+function renderSalesDashboard() {
+  if (typeof _mgComputePeriod !== 'function') return;
+  // 이번 달 기준
+  const { start, end } = _mgComputePeriod('이번 달');
+  // 1) 정상 주문 필터링
+  const orders = (DB.shopOrders||[]).filter(o => {
+    if (!o) return false;
+    if (o.status === '취소' || o.status === '반품') return false;
+    const d = (o.orderDate || o.date || '').slice(0,10);
+    if (start && d < start) return false;
+    if (end && d > end) return false;
+    return true;
+  });
+  // 2) 합계 + 쇼핑몰별 집계
+  let tRev = 0, tCogs = 0, tFee = 0, tAds = 0;
+  const shopAgg = {};
+  orders.forEach(o => {
+    const shop = (DB.shops||[]).find(s => s.id === o.shopId) || { id: o.shopId, name: o.shopName || '쇼핑몰' };
+    const rev = parseFloat(o.paymentAmount || o.totalPrice || 0) || 0;
+    const { cogs } = _mgLookupCogs(o);
+    const fee = rev * (parseFloat(shop.commissionBase) || 0) / 100;
+    const ads = _mgAllocateAds(o, shop);
+    tRev += rev; tCogs += cogs; tFee += fee; tAds += ads;
+    const sk = shop.id || 'unknown';
+    if (!shopAgg[sk]) shopAgg[sk] = { name: shop.name || '쇼핑몰', rev:0, cogs:0, fee:0, ads:0, count:0 };
+    shopAgg[sk].rev += rev; shopAgg[sk].cogs += cogs; shopAgg[sk].fee += fee; shopAgg[sk].ads += ads; shopAgg[sk].count++;
+  });
+  const netMargin = tRev - tCogs - tFee - tAds;
+  const netRev = tRev - tFee; // 순매출 = 총매출 − 수수료
+  const marginRate = tRev > 0 ? (netMargin / tRev * 100) : 0;
+  // 3) KPI 갱신
+  const fmtWon = n => '₩' + Math.round(n).toLocaleString();
+  if ($('sd-total-rev'))   $('sd-total-rev').textContent   = tRev > 0 ? fmtWon(tRev) : '-';
+  if ($('sd-net-rev'))     $('sd-net-rev').textContent     = tRev > 0 ? fmtWon(netRev) : '-';
+  if ($('sd-net-margin'))  $('sd-net-margin').textContent  = tRev > 0 ? fmtWon(netMargin) : '-';
+  if ($('sd-margin-rate')) $('sd-margin-rate').textContent = tRev > 0 ? marginRate.toFixed(1) + '%' : '-';
+  // 4) TOP 3 쇼핑몰 (매출 순)
+  const shopList = Object.values(shopAgg).map(s => ({ ...s, net: s.rev - s.cogs - s.fee - s.ads }));
+  const top3 = [...shopList].sort((a,b) => b.rev - a.rev).slice(0,3);
+  const top3El = $('sd-top3');
+  if (top3El) {
+    if (!top3.length) {
+      top3El.innerHTML = '<div style="text-align:center;padding:40px;color:var(--gray-400);font-size:12.5px">조회 기간에 매출 데이터가 없습니다</div>';
+    } else {
+      const rankIcons = ['🥇','🥈','🥉'];
+      top3El.innerHTML = top3.map((s, i) => {
+        const sharePct = tRev > 0 ? (s.rev / tRev * 100).toFixed(1) : 0;
+        const netPct   = s.rev > 0 ? (s.net / s.rev * 100).toFixed(1) : 0;
+        const isLast   = i === top3.length - 1;
+        const netColor = s.net >= 0 ? '#16a34a' : '#dc2626';
+        return `<div style="padding:11px 6px;${isLast?'':'border-bottom:1px solid var(--gray-100);'}">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+            <span style="font-size:14px;font-weight:800;color:#0f172a">${rankIcons[i]||(i+1)} ${(s.name||'-').replace(/</g,'&lt;')}</span>
+            <span style="font-size:11.5px;color:var(--gray-500)">${s.count}건 · ${sharePct}%</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:13px">
+            <span style="color:var(--sky-700);font-weight:700">${fmtWon(s.rev)}</span>
+            <span style="color:${netColor};font-weight:700">NET 마진 ${netPct}%</span>
+          </div>
+        </div>`;
+      }).join('');
+    }
+  }
+  // 5) 쇼핑몰별 매출 & 마진 막대 차트
+  const canvas = document.getElementById('sd-shop-chart');
+  if (canvas && typeof Chart !== 'undefined') {
+    if (window._sdShopChart) { try { window._sdShopChart.destroy(); } catch(_){} window._sdShopChart = null; }
+    if (shopList.length > 0) {
+      const sortedShops = [...shopList].sort((a,b) => b.rev - a.rev);
+      window._sdShopChart = new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels: sortedShops.map(s => s.name),
+          datasets: [
+            { label: '매출', data: sortedShops.map(s => Math.round(s.rev)), backgroundColor: 'rgba(99,102,241,0.65)', borderColor: 'rgba(99,102,241,1)', borderWidth: 1 },
+            { label: 'NET 마진', data: sortedShops.map(s => Math.round(s.net)), backgroundColor: 'rgba(34,197,94,0.65)', borderColor: 'rgba(34,197,94,1)', borderWidth: 1 }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'top', labels: { font: { size: 11 }, boxWidth: 14 } },
+            tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ₩' + (ctx.parsed.y||0).toLocaleString() } }
+          },
+          scales: {
+            y: { beginAtZero: true, ticks: { callback: v => (v >= 1000000 ? (v/1000000).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(0)+'k' : v), font: { size: 10 } } },
+            x: { ticks: { font: { size: 11 } } }
+          }
+        }
+      });
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────
