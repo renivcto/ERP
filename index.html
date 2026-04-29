@@ -8768,6 +8768,35 @@ function calcRoasReport() {
   const roasColor = roas === null ? 'var(--gray-500)' : roas >= 300 ? '#16a34a' : roas >= 100 ? '#d97706' : '#dc2626';
   const roasText = roas === null ? '-' : roas.toFixed(0) + '%';
 
+  // v1.9.357: "순이익" → "광고 마진" 으로 변경 (수수료/원가 미반영이라 진짜 순이익이 아님)
+  //   매출 − 광고비 = 광고비 차감 후 매출 = "광고 마진" (광고에 의한 매출 효율 잔액)
+  // v1.9.357: 저장된 ROAS 분석 기간 칩 (각 기간별 결과를 한눈에 비교 + 클릭으로 전환)
+  const _shopForChips = (DB.shops||[]).find(s => s.id === shopId);
+  const _savedReports = (_shopForChips && Array.isArray(_shopForChips.roasReports)) ? _shopForChips.roasReports : [];
+  const _sortedReports = [..._savedReports].sort((a,b) => (b.calculatedAt||0) - (a.calculatedAt||0));
+  const savedChipsHtml = _sortedReports.length ? `
+    <div style="margin-top:14px;padding-top:12px;border-top:1px dashed #e2e8f0">
+      <div style="font-size:11.5px;color:var(--gray-600);font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:6px">
+        <span>📊 저장된 분석</span>
+        <span style="font-size:10.5px;color:var(--gray-400);font-weight:500">— 칩을 클릭해 결과 전환</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${_sortedReports.map(r => {
+          const isCur = r.startDate === start && r.endDate === end;
+          const _r = r.roas;
+          const _rt = _r == null ? '-' : Math.round(_r) + '%';
+          const _bg = isCur ? '#0f172a' : (_r != null && _r >= 100 ? '#f0fdf4' : '#fef2f2');
+          const _fg = isCur ? '#fff' : (_r != null && _r >= 100 ? '#16a34a' : '#dc2626');
+          const _bd = isCur ? '#0f172a' : (_r != null && _r >= 100 ? '#bbf7d0' : '#fecaca');
+          const _per = r.startDate === r.endDate ? r.startDate : `${r.startDate} ~ ${r.endDate}`;
+          return `<button type="button" onclick="event.stopPropagation();useAdPeriodForRoas('${r.startDate}','${r.endDate}')" title="${_per} ROAS 결과 보기 — 매출 ${(r.revenue||0).toLocaleString()}원 / 광고비 ${(r.adsCost||0).toLocaleString()}원" style="display:inline-flex;align-items:center;gap:6px;background:${_bg};color:${_fg};border:1px solid ${_bd};padding:4px 10px;border-radius:99px;font-size:11px;font-weight:700;cursor:pointer;transition:all .12s">
+            <span>${_per}</span>
+            <span style="background:${isCur?'rgba(255,255,255,.2)':'rgba(0,0,0,.05)'};color:${_fg};padding:1px 6px;border-radius:99px;font-size:10px;font-weight:800">${_rt}</span>
+            <span onclick="event.stopPropagation();removeRoasReport('${r.startDate}','${r.endDate}')" title="이 분석 삭제" style="opacity:.6;font-size:10px;cursor:pointer;margin-left:1px">✕</span>
+          </button>`;
+        }).join('')}
+      </div>
+    </div>` : '';
   container.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:14px">
       <div style="background:var(--sky-50);border-radius:8px;padding:14px;text-align:center">
@@ -8786,37 +8815,53 @@ function calcRoasReport() {
         <div style="font-size:10.5px;color:var(--gray-400);margin-top:2px">${roas === null ? '광고비 0원' : roas >= 300 ? '효율 우수' : roas >= 100 ? '손익분기 이상' : '개선 필요'}</div>
       </div>
       <div style="background:var(--gray-50);border-radius:8px;padding:14px;text-align:center">
-        <div style="font-size:11px;color:var(--gray-500);font-weight:600;margin-bottom:4px">순이익 (매출-광고비)</div>
+        <div style="font-size:11px;color:var(--gray-500);font-weight:600;margin-bottom:4px" title="매출에서 광고비를 뺀 잔액. 수수료·원가는 미포함이므로 진짜 순이익이 아닙니다.">광고 마진 <span style="font-size:9.5px;color:var(--gray-400);font-weight:500">(매출−광고비)</span></div>
         <div style="font-size:18px;font-weight:700;color:${rev - adsCost >= 0 ? '#16a34a' : '#dc2626'}">${(rev - adsCost).toLocaleString()}<span style="font-size:12px;font-weight:400">원</span></div>
-        <div style="font-size:10.5px;color:var(--gray-400);margin-top:2px">${rev - adsCost >= 0 ? '흑자' : '적자'} (광고비 기준)</div>
+        <div style="font-size:10.5px;color:var(--gray-400);margin-top:2px">${rev - adsCost >= 0 ? '광고 효율 양호' : '광고 효율 부족'}</div>
       </div>
     </div>
-    <div style="font-size:10.5px;color:var(--gray-400)">※ ROAS = 매출 ÷ 광고비 × 100 · 수수료·원가 미포함 순수 광고 대비 매출 효율</div>
+    <div style="font-size:10.5px;color:var(--gray-400)">※ ROAS = 매출 ÷ 광고비 × 100 · 광고 마진은 수수료·원가 미포함 (순수 광고 대비 매출 잔액)</div>
+    ${savedChipsHtml}
   `;
+}
+
+// v1.9.357: 저장된 ROAS 분석 항목 삭제
+function removeRoasReport(startDate, endDate) {
+  if (!confirm(`${startDate} ~ ${endDate} ROAS 분석을 삭제하시겠습니까?`)) return;
+  const shopId = window._selectedShopId;
+  const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop || !Array.isArray(shop.roasReports)) return;
+  shop.roasReports = shop.roasReports.filter(r => !(r && r.startDate === startDate && r.endDate === endDate));
+  // lastRoas 도 같은 기간이면 제거
+  if (shop.lastRoas && shop.lastRoas.startDate === startDate && shop.lastRoas.endDate === endDate) shop.lastRoas = null;
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+  try {
+    if (typeof saveDataNow === 'function') saveDataNow().catch(e => console.warn('roasReports 삭제 저장 실패:', e));
+    else if (typeof saveData === 'function') saveData();
+  } catch(_){}
+  // 현재 분석 패널 재렌더 (남은 칩 갱신)
+  try {
+    if ($('roas-start')?.value === startDate && $('roas-end')?.value === endDate) {
+      const rr = $('roas-result');
+      if (rr) rr.innerHTML = '<div style="text-align:center;color:var(--gray-400);font-size:12px;padding:20px">기간을 선택하고 조회를 클릭하세요</div>';
+      if ($('roas-start')) $('roas-start').value = '';
+      if ($('roas-end')) $('roas-end').value = '';
+    } else {
+      // 다른 분석이 보이고 있으면 그건 유지하되 칩 목록만 갱신
+      calcRoasReport();
+    }
+  } catch(_){}
+  showNotif('🗑️ 분석 항목이 삭제되었습니다', 'info');
 }
 function renderShopAdsList(shopId) {
   const container = $('shop-ads-list'); if (!container) return;
   const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop || !shop.adsCosts?.length) { container.innerHTML = '<div style="text-align:center;color:var(--gray-400);padding:10px;font-size:12px">등록된 광고비가 없습니다</div>'; return; }
-  // v1.9.355/356: 광고비 기간 행 클릭 → 해당 기간으로 ROAS 분석 + 기간별 저장된 ROAS 인라인 표시
-  const _reports = Array.isArray(shop.roasReports) ? shop.roasReports : [];
-  container.innerHTML = '<div style="font-size:11px;color:var(--gray-500);margin-bottom:4px;text-align:right">💡 행을 클릭하면 해당 기간으로 ROAS 분석 (각 기간별 결과 자동 저장)</div>' +
-    '<table class="tbl" style="font-size:11.5px;text-align:center"><thead><tr><th>기간</th><th>방식</th><th>광고비</th><th>ROAS</th><th>비고</th><th></th></tr></thead><tbody>' +
+  // v1.9.355: 광고비 기간 행 클릭 → 해당 기간으로 ROAS 자동 분석 (인라인 ROAS 컬럼은 ROAS 분석 패널 안에서 관리)
+  container.innerHTML = '<div style="font-size:11px;color:var(--gray-500);margin-bottom:4px;text-align:right">💡 행을 클릭하면 해당 기간으로 ROAS 분석</div>' +
+    '<table class="tbl" style="font-size:11.5px;text-align:center"><thead><tr><th>기간</th><th>방식</th><th>광고비</th><th>비고</th><th></th></tr></thead><tbody>' +
     shop.adsCosts.map(a => {
       const typeLabel = a.type === 'monthly' ? '월별' : a.type === 'range' ? '기간별' : '일별';
       const period = a.startDate === a.endDate ? a.startDate : `${a.startDate} ~ ${a.endDate}`;
-      // 이 기간에 저장된 ROAS 보고서 검색
-      const _report = _reports.find(r => r && r.startDate === a.startDate && r.endDate === a.endDate);
-      let roasCell;
-      if (_report && _report.roas != null) {
-        const _color = _report.roas >= 300 ? '#16a34a' : _report.roas >= 100 ? '#d97706' : '#dc2626';
-        const _bg    = _report.roas >= 300 ? '#f0fdf4' : _report.roas >= 100 ? '#fffbeb' : '#fef2f2';
-        roasCell = `<span title="매출 ${(_report.revenue||0).toLocaleString()}원 / 주문 ${_report.orderCount||0}건" style="display:inline-block;background:${_bg};color:${_color};font-weight:700;padding:2px 8px;border-radius:99px;font-size:11px">${Math.round(_report.roas)}%</span>`;
-      } else if (_report && _report.roas == null) {
-        roasCell = '<span style="color:var(--gray-400);font-size:10.5px">광고비 0</span>';
-      } else {
-        roasCell = '<span style="color:var(--gray-400);font-size:10.5px">미분석</span>';
-      }
-      return `<tr style="cursor:pointer;transition:background .12s" onmouseenter="this.style.background='#eef6ff'" onmouseleave="this.style.background=''" onclick="useAdPeriodForRoas('${a.startDate}','${a.endDate}')" title="이 기간으로 ROAS 분석"><td style="white-space:nowrap">${period}</td><td>${typeLabel}</td><td>${Number(a.cost).toLocaleString()}원</td><td>${roasCell}</td><td>${a.memo||'-'}</td><td><button class="btn btn-outline btn-sm" style="font-size:10px;padding:1px 6px;color:var(--red-500)" onclick="event.stopPropagation();removeShopAdsCost('${shopId}',${a.id})">삭제</button></td></tr>`;
+      return `<tr style="cursor:pointer;transition:background .12s" onmouseenter="this.style.background='#eef6ff'" onmouseleave="this.style.background=''" onclick="useAdPeriodForRoas('${a.startDate}','${a.endDate}')" title="이 기간으로 ROAS 분석"><td style="white-space:nowrap">${period}</td><td>${typeLabel}</td><td>${Number(a.cost).toLocaleString()}원</td><td>${a.memo||'-'}</td><td><button class="btn btn-outline btn-sm" style="font-size:10px;padding:1px 6px;color:var(--red-500)" onclick="event.stopPropagation();removeShopAdsCost('${shopId}',${a.id})">삭제</button></td></tr>`;
     }).join('') + '</tbody></table>';
 }
 
