@@ -18333,14 +18333,15 @@ async function saveSample() {
     if (_sampleImage)     { s.image     = _sampleImage.data;     s.imageName     = _sampleImage.name;     }
     // v1.9.405: updatedAt 기록 → Firestore 머지 시 최신 수정본을 보호
     s.updatedAt = Date.now();
-    // 연결된 지출결의서 동기화
+    // 연결된 지출결의서 동기화 — 없으면 신규 생성 (v1.9.501)
     const exp = (DB.expenses||[]).find(e => e.category==='sample' && e.sampleId===s.id);
     if (exp) {
       exp.title = `[샘플] ${s.purpose}`;
       exp.vendor = s.vendor;
       exp.amount = s.amount;
       exp.dueDate = s.buyDate;
-      exp.paidDate = s.buyDate;
+      // 미지급 상태인 동안에는 paidDate를 buyDate로 강제하지 않음
+      if (exp.paidStatus === 'paid') exp.paidDate = exp.paidDate || s.buyDate;
       exp.note = `${s.payMethod||''}${s.note?' / '+s.note:''}`;
       // v1.9.219: payMethod / 계좌정보 전파
       exp.payMethod = s.payMethod || '';
@@ -18348,6 +18349,29 @@ async function saveSample() {
       exp.bankAccount = s.bankAccount || '';
       exp.bankHolder  = s.bankHolder  || '';
       exp.updatedAt = Date.now();
+    } else if (s.amount > 0) {
+      // v1.9.501: 기존에 expense가 없으면 자동으로 생성 — 옛 데이터 복구 / 금액 0으로 등록 후 추가한 케이스 모두 커버
+      DB.expenses.push({
+        id: nextId('expense'),
+        approvalId: null,
+        orderId: null,
+        sampleId: s.id,
+        category: 'sample',
+        title: `[샘플] ${s.purpose}`,
+        vendor: s.vendor,
+        amount: s.amount,
+        dueDate: s.buyDate,
+        paidDate: '',
+        paidStatus: 'requested',
+        taxInvoice: (s.payMethod === '법인카드') ? '수령완료' : '미수령',
+        urgent: false,
+        createdAt: Date.now(),
+        note: `${s.payMethod||''}${s.note?' / '+s.note:''}`,
+        payMethod  : s.payMethod    || '',
+        bankName   : s.bankName     || '',
+        bankAccount: s.bankAccount  || '',
+        bankHolder : s.bankHolder   || '',
+      });
     }
     // v1.9.404: 디바운스 saveData → 즉시 localStorage + Firestore 동기 저장으로 변경
     //   원인: 800ms 디바운스 안에 다른 동작(예: 페이지 이동)이 Firestore 재로드를 트리거하면
@@ -26615,8 +26639,49 @@ function init() {
   dedupeVendors();
   // v1.9.500: 광고비 expense ↔ 쇼핑몰 adsCosts 일괄 동기화 (앱 시작 시 1회)
   try { _resyncAllExpenseAdsToShops(); } catch(e) { console.warn('광고비 동기화 실패:', e); }
+  // v1.9.501: 샘플 → 지출결의서 누락 보정 (앱 시작 시 1회)
+  try { _resyncOrphanSampleExpenses(); } catch(e) { console.warn('샘플 expense 동기화 실패:', e); }
   updateBadges();
   renderDashboard();
+}
+
+// v1.9.501: 샘플 구매가 있는데 매칭되는 expense가 없는 경우 자동 보정
+//  - 옛 데이터(v1.9.202 이전 등록), 금액 0으로 등록 후 수정 등의 케이스 복구
+function _resyncOrphanSampleExpenses() {
+  if (!Array.isArray(DB.samples) || !Array.isArray(DB.expenses)) return;
+  let created = 0;
+  (DB.samples||[]).forEach(s => {
+    if (!s || !s.id) return;
+    const has = DB.expenses.some(e => e && e.category === 'sample' && e.sampleId === s.id);
+    if (has) return;
+    if (!(parseFloat(s.amount) > 0)) return;
+    DB.expenses.push({
+      id: nextId('expense'),
+      approvalId: null,
+      orderId: null,
+      sampleId: s.id,
+      category: 'sample',
+      title: `[샘플] ${s.purpose||''}`,
+      vendor: s.vendor||'',
+      amount: parseFloat(s.amount)||0,
+      dueDate: s.buyDate||'',
+      paidDate: '',
+      paidStatus: 'requested',
+      taxInvoice: (s.payMethod === '법인카드') ? '수령완료' : '미수령',
+      urgent: false,
+      createdAt: s.createdAt || Date.now(),
+      note: `${s.payMethod||''}${s.note?' / '+s.note:''}`,
+      payMethod  : s.payMethod    || '',
+      bankName   : s.bankName     || '',
+      bankAccount: s.bankAccount  || '',
+      bankHolder : s.bankHolder   || '',
+    });
+    created++;
+  });
+  if (created > 0) {
+    console.log(`✅ v1.9.501 샘플 expense 누락 ${created}건 자동 복구`);
+    try { if (typeof saveDataNow === 'function') saveDataNow().catch(_=>{}); else if (typeof saveData === 'function') saveData(); } catch(_){}
+  }
 }
 
 // v1.9.500: 모든 광고비 지출결의서를 쇼핑몰 adsCosts에 동기화 (마이그레이션 / 데이터 재정합)
