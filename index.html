@@ -2278,9 +2278,21 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             <div class="fg"><label>수수료 비고</label><input class="fi" id="shop-fee-memo" placeholder="수수료 변경 사유, 협상 조건 등"></div>
             <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px">모든 금액·비율은 0 입력 허용 (수수료 무료 채널 대응)</div>
           </div>
-          <!-- ③ 광고비 -->
+          <!-- ③ 광고비 — v1.9.500: 지출결의서가 단일 진실 (Single Source of Truth) -->
           <div class="shop-section">
             <div class="shop-section-title">③ 광고비</div>
+            <!-- v1.9.500: 안내 배너 — 지출결의서에서 입력하도록 안내 -->
+            <div style="background:linear-gradient(135deg,#fdf2f8,#fff7ed);border:1px solid #fbcfe8;border-radius:8px;padding:11px 13px;margin-bottom:10px;display:flex;align-items:flex-start;gap:10px">
+              <div style="font-size:18px;flex-shrink:0">📢</div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:12px;font-weight:700;color:#be185d;margin-bottom:3px">광고비는 <u>지출결의서</u>에서 등록하세요</div>
+                <div style="font-size:10.5px;color:#9d174d;line-height:1.5">결재 요청 → 지출 결의서 → 분류 '광고비' 선택 시 쇼핑몰·집행 기간·금액을 입력하면 이 화면 광고비 이력에 자동 반영됩니다. 아래 추가 폼은 <b>예외 수동 입력용</b>으로만 사용하세요.</div>
+                <button type="button" id="shop-ads-open-expense-btn" onclick="openExpenseModalForAd(window._selectedShopId)" style="margin-top:7px;background:#be185d;color:#fff;border:none;padding:5px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">+ 지출결의서 작성하기</button>
+                <button type="button" id="shop-ads-toggle-manual-btn" onclick="toggleShopAdsManualForm()" style="margin-top:7px;margin-left:6px;background:#fff;color:#be185d;border:1px solid #fbcfe8;padding:5px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer">▾ 수동 입력 폼 열기</button>
+              </div>
+            </div>
+            <!-- v1.9.500: 수동 입력 폼 — 기본 접힘 -->
+            <div id="shop-ads-manual-form" style="display:none">
             <div class="fg" style="margin-bottom:10px"><label>입력 방식</label><select class="fs" id="shop-ads-type" onchange="toggleAdsInputType()"><option value="monthly">월별 입력</option><option value="range">기간별 입력</option><option value="daily">일별 입력</option></select></div>
             <div class="fg" id="ads-monthly-group" style="margin-bottom:10px"><label>월 선택</label><input class="fi" id="shop-ads-month" type="month"></div>
             <div id="ads-range-group" style="display:none;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
@@ -2294,10 +2306,11 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             </div>
             <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:6px">
               <button class="btn btn-outline btn-sm" id="shop-ads-cancel-btn" style="display:none" onclick="cancelEditShopAdsCost()">취소</button>
-              <button class="btn btn-outline btn-sm" id="shop-ads-submit-btn" onclick="submitShopAdsCost()">+ 광고비 추가</button>
+              <button class="btn btn-outline btn-sm" id="shop-ads-submit-btn" onclick="submitShopAdsCost()">+ 광고비 추가 (수동)</button>
+            </div>
+            <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px">0원 입력 = 광고 미집행 · 미설정 날짜는 광고비 0원 적용</div>
             </div>
             <div id="shop-ads-list" style="margin-top:10px"></div>
-            <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px">0원 입력 = 광고 미집행 · 미설정 날짜는 광고비 0원 적용</div>
           </div>
           <!-- ④ ROAS 분석 -->
           <div class="shop-section">
@@ -3745,6 +3758,34 @@ EXP YYYYMMDD 까지</textarea></div>
           </select>
         </div>
         <div class="fg"><label>지급 요청일</label><input class="fi" id="ape-duedate" type="date"></div>
+      </div>
+      <!-- v1.9.500: 광고비 카테고리 전용 필드 — 쇼핑몰 광고비 / ROAS / 마진 분석에 자동 연동 -->
+      <div id="ape-ad-fields" style="display:none;background:#fdf2f8;border:1px solid #fbcfe8;border-radius:8px;padding:12px;margin-bottom:10px">
+        <div style="font-size:12px;color:#be185d;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+          📢 광고 집행 정보
+          <span style="font-size:10.5px;color:#9d174d;font-weight:500">— 쇼핑몰 광고비 · ROAS · 마진 분석에 자동 반영</span>
+        </div>
+        <div class="fg2" style="margin-bottom:6px">
+          <div class="fg" style="margin:0">
+            <label>광고 플랫폼 (쇼핑몰)<span class="req">*</span></label>
+            <select class="fs" id="ape-ad-shop"><option value="">— 쇼핑몰 선택 —</option></select>
+          </div>
+          <div class="fg" style="margin:0">
+            <label>매체 / 캠페인명</label>
+            <input class="fi" id="ape-ad-platform" placeholder="예: 네이버 GFA · 카카오 키워드 · 자체 쿠폰">
+          </div>
+        </div>
+        <div class="fg2" style="margin-bottom:0">
+          <div class="fg" style="margin:0">
+            <label>집행 시작일<span class="req">*</span></label>
+            <input class="fi" id="ape-ad-start" type="date">
+          </div>
+          <div class="fg" style="margin:0">
+            <label>집행 종료일<span class="req">*</span></label>
+            <input class="fi" id="ape-ad-end" type="date">
+          </div>
+        </div>
+        <div style="font-size:10.5px;color:#9d174d;margin-top:8px;line-height:1.45">※ 위 '금액'에 입력한 광고비가 선택한 쇼핑몰의 광고비 이력에 자동 등록됩니다. 동일 쇼핑몰의 다른 광고 기간과 겹치지 않도록 주의해 주세요.</div>
       </div>
       <div class="fg"><label>제목<span class="req">*</span></label><input class="fi" id="ape-title" placeholder=""></div>
       <div class="fg2">
@@ -9310,11 +9351,17 @@ function submitShopAdsCost() {
     startDate = $('shop-ads-date')?.value; if (!startDate) { alert('날짜를 선택해주세요.'); return; }
     endDate = startDate;
   }
-  // 겹침 검사 — 수정 모드면 자기 자신 제외
+  // 겹침 검사 — 수정 모드면 자기 자신 제외 (자동 동기화 항목과 겹치면 추가 안내)
   const overlap = shop.adsCosts.find(a =>
-    a.id !== _editingAdsCostId && !(endDate < a.startDate || startDate > a.endDate)
+    a.id != _editingAdsCostId && !(endDate < a.startDate || startDate > a.endDate)
   );
-  if (overlap) { alert('광고 기간이 겹치지 않도록 설정해 주세요.'); return; }
+  if (overlap) {
+    if (overlap.expenseId) {
+      if (!confirm(`이 기간은 지출결의서 #${overlap.expenseId} (${overlap.startDate} ~ ${overlap.endDate}) 와 겹칩니다.\n수동 광고비를 추가하면 ROAS·마진 분석에 중복 합산될 수 있습니다.\n그래도 진행하시겠습니까?`)) return;
+    } else {
+      alert('광고 기간이 겹치지 않도록 설정해 주세요.'); return;
+    }
+  }
   if (_editingAdsCostId != null) {
     // 수정 모드 — 기존 ROAS 보고서가 기간 키 기반이라면 같이 갱신
     const idx = shop.adsCosts.findIndex(a => a.id === _editingAdsCostId);
@@ -9351,7 +9398,17 @@ function addShopAdsCost() { submitShopAdsCost(); }
 function editShopAdsCost(shopId, adsId) {
   if (!requireWrite()) return;
   const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop) return;
-  const a = (shop.adsCosts||[]).find(x => x.id === adsId); if (!a) { alert('수정할 광고비를 찾을 수 없습니다'); return; }
+  const a = (shop.adsCosts||[]).find(x => x.id == adsId); if (!a) { alert('수정할 광고비를 찾을 수 없습니다'); return; }
+  // v1.9.500: 자동 동기화 항목은 지출결의서에서 수정하도록 안내
+  if (a.expenseId) {
+    if (confirm('이 광고비는 지출결의서에서 자동 동기화된 항목입니다.\n지출결의서로 이동해 수정하시겠습니까?')) {
+      _openLinkedExpense(a.expenseId);
+    }
+    return;
+  }
+  // 수동 입력 폼이 닫혀있으면 펼침
+  const f = $('shop-ads-manual-form');
+  if (f && f.style.display === 'none') { try { toggleShopAdsManualForm(); } catch(_){} }
   _editingAdsCostId = adsId;
   // 폼 채우기
   if ($('shop-ads-type')) { $('shop-ads-type').value = a.type || 'monthly'; toggleAdsInputType(); }
@@ -9570,15 +9627,14 @@ function removeRoasReport(startDate, endDate) {
 }
 function renderShopAdsList(shopId) {
   const container = $('shop-ads-list'); if (!container) return;
-  const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop || !shop.adsCosts?.length) { container.innerHTML = '<div style="text-align:center;color:var(--gray-400);padding:10px;font-size:12px">등록된 광고비가 없습니다</div>'; return; }
-  // v1.9.355/358: 광고비 기간 행 클릭 → 해당 기간으로 ROAS 분석 + ROAS pill + 수정/삭제 버튼
+  const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop || !shop.adsCosts?.length) { container.innerHTML = '<div style="text-align:center;color:var(--gray-400);padding:10px;font-size:12px">등록된 광고비가 없습니다 — 지출결의서에서 광고비를 등록하세요</div>'; return; }
+  // v1.9.355/358 + v1.9.500: 광고비 기간 행 클릭 → 해당 기간으로 ROAS / 자동 동기화 행은 출처 표시 + 지출결의서로 이동
   const _reports = Array.isArray(shop.roasReports) ? shop.roasReports : [];
   container.innerHTML = '<div style="font-size:11px;color:var(--gray-500);margin-bottom:4px;text-align:right">💡 행을 클릭하면 해당 기간으로 ROAS 분석 (각 기간별 결과 자동 저장)</div>' +
-    '<table class="tbl" style="font-size:11.5px;text-align:center"><thead><tr><th>기간</th><th>방식</th><th>광고비</th><th>ROAS</th><th>비고</th><th style="width:70px"></th></tr></thead><tbody>' +
+    '<table class="tbl" style="font-size:11.5px;text-align:center"><thead><tr><th>기간</th><th>방식</th><th>광고비</th><th>ROAS</th><th>비고</th><th style="width:90px">출처</th></tr></thead><tbody>' +
     shop.adsCosts.map(a => {
       const typeLabel = a.type === 'monthly' ? '월별' : a.type === 'range' ? '기간별' : '일별';
       const period = a.startDate === a.endDate ? a.startDate : `${a.startDate} ~ ${a.endDate}`;
-      // 이 기간에 저장된 ROAS 보고서 검색
       const _report = _reports.find(r => r && r.startDate === a.startDate && r.endDate === a.endDate);
       let roasCell;
       if (_report && _report.roas != null) {
@@ -9590,13 +9646,32 @@ function renderShopAdsList(shopId) {
       } else {
         roasCell = '<span style="color:var(--gray-400);font-size:10.5px">미분석</span>';
       }
-      // 수정/삭제 버튼 — 색상 구분 (수정: indigo, 삭제: red)
-      const actionCell = `<div style="display:inline-flex;flex-direction:column;gap:3px;align-items:stretch">
-        <button class="btn btn-sm" title="수정" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:2px 8px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer;line-height:1" onclick="event.stopPropagation();editShopAdsCost('${shopId}',${a.id})">✏️ 수정</button>
-        <button class="btn btn-sm" title="삭제" style="background:#fef2f2;color:#ef4444;border:1px solid #fecaca;padding:2px 8px;border-radius:5px;font-size:10.5px;font-weight:600;cursor:pointer;line-height:1" onclick="event.stopPropagation();removeShopAdsCost('${shopId}',${a.id})">🗑️ 삭제</button>
-      </div>`;
-      return `<tr style="cursor:pointer;transition:background .12s" onmouseenter="this.style.background='#eef6ff'" onmouseleave="this.style.background=''" onclick="useAdPeriodForRoas('${a.startDate}','${a.endDate}')" title="이 기간으로 ROAS 분석"><td style="white-space:nowrap">${period}</td><td>${typeLabel}</td><td>${Number(a.cost).toLocaleString()}원</td><td>${roasCell}</td><td>${a.memo||'-'}</td><td style="padding:6px 8px">${actionCell}</td></tr>`;
+      // v1.9.500: 자동 동기화 행과 수동 행 구분
+      const isAuto = !!a.expenseId;
+      let actionCell;
+      if (isAuto) {
+        actionCell = `<div style="display:inline-flex;flex-direction:column;gap:3px;align-items:stretch">
+          <span style="display:inline-flex;align-items:center;justify-content:center;gap:3px;background:#fdf2f8;color:#be185d;border:1px solid #fbcfe8;padding:2px 6px;border-radius:99px;font-size:10px;font-weight:700;line-height:1.4" title="지출결의서에서 자동 동기화된 항목입니다">📢 지출결의서</span>
+          <button class="btn btn-sm" title="지출결의서에서 수정" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:2px 8px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer;line-height:1" onclick="event.stopPropagation();_openLinkedExpense(${a.expenseId})">✏️ 수정</button>
+        </div>`;
+      } else {
+        actionCell = `<div style="display:inline-flex;flex-direction:column;gap:3px;align-items:stretch">
+          <span style="display:inline-flex;align-items:center;justify-content:center;background:#f8fafc;color:#475569;border:1px solid #e2e8f0;padding:2px 6px;border-radius:99px;font-size:10px;font-weight:600;line-height:1.4" title="쇼핑몰 화면에서 직접 입력된 항목">✋ 수동</span>
+          <button class="btn btn-sm" title="수정" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:2px 8px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer;line-height:1" onclick="event.stopPropagation();editShopAdsCost('${shopId}',${a.id})">✏️ 수정</button>
+          <button class="btn btn-sm" title="삭제" style="background:#fef2f2;color:#ef4444;border:1px solid #fecaca;padding:2px 8px;border-radius:5px;font-size:10.5px;font-weight:600;cursor:pointer;line-height:1" onclick="event.stopPropagation();removeShopAdsCost('${shopId}',${a.id})">🗑️ 삭제</button>
+        </div>`;
+      }
+      const rowBg = isAuto ? 'background:#fef7fb' : '';
+      return `<tr style="cursor:pointer;transition:background .12s;${rowBg}" onmouseenter="this.style.background='#eef6ff'" onmouseleave="this.style.background='${isAuto?'#fef7fb':''}'" onclick="useAdPeriodForRoas('${a.startDate}','${a.endDate}')" title="이 기간으로 ROAS 분석"><td style="white-space:nowrap">${period}</td><td>${typeLabel}</td><td>${Number(a.cost).toLocaleString()}원</td><td>${roasCell}</td><td>${a.memo||'-'}</td><td style="padding:6px 8px">${actionCell}</td></tr>`;
     }).join('') + '</tbody></table>';
+}
+
+// v1.9.500: adsCosts 행 → 연결된 지출결의서 열기
+function _openLinkedExpense(expenseId) {
+  if (expenseId == null) { alert('연결된 지출결의서를 찾을 수 없습니다'); return; }
+  const e = (DB.expenses||[]).find(x => x.id === Number(expenseId) || x.id === expenseId);
+  if (!e) { alert('지출결의서를 찾을 수 없습니다 (이미 삭제되었을 수 있음)'); return; }
+  if (typeof editExpense === 'function') editExpense(e.id);
 }
 
 // v1.9.355: 광고비 기간 행 클릭 시 호출 — ROAS 시작일/종료일을 채우고 즉시 분석
@@ -9609,7 +9684,14 @@ function useAdPeriodForRoas(startDate, endDate) {
 function removeShopAdsCost(shopId, adsId) {
   if (!requireWrite()) return;
   const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop) return;
-  shop.adsCosts = (shop.adsCosts||[]).filter(a => a.id !== adsId);
+  // v1.9.500: 자동 동기화된 항목(expenseId 보유)은 직접 삭제 금지 — 지출결의서 측에서 삭제하도록 안내
+  const target = (shop.adsCosts||[]).find(a => a.id == adsId);
+  if (target && target.expenseId) {
+    alert('이 광고비는 지출결의서에서 자동 동기화된 항목입니다.\n결재 요청 → 지출결의서에서 해당 항목을 삭제해 주세요.');
+    return;
+  }
+  if (!confirm('이 광고비 항목을 삭제하시겠습니까?')) return;
+  shop.adsCosts = (shop.adsCosts||[]).filter(a => a.id != adsId);
   saveData(); renderShopAdsList(shopId);
 }
 
@@ -16952,9 +17034,13 @@ function deleteExpense(id) {
   } else {
     if (!confirm('이 지출결의서를 삭제하시겠습니까?')) return;
   }
+  // v1.9.500: 광고비 expense는 쇼핑몰 adsCosts에서도 제거
+  try { if (e && e.category === 'ad') _removeExpenseAdsFromShop(e.id); } catch(_){}
   DB.expenses = DB.expenses.filter(x => x.id !== id);
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
   renderApprovalPage();
+  try { renderShopList(); } catch(_){}
+  try { if (window._selectedShopId) renderShopAdsList(window._selectedShopId); } catch(_){}
   try { showNotif('지출결의서가 삭제되었습니다', 'success'); } catch(_){}
 }
 
@@ -17686,6 +17772,16 @@ let _apeAttachments = [];
 function onApeCategoryChange() {
   const cat = ($('ape-category') && $('ape-category').value) || 'other';
   const ta = $('ape-note');
+  // v1.9.500: 광고비 카테고리 선택 시 광고 집행 정보 필드 표시 + 쇼핑몰 드롭다운 채우기
+  const adFields = $('ape-ad-fields');
+  if (adFields) {
+    if (cat === 'ad') {
+      adFields.style.display = '';
+      _populateApeAdShopDropdown();
+    } else {
+      adFields.style.display = 'none';
+    }
+  }
   if (!ta) return;
   const cur = (ta.value || '').trim();
   // 비어있거나 이전 템플릿과 일치하면 자동 교체
@@ -17693,6 +17789,16 @@ function onApeCategoryChange() {
   if (isTemplate) {
     ta.value = APE_TEMPLATES[cat] || APE_TEMPLATES['other'];
   }
+}
+
+// v1.9.500: 지출결의서 광고비 — 쇼핑몰 드롭다운 채우기
+function _populateApeAdShopDropdown() {
+  const sel = $('ape-ad-shop'); if (!sel) return;
+  const cur = sel.value;
+  const shops = (DB.shops || []).slice();
+  sel.innerHTML = '<option value="">— 쇼핑몰 선택 —</option>' +
+    shops.map(s => `<option value="${s.id}">${(s.name||'쇼핑몰').replace(/</g,'&lt;')}</option>`).join('');
+  if (cur && shops.find(s => s.id === cur)) sel.value = cur;
 }
 
 function resetApeNoteToTemplate() {
@@ -17801,7 +17907,40 @@ function openExpenseModal() {
   // v1.9.308: 지급 방법 기본 계좌이체 + 힌트/계좌 행 표시 상태 동기화
   if ($('ape-paymethod')) $('ape-paymethod').value = '계좌이체';
   try { onApePayMethodChange(); } catch(_){}
+  // v1.9.500: 광고비 필드 초기화 + 카테고리에 따라 표시 토글
+  if ($('ape-ad-shop')) { _populateApeAdShopDropdown(); $('ape-ad-shop').value = window._preselectedAdShopId || ''; window._preselectedAdShopId = null; }
+  if ($('ape-ad-platform')) $('ape-ad-platform').value = '';
+  if ($('ape-ad-start')) $('ape-ad-start').value = '';
+  if ($('ape-ad-end')) $('ape-ad-end').value = '';
+  try { onApeCategoryChange(); } catch(_){}
   renderApeAttachList();
+}
+
+// v1.9.500: 쇼핑몰 광고비 패널에서 → 지출결의서 광고비 작성 모달 바로 열기
+function openExpenseModalForAd(shopId) {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  window._preselectedAdShopId = shopId || '';
+  const _prev = window._apExpFilter;
+  window._apExpFilter = 'ad';
+  try { openExpenseModal(); } finally { window._apExpFilter = _prev; }
+  if ($('ape-category')) $('ape-category').value = 'ad';
+  try { onApeCategoryChange(); } catch(_){}
+  if (shopId && $('ape-ad-shop')) $('ape-ad-shop').value = shopId;
+}
+
+// v1.9.500: 쇼핑몰 광고비 수동 입력 폼 토글
+function toggleShopAdsManualForm() {
+  const f = $('shop-ads-manual-form');
+  const b = $('shop-ads-toggle-manual-btn');
+  if (!f) return;
+  const isOpen = (f.style.display !== 'none');
+  if (isOpen) {
+    f.style.display = 'none';
+    if (b) b.textContent = '▾ 수동 입력 폼 열기';
+  } else {
+    f.style.display = '';
+    if (b) b.textContent = '▴ 수동 입력 폼 닫기';
+  }
 }
 
 // v1.9.308: 지급 방법 변경 시 힌트 문구 + 계좌 행 토글
@@ -17846,6 +17985,12 @@ function editExpense(id) {
   // v1.9.308: 지급 방법 복원 + 힌트/계좌 행 상태 동기화 (기존 건은 '계좌이체' 기본 가정)
   if ($('ape-paymethod')) $('ape-paymethod').value = e.payMethod || '계좌이체';
   try { onApePayMethodChange(); } catch(_){}
+  // v1.9.500: 광고비 필드 복원 + 토글
+  if ($('ape-ad-shop')) { _populateApeAdShopDropdown(); $('ape-ad-shop').value = e.adShopId || ''; }
+  if ($('ape-ad-platform')) $('ape-ad-platform').value = e.adPlatform || '';
+  if ($('ape-ad-start')) $('ape-ad-start').value = e.adStartDate || '';
+  if ($('ape-ad-end')) $('ape-ad-end').value = e.adEndDate || '';
+  try { onApeCategoryChange(); } catch(_){}
   renderApeAttachList();
 }
 
@@ -17854,11 +17999,35 @@ function saveExpense() {
   if (!title) { showNotif('제목을 입력하세요', 'warning'); return; }
   const amount = parseFloat($('ape-amount').value) || 0;
   if (!amount) { showNotif('금액을 입력하세요', 'warning'); return; }
+  // v1.9.500: 광고비 카테고리일 때 광고 필드 검증 + 수집
+  const _category = $('ape-category').value || 'other';
+  let _ad = null;
+  if (_category === 'ad') {
+    const adShopId = ($('ape-ad-shop') && $('ape-ad-shop').value) || '';
+    const adPlatform = ($('ape-ad-platform') && $('ape-ad-platform').value || '').trim();
+    const adStart = ($('ape-ad-start') && $('ape-ad-start').value) || '';
+    const adEnd = ($('ape-ad-end') && $('ape-ad-end').value) || '';
+    if (!adShopId) { showNotif('광고 플랫폼(쇼핑몰)을 선택하세요', 'warning'); return; }
+    if (!adStart || !adEnd) { showNotif('집행 시작일/종료일을 입력하세요', 'warning'); return; }
+    if (adStart > adEnd) { showNotif('시작일이 종료일보다 늦습니다', 'warning'); return; }
+    _ad = { adShopId, adPlatform, adStartDate: adStart, adEndDate: adEnd };
+    // 동일 쇼핑몰 광고 기간 겹침 검사 (자기 자신 제외)
+    const shopRef = (DB.shops||[]).find(s => s.id === adShopId);
+    if (shopRef && Array.isArray(shopRef.adsCosts)) {
+      const overlap = shopRef.adsCosts.find(a =>
+        a.expenseId !== _editingExpenseId && !(adEnd < a.startDate || adStart > a.endDate)
+      );
+      if (overlap) {
+        if (!confirm(`이 쇼핑몰의 기존 광고 기간 ${overlap.startDate} ~ ${overlap.endDate} 와 겹칩니다.\n그래도 저장하시겠습니까? (마진/ROAS 계산에서 중복 합산될 수 있습니다)`)) return;
+      }
+    }
+  }
   // v1.9.229: 수정 모드 지원 / v1.9.233: 계좌번호 · 다중 첨부 지원
   if (_editingExpenseId) {
     const ex = (DB.expenses||[]).find(x => x.id === _editingExpenseId);
     if (ex) {
-      ex.category = $('ape-category').value || 'other';
+      const _prevCat = ex.category;
+      ex.category = _category;
       ex.title = title;
       ex.vendor = $('ape-vendor').value || '';
       ex.amount = amount;
@@ -17873,12 +18042,26 @@ function saveExpense() {
       const _prevPm = ex.payMethod || '';
       ex.payMethod = _newPm;
       if (_newPm === '법인카드' && _prevPm !== '법인카드') ex.taxInvoice = '수령완료';
+      // v1.9.500: 광고비 필드 저장 + 동기화
+      if (_ad) {
+        ex.adShopId = _ad.adShopId;
+        ex.adPlatform = _ad.adPlatform;
+        ex.adStartDate = _ad.adStartDate;
+        ex.adEndDate = _ad.adEndDate;
+        try { _syncExpenseAdsToShop(ex); } catch(err) { console.warn('광고비 동기화 실패:', err); }
+      } else {
+        // 카테고리가 광고비에서 다른 카테고리로 바뀐 경우 → 기존 동기화 항목 제거
+        if (_prevCat === 'ad') { try { _removeExpenseAdsFromShop(ex.id); } catch(_){} }
+        delete ex.adShopId; delete ex.adPlatform; delete ex.adStartDate; delete ex.adEndDate;
+      }
       try { saveData(); } catch(_){}
       closeModal('ap-expense');
       _editingExpenseId = null;
       _apeAttachments = [];
       renderApprovalPage();
       updateApprovalBadges();
+      try { renderShopList(); } catch(_){}
+      try { if (window._selectedShopId) renderShopAdsList(window._selectedShopId); } catch(_){}
       showNotif('✅ 지출결의서 수정 완료', 'success');
       return;
     }
@@ -17890,7 +18073,7 @@ function saveExpense() {
     id: nextId('expense'),
     approvalId: null,
     orderId: null,
-    category: $('ape-category').value || 'other',
+    category: _category,
     title,
     vendor: $('ape-vendor').value || '',
     amount,
@@ -17906,14 +18089,79 @@ function saveExpense() {
     note: $('ape-note').value || '',
     attachments: Array.isArray(_apeAttachments) ? _apeAttachments.slice() : [],
   };
+  // v1.9.500: 광고비 필드 첨부 + 쇼핑몰 광고비 자동 동기화
+  if (_ad) {
+    e.adShopId = _ad.adShopId;
+    e.adPlatform = _ad.adPlatform;
+    e.adStartDate = _ad.adStartDate;
+    e.adEndDate = _ad.adEndDate;
+  }
   DB.expenses.push(e);
+  if (_ad) { try { _syncExpenseAdsToShop(e); } catch(err) { console.warn('광고비 동기화 실패:', err); } }
   try { saveData(); } catch(_){}
   slackNotify('pay_request', e);
   closeModal('ap-expense');
   _apeAttachments = [];
   renderApprovalPage();
   updateApprovalBadges();
+  try { renderShopList(); } catch(_){}
+  try { if (window._selectedShopId) renderShopAdsList(window._selectedShopId); } catch(_){}
   showNotif('✅ 지출결의서 등록 완료', 'success');
+}
+
+// v1.9.500: 지출결의서 광고비 → 쇼핑몰 adsCosts 자동 동기화
+//  - expenseId 필드를 매핑 키로 사용하여 동일 expense는 1행만 유지
+//  - 수동 입력된 adsCosts 항목은 expenseId가 없으므로 영향 없음
+function _syncExpenseAdsToShop(expense) {
+  if (!expense || expense.category !== 'ad' || !expense.adShopId) return;
+  const shop = (DB.shops||[]).find(s => s.id === expense.adShopId);
+  if (!shop) { console.warn('동기화 대상 쇼핑몰 없음:', expense.adShopId); return; }
+  if (!Array.isArray(shop.adsCosts)) shop.adsCosts = [];
+  // 다른 쇼핑몰에 같은 expenseId 동기화 항목이 있다면 제거 (쇼핑몰 변경 케이스)
+  (DB.shops||[]).forEach(s => {
+    if (s.id !== expense.adShopId && Array.isArray(s.adsCosts)) {
+      s.adsCosts = s.adsCosts.filter(a => a.expenseId !== expense.id);
+    }
+  });
+  const memo = expense.adPlatform
+    ? `[지출결의서 #${expense.id}] ${expense.adPlatform}`
+    : `[지출결의서 #${expense.id}] ${expense.title || ''}`.trim();
+  const entry = {
+    id: 'exp_' + expense.id,
+    expenseId: expense.id,
+    type: 'range',
+    startDate: expense.adStartDate,
+    endDate: expense.adEndDate,
+    cost: parseFloat(expense.amount) || 0,
+    memo,
+    platform: expense.adPlatform || '',
+    autoSynced: true
+  };
+  const idx = shop.adsCosts.findIndex(a => a.expenseId === expense.id);
+  if (idx >= 0) {
+    const old = shop.adsCosts[idx];
+    if (Array.isArray(shop.roasReports) && (old.startDate !== entry.startDate || old.endDate !== entry.endDate)) {
+      shop.roasReports.forEach(r => {
+        if (r && r.startDate === old.startDate && r.endDate === old.endDate) {
+          r.startDate = entry.startDate; r.endDate = entry.endDate;
+        }
+      });
+    }
+    shop.adsCosts[idx] = { ...old, ...entry };
+  } else {
+    shop.adsCosts.push(entry);
+  }
+  shop.adsCosts.sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''));
+}
+
+// v1.9.500: 지출결의서 삭제/카테고리 변경 시 호출 — 모든 쇼핑몰에서 expenseId 매칭 항목 제거
+function _removeExpenseAdsFromShop(expenseId) {
+  if (expenseId == null) return;
+  (DB.shops||[]).forEach(s => {
+    if (Array.isArray(s.adsCosts)) {
+      s.adsCosts = s.adsCosts.filter(a => a.expenseId !== expenseId);
+    }
+  });
 }
 
 // ═══════════ 샘플 구매 모달 ═══════════
@@ -26369,8 +26617,28 @@ function syncGSheets() {
 
 function init() {
   dedupeVendors();
+  // v1.9.500: 광고비 expense ↔ 쇼핑몰 adsCosts 일괄 동기화 (앱 시작 시 1회)
+  try { _resyncAllExpenseAdsToShops(); } catch(e) { console.warn('광고비 동기화 실패:', e); }
   updateBadges();
   renderDashboard();
+}
+
+// v1.9.500: 모든 광고비 지출결의서를 쇼핑몰 adsCosts에 동기화 (마이그레이션 / 데이터 재정합)
+function _resyncAllExpenseAdsToShops() {
+  if (!Array.isArray(DB.expenses) || !Array.isArray(DB.shops)) return;
+  // 1) 모든 쇼핑몰에서 깨진 자동 동기화 항목(expenseId만 있고 매칭되는 expense 없음) 제거
+  const validExpIds = new Set((DB.expenses||[]).filter(e => e && e.category === 'ad').map(e => e.id));
+  (DB.shops||[]).forEach(s => {
+    if (Array.isArray(s.adsCosts)) {
+      s.adsCosts = s.adsCosts.filter(a => !a.expenseId || validExpIds.has(a.expenseId));
+    }
+  });
+  // 2) 모든 광고비 expense를 동기화 (필수 필드 존재 시)
+  (DB.expenses||[]).forEach(e => {
+    if (e && e.category === 'ad' && e.adShopId && e.adStartDate && e.adEndDate) {
+      try { _syncExpenseAdsToShop(e); } catch(err) { console.warn('동기화 실패:', e.id, err); }
+    }
+  });
 }
 
 // 동일 업체(회사명+분류 기준) 중복 항목 정리 — 저장 실패 잔재 등을 청소
