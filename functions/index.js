@@ -498,7 +498,7 @@ async function ingestCoupangOrders({ daysBack = 1 } = {}) {
     total: merge.total,
     statusCounts,
     range: `${createdAtFrom} ~ ${createdAtTo}`,
-    sampleNew: merge.sampleNew.map(o => ({ orderNo: o.orderNo, customer: o.customerName, product: o.productName, amount: o.paymentAmount }))
+    sampleNew: merge.sampleNew.map(o => ({ orderNo: o.orderNo, customer: o.customerName, product: o.productName, qty: o.qty, amount: o.paymentAmount }))
   };
 }
 
@@ -521,7 +521,7 @@ exports.fetchCoupangOrders = functions
     try {
       const result = await ingestCoupangOrders({ daysBack: 1 });
       const sampleText = result.sampleNew.length
-        ? '\n\n*신규 주문 샘플:*\n' + result.sampleNew.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} / ₩${(s.amount || 0).toLocaleString()}`).join('\n')
+        ? '\n\n*신규 주문 샘플:*\n' + result.sampleNew.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`).join('\n')
         : '';
       // v2.5: ERP 총 주문 / 상태별 라인 제거 + 별도 채널(르니브-주문자동화)로 전송
       await notifySlack({
@@ -822,7 +822,7 @@ async function ingestCafe24Orders({ daysBack = 1 } = {}) {
     total: merge.total,
     range: `${startDate} ~ ${endDate}`,
     sampleNew: merge.sampleNew.map(o => ({
-      orderNo: o.orderNo, customer: o.customerName, product: o.productName, amount: o.paymentAmount
+      orderNo: o.orderNo, customer: o.customerName, product: o.productName, qty: o.qty, amount: o.paymentAmount
     }))
   };
 }
@@ -845,7 +845,7 @@ exports.fetchCafe24Orders = functions
       const result = await ingestCafe24Orders({ daysBack: 1 });
       const sampleText = result.sampleNew.length
         ? '\n\n*신규 주문 샘플:*\n' + result.sampleNew.map(s =>
-            `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} / ₩${(s.amount || 0).toLocaleString()}`
+            `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`
           ).join('\n')
         : '';
       await notifySlack({
