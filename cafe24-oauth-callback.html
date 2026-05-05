@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Cafe24 OAuth Callback — Reniv ERP</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.25);
+    padding: 32px 36px;
+    max-width: 720px;
+    width: 100%;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #1f2937;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .subtitle {
+    font-size: 13px;
+    color: #6b7280;
+    margin-bottom: 24px;
+  }
+  .step {
+    background: #f9fafb;
+    border-left: 4px solid #6366f1;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-bottom: 14px;
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+  .step-title {
+    font-weight: 700;
+    color: #4338ca;
+    margin-bottom: 4px;
+  }
+  .status {
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 13.5px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .status.loading { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+  .status.success { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
+  .status.error { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+  .form-group { margin-bottom: 14px; }
+  .form-group label {
+    display: block;
+    font-size: 12px;
+    color: #4b5563;
+    font-weight: 600;
+    margin-bottom: 5px;
+  }
+  .form-group input {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1.5px solid #d1d5db;
+    border-radius: 7px;
+    font-size: 13px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    background: #fff;
+  }
+  .form-group input:focus { outline: 2px solid #6366f1; border-color: #6366f1; }
+  .btn {
+    background: #6366f1;
+    color: #fff;
+    border: none;
+    padding: 11px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background .15s;
+    width: 100%;
+    margin-top: 6px;
+  }
+  .btn:hover:not(:disabled) { background: #4f46e5; }
+  .btn:disabled { background: #9ca3af; cursor: not-allowed; }
+  .btn-copy {
+    background: #10b981;
+    width: auto;
+    padding: 6px 14px;
+    font-size: 12px;
+    margin-left: 8px;
+  }
+  .btn-copy:hover:not(:disabled) { background: #059669; }
+  .token-box {
+    background: #1f2937;
+    color: #34d399;
+    padding: 16px 20px;
+    border-radius: 8px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px;
+    word-break: break-all;
+    margin: 8px 0 16px;
+    line-height: 1.5;
+  }
+  .info {
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 12.5px;
+    color: #4338ca;
+    line-height: 1.55;
+    margin: 14px 0;
+  }
+  .ps-cmd {
+    background: #0f172a;
+    color: #f1f5f9;
+    padding: 12px 16px;
+    border-radius: 7px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px;
+    margin: 6px 0;
+    white-space: pre-wrap;
+    line-height: 1.55;
+  }
+  .small { font-size: 11.5px; color: #6b7280; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🔐 Cafe24 OAuth Callback</h1>
+  <div class="subtitle">자사몰 ERP 주문 자동 수집을 위한 Refresh Token 발급</div>
+
+  <div id="status" class="status loading">⏳ 준비 중...</div>
+
+  <!-- 1단계: Client 정보 입력 (인가 시작 전 또는 콜백 후 자동 사용) -->
+  <div id="setup-section" style="display:none">
+    <div class="step">
+      <div class="step-title">📝 1단계 — Cafe24 앱 정보 입력</div>
+      Cafe24 개발자 센터에서 발급받은 정보를 입력하세요. 페이지를 떠나도 브라우저에 저장되어 있어 다시 입력할 필요 없습니다.
+    </div>
+
+    <div class="form-group">
+      <label>Mall ID</label>
+      <input type="text" id="mallId" placeholder="예: butiplplanet" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label>Client ID</label>
+      <input type="text" id="clientId" placeholder="Cafe24 앱에서 발급받은 Client ID" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label>Client Secret</label>
+      <input type="password" id="clientSecret" placeholder="Cafe24 앱에서 발급받은 Client Secret" autocomplete="off">
+    </div>
+
+    <button class="btn" id="authorizeBtn" onclick="startAuthorize()">🔓 OAuth 인가 시작 (Cafe24 권한 동의 페이지로 이동)</button>
+    <div class="small" style="margin-top:8px">동의 후 자동으로 이 페이지로 돌아옵니다.</div>
+  </div>
+
+  <!-- 2단계: 토큰 발급 결과 (콜백 후) -->
+  <div id="result-section" style="display:none">
+    <div class="step">
+      <div class="step-title">🎉 2단계 — Refresh Token 발급 완료</div>
+      아래 값을 복사해서 PowerShell에서 시크릿으로 등록하세요.
+    </div>
+
+    <div class="form-group">
+      <label>발급된 Refresh Token (시크릿 등록 시 사용) <button class="btn btn-copy" onclick="copyValue('refreshToken')">📋 복사</button></label>
+      <div class="token-box" id="refreshTokenBox">-</div>
+    </div>
+
+    <div class="form-group">
+      <label>Access Token (참고용 — 2시간 후 자동 갱신됨)</label>
+      <div class="token-box" id="accessTokenBox" style="opacity:.6">-</div>
+    </div>
+
+    <div class="info">
+      <strong>🚀 다음 단계 — PowerShell에서 시크릿 4개 등록</strong>
+      <div style="margin-top:8px">아래 명령어들을 차례로 실행하고, 각 prompt에 표시된 값을 붙여넣으세요:</div>
+    </div>
+
+    <div class="ps-cmd" id="ps-cmd-mall">firebase functions:secrets:set CAFE24_MALL_ID --project reniv-erp-135a3</div>
+    <div class="small">→ <span id="hintMall">-</span> 입력</div>
+
+    <div class="ps-cmd" id="ps-cmd-cid">firebase functions:secrets:set CAFE24_CLIENT_ID --project reniv-erp-135a3</div>
+    <div class="small">→ Client ID 입력</div>
+
+    <div class="ps-cmd" id="ps-cmd-cs">firebase functions:secrets:set CAFE24_CLIENT_SECRET --project reniv-erp-135a3</div>
+    <div class="small">→ Client Secret 입력</div>
+
+    <div class="ps-cmd" id="ps-cmd-rt">firebase functions:secrets:set CAFE24_REFRESH_TOKEN --project reniv-erp-135a3</div>
+    <div class="small">→ 위에 표시된 Refresh Token 입력</div>
+
+    <button class="btn" onclick="resetAll()" style="background:#9ca3af;margin-top:18px">🔄 처음부터 다시 시작</button>
+  </div>
+
+  <!-- 에러 메시지 -->
+  <div id="error-section" style="display:none">
+    <div class="info" style="background:#fee2e2;border-color:#fca5a5;color:#991b1b">
+      <strong id="errorTitle">❌ 오류 발생</strong>
+      <div id="errorMessage" style="margin-top:6px"></div>
+    </div>
+    <button class="btn" onclick="resetAll()" style="background:#9ca3af">🔄 처음부터 다시 시작</button>
+  </div>
+</div>
+
+<script>
+const STORAGE_KEY = 'cafe24_oauth_state';
+const REDIRECT_URI = 'https://renivcto.github.io/ERP/cafe24-oauth-callback.html';
+
+function setStatus(text, level) {
+  const el = document.getElementById('status');
+  el.textContent = text;
+  el.className = 'status ' + (level || 'loading');
+}
+
+function showSection(name) {
+  document.getElementById('setup-section').style.display = name === 'setup' ? '' : 'none';
+  document.getElementById('result-section').style.display = name === 'result' ? '' : 'none';
+  document.getElementById('error-section').style.display = name === 'error' ? '' : 'none';
+}
+
+function showError(title, message) {
+  document.getElementById('errorTitle').textContent = '❌ ' + title;
+  document.getElementById('errorMessage').textContent = message || '';
+  showSection('error');
+  setStatus('실패', 'error');
+}
+
+function copyValue(elementId) {
+  const text = document.getElementById(elementId === 'refreshToken' ? 'refreshTokenBox' : elementId + 'Box').textContent.trim();
+  if (!text || text === '-') return;
+  navigator.clipboard.writeText(text).then(() => {
+    alert('✅ 클립보드에 복사되었습니다');
+  }).catch(() => {
+    alert('복사 실패 — 직접 선택해서 복사해 주세요');
+  });
+}
+
+function loadState() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (e) { return {}; }
+}
+
+function saveState(state) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+}
+
+function clearState() {
+  try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+}
+
+function resetAll() {
+  if (confirm('저장된 정보를 모두 지우고 처음부터 다시 시작하시겠습니까?')) {
+    clearState();
+    location.href = REDIRECT_URI;
+  }
+}
+
+function startAuthorize() {
+  const mallId = document.getElementById('mallId').value.trim();
+  const clientId = document.getElementById('clientId').value.trim();
+  const clientSecret = document.getElementById('clientSecret').value.trim();
+
+  if (!mallId || !clientId || !clientSecret) {
+    alert('Mall ID, Client ID, Client Secret 모두 입력해 주세요');
+    return;
+  }
+
+  // 상태 저장 (콜백 시 복원용)
+  const state = Math.random().toString(36).slice(2) + Date.now();
+  saveState({ mallId, clientId, clientSecret, state });
+
+  // Cafe24 OAuth 인가 URL로 이동
+  const authUrl = `https://${mallId}.cafe24api.com/api/v2/oauth/authorize`
+    + `?response_type=code`
+    + `&client_id=${encodeURIComponent(clientId)}`
+    + `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`
+    + `&scope=${encodeURIComponent('mall.read_order')}`
+    + `&state=${encodeURIComponent(state)}`;
+
+  setStatus('🔐 Cafe24 권한 동의 페이지로 이동 중...', 'loading');
+  setTimeout(() => { location.href = authUrl; }, 500);
+}
+
+async function exchangeCodeForToken(code, mallId, clientId, clientSecret) {
+  const tokenUrl = `https://${mallId}.cafe24api.com/api/v2/oauth/token`;
+  const basic = btoa(`${clientId}:${clientSecret}`);
+
+  const body = new URLSearchParams();
+  body.set('grant_type', 'authorization_code');
+  body.set('code', code);
+  body.set('redirect_uri', REDIRECT_URI);
+
+  const response = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Basic ' + basic,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: body.toString()
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`토큰 발급 실패 (${response.status}): ${errorText.slice(0, 300)}`);
+  }
+
+  return await response.json();
+}
+
+async function init() {
+  const params = new URLSearchParams(location.search);
+  const code = params.get('code');
+  const state = params.get('state');
+  const error = params.get('error');
+
+  // 에러 응답
+  if (error) {
+    showError('Cafe24 인증 실패', `${error}: ${params.get('error_description') || ''}`);
+    return;
+  }
+
+  // 콜백으로 들어왔을 때 (?code=...)
+  if (code) {
+    const saved = loadState();
+    if (!saved.clientId || !saved.clientSecret || !saved.mallId) {
+      showError('상태 정보 누락', '브라우저 저장 정보가 없습니다. 처음부터 다시 시작해 주세요.');
+      return;
+    }
+    if (saved.state !== state) {
+      showError('CSRF 검증 실패', 'state 값이 일치하지 않습니다. 처음부터 다시 시도해 주세요.');
+      return;
+    }
+
+    setStatus('🔑 토큰 발급 중...', 'loading');
+
+    try {
+      const tokens = await exchangeCodeForToken(code, saved.mallId, saved.clientId, saved.clientSecret);
+
+      if (!tokens.refresh_token) {
+        throw new Error('응답에 refresh_token이 없습니다: ' + JSON.stringify(tokens).slice(0, 300));
+      }
+
+      document.getElementById('refreshTokenBox').textContent = tokens.refresh_token;
+      document.getElementById('accessTokenBox').textContent = tokens.access_token || '-';
+      document.getElementById('hintMall').textContent = saved.mallId;
+
+      // URL 정리 (인가 코드 제거)
+      history.replaceState({}, '', REDIRECT_URI);
+
+      // state 정리 (보안)
+      const cleanState = { mallId: saved.mallId };
+      saveState(cleanState);
+
+      setStatus('✅ Refresh Token 발급 완료', 'success');
+      showSection('result');
+    } catch (e) {
+      console.error(e);
+      showError('토큰 발급 중 오류', e.message);
+    }
+    return;
+  }
+
+  // 콜백 아닌 일반 진입 → setup 화면
+  const saved = loadState();
+  if (saved.mallId) document.getElementById('mallId').value = saved.mallId;
+  if (saved.clientId) document.getElementById('clientId').value = saved.clientId;
+  // clientSecret은 저장은 하지만 표시는 안 함
+
+  setStatus('📝 정보 입력 후 인가 시작', 'loading');
+  showSection('setup');
+}
+
+// 페이지 로드 후 초기화
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

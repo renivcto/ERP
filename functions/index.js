@@ -1,5 +1,16 @@
 // =============================================================================
-// Reniv ERP — Cloud Functions (v2.4, 2026-05, 시크릿 trim + IP 디버그)
+// Reniv ERP — Cloud Functions (v2.6, 2026-05, Cafe24 자사몰 주문 자동 수집 추가)
+// =============================================================================
+// v2.6 추가:
+//   - fetchCafe24Orders: 자사몰(Cafe24) 주문 자동 수집 (KST 9/13/18시, 쿠팡과 동일 스케줄)
+//   - manualFetchCafe24Orders: 관리자 수동 호출
+//   - Cafe24 OAuth 2.0 — Refresh Token rotation 자동 처리 (Firestore에 저장)
+//   - 시크릿: CAFE24_MALL_ID, CAFE24_CLIENT_ID, CAFE24_CLIENT_SECRET, CAFE24_REFRESH_TOKEN(초기값)
+// =============================================================================
+// v2.5 변경:
+//   - 쿠팡 주문 수집 알림은 별도 Slack 채널 (르니브-주문자동화) 으로 전송
+//   - 시크릿: SLACK_ORDERS_WEBHOOK
+//   - 알림 메시지 간소화: ERP 총 주문 / 상태별 항목 제거
 // =============================================================================
 // v2.3 추가:
 //   - vpcConnector: 'erp-coupang-vpc-conn' (asia-northeast3)
@@ -68,8 +79,9 @@ function kstTimestampForFilename() {
 // Slack 알림 헬퍼
 //   level: 'success' | 'error' | 'info' | 'warning'
 // ─────────────────────────────────────────────────────────────
-async function notifySlack({ title, level, details }) {
-  const webhook = (functions.config().slack || {}).webhook;
+async function notifySlack({ title, level, details, webhookOverride }) {
+  // v2.5: webhookOverride 가 있으면 그쪽으로 전송 (예: 주문 알림은 별도 채널)
+  const webhook = webhookOverride || (functions.config().slack || {}).webhook;
   if (!webhook) {
     console.warn('[SLACK] webhook 미설정 - 알림 건너뜀');
     return;
@@ -496,7 +508,7 @@ async function ingestCoupangOrders({ daysBack = 1 } = {}) {
 exports.fetchCoupangOrders = functions
   .region(REGION)
   .runWith({
-    secrets: ['COUPANG_ACCESS_KEY', 'COUPANG_SECRET_KEY', 'COUPANG_VENDOR_ID'],
+    secrets: ['COUPANG_ACCESS_KEY', 'COUPANG_SECRET_KEY', 'COUPANG_VENDOR_ID', 'SLACK_ORDERS_WEBHOOK'],
     timeoutSeconds: 240,
     memory: '256MB',
     // v2.3: Wing 화이트리스트 통과를 위해 VPC Connector → Cloud NAT 고정 IP 사용
@@ -511,16 +523,15 @@ exports.fetchCoupangOrders = functions
       const sampleText = result.sampleNew.length
         ? '\n\n*신규 주문 샘플:*\n' + result.sampleNew.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} / ₩${(s.amount || 0).toLocaleString()}`).join('\n')
         : '';
-      const statusBreak = Object.entries(result.statusCounts).map(([k, v]) => `${k}=${v}`).join(', ');
+      // v2.5: ERP 총 주문 / 상태별 라인 제거 + 별도 채널(르니브-주문자동화)로 전송
       await notifySlack({
         title: result.added > 0 ? `쿠팡 자동 주문 수집 — 신규 ${result.added}건` : '쿠팡 자동 주문 수집 — 신규 없음',
         level: result.added > 0 ? 'success' : 'info',
         details:
           `📦 가져옴: ${result.fetched}건\n` +
           `✅ 신규 추가: ${result.added}건\n` +
-          `📊 ERP 총 주문: ${result.total}건\n` +
-          `📅 조회 기간: ${result.range}\n` +
-          `📊 상태별: ${statusBreak}` + sampleText
+          `📅 조회 기간: ${result.range}` + sampleText,
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
       });
       console.log('[COUPANG SCHED] 성공:', JSON.stringify(result));
       return result;
@@ -533,7 +544,8 @@ exports.fetchCoupangOrders = functions
           `*확인 사항:*\n` +
           `1. <https://console.firebase.google.com/project/${PROJECT_ID}/functions/logs|Functions 로그>\n` +
           `2. Wing 관리자 페이지 → API 설정 → 허용 IP 화이트리스트 (Functions IP가 막혔을 가능성)\n` +
-          `3. firebase functions:secrets:get COUPANG_ACCESS_KEY 등 시크릿 등록 확인`
+          `3. firebase functions:secrets:get COUPANG_ACCESS_KEY 등 시크릿 등록 확인`,
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
       });
       throw err;
     }
@@ -545,7 +557,7 @@ exports.fetchCoupangOrders = functions
 exports.manualFetchCoupangOrders = functions
   .region(REGION)
   .runWith({
-    secrets: ['COUPANG_ACCESS_KEY', 'COUPANG_SECRET_KEY', 'COUPANG_VENDOR_ID'],
+    secrets: ['COUPANG_ACCESS_KEY', 'COUPANG_SECRET_KEY', 'COUPANG_VENDOR_ID', 'SLACK_ORDERS_WEBHOOK'],
     timeoutSeconds: 240,
     memory: '256MB',
     // v2.3: Wing 화이트리스트 통과를 위해 VPC Connector → Cloud NAT 고정 IP 사용
@@ -572,7 +584,8 @@ exports.manualFetchCoupangOrders = functions
         details:
           `👤 실행자: *${userName}* (\`${uid}\`)\n` +
           `📦 가져옴: ${result.fetched}건 / 신규 ${result.added}건\n` +
-          `📅 조회 기간: ${result.range} (daysBack=${daysBack})`
+          `📅 조회 기간: ${result.range} (daysBack=${daysBack})`,
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
       });
       return result;
     } catch (err) {
@@ -580,7 +593,329 @@ exports.manualFetchCoupangOrders = functions
       await notifySlack({
         title: '쿠팡 수동 주문 수집 실패',
         level: 'error',
-        details: `👤 ${userName}\n❌ ${err.message}`
+        details: `👤 ${userName}\n❌ ${err.message}`,
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
+      });
+      throw new functions.https.HttpsError('internal', err.message);
+    }
+  });
+
+// =============================================================================
+// v2.6 — Cafe24 자사몰 주문 자동 수집
+// =============================================================================
+//
+// OAuth 2.0 + Refresh Token rotation:
+//   - Cafe24는 매 토큰 갱신 시 새 refresh_token을 발급함 (rotation)
+//   - 따라서 시크릿에 저장된 초기 토큰은 1회용
+//   - 이후 토큰은 Firestore의 system/cafe24_token 문서에 저장 + 매 호출 시 갱신
+//
+// 토큰 만료:
+//   - access_token: 2시간
+//   - refresh_token: 2주 (사용 시마다 갱신)
+//   → 정기 호출(매일 3회)이면 영구 사용 가능
+// =============================================================================
+
+const CAFE24_TOKEN_DOC = 'system/cafe24_token';
+
+// Cafe24 토큰 갱신 (refresh_token → 새 access_token + 새 refresh_token)
+async function refreshCafe24Token({ mallId, clientId, clientSecret, refreshToken }) {
+  const url = `https://${mallId}.cafe24api.com/api/v2/oauth/token`;
+  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+
+  const body = new URLSearchParams();
+  body.set('grant_type', 'refresh_token');
+  body.set('refresh_token', refreshToken);
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Basic ' + basic,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: body.toString()
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '(unreadable)');
+    throw new Error(`Cafe24 토큰 갱신 실패 (${response.status}): ${errorText.slice(0, 400)}`);
+  }
+  return await response.json();
+}
+
+// Cafe24 주문 조회 API 호출
+async function fetchCafe24OrdersRaw({ mallId, accessToken, startDate, endDate, limit = 100, offset = 0 }) {
+  const url = `https://${mallId}.cafe24api.com/api/v2/admin/orders`
+    + `?start_date=${startDate}`
+    + `&end_date=${endDate}`
+    + `&date_type=order_date`
+    + `&limit=${limit}`
+    + `&offset=${offset}`
+    + `&embed=items,buyer,receivers`;
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Authorization': 'Bearer ' + accessToken,
+      'X-Cafe24-Api-Version': '2025-04-01',
+      'Content-Type': 'application/json'
+    }
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '(unreadable)');
+    throw new Error(`Cafe24 주문 조회 실패 (${response.status}): ${errorText.slice(0, 400)}`);
+  }
+  return await response.json();
+}
+
+// Cafe24 주문 → ERP shopOrders 형식 매핑
+function mapCafe24ToErpOrder(c, shopId, shopName) {
+  // c: Cafe24 주문 객체
+  const items = Array.isArray(c.items) ? c.items : [];
+  const totalQty = items.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0) || 1;
+  const productNames = items.map(it => it.product_name || it.variant_name).filter(Boolean).join(' + ');
+  const buyer = c.buyer || {};
+  const receiver = (Array.isArray(c.receivers) && c.receivers[0]) || c.receiver || {};
+
+  // 주소 조립
+  const address = [receiver.address1, receiver.address2].filter(Boolean).join(' ').trim();
+
+  // 배송완료 여부 판단 — Cafe24 order_status 코드 기반
+  // N00: 입금전, N10: 상품준비중, N20: 배송준비중, N21: 배송보류, N22: 배송대기, N30: 배송중, N40: 배송완료
+  // C##: 취소 시리즈, R##: 반품 시리즈
+  const status = c.order_status || '';
+  let mappedStatus = '배송 전';
+  if (status.startsWith('N40')) mappedStatus = '배송완료';
+  else if (status.startsWith('N30')) mappedStatus = '배송중';
+  else if (status.startsWith('C')) mappedStatus = '취소';
+  else if (status.startsWith('R')) mappedStatus = '반품';
+
+  return {
+    id: Date.now() + Math.floor(Math.random() * 100000),
+    orderNo: String(c.order_id || ''),
+    orderDate: (c.order_date || '').slice(0, 10),
+    customerName: buyer.name || '',
+    customerPhone: fmtPhoneKr(buyer.cellphone || buyer.phone || ''),
+    email: buyer.email || '',
+    productName: productNames,
+    qty: totalQty,
+    paymentAmount: Number(c.payment_amount) || Number(c.actual_payment_amount) || Number(c.order_price_amount) || 0,
+    recipientName: receiver.name || '',
+    recipientPhone: fmtPhoneKr(receiver.cellphone || receiver.phone || ''),
+    zipCode: receiver.zipcode || receiver.postal_code || '',
+    address,
+    deliveryNote: c.shipping_message || '',
+    paymentDate: (c.payment_date || '').slice(0, 10),
+    shipDate: (c.shipped_date || '').slice(0, 10),
+    shippingFee: Number(c.shipping_fee) || 0,
+    trackingNo: c.invoice_number || '',
+    status: mappedStatus,
+    shopId,
+    shopName,
+    source: 'cafe24_auto',
+    cafe24Status: status,
+    fetchedAt: Date.now()
+  };
+}
+
+// erp_data/shops에서 자사몰(Cafe24) shop 객체 찾기
+async function findCafe24Shop(firestoreDb) {
+  const snap = await firestoreDb.doc('erp_data/shops').get();
+  if (!snap.exists) return null;
+  const raw = snap.data().data;
+  let shops = [];
+  if (typeof raw === 'string') { try { shops = JSON.parse(raw) || []; } catch (_) {} }
+  else if (Array.isArray(raw)) shops = raw;
+  const nameMatches = (n) => {
+    if (!n) return false;
+    const lower = String(n).toLowerCase();
+    return n.includes('자사몰') || n.includes('cafe24') || lower.includes('cafe24') || n.includes('Cafe24');
+  };
+  return shops.find(s => s && nameMatches(s.name)) || null;
+}
+
+// Firestore에서 현재 refresh_token 가져오기 (rotation 처리)
+async function getCurrentCafe24RefreshToken(firestoreDb) {
+  const docRef = firestoreDb.doc(CAFE24_TOKEN_DOC);
+  const snap = await docRef.get();
+  if (snap.exists && snap.data().refresh_token) {
+    return { source: 'firestore', refreshToken: snap.data().refresh_token, updatedAt: snap.data().updatedAt };
+  }
+  // Firestore에 없으면 시크릿의 초기값 사용
+  const initial = (process.env.CAFE24_REFRESH_TOKEN || '').trim();
+  if (!initial) throw new Error('CAFE24_REFRESH_TOKEN 시크릿 미설정 + Firestore에도 토큰 없음 — OAuth 콜백 페이지에서 토큰 발급 후 등록 필요');
+  return { source: 'secret', refreshToken: initial };
+}
+
+// Firestore에 새 refresh_token 저장
+async function saveCafe24RefreshToken(firestoreDb, refreshToken) {
+  await firestoreDb.doc(CAFE24_TOKEN_DOC).set({
+    refresh_token: refreshToken,
+    updatedAt: Date.now(),
+    updatedAtIso: new Date().toISOString()
+  });
+}
+
+// 메인 인입 로직
+async function ingestCafe24Orders({ daysBack = 1 } = {}) {
+  const mallId = (process.env.CAFE24_MALL_ID || '').trim();
+  const clientId = (process.env.CAFE24_CLIENT_ID || '').trim();
+  const clientSecret = (process.env.CAFE24_CLIENT_SECRET || '').trim();
+  if (!mallId || !clientId || !clientSecret) {
+    throw new Error('CAFE24_MALL_ID / CAFE24_CLIENT_ID / CAFE24_CLIENT_SECRET 시크릿 미설정');
+  }
+
+  const firestoreDb = admin.firestore();
+  const cafe24Shop = await findCafe24Shop(firestoreDb);
+  if (!cafe24Shop) {
+    throw new Error('쇼핑몰 관리에 "자사몰" 또는 "Cafe24"가 등록되어 있지 않습니다. ERP → 매출 분석 → 쇼핑몰 관리에서 먼저 등록해 주세요.');
+  }
+  const shopId = cafe24Shop.id;
+  const shopName = cafe24Shop.name || '자사몰';
+
+  // 1) 현재 refresh_token 가져오기
+  const tokenInfo = await getCurrentCafe24RefreshToken(firestoreDb);
+  console.log('[CAFE24] refresh_token 출처:', tokenInfo.source,
+    tokenInfo.updatedAt ? `(갱신: ${new Date(tokenInfo.updatedAt).toISOString()})` : '');
+
+  // 2) 토큰 갱신 → access_token + 새 refresh_token
+  const tokens = await refreshCafe24Token({
+    mallId, clientId, clientSecret,
+    refreshToken: tokenInfo.refreshToken
+  });
+  if (!tokens.access_token || !tokens.refresh_token) {
+    throw new Error('Cafe24 토큰 응답 비정상: ' + JSON.stringify(tokens).slice(0, 300));
+  }
+  // 새 refresh_token 즉시 Firestore에 저장 (rotation)
+  await saveCafe24RefreshToken(firestoreDb, tokens.refresh_token);
+  console.log('[CAFE24] 새 refresh_token Firestore 저장 완료');
+
+  // 3) 주문 조회 (KST 기준)
+  const todayKst = new Date(Date.now() + 9 * 3600 * 1000);
+  const fromDate = new Date(todayKst); fromDate.setDate(fromDate.getDate() - daysBack);
+  const startDate = fromDate.toISOString().slice(0, 10);
+  const endDate = todayKst.toISOString().slice(0, 10);
+
+  // 페이지네이션 (limit 100씩)
+  let allOrders = [];
+  let offset = 0;
+  const limit = 100;
+  while (true) {
+    const resp = await fetchCafe24OrdersRaw({
+      mallId, accessToken: tokens.access_token, startDate, endDate, limit, offset
+    });
+    const list = (resp && Array.isArray(resp.orders)) ? resp.orders : [];
+    allOrders = allOrders.concat(list);
+    if (list.length < limit) break;
+    offset += limit;
+    if (offset > 5000) { console.warn('[CAFE24] 페이지 5000건 초과 — 안전을 위해 중단'); break; }
+  }
+  console.log('[CAFE24] 가져온 주문:', allOrders.length, '건');
+
+  // 4) ERP 형식 매핑 + Firestore 머지
+  const erpOrders = allOrders.map(c => mapCafe24ToErpOrder(c, shopId, shopName));
+  const merge = await mergeOrdersIntoFirestore(firestoreDb, erpOrders);
+
+  return {
+    fetched: allOrders.length,
+    added: merge.added,
+    total: merge.total,
+    range: `${startDate} ~ ${endDate}`,
+    sampleNew: merge.sampleNew.map(o => ({
+      orderNo: o.orderNo, customer: o.customerName, product: o.productName, amount: o.paymentAmount
+    }))
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 6) Cafe24 자동 수집 — KST 9/13/18시 (쿠팡과 동일 스케줄)
+// ─────────────────────────────────────────────────────────────
+exports.fetchCafe24Orders = functions
+  .region(REGION)
+  .runWith({
+    secrets: ['CAFE24_MALL_ID', 'CAFE24_CLIENT_ID', 'CAFE24_CLIENT_SECRET', 'CAFE24_REFRESH_TOKEN', 'SLACK_ORDERS_WEBHOOK'],
+    timeoutSeconds: 300,
+    memory: '256MB'
+    // Cafe24는 IP 화이트리스트 없음 → vpcConnector 불필요
+  })
+  .pubsub.schedule('0 9,13,18 * * *')
+  .timeZone('Asia/Seoul')
+  .onRun(async (context) => {
+    try {
+      const result = await ingestCafe24Orders({ daysBack: 1 });
+      const sampleText = result.sampleNew.length
+        ? '\n\n*신규 주문 샘플:*\n' + result.sampleNew.map(s =>
+            `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} / ₩${(s.amount || 0).toLocaleString()}`
+          ).join('\n')
+        : '';
+      await notifySlack({
+        title: result.added > 0 ? `자사몰(Cafe24) 자동 주문 수집 — 신규 ${result.added}건` : '자사몰(Cafe24) 자동 주문 수집 — 신규 없음',
+        level: result.added > 0 ? 'success' : 'info',
+        details:
+          `📦 가져옴: ${result.fetched}건\n` +
+          `✅ 신규 추가: ${result.added}건\n` +
+          `📅 조회 기간: ${result.range}` + sampleText,
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
+      });
+      console.log('[CAFE24 SCHED] 성공:', JSON.stringify(result));
+      return result;
+    } catch (err) {
+      console.error('[CAFE24 SCHED] 실패:', err);
+      await notifySlack({
+        title: '자사몰(Cafe24) 자동 주문 수집 실패',
+        level: 'error',
+        details: `❌ 오류: ${err.message}\n\n` +
+          `*확인 사항:*\n` +
+          `1. <https://console.firebase.google.com/project/${PROJECT_ID}/functions/logs|Functions 로그>\n` +
+          `2. Refresh Token 만료 가능성 — OAuth 콜백 페이지에서 재발급 후 firestoreDb의 system/cafe24_token 갱신\n` +
+          `3. ERP 쇼핑몰 관리에 "자사몰" 또는 "Cafe24" 등록 확인`,
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
+      });
+      throw err;
+    }
+  });
+
+// ─────────────────────────────────────────────────────────────
+// 7) Cafe24 수동 트리거 — 테스트/즉시 수집용
+// ─────────────────────────────────────────────────────────────
+exports.manualFetchCafe24Orders = functions
+  .region(REGION)
+  .runWith({
+    secrets: ['CAFE24_MALL_ID', 'CAFE24_CLIENT_ID', 'CAFE24_CLIENT_SECRET', 'CAFE24_REFRESH_TOKEN', 'SLACK_ORDERS_WEBHOOK'],
+    timeoutSeconds: 300,
+    memory: '256MB'
+  })
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', '로그인이 필요합니다.');
+    }
+    const uid = context.auth.uid;
+    const userDoc = await admin.firestore().doc(`users/${uid}`).get();
+    if (!userDoc.exists || userDoc.data().isAdmin !== true) {
+      throw new functions.https.HttpsError('permission-denied', '관리자 권한이 필요합니다.');
+    }
+    const userName = userDoc.data().name || userDoc.data().email || uid;
+    const daysBack = Math.min(Math.max(parseInt((data && data.daysBack) || 1, 10) || 1, 1), 30);
+
+    try {
+      const result = await ingestCafe24Orders({ daysBack });
+      await notifySlack({
+        title: `자사몰(Cafe24) 수동 주문 수집 (관리자 ${userName})`,
+        level: 'info',
+        details:
+          `👤 실행자: *${userName}* (\`${uid}\`)\n` +
+          `📦 가져옴: ${result.fetched}건 / 신규 ${result.added}건\n` +
+          `📅 조회 기간: ${result.range} (daysBack=${daysBack})`,
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
+      });
+      return result;
+    } catch (err) {
+      console.error('[CAFE24 MANUAL] 실패:', err);
+      await notifySlack({
+        title: '자사몰(Cafe24) 수동 주문 수집 실패',
+        level: 'error',
+        details: `👤 ${userName}\n❌ ${err.message}`,
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
       });
       throw new functions.https.HttpsError('internal', err.message);
     }
