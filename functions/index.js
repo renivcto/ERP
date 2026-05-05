@@ -1,5 +1,14 @@
 // =============================================================================
-// Reniv ERP — Cloud Functions (v2.10, 2026-05, 쿠팡 인라인 cancellation 감지 + 휴리스틱)
+// Reniv ERP — Cloud Functions (v2.12, 2026-05, 휴리스틱 14일 cutoff + 진단 로그)
+// =============================================================================
+// v2.12 변경:
+//   - daysBack 기본값 1 → 7 (active 응답 범위 확장)
+//   - 휴리스틱 비교 범위 14일 cutoff (orderDate 기준)
+//   - [COUPANG HEURISTIC] 진단 로그 (어디서 막히는지 한눈에)
+// =============================================================================
+// v2.11 변경:
+//   - 모든 주문에 대해 cancellation 핵심 필드 한 줄 요약 로그 ([COUPANG ORDER])
+//   - holdCountForCancel 검사 추가 (취소 보류 = 취소 요청 들어옴)
 // =============================================================================
 // v2.10 변경:
 //   - 쿠팡 응답의 orderItems[]에서 cancelCount/returnCount/cancelStatus 직접 검사 (인라인)
@@ -535,7 +544,7 @@ async function findCoupangShop(firestoreDb) {
 }
 
 // 메인 인입 로직
-async function ingestCoupangOrders({ daysBack = 1 } = {}) {
+async function ingestCoupangOrders({ daysBack = 7 } = {}) {
   // v2.4: 시크릿 값에 줄바꿈/공백이 섞여 있어도 안전하도록 trim 처리
   const accessKey = (process.env.COUPANG_ACCESS_KEY || '').trim();
   const secretKey = (process.env.COUPANG_SECRET_KEY || '').trim();
@@ -600,15 +609,26 @@ async function ingestCoupangOrders({ daysBack = 1 } = {}) {
     }
   }
 
-  // v2.10: 디버그 로그 — 첫 주문 전체 JSON으로 cancellation 필드 구조 파악
-  const firstOrder = Array.from(collected.values())[0];
-  if (firstOrder) {
-    console.log('[COUPANG DEBUG] 첫 주문 sample:', JSON.stringify(firstOrder).slice(0, 1500));
-  }
+  // v2.11: 모든 주문에 대해 cancellation 핵심 필드 요약 로그 (한 줄씩)
+  collected.forEach((order, orderId) => {
+    const items = Array.isArray(order.orderItems) ? order.orderItems : [];
+    const totalCancel = items.reduce((s, i) => s + (Number(i && i.cancelCount) || 0), 0);
+    const totalReturn = items.reduce((s, i) => s + (Number(i && i.returnCount) || 0), 0);
+    const totalHold = items.reduce((s, i) => s + (Number(i && i.holdCountForCancel) || 0), 0);
+    const itemStatuses = items.map(i => i && (i.cancelStatus || '')).filter(Boolean).join(',');
+    console.log('[COUPANG ORDER]', JSON.stringify({
+      orderId: order.orderId,
+      customer: order.orderer && order.orderer.name,
+      status: order.status,
+      cancelStatus: order.cancelStatus || order.cancellationStatus || null,
+      cancelCount: totalCancel,
+      returnCount: totalReturn,
+      holdCountForCancel: totalHold,
+      itemStatuses: itemStatuses || null
+    }));
+  });
 
-  // v2.10: orderItem 인라인 cancellation 검사 — 응답 안의 cancellation 필드로 직접 감지
-  //   가설 필드: cancelCount, returnCount, cancelStatus !== 'NONE'/'없음'/null/empty
-  //   주문 레벨: order.cancelStatus 또는 order.cancelStatus
+  // v2.10/2.11: orderItem 인라인 cancellation 검사 (확장된 필드)
   const inlineCanceledIds = new Set();
   collected.forEach((order, orderId) => {
     if (!order) return;
@@ -624,6 +644,8 @@ async function ingestCoupangOrders({ daysBack = 1 } = {}) {
       if (!it) return false;
       if ((Number(it.cancelCount) || 0) > 0) return true;
       if ((Number(it.returnCount) || 0) > 0) return true;
+      // v2.11: holdCountForCancel — 취소 보류 카운트 (취소 요청 들어옴)
+      if ((Number(it.holdCountForCancel) || 0) > 0) return true;
       const st = String(it.cancelStatus || it.cancellationStatus || '').toUpperCase();
       if (st && !['NONE', 'NO', '없음', ''].includes(st)) return true;
       return false;
@@ -634,7 +656,7 @@ async function ingestCoupangOrders({ daysBack = 1 } = {}) {
     console.log('[COUPANG] 인라인 cancellation 감지:', inlineCanceledIds.size, '건', Array.from(inlineCanceledIds).slice(0, 5));
   }
 
-  // v2.9: 휴리스틱 취소 감지 — ERP에 있는데 active 응답에 없는 주문을 취소로 추정 (보조)
+  // v2.11: 휴리스틱 취소 감지 — daysBack 기간을 7일로 확장 + 진단 로그
   const SAFETY_LIMIT = 10;
   const erpDocRef = firestoreDb.doc('erp_data/shopOrders');
   const erpSnap = await erpDocRef.get();
@@ -646,16 +668,43 @@ async function ingestCoupangOrders({ daysBack = 1 } = {}) {
   }
   const activeOrderNos = new Set();
   collected.forEach((_, orderId) => activeOrderNos.add(String(orderId)));
+
+  // v2.11: 휴리스틱 비교 기간 — 14일 cutoff (orderDate 기준)
+  const heuristicCutoffMs = Date.now() - 14 * 24 * 3600 * 1000;
+  const heuristicCutoff = new Date(heuristicCutoffMs).toISOString().slice(0, 10);
+
+  // 진단용 카운터
+  let cntTotal = 0, cntThisShop = 0, cntInRange = 0, cntActive = 0, cntPresumed = 0;
   const presumedCanceledIds = new Set();
   let safetyTriggered = false;
   erpExisting.forEach(o => {
+    cntTotal++;
     if (!o || o.shopId !== shopId) return;
+    cntThisShop++;
     const d = (o.orderDate || '').slice(0, 10);
-    if (d < createdAtFrom || d > createdAtTo) return;
-    if (!activeOrderNos.has(String(o.orderNo))) {
-      presumedCanceledIds.add(String(o.orderNo));
+    // v2.11: 14일 cutoff (active 응답이 더 짧은 기간이라도 휴리스틱은 더 넓게 검사)
+    if (d < heuristicCutoff) return;
+    cntInRange++;
+    if (activeOrderNos.has(String(o.orderNo))) {
+      cntActive++;
+      return;
     }
+    cntPresumed++;
+    presumedCanceledIds.add(String(o.orderNo));
   });
+  console.log('[COUPANG HEURISTIC]', JSON.stringify({
+    shopId,
+    erpTotal: cntTotal,
+    thisShop: cntThisShop,
+    inRange14d: cntInRange,
+    matchedActive: cntActive,
+    presumedCanceled: cntPresumed,
+    activeOrderNos: Array.from(activeOrderNos),
+    presumedIds: Array.from(presumedCanceledIds),
+    heuristicCutoff,
+    createdAtFrom,
+    createdAtTo
+  }));
   if (presumedCanceledIds.size > SAFETY_LIMIT) {
     console.warn(`[COUPANG] 휴리스틱 추정 취소 ${presumedCanceledIds.size}건 — Safety guard 발동, 자동 삭제 건너뜀`);
     safetyTriggered = true;
