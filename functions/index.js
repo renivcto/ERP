@@ -1,5 +1,5 @@
 // =============================================================================
-// Reniv ERP — Cloud Functions (v2.3, 2026-05, VPC Connector + Cloud NAT 고정 IP)
+// Reniv ERP — Cloud Functions (v2.4, 2026-05, 시크릿 trim + IP 디버그)
 // =============================================================================
 // v2.3 추가:
 //   - vpcConnector: 'erp-coupang-vpc-conn' (asia-northeast3)
@@ -417,11 +417,29 @@ async function findCoupangShop(firestoreDb) {
 
 // 메인 인입 로직
 async function ingestCoupangOrders({ daysBack = 1 } = {}) {
-  const accessKey = process.env.COUPANG_ACCESS_KEY;
-  const secretKey = process.env.COUPANG_SECRET_KEY;
-  const vendorId  = process.env.COUPANG_VENDOR_ID;
+  // v2.4: 시크릿 값에 줄바꿈/공백이 섞여 있어도 안전하도록 trim 처리
+  const accessKey = (process.env.COUPANG_ACCESS_KEY || '').trim();
+  const secretKey = (process.env.COUPANG_SECRET_KEY || '').trim();
+  const vendorId  = (process.env.COUPANG_VENDOR_ID  || '').trim();
   if (!accessKey || !secretKey || !vendorId) {
     throw new Error('COUPANG_ACCESS_KEY / COUPANG_SECRET_KEY / COUPANG_VENDOR_ID 시크릿 미설정');
+  }
+  console.log('[COUPANG] 시크릿 길이 확인:', {
+    accessKeyLen: accessKey.length,
+    secretKeyLen: secretKey.length,
+    vendorIdLen: vendorId.length,
+    vendorIdValue: vendorId  // VENDOR_ID는 민감 정보 아님
+  });
+  // v2.4 디버그: 함수의 외부 발신 IP 확인 (Cloud NAT 통해 나가야 34.64.120.224)
+  try {
+    const ipResp = await fetch('https://api.ipify.org?format=json');
+    if (ipResp.ok) {
+      const ipData = await ipResp.json();
+      console.log('[COUPANG] 함수 외부 발신 IP:', ipData.ip,
+        ipData.ip === '34.64.120.224' ? '✅ Cloud NAT 정상' : '⚠️ Cloud NAT 미경유 (예상: 34.64.120.224)');
+    }
+  } catch (e) {
+    console.warn('[COUPANG] IP 확인 실패:', e.message);
   }
 
   // KST 기준 날짜 범위
