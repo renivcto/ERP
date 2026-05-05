@@ -8393,8 +8393,15 @@ function renderShopOrderTable() {
     const map = {'배송 전':'blue','배송중':'sky','배송완료':'green','취소':'red','반품':'red','수집완료':'blue','출고요청':'amber'};
     return `<span class="badge ${map[s]||'gray'}">${s||'-'}</span>`;
   };
+  // v1.9.510: itemId 매핑 여부에 따라 상품명 셀을 다르게 렌더링
   tbody.innerHTML = sorted.map(o => {
     const amt = o.paymentAmount || o.totalPrice || 0;
+    const isUnmapped = !o.itemId && (o.shopId || o.shopName);
+    const productCellStyle = 'text-align:left;max-width:180px;word-break:keep-all;white-space:normal;line-height:1.4;font-size:13px';
+    const escName = (o.productName||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/'/g,'&apos;').replace(/\"/g,'&quot;');
+    const productCell = isUnmapped
+      ? `<td style="${productCellStyle};background:#fef3c7;cursor:pointer" onclick="event.stopPropagation();openMappingForOrder(${o.id})" title="🔗 클릭해서 ERP 품목과 매핑하기 (같은 상품명 일괄 적용)"><span style="color:#92400e;font-weight:600">⚠️</span> ${o.productName||'-'} <span style="font-size:10.5px;color:#92400e;font-weight:600">[매핑 필요]</span></td>`
+      : `<td style="${productCellStyle}">${o.productName||'-'}</td>`;
     return `<tr>
       <td><input type="checkbox" class="so-row-check" value="${o.id}" onchange="updateSoBulkBar()"></td>
       <td style="white-space:nowrap;font-size:12.5px">${fmtDateShort(o.orderDate)}</td>
@@ -8402,7 +8409,7 @@ function renderShopOrderTable() {
       <td><span style="font-size:12px;color:#3d6ea8;font-weight:600;cursor:pointer;text-decoration:none" onclick="event.stopPropagation();openOrderDetail(${o.id})" title="클릭하면 주문 상세 보기" onmouseenter="this.style.color='#2c5687'" onmouseleave="this.style.color='#3d6ea8'">${o.orderNo||'-'}</span></td>
       <td><span style="color:#3d6ea8;font-weight:600;cursor:pointer;text-decoration:none;font-size:12px" onclick="openOrderDetail(${o.id})" onmouseenter="this.style.color='#2c5687'" onmouseleave="this.style.color='#3d6ea8'">${o.customerName||'-'}</span></td>
       <td style="font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap">${_fmtPhone(o.customerPhone)}</td>
-      <td style="text-align:left;max-width:180px;word-break:keep-all;white-space:normal;line-height:1.4;font-size:13px">${o.productName||'-'}</td>
+      ${productCell}
       <td style="font-size:13px">${o.qty||0}</td>
       <td style="font-variant-numeric:tabular-nums;font-size:13px">${amt.toLocaleString()}원</td>
       <td style="white-space:nowrap;text-align:center"><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 10px;color:var(--red-500);white-space:nowrap;word-break:keep-all;display:inline-block;min-width:36px" onclick="deleteShopOrder(${o.id})">삭제</button></td>
@@ -8643,26 +8650,32 @@ function openProductMappingModal(unmappedList, shopId) {
 function closeProductMappingModal() {
   const m = document.getElementById('overlay-product-mapping-modal');
   if (m) m.remove();
+  // v1.9.510: existing 모드 + 기존 흐름 모두 정리
   window._pendingUploadOrders = null;
   window._pendingUploadShopId = null;
+  window._mappingMode = null;
+  window._mappingShopId = null;
 }
 
 function applyProductMapping() {
+  // v1.9.510: 'existing' 모드(자동 수집된 기존 주문 매핑)와 기존 CSV 업로드 흐름 분기
   const selects = document.querySelectorAll('.mapping-select');
-  const shopId = window._pendingUploadShopId;
-  const orders = window._pendingUploadOrders;
-  if (!shopId || !orders) return;
+  const isExistingMode = window._mappingMode === 'existing';
+  const shopId = isExistingMode ? window._mappingShopId : window._pendingUploadShopId;
+  const orders = isExistingMode ? null : window._pendingUploadOrders;
+  if (!shopId) return;
+  if (!isExistingMode && !orders) return;
   const shop = (DB.shops||[]).find(s => s.id === shopId);
+  if (!shop) return;
   if (!shop.productMappings) shop.productMappings = [];
-  // 매핑 저장
+
+  let updatedCount = 0;
   selects.forEach(sel => {
     const shopProductName = sel.dataset.shopName;
     const itemId = sel.value;
-    if (!itemId || itemId === '_skip') {
-      // 건너뛰기면 매핑 저장하지 않음
-      return;
-    }
-    // 기존 매핑이 있으면 업데이트, 없으면 추가
+    if (!itemId || itemId === '_skip') return;
+
+    // shop.productMappings 갱신
     const existIdx = shop.productMappings.findIndex(m => m.shopProductName === shopProductName);
     const itemIdNum = parseInt(itemId);
     if (existIdx >= 0) {
@@ -8670,13 +8683,78 @@ function applyProductMapping() {
     } else {
       shop.productMappings.push({ shopProductName, itemId: itemIdNum });
     }
-    // 해당 주문들에 itemId 반영
-    orders.forEach(o => {
-      if (o.productName === shopProductName) o.itemId = itemIdNum;
-    });
+
+    if (isExistingMode) {
+      // v1.9.510: 같은 쇼핑몰 + 같은 상품명을 가진 모든 기존 주문에 일괄 적용
+      (DB.shopOrders||[]).forEach(o => {
+        if (o && o.shopId === shopId && o.productName === shopProductName && !o.itemId) {
+          o.itemId = itemIdNum;
+          updatedCount++;
+        }
+      });
+    } else {
+      // 기존 CSV 업로드 흐름
+      orders.forEach(o => {
+        if (o.productName === shopProductName) o.itemId = itemIdNum;
+      });
+    }
   });
+
   closeProductMappingModal();
-  finalizeOrderUpload(orders, shopId);
+
+  if (isExistingMode) {
+    // 모드 정리 + 저장 + 재렌더
+    window._mappingMode = null;
+    window._mappingShopId = null;
+    try {
+      if (typeof saveDataNow === 'function') saveDataNow().then(() => {
+        try { renderShopOrderTable(); } catch(_){}
+      }).catch(e => console.warn('매핑 저장 실패:', e));
+      else if (typeof saveData === 'function') { saveData(); renderShopOrderTable(); }
+    } catch(_){}
+    showNotif(`✅ ${updatedCount}건 주문이 매핑되었습니다 (다음 자동 수집부터 같은 상품명은 자동 매핑)`, 'success');
+  } else {
+    finalizeOrderUpload(orders, shopId);
+  }
+}
+
+// v1.9.510: 주문 관리 테이블에서 매핑 안 된 주문의 상품명 클릭 시 호출
+//  - 같은 쇼핑몰의 매핑 안 된 모든 주문을 모달에 한꺼번에 표시
+//  - 매핑 적용 시 같은 상품명 가진 모든 주문에 일괄 itemId 부여
+function openMappingForOrder(orderId) {
+  if (!requireWrite()) return;
+  const order = (DB.shopOrders||[]).find(o => o && o.id === orderId);
+  if (!order) { alert('주문을 찾을 수 없습니다'); return; }
+  const shopId = order.shopId;
+  if (!shopId) { alert('쇼핑몰 정보가 없는 주문입니다'); return; }
+
+  // 같은 쇼핑몰의 매핑 안 된 주문들에서 unique 상품명 추출
+  const unmappedOrders = (DB.shopOrders||[]).filter(o =>
+    o && o.shopId === shopId && !o.itemId && (o.productName||'').trim()
+  );
+  const uniqueNamesMap = new Map();
+  unmappedOrders.forEach(o => {
+    if (!uniqueNamesMap.has(o.productName)) {
+      uniqueNamesMap.set(o.productName, { name: o.productName });
+    }
+  });
+  const unmappedList = Array.from(uniqueNamesMap.values());
+  // 클릭한 상품명을 맨 앞으로
+  const idx = unmappedList.findIndex(u => u.name === order.productName);
+  if (idx > 0) {
+    const [self] = unmappedList.splice(idx, 1);
+    unmappedList.unshift(self);
+  }
+
+  if (unmappedList.length === 0) {
+    showNotif('이 쇼핑몰의 매핑 안 된 주문이 없습니다', 'info');
+    return;
+  }
+
+  // 'existing' 모드 표시 + 모달 호출
+  window._mappingMode = 'existing';
+  window._mappingShopId = shopId;
+  openProductMappingModal(unmappedList, shopId);
 }
 
 // ─────────────────────────────────────────────────────────

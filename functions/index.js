@@ -1,5 +1,10 @@
 // =============================================================================
-// Reniv ERP — Cloud Functions (v2.6, 2026-05, Cafe24 자사몰 주문 자동 수집 추가)
+// Reniv ERP — Cloud Functions (v2.7, 2026-05, 자동 수집 시 ERP 품목 자동 매핑)
+// =============================================================================
+// v2.7 추가:
+//   - applyProductMappingsToOrders(): 쇼핑몰별 productMappings + 완제품 정확 일치로 itemId 자동 부여
+//   - 쿠팡 / 자사몰 자동 수집에 모두 적용
+//   - ERP 주문관리에서 사용자가 매핑하면 다음 수집부터 자동 매핑됨
 // =============================================================================
 // v2.6 추가:
 //   - fetchCafe24Orders: 자사몰(Cafe24) 주문 자동 수집 (KST 9/13/18시, 쿠팡과 동일 스케줄)
@@ -382,6 +387,51 @@ function mapCoupangToErpOrder(c, shopId, shopName) {
   };
 }
 
+// v2.7: 쇼핑몰별 productMappings + DB.items로 itemId 자동 매핑
+//   - shop.productMappings에 매핑되어 있으면 itemId 부여
+//   - 또는 ERP의 완제품 이름과 정확히 일치하면 itemId 부여
+//   - 매핑 안 된 주문은 itemId 없이 push (ERP 화면에서 사용자가 매핑하면 일괄 갱신됨)
+async function applyProductMappingsToOrders(firestoreDb, orders, shopId) {
+  if (!Array.isArray(orders) || orders.length === 0) return { mapped: 0 };
+
+  // shops 문서 읽기
+  const shopsSnap = await firestoreDb.doc('erp_data/shops').get();
+  let shop = null;
+  if (shopsSnap.exists) {
+    const raw = shopsSnap.data().data;
+    let shops = [];
+    if (typeof raw === 'string') { try { shops = JSON.parse(raw) || []; } catch (_) {} }
+    else if (Array.isArray(raw)) shops = raw;
+    shop = shops.find(s => s && s.id === shopId);
+  }
+  const productMappings = (shop && Array.isArray(shop.productMappings)) ? shop.productMappings : [];
+
+  // items 문서 읽기 (정확 일치 fallback용)
+  const itemsSnap = await firestoreDb.doc('erp_data/items').get();
+  let items = [];
+  if (itemsSnap.exists) {
+    const raw = itemsSnap.data().data;
+    if (typeof raw === 'string') { try { items = JSON.parse(raw) || []; } catch (_) {} }
+    else if (Array.isArray(raw)) items = raw;
+  }
+
+  let mapped = 0;
+  orders.forEach(o => {
+    if (o.itemId) return;
+    if (!o.productName) return;
+
+    // 1) shop.productMappings 우선
+    const m = productMappings.find(x => x && x.shopProductName === o.productName);
+    if (m && m.itemId) { o.itemId = m.itemId; mapped++; return; }
+
+    // 2) DB.items 정확 일치 (완제품)
+    const exact = items.find(it => it && it.type === '완제품' && it.name === o.productName);
+    if (exact) { o.itemId = exact.id; mapped++; return; }
+  });
+
+  return { mapped };
+}
+
 // erp_data/shopOrders Firestore 문서에서 기존 주문 읽고 신규만 머지
 async function mergeOrdersIntoFirestore(firestoreDb, newOrders) {
   const docRef = firestoreDb.doc('erp_data/shopOrders');
@@ -490,6 +540,9 @@ async function ingestCoupangOrders({ daysBack = 1 } = {}) {
   }
 
   const erpOrders = Array.from(collected.values()).map(c => mapCoupangToErpOrder(c, shopId, shopName));
+  // v2.7: 매핑 자동 적용 (productMappings + 정확 일치)
+  const mappingResult = await applyProductMappingsToOrders(firestoreDb, erpOrders, shopId);
+  console.log('[COUPANG] 매핑 자동 적용:', mappingResult.mapped, '건');
   const merge = await mergeOrdersIntoFirestore(firestoreDb, erpOrders);
 
   return {
@@ -814,6 +867,9 @@ async function ingestCafe24Orders({ daysBack = 1 } = {}) {
 
   // 4) ERP 형식 매핑 + Firestore 머지
   const erpOrders = allOrders.map(c => mapCafe24ToErpOrder(c, shopId, shopName));
+  // v2.7: 매핑 자동 적용 (productMappings + 정확 일치)
+  const mappingResult = await applyProductMappingsToOrders(firestoreDb, erpOrders, shopId);
+  console.log('[CAFE24] 매핑 자동 적용:', mappingResult.mapped, '건');
   const merge = await mergeOrdersIntoFirestore(firestoreDb, erpOrders);
 
   return {
