@@ -1,5 +1,10 @@
 // =============================================================================
-// Reniv ERP — Cloud Functions (v2.9, 2026-05, 쿠팡 휴리스틱 취소 감지)
+// Reniv ERP — Cloud Functions (v2.10, 2026-05, 쿠팡 인라인 cancellation 감지 + 휴리스틱)
+// =============================================================================
+// v2.10 변경:
+//   - 쿠팡 응답의 orderItems[]에서 cancelCount/returnCount/cancelStatus 직접 검사 (인라인)
+//   - 디버그 로그: 첫 주문 전체 JSON 출력 (실제 필드 구조 파악용)
+//   - 휴리스틱은 보조로 유지
 // =============================================================================
 // v2.9 변경 (Wing API의 CANCEL/RETURNED status 값이 400 거부됨):
 //   - 쿠팡: 휴리스틱 — ERP에 있는데 같은 기간 active 응답에 없는 주문을 취소로 추정
@@ -595,9 +600,41 @@ async function ingestCoupangOrders({ daysBack = 1 } = {}) {
     }
   }
 
-  // v2.9: 휴리스틱 취소 감지 — Wing API의 cancel status 값을 알 수 없어서, 
-  //   "ERP에 있는데 같은 기간 active 응답에 없는 주문"을 취소로 추정
-  //   거짓 양성 위험: 일시적 API 오류로 일부 주문 누락 가능 → Safety guard로 대량 삭제 방지
+  // v2.10: 디버그 로그 — 첫 주문 전체 JSON으로 cancellation 필드 구조 파악
+  const firstOrder = Array.from(collected.values())[0];
+  if (firstOrder) {
+    console.log('[COUPANG DEBUG] 첫 주문 sample:', JSON.stringify(firstOrder).slice(0, 1500));
+  }
+
+  // v2.10: orderItem 인라인 cancellation 검사 — 응답 안의 cancellation 필드로 직접 감지
+  //   가설 필드: cancelCount, returnCount, cancelStatus !== 'NONE'/'없음'/null/empty
+  //   주문 레벨: order.cancelStatus 또는 order.cancelStatus
+  const inlineCanceledIds = new Set();
+  collected.forEach((order, orderId) => {
+    if (!order) return;
+    // 주문 레벨 cancellation 필드
+    const orderCancelStatus = order.cancelStatus || order.cancellationStatus || '';
+    if (orderCancelStatus && !['NONE', 'NO', '없음', ''].includes(String(orderCancelStatus).toUpperCase())) {
+      inlineCanceledIds.add(String(orderId));
+      return;
+    }
+    // orderItems 레벨 검사
+    const items = Array.isArray(order.orderItems) ? order.orderItems : [];
+    const itemCanceled = items.some(it => {
+      if (!it) return false;
+      if ((Number(it.cancelCount) || 0) > 0) return true;
+      if ((Number(it.returnCount) || 0) > 0) return true;
+      const st = String(it.cancelStatus || it.cancellationStatus || '').toUpperCase();
+      if (st && !['NONE', 'NO', '없음', ''].includes(st)) return true;
+      return false;
+    });
+    if (itemCanceled) inlineCanceledIds.add(String(orderId));
+  });
+  if (inlineCanceledIds.size > 0) {
+    console.log('[COUPANG] 인라인 cancellation 감지:', inlineCanceledIds.size, '건', Array.from(inlineCanceledIds).slice(0, 5));
+  }
+
+  // v2.9: 휴리스틱 취소 감지 — ERP에 있는데 active 응답에 없는 주문을 취소로 추정 (보조)
   const SAFETY_LIMIT = 10;
   const erpDocRef = firestoreDb.doc('erp_data/shopOrders');
   const erpSnap = await erpDocRef.get();
@@ -614,7 +651,6 @@ async function ingestCoupangOrders({ daysBack = 1 } = {}) {
   erpExisting.forEach(o => {
     if (!o || o.shopId !== shopId) return;
     const d = (o.orderDate || '').slice(0, 10);
-    // createdAtFrom~To 기간 내 ERP 주문 중 active에 없는 것
     if (d < createdAtFrom || d > createdAtTo) return;
     if (!activeOrderNos.has(String(o.orderNo))) {
       presumedCanceledIds.add(String(o.orderNo));
@@ -625,17 +661,26 @@ async function ingestCoupangOrders({ daysBack = 1 } = {}) {
     safetyTriggered = true;
   }
 
+  // v2.10: 인라인 + 휴리스틱 취소 후보 통합 (인라인이 더 정확)
+  const allCanceledIds = new Set([...inlineCanceledIds, ...presumedCanceledIds]);
+
   const erpOrders = Array.from(collected.values()).map(c => mapCoupangToErpOrder(c, shopId, shopName));
   // v2.7: 매핑 자동 적용
   const mappingResult = await applyProductMappingsToOrders(firestoreDb, erpOrders, shopId);
   console.log('[COUPANG] 매핑 자동 적용:', mappingResult.mapped, '건');
   const merge = await mergeOrdersIntoFirestore(firestoreDb, erpOrders);
 
-  // v2.9: 취소 추정 주문 ERP에서 제거 (Safety guard 통과 시에만)
+  // v2.10: 통합 취소 후보 (인라인 + 휴리스틱) 삭제
+  //   - 인라인은 항상 안전 (응답 직접 확인)
+  //   - 휴리스틱만은 safety guard 적용 (대량 삭제 방지)
   let removeResult = { removed: 0, samples: [] };
-  if (!safetyTriggered && presumedCanceledIds.size > 0) {
-    removeResult = await removeOrdersFromFirestore(firestoreDb, presumedCanceledIds, shopId);
-    if (removeResult.removed > 0) console.log('[COUPANG] 휴리스틱 취소 삭제:', removeResult.removed, '건');
+  let toRemove = new Set([...inlineCanceledIds]);
+  if (!safetyTriggered) {
+    presumedCanceledIds.forEach(id => toRemove.add(id));
+  }
+  if (toRemove.size > 0) {
+    removeResult = await removeOrdersFromFirestore(firestoreDb, toRemove, shopId);
+    if (removeResult.removed > 0) console.log('[COUPANG] 취소 삭제 완료:', removeResult.removed, '건 (인라인:', inlineCanceledIds.size, ', 휴리스틱:', presumedCanceledIds.size, ', safety triggered:', safetyTriggered, ')');
   }
 
   return {
