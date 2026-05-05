@@ -1,11 +1,11 @@
 // =============================================================================
-// Reniv ERP — Cloud Functions (v2.8, 2026-05, 취소/반품 자동 감지 + ERP 삭제)
+// Reniv ERP — Cloud Functions (v2.9, 2026-05, 쿠팡 휴리스틱 취소 감지)
 // =============================================================================
-// v2.8 추가:
-//   - removeOrdersFromFirestore(): 취소/반품된 orderNo를 ERP shopOrders에서 자동 삭제
-//   - 쿠팡: Wing API에서 CANCEL / RETURNED status 추가 조회
-//   - 자사몰: 응답 order_status가 C*/R*이면 별도 분리 → 삭제 + 알림
-//   - Slack 알림에 "취소/반품 삭제 N건 + 샘플" 추가
+// v2.9 변경 (Wing API의 CANCEL/RETURNED status 값이 400 거부됨):
+//   - 쿠팡: 휴리스틱 — ERP에 있는데 같은 기간 active 응답에 없는 주문을 취소로 추정
+//   - Safety guard: 10건 초과 추정 시 자동 삭제 안 함 (일시 오류 대량 손실 방지)
+//   - 자사몰: 응답 order_status가 C*/R*이면 별도 분리 → 정확 처리 (변경 없음)
+//   - Slack 알림에 "취소 추정 N건 + 샘플 + 안전 guard 표시"
 // =============================================================================
 // v2.7 추가:
 //   - applyProductMappingsToOrders(): 쇼핑몰별 productMappings + 완제품 정확 일치로 itemId 자동 부여
@@ -576,10 +576,9 @@ async function ingestCoupangOrders({ daysBack = 1 } = {}) {
   const cancelStatuses = ['CANCEL', 'RETURNED'];
 
   const collected = new Map();
-  const canceledIds = new Set();
   const statusCounts = {};
 
-  // active 주문
+  // active 주문 조회
   for (const status of activeStatuses) {
     try {
       const resp = await callWingAPI({ accessKey, secretKey, vendorId, status, createdAtFrom, createdAtTo });
@@ -596,19 +595,34 @@ async function ingestCoupangOrders({ daysBack = 1 } = {}) {
     }
   }
 
-  // v2.8: 취소/반품 주문 (잘못된 status 값일 가능성 있어 try/catch 무시)
-  for (const status of cancelStatuses) {
-    try {
-      const resp = await callWingAPI({ accessKey, secretKey, vendorId, status, createdAtFrom, createdAtTo });
-      const list = (resp && Array.isArray(resp.data)) ? resp.data : [];
-      statusCounts[status] = list.length;
-      for (const order of list) {
-        if (order && order.orderId) canceledIds.add(String(order.orderId));
-      }
-    } catch (e) {
-      statusCounts[status] = `SKIP (${(e.message||'').slice(0,40)})`;
-      console.warn(`[COUPANG] cancel status ${status} 조회 실패 (무시):`, e.message);
+  // v2.9: 휴리스틱 취소 감지 — Wing API의 cancel status 값을 알 수 없어서, 
+  //   "ERP에 있는데 같은 기간 active 응답에 없는 주문"을 취소로 추정
+  //   거짓 양성 위험: 일시적 API 오류로 일부 주문 누락 가능 → Safety guard로 대량 삭제 방지
+  const SAFETY_LIMIT = 10;
+  const erpDocRef = firestoreDb.doc('erp_data/shopOrders');
+  const erpSnap = await erpDocRef.get();
+  let erpExisting = [];
+  if (erpSnap.exists) {
+    const raw = erpSnap.data().data;
+    if (typeof raw === 'string') { try { erpExisting = JSON.parse(raw) || []; } catch (_) {} }
+    else if (Array.isArray(raw)) erpExisting = raw;
+  }
+  const activeOrderNos = new Set();
+  collected.forEach((_, orderId) => activeOrderNos.add(String(orderId)));
+  const presumedCanceledIds = new Set();
+  let safetyTriggered = false;
+  erpExisting.forEach(o => {
+    if (!o || o.shopId !== shopId) return;
+    const d = (o.orderDate || '').slice(0, 10);
+    // createdAtFrom~To 기간 내 ERP 주문 중 active에 없는 것
+    if (d < createdAtFrom || d > createdAtTo) return;
+    if (!activeOrderNos.has(String(o.orderNo))) {
+      presumedCanceledIds.add(String(o.orderNo));
     }
+  });
+  if (presumedCanceledIds.size > SAFETY_LIMIT) {
+    console.warn(`[COUPANG] 휴리스틱 추정 취소 ${presumedCanceledIds.size}건 — Safety guard 발동, 자동 삭제 건너뜀`);
+    safetyTriggered = true;
   }
 
   const erpOrders = Array.from(collected.values()).map(c => mapCoupangToErpOrder(c, shopId, shopName));
@@ -617,9 +631,12 @@ async function ingestCoupangOrders({ daysBack = 1 } = {}) {
   console.log('[COUPANG] 매핑 자동 적용:', mappingResult.mapped, '건');
   const merge = await mergeOrdersIntoFirestore(firestoreDb, erpOrders);
 
-  // v2.8: 취소된 주문 ERP에서 제거
-  const removeResult = await removeOrdersFromFirestore(firestoreDb, canceledIds, shopId);
-  if (removeResult.removed > 0) console.log('[COUPANG] 취소/반품 삭제:', removeResult.removed, '건');
+  // v2.9: 취소 추정 주문 ERP에서 제거 (Safety guard 통과 시에만)
+  let removeResult = { removed: 0, samples: [] };
+  if (!safetyTriggered && presumedCanceledIds.size > 0) {
+    removeResult = await removeOrdersFromFirestore(firestoreDb, presumedCanceledIds, shopId);
+    if (removeResult.removed > 0) console.log('[COUPANG] 휴리스틱 취소 삭제:', removeResult.removed, '건');
+  }
 
   return {
     fetched: erpOrders.length,
@@ -627,6 +644,8 @@ async function ingestCoupangOrders({ daysBack = 1 } = {}) {
     total: merge.total,
     removed: removeResult.removed,
     removedSamples: removeResult.samples,
+    presumedCanceled: presumedCanceledIds.size,
+    safetyTriggered,
     statusCounts,
     range: `${createdAtFrom} ~ ${createdAtTo}`,
     sampleNew: merge.sampleNew.map(o => ({ orderNo: o.orderNo, customer: o.customerName, product: o.productName, qty: o.qty, amount: o.paymentAmount }))
@@ -655,11 +674,14 @@ exports.fetchCoupangOrders = functions
         ? '\n\n*신규 주문 샘플:*\n' + result.sampleNew.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`).join('\n')
         : '';
       // v2.5: ERP 총 주문 / 상태별 라인 제거 + 별도 채널(르니브-주문자동화)로 전송
-      // v2.8: 취소/반품 삭제 정보 추가
+      // v2.9: 휴리스틱 취소 감지 정보 + Safety guard 안내
       const removedText = (result.removed > 0)
-        ? `\n🗑️ 취소/반품 삭제: ${result.removed}건` + (result.removedSamples && result.removedSamples.length
-          ? '\n*취소 주문:*\n' + result.removedSamples.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`).join('\n')
+        ? `\n🗑️ 취소/반품 자동 삭제: ${result.removed}건 _(휴리스틱 추정)_` + (result.removedSamples && result.removedSamples.length
+          ? '\n*취소 추정 주문:*\n' + result.removedSamples.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`).join('\n')
           : '')
+        : '';
+      const safetyText = result.safetyTriggered
+        ? `\n⚠️ Safety guard 발동: 추정 취소가 ${result.presumedCanceled}건으로 너무 많아 자동 삭제 건너뜀 (일시 API 오류 가능성). ERP에서 수동 확인 권장.`
         : '';
       const titleParts = [];
       if (result.added > 0) titleParts.push(`신규 ${result.added}건`);
@@ -671,7 +693,7 @@ exports.fetchCoupangOrders = functions
         details:
           `📦 가져옴: ${result.fetched}건\n` +
           `✅ 신규 추가: ${result.added}건\n` +
-          `📅 조회 기간: ${result.range}` + sampleText + removedText,
+          `📅 조회 기간: ${result.range}` + sampleText + removedText + safetyText,
         webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
       });
       console.log('[COUPANG SCHED] 성공:', JSON.stringify(result));
