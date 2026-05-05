@@ -1,5 +1,10 @@
 // =============================================================================
-// Reniv ERP — Cloud Functions (v2.13, 2026-05, 자사몰 0원 주문 매핑 보정)
+// Reniv ERP — Cloud Functions (v2.14, 2026-05, 백업 알림 채널 명시 분리)
+// =============================================================================
+// v2.14 변경:
+//   - 백업 함수 3개(scheduledFirestoreExport / manualBackup / pruneOldBackups)에
+//     SLACK_BACKUP_WEBHOOK 시크릿을 명시적으로 사용 (erp-자동백업 채널)
+//   - 주문 알림(르니브-주문자동화)와 완전 분리
 // =============================================================================
 // v2.13 변경:
 //   - 네이버페이 충전금/포인트 결제 등 payment_amount=0인 주문도 정확한 금액 산출
@@ -159,6 +164,9 @@ async function notifySlack({ title, level, details, webhookOverride }) {
 // ─────────────────────────────────────────────────────────────
 exports.scheduledFirestoreExport = functions
   .region(REGION)
+  .runWith({
+    secrets: ['SLACK_BACKUP_WEBHOOK']
+  })
   .pubsub.schedule('0 3 * * *')
   .timeZone('Asia/Seoul')
   .onRun(async (context) => {
@@ -184,6 +192,7 @@ exports.scheduledFirestoreExport = functions
           `📂 저장 위치: \`${outputPrefix}\`\n` +
           `🔧 작업 ID: \`${response.name.split('/').pop()}\`\n\n` +
           `_(실제 파일 생성 완료까지 1~5분 소요. 완료 확인은 버킷 직접 확인.)_`,
+        webhookOverride: process.env.SLACK_BACKUP_WEBHOOK
       });
 
       return { success: true, operation: response.name, path: outputPrefix };
@@ -199,6 +208,7 @@ exports.scheduledFirestoreExport = functions
           `1. <https://console.firebase.google.com/project/${PROJECT_ID}/functions/logs|Functions 로그 확인>\n` +
           `2. <https://console.cloud.google.com/iam-admin/iam?project=${PROJECT_ID}|IAM 권한 확인> ` +
           `(서비스 계정에 'Cloud Datastore Import Export Admin', 'Storage Object Admin' 역할 필요)`,
+        webhookOverride: process.env.SLACK_BACKUP_WEBHOOK
       });
 
       throw new functions.https.HttpsError('internal', '백업 실패: ' + err.message);
@@ -210,6 +220,9 @@ exports.scheduledFirestoreExport = functions
 // ─────────────────────────────────────────────────────────────
 exports.manualBackup = functions
   .region(REGION)
+  .runWith({
+    secrets: ['SLACK_BACKUP_WEBHOOK']
+  })
   .https.onCall(async (data, context) => {
     if (!context.auth) {
       throw new functions.https.HttpsError('unauthenticated', '로그인이 필요합니다.');
@@ -240,6 +253,7 @@ exports.manualBackup = functions
           `👤 실행자: *${userName}* (\`${uid}\`)\n` +
           `📂 저장 위치: \`${outputPrefix}\`\n` +
           `🔧 작업 ID: \`${response.name.split('/').pop()}\``,
+        webhookOverride: process.env.SLACK_BACKUP_WEBHOOK
       });
 
       return { success: true, operation: response.name, path: outputPrefix };
@@ -252,6 +266,7 @@ exports.manualBackup = functions
         details:
           `👤 실행자: *${userName}* (\`${uid}\`)\n` +
           `❌ 오류: ${err.message}`,
+        webhookOverride: process.env.SLACK_BACKUP_WEBHOOK
       });
 
       throw new functions.https.HttpsError('internal', '백업 실패: ' + err.message);
@@ -264,6 +279,9 @@ exports.manualBackup = functions
 // ─────────────────────────────────────────────────────────────
 exports.pruneOldBackups = functions
   .region(REGION)
+  .runWith({
+    secrets: ['SLACK_BACKUP_WEBHOOK']
+  })
   .pubsub.schedule('0 4 * * 0')
   .timeZone('Asia/Seoul')
   .onRun(async (context) => {
@@ -301,6 +319,7 @@ exports.pruneOldBackups = functions
           `🗑️ 삭제: ${deletedCount}개 파일 (${deletedFolders.size}개 날짜 폴더)\n` +
           `📦 유지: ${keptCount}개 파일\n` +
           `📅 기준: 30일 (${kstDate()} 이전)`,
+        webhookOverride: process.env.SLACK_BACKUP_WEBHOOK
       });
 
       return { deleted: deletedCount, kept: keptCount };
@@ -313,6 +332,7 @@ exports.pruneOldBackups = functions
         details:
           `❌ 오류: ${err.message}\n\n` +
           `<https://console.firebase.google.com/project/${PROJECT_ID}/functions/logs|로그 확인>`,
+        webhookOverride: process.env.SLACK_BACKUP_WEBHOOK
       });
 
       throw err;
