@@ -1,16 +1,23 @@
 // =============================================================================
-// Reniv ERP — 자동 백업 Cloud Functions (v2.1, 2026-04, Slack 알림 추가)
+// Reniv ERP — Cloud Functions (v2.2, 2026-05, 쿠팡 주문 자동 수집 추가)
 // =============================================================================
 //
 // 기능:
+//   [백업]
 //   1) scheduledFirestoreExport: 매일 새벽 3시 (KST) Firestore 전체 백업
 //   2) manualBackup: 관리자가 웹 UI에서 버튼 클릭으로 즉시 백업
 //   3) pruneOldBackups: 30일 이상 된 일일 백업 자동 삭제 (매주 일요일 04:00)
+//   [주문 자동 수집 — v2.2]
+//   4) fetchCoupangOrders: 매일 KST 09:00 / 13:00 / 18:00 쿠팡 주문 자동 수집
+//   5) manualFetchCoupangOrders: 관리자 수동 호출 (테스트/즉시 수집용)
 //
 // 모든 함수는 성공/실패 시 Slack 알림 전송 (functions.config().slack.webhook)
 //
-// 배포 전 Slack webhook 등록 (한 번만):
+// 배포 전 시크릿 등록 (한 번만):
 //   firebase functions:config:set slack.webhook="https://hooks.slack.com/services/..."
+//   firebase functions:secrets:set COUPANG_ACCESS_KEY
+//   firebase functions:secrets:set COUPANG_SECRET_KEY
+//   firebase functions:secrets:set COUPANG_VENDOR_ID
 //
 // 배포:
 //   firebase deploy --only functions --project reniv-erp-135a3
@@ -20,6 +27,7 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const firestore = require('@google-cloud/firestore');
 const {Storage} = require('@google-cloud/storage');
+const crypto = require('crypto');
 
 admin.initializeApp();
 
@@ -260,5 +268,290 @@ exports.pruneOldBackups = functions
       });
 
       throw err;
+    }
+  });
+
+// =============================================================================
+// v2.2 — 쿠팡 Wing Open API: 주문 자동 수집 → ERP shopOrders Firestore 머지
+// =============================================================================
+//
+// Wing API 인증: HMAC-SHA256 (yymmddTHHmmssZ, UTC 기준)
+// IP 화이트리스트가 활성화되어 있다면 Cloud Functions 발신 IP를 등록해야 함
+// (필요 시 VPC connector + Cloud NAT 고정 IP 옵션 검토)
+// =============================================================================
+
+// 쿠팡 datetime 포맷: yyMMddTHHmmssZ (UTC)
+function coupangDatetime() {
+  const d = new Date();
+  const yy = String(d.getUTCFullYear()).slice(2);
+  const MM = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const HH = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  const ss = String(d.getUTCSeconds()).padStart(2, '0');
+  return `${yy}${MM}${dd}T${HH}${mm}${ss}Z`;
+}
+
+// Wing API 호출 + HMAC-SHA256 서명
+async function callWingAPI({ accessKey, secretKey, vendorId, status, createdAtFrom, createdAtTo }) {
+  const method = 'GET';
+  const path = `/v2/providers/openapi/apis/api/v4/vendors/${vendorId}/ordersheets`;
+  const query = `createdAtFrom=${createdAtFrom}&createdAtTo=${createdAtTo}&status=${status}&maxPerPage=50`;
+  const datetime = coupangDatetime();
+  const message = `${datetime}${method}${path}${query}`;
+  const signature = crypto.createHmac('sha256', secretKey).update(message).digest('hex');
+  const auth = `CEA algorithm=HmacSHA256, access-key=${accessKey}, signed-date=${datetime}, signature=${signature}`;
+  const url = `https://api-gateway.coupang.com${path}?${query}`;
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Authorization': auth,
+      'Content-Type': 'application/json;charset=UTF-8',
+      'X-EXTENDED-Timeout': '90000'
+    }
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '(body unreadable)');
+    throw new Error(`Wing API ${response.status}: ${body.slice(0, 500)}`);
+  }
+  return await response.json();
+}
+
+// 한국 전화번호 보정: 첫자리 1~9 면 0 추가 (엑셀 import 로직과 동일 규칙)
+function fmtPhoneKr(phone) {
+  if (!phone) return '';
+  let s = String(phone).trim();
+  if (!s) return '';
+  if (/^[1-9]/.test(s)) s = '0' + s;
+  return s;
+}
+
+// 쿠팡 주문 객체 → ERP shopOrders 객체 매핑
+function mapCoupangToErpOrder(c, shopId, shopName) {
+  const items = Array.isArray(c.orderItems) ? c.orderItems : [];
+  const totalAmount = items.reduce((sum, it) =>
+    sum + (Number(it.orderPrice) || 0) * (Number(it.shippingCount) || 1), 0);
+  const totalQty = items.reduce((sum, it) => sum + (Number(it.shippingCount) || 0), 0) || 1;
+  const productNames = items.map(it => it.vendorItemName || it.sellerProductName).filter(Boolean).join(' + ');
+
+  return {
+    id: Date.now() + Math.floor(Math.random() * 100000),
+    orderNo: String(c.orderId || ''),
+    orderDate: (c.orderedAt || '').slice(0, 10),
+    customerName: (c.orderer && c.orderer.name) || '',
+    customerPhone: fmtPhoneKr((c.orderer && (c.orderer.safeNumber || c.orderer.phoneNumber)) || ''),
+    email: (c.orderer && c.orderer.email) || '',
+    productName: productNames || '',
+    qty: totalQty,
+    paymentAmount: totalAmount,
+    recipientName: (c.receiver && c.receiver.name) || '',
+    recipientPhone: fmtPhoneKr((c.receiver && (c.receiver.safeNumber || c.receiver.receiverNumber)) || ''),
+    zipCode: (c.receiver && c.receiver.postCode) || '',
+    address: `${(c.receiver && c.receiver.addr1) || ''} ${(c.receiver && c.receiver.addr2) || ''}`.trim(),
+    deliveryNote: c.parcelPrintMessage || '',
+    paymentDate: (c.paidAt || '').slice(0, 10),
+    shipDate: '',
+    shippingFee: Number(c.shippingPrice) || 0,
+    trackingNo: c.invoiceNumber || '',
+    status: c.invoiceNumber ? '배송완료' : '배송 전',
+    shopId,
+    shopName,
+    source: 'coupang_auto',
+    coupangStatus: c.status || '',
+    fetchedAt: Date.now(),
+  };
+}
+
+// erp_data/shopOrders Firestore 문서에서 기존 주문 읽고 신규만 머지
+async function mergeOrdersIntoFirestore(firestoreDb, newOrders) {
+  const docRef = firestoreDb.doc('erp_data/shopOrders');
+  const snap = await docRef.get();
+  let existing = [];
+  if (snap.exists) {
+    const raw = snap.data().data;
+    if (typeof raw === 'string') {
+      try { existing = JSON.parse(raw) || []; } catch (_) { existing = []; }
+    } else if (Array.isArray(raw)) {
+      existing = raw;
+    }
+  }
+  const existingOrderNos = new Set(existing.map(o => String(o.orderNo)));
+  const trulyNew = newOrders.filter(o => o.orderNo && !existingOrderNos.has(String(o.orderNo)));
+
+  if (trulyNew.length === 0) {
+    return { added: 0, total: existing.length, sampleNew: [] };
+  }
+
+  const merged = existing.concat(trulyNew);
+  await docRef.set({
+    data: JSON.stringify(merged),
+    ts: Date.now()
+  });
+
+  return { added: trulyNew.length, total: merged.length, sampleNew: trulyNew.slice(0, 3) };
+}
+
+// erp_data/shops 에서 쿠팡 shop 객체 찾기
+async function findCoupangShop(firestoreDb) {
+  const snap = await firestoreDb.doc('erp_data/shops').get();
+  if (!snap.exists) return null;
+  const raw = snap.data().data;
+  let shops = [];
+  if (typeof raw === 'string') { try { shops = JSON.parse(raw) || []; } catch (_) {} }
+  else if (Array.isArray(raw)) shops = raw;
+  const nameMatches = (n) => {
+    if (!n) return false;
+    const lower = String(n).toLowerCase();
+    return n.includes('쿠팡') || lower.includes('coupang');
+  };
+  return shops.find(s => s && nameMatches(s.name)) || null;
+}
+
+// 메인 인입 로직
+async function ingestCoupangOrders({ daysBack = 1 } = {}) {
+  const accessKey = process.env.COUPANG_ACCESS_KEY;
+  const secretKey = process.env.COUPANG_SECRET_KEY;
+  const vendorId  = process.env.COUPANG_VENDOR_ID;
+  if (!accessKey || !secretKey || !vendorId) {
+    throw new Error('COUPANG_ACCESS_KEY / COUPANG_SECRET_KEY / COUPANG_VENDOR_ID 시크릿 미설정');
+  }
+
+  // KST 기준 날짜 범위
+  const todayKst = new Date(Date.now() + 9 * 3600 * 1000);
+  const fromDate = new Date(todayKst); fromDate.setDate(fromDate.getDate() - daysBack);
+  const createdAtFrom = fromDate.toISOString().slice(0, 10);
+  const createdAtTo   = todayKst.toISOString().slice(0, 10);
+
+  const firestoreDb = admin.firestore();
+  const coupangShop = await findCoupangShop(firestoreDb);
+  if (!coupangShop) {
+    throw new Error('쇼핑몰 관리에 "쿠팡"이 등록되어 있지 않습니다. ERP → 매출 분석 → 쇼핑몰 관리에서 먼저 등록해주세요.');
+  }
+  const shopId = coupangShop.id;
+  const shopName = coupangShop.name || '쿠팡';
+
+  // 모든 status 순회 + orderId 단위 dedupe
+  const statuses = ['ACCEPT', 'INSTRUCT', 'DEPARTURE', 'DELIVERING', 'FINAL_DELIVERY'];
+  const collected = new Map();
+  const statusCounts = {};
+
+  for (const status of statuses) {
+    try {
+      const resp = await callWingAPI({ accessKey, secretKey, vendorId, status, createdAtFrom, createdAtTo });
+      const list = (resp && Array.isArray(resp.data)) ? resp.data : [];
+      statusCounts[status] = list.length;
+      for (const order of list) {
+        if (order && order.orderId && !collected.has(order.orderId)) {
+          collected.set(order.orderId, order);
+        }
+      }
+    } catch (e) {
+      statusCounts[status] = `ERROR: ${e.message}`;
+      console.warn(`[COUPANG] ${status} 조회 실패:`, e.message);
+    }
+  }
+
+  const erpOrders = Array.from(collected.values()).map(c => mapCoupangToErpOrder(c, shopId, shopName));
+  const merge = await mergeOrdersIntoFirestore(firestoreDb, erpOrders);
+
+  return {
+    fetched: erpOrders.length,
+    added: merge.added,
+    total: merge.total,
+    statusCounts,
+    range: `${createdAtFrom} ~ ${createdAtTo}`,
+    sampleNew: merge.sampleNew.map(o => ({ orderNo: o.orderNo, customer: o.customerName, product: o.productName, amount: o.paymentAmount }))
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 4) 쿠팡 주문 자동 수집 — 매일 KST 09:00 / 13:00 / 18:00
+// ─────────────────────────────────────────────────────────────
+exports.fetchCoupangOrders = functions
+  .region(REGION)
+  .runWith({
+    secrets: ['COUPANG_ACCESS_KEY', 'COUPANG_SECRET_KEY', 'COUPANG_VENDOR_ID'],
+    timeoutSeconds: 240,
+    memory: '256MB'
+  })
+  .pubsub.schedule('0 9,13,18 * * *')
+  .timeZone('Asia/Seoul')
+  .onRun(async (context) => {
+    try {
+      const result = await ingestCoupangOrders({ daysBack: 1 });
+      const sampleText = result.sampleNew.length
+        ? '\n\n*신규 주문 샘플:*\n' + result.sampleNew.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} / ₩${(s.amount || 0).toLocaleString()}`).join('\n')
+        : '';
+      const statusBreak = Object.entries(result.statusCounts).map(([k, v]) => `${k}=${v}`).join(', ');
+      await notifySlack({
+        title: result.added > 0 ? `쿠팡 자동 주문 수집 — 신규 ${result.added}건` : '쿠팡 자동 주문 수집 — 신규 없음',
+        level: result.added > 0 ? 'success' : 'info',
+        details:
+          `📦 가져옴: ${result.fetched}건\n` +
+          `✅ 신규 추가: ${result.added}건\n` +
+          `📊 ERP 총 주문: ${result.total}건\n` +
+          `📅 조회 기간: ${result.range}\n` +
+          `📊 상태별: ${statusBreak}` + sampleText
+      });
+      console.log('[COUPANG SCHED] 성공:', JSON.stringify(result));
+      return result;
+    } catch (err) {
+      console.error('[COUPANG SCHED] 실패:', err);
+      await notifySlack({
+        title: '쿠팡 자동 주문 수집 실패',
+        level: 'error',
+        details: `❌ 오류: ${err.message}\n\n` +
+          `*확인 사항:*\n` +
+          `1. <https://console.firebase.google.com/project/${PROJECT_ID}/functions/logs|Functions 로그>\n` +
+          `2. Wing 관리자 페이지 → API 설정 → 허용 IP 화이트리스트 (Functions IP가 막혔을 가능성)\n` +
+          `3. firebase functions:secrets:get COUPANG_ACCESS_KEY 등 시크릿 등록 확인`
+      });
+      throw err;
+    }
+  });
+
+// ─────────────────────────────────────────────────────────────
+// 5) 수동 트리거 (관리자 콜) — 테스트/즉시 수집용
+// ─────────────────────────────────────────────────────────────
+exports.manualFetchCoupangOrders = functions
+  .region(REGION)
+  .runWith({
+    secrets: ['COUPANG_ACCESS_KEY', 'COUPANG_SECRET_KEY', 'COUPANG_VENDOR_ID'],
+    timeoutSeconds: 240,
+    memory: '256MB'
+  })
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', '로그인이 필요합니다.');
+    }
+    const uid = context.auth.uid;
+    const userDoc = await admin.firestore().doc(`users/${uid}`).get();
+    if (!userDoc.exists || userDoc.data().isAdmin !== true) {
+      throw new functions.https.HttpsError('permission-denied', '관리자 권한이 필요합니다.');
+    }
+    const userName = userDoc.data().name || userDoc.data().email || uid;
+    const daysBack = Math.min(Math.max(parseInt((data && data.daysBack) || 1, 10) || 1, 1), 14);
+
+    try {
+      const result = await ingestCoupangOrders({ daysBack });
+      await notifySlack({
+        title: `쿠팡 수동 주문 수집 (관리자 ${userName})`,
+        level: 'info',
+        details:
+          `👤 실행자: *${userName}* (\`${uid}\`)\n` +
+          `📦 가져옴: ${result.fetched}건 / 신규 ${result.added}건\n` +
+          `📅 조회 기간: ${result.range} (daysBack=${daysBack})`
+      });
+      return result;
+    } catch (err) {
+      console.error('[COUPANG MANUAL] 실패:', err);
+      await notifySlack({
+        title: '쿠팡 수동 주문 수집 실패',
+        level: 'error',
+        details: `👤 ${userName}\n❌ ${err.message}`
+      });
+      throw new functions.https.HttpsError('internal', err.message);
     }
   });
