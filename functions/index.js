@@ -1,5 +1,10 @@
 // =============================================================================
-// Reniv ERP — Cloud Functions (v2.12, 2026-05, 휴리스틱 14일 cutoff + 진단 로그)
+// Reniv ERP — Cloud Functions (v2.13, 2026-05, 자사몰 0원 주문 매핑 보정)
+// =============================================================================
+// v2.13 변경:
+//   - 네이버페이 충전금/포인트 결제 등 payment_amount=0인 주문도 정확한 금액 산출
+//   - 7개 결제/주문 금액 필드 순차 시도 + orderItems 가격×수량 합계 fallback
+//   - 0원 감지 시 디버그 로그로 응답 구조 파악
 // =============================================================================
 // v2.12 변경:
 //   - daysBack 기본값 1 → 7 (active 응답 범위 확장)
@@ -947,6 +952,47 @@ function mapCafe24ToErpOrder(c, shopId, shopName) {
   else if (status.startsWith('C')) mappedStatus = '취소';
   else if (status.startsWith('R')) mappedStatus = '반품';
 
+  // v2.13: 네이버페이 충전금/포인트로 결제된 주문은 payment_amount=0으로 들어올 수 있음
+  //   → 다양한 결제/주문 금액 필드를 순차 시도, 모두 0이면 orderItems 가격×수량 합계로 fallback
+  const candidates = [
+    Number(c.payment_amount),
+    Number(c.actual_payment_amount),
+    Number(c.total_pay_amount),
+    Number(c.expected_payment_amount),
+    Number(c.order_price_amount),
+    Number(c.total_payment_amount),
+    Number(c.settle_price),
+    // 마지막 fallback: orderItems의 product_price × quantity 합계
+    items.reduce((s, it) => {
+      if (!it) return s;
+      const unit = Number(it.product_price) || Number(it.price) || Number(it.option_price) || 0;
+      const q = Number(it.quantity) || 1;
+      return s + unit * q;
+    }, 0)
+  ];
+  const paymentAmount = candidates.find(v => v && v > 0) || 0;
+
+  // v2.13: 0원 주문이면 디버그 로그 (실제 응답 구조 파악용)
+  if (paymentAmount === 0 && c.order_id) {
+    console.warn('[CAFE24 DEBUG] 0원 주문 감지:', c.order_id, JSON.stringify({
+      payment_amount: c.payment_amount,
+      actual_payment_amount: c.actual_payment_amount,
+      total_pay_amount: c.total_pay_amount,
+      expected_payment_amount: c.expected_payment_amount,
+      order_price_amount: c.order_price_amount,
+      total_payment_amount: c.total_payment_amount,
+      settle_price: c.settle_price,
+      payment_method: c.payment_method,
+      itemsSample: items.slice(0, 1).map(i => ({
+        product_price: i && i.product_price,
+        price: i && i.price,
+        option_price: i && i.option_price,
+        quantity: i && i.quantity,
+        product_name: i && i.product_name
+      }))
+    }).slice(0, 1500));
+  }
+
   return {
     id: Date.now() + Math.floor(Math.random() * 100000),
     orderNo: String(c.order_id || ''),
@@ -956,7 +1002,7 @@ function mapCafe24ToErpOrder(c, shopId, shopName) {
     email: buyer.email || '',
     productName: productNames,
     qty: totalQty,
-    paymentAmount: Number(c.payment_amount) || Number(c.actual_payment_amount) || Number(c.order_price_amount) || 0,
+    paymentAmount,
     recipientName: receiver.name || '',
     recipientPhone: fmtPhoneKr(receiver.cellphone || receiver.phone || ''),
     zipCode: receiver.zipcode || receiver.postal_code || '',
