@@ -9105,18 +9105,26 @@ function renderMarginAnalysis() {
     return true;
   });
 
-  // 2) 행별 계산 + 합계
+  // v1.9.520: Net (부가세 제외) 기준으로 통일
+  //   - 판매가는 VAT 10% 포함 → /1.1 로 Net 변환
+  //   - 원가(COGS)는 이미 VAT 제외 (그대로)
+  //   - 수수료는 VAT 포함 → /1.1 로 Net 변환
+  //   - 광고비는 VAT 포함 → /1.1 로 Net 변환
+  const VAT_DIVIDER = 1.1;
   let sumRev = 0, sumCogs = 0, sumFee = 0, sumAds = 0;
   const rows = orders.map(o => {
     const shop = (DB.shops||[]).find(s => s.id === o.shopId) || {};
-    const revenue = parseFloat(o.paymentAmount || o.totalPrice || 0) || 0;
-    const { cogs } = _mgLookupCogs(o);
-    const fee = revenue * (parseFloat(shop.commissionBase) || 0) / 100;
-    const ads = _mgAllocateAds(o, shop);
+    const revenueGross = parseFloat(o.paymentAmount || o.totalPrice || 0) || 0;
+    const revenue = revenueGross / VAT_DIVIDER;
+    const { cogs } = _mgLookupCogs(o); // 이미 VAT 제외
+    const feeGross = revenueGross * (parseFloat(shop.commissionBase) || 0) / 100;
+    const fee = feeGross / VAT_DIVIDER;
+    const adsGross = _mgAllocateAds(o, shop);
+    const ads = adsGross / VAT_DIVIDER;
     const net = revenue - cogs - fee - ads;
     const pct = revenue > 0 ? (net / revenue * 100) : 0;
     sumRev += revenue; sumCogs += cogs; sumFee += fee; sumAds += ads;
-    return { o, shop, revenue, cogs, fee, ads, net, pct };
+    return { o, shop, revenueGross, revenue, cogs, fee, ads, net, pct };
   });
 
   // 3) 상단 KPI 갱신
