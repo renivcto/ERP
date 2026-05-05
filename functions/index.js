@@ -1,5 +1,11 @@
 // =============================================================================
-// Reniv ERP — Cloud Functions (v2.2, 2026-05, 쿠팡 주문 자동 수집 추가)
+// Reniv ERP — Cloud Functions (v2.3, 2026-05, VPC Connector + Cloud NAT 고정 IP)
+// =============================================================================
+// v2.3 추가:
+//   - vpcConnector: 'erp-coupang-vpc-conn' (asia-northeast3)
+//   - vpcConnectorEgressSettings: 'ALL_TRAFFIC' → 모든 외부 트래픽이 Cloud NAT 경유
+//   - Cloud NAT 고정 IP: 34.64.120.224 (erp-coupang-outbound-ip)
+//   - 쿠팡 Wing 화이트리스트에 위 IP 등록 필요
 // =============================================================================
 //
 // 기능:
@@ -474,7 +480,10 @@ exports.fetchCoupangOrders = functions
   .runWith({
     secrets: ['COUPANG_ACCESS_KEY', 'COUPANG_SECRET_KEY', 'COUPANG_VENDOR_ID'],
     timeoutSeconds: 240,
-    memory: '256MB'
+    memory: '256MB',
+    // v2.3: Wing 화이트리스트 통과를 위해 VPC Connector → Cloud NAT 고정 IP 사용
+    vpcConnector: 'erp-coupang-vpc-conn',
+    vpcConnectorEgressSettings: 'ALL_TRAFFIC'
   })
   .pubsub.schedule('0 9,13,18 * * *')
   .timeZone('Asia/Seoul')
@@ -520,7 +529,10 @@ exports.manualFetchCoupangOrders = functions
   .runWith({
     secrets: ['COUPANG_ACCESS_KEY', 'COUPANG_SECRET_KEY', 'COUPANG_VENDOR_ID'],
     timeoutSeconds: 240,
-    memory: '256MB'
+    memory: '256MB',
+    // v2.3: Wing 화이트리스트 통과를 위해 VPC Connector → Cloud NAT 고정 IP 사용
+    vpcConnector: 'erp-coupang-vpc-conn',
+    vpcConnectorEgressSettings: 'ALL_TRAFFIC'
   })
   .https.onCall(async (data, context) => {
     if (!context.auth) {
