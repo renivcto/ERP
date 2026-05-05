@@ -8703,16 +8703,23 @@ function applyProductMapping() {
   closeProductMappingModal();
 
   if (isExistingMode) {
-    // 모드 정리 + 저장 + 재렌더
+    // v1.9.511: 즉시 화면 갱신 (로컬 DB.shopOrders + shop.productMappings는 위에서 이미 갱신됨)
     window._mappingMode = null;
     window._mappingShopId = null;
+    try { renderShopOrderTable(); } catch(_){}
+    if (updatedCount > 0) {
+      showNotif(`✅ ${updatedCount}건 주문이 매핑되었습니다 (다음 자동 수집부터 같은 상품명 자동 매핑)`, 'success');
+    } else {
+      showNotif('⚠️ 매핑된 주문이 없습니다 — 모달에서 완제품을 선택했는지 확인해주세요', 'warning');
+    }
+    // 백그라운드로 Firestore 저장 (실패해도 로컬은 OK)
     try {
-      if (typeof saveDataNow === 'function') saveDataNow().then(() => {
-        try { renderShopOrderTable(); } catch(_){}
-      }).catch(e => console.warn('매핑 저장 실패:', e));
-      else if (typeof saveData === 'function') { saveData(); renderShopOrderTable(); }
+      if (typeof saveDataNow === 'function') {
+        saveDataNow().catch(e => console.warn('매핑 Firestore 저장 실패:', e));
+      } else if (typeof saveData === 'function') {
+        saveData();
+      }
     } catch(_){}
-    showNotif(`✅ ${updatedCount}건 주문이 매핑되었습니다 (다음 자동 수집부터 같은 상품명은 자동 매핑)`, 'success');
   } else {
     finalizeOrderUpload(orders, shopId);
   }
