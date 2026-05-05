@@ -1,5 +1,11 @@
 // =============================================================================
-// Reniv ERP — Cloud Functions (v2.7, 2026-05, 자동 수집 시 ERP 품목 자동 매핑)
+// Reniv ERP — Cloud Functions (v2.8, 2026-05, 취소/반품 자동 감지 + ERP 삭제)
+// =============================================================================
+// v2.8 추가:
+//   - removeOrdersFromFirestore(): 취소/반품된 orderNo를 ERP shopOrders에서 자동 삭제
+//   - 쿠팡: Wing API에서 CANCEL / RETURNED status 추가 조회
+//   - 자사몰: 응답 order_status가 C*/R*이면 별도 분리 → 삭제 + 알림
+//   - Slack 알림에 "취소/반품 삭제 N건 + 샘플" 추가
 // =============================================================================
 // v2.7 추가:
 //   - applyProductMappingsToOrders(): 쇼핑몰별 productMappings + 완제품 정확 일치로 itemId 자동 부여
@@ -432,6 +438,52 @@ async function applyProductMappingsToOrders(firestoreDb, orders, shopId) {
   return { mapped };
 }
 
+// v2.8: 취소/반품된 orderNo들을 erp_data/shopOrders에서 제거
+//   - 동일 shopId 내에서만 매칭 (다른 쇼핑몰의 같은 주문번호 보호)
+//   - 삭제된 주문 샘플 최대 3건 반환 (Slack 알림용)
+async function removeOrdersFromFirestore(firestoreDb, orderNos, shopId) {
+  if (!orderNos) return { removed: 0, samples: [] };
+  const set = (orderNos instanceof Set) ? orderNos : new Set(Array.from(orderNos).map(String));
+  if (set.size === 0) return { removed: 0, samples: [] };
+
+  const docRef = firestoreDb.doc('erp_data/shopOrders');
+  const snap = await docRef.get();
+  let existing = [];
+  if (snap.exists) {
+    const raw = snap.data().data;
+    if (typeof raw === 'string') {
+      try { existing = JSON.parse(raw) || []; } catch (_) {}
+    } else if (Array.isArray(raw)) {
+      existing = raw;
+    }
+  }
+
+  const samples = [];
+  const filtered = existing.filter(o => {
+    if (!o) return false;
+    if (o.shopId !== shopId) return true;
+    if (set.has(String(o.orderNo))) {
+      if (samples.length < 3) {
+        samples.push({
+          orderNo: o.orderNo,
+          customer: o.customerName,
+          product: o.productName,
+          qty: o.qty,
+          amount: o.paymentAmount
+        });
+      }
+      return false;
+    }
+    return true;
+  });
+
+  const removed = existing.length - filtered.length;
+  if (removed > 0) {
+    await docRef.set({ data: JSON.stringify(filtered), ts: Date.now() });
+  }
+  return { removed, samples };
+}
+
 // erp_data/shopOrders Firestore 문서에서 기존 주문 읽고 신규만 머지
 async function mergeOrdersIntoFirestore(firestoreDb, newOrders) {
   const docRef = firestoreDb.doc('erp_data/shopOrders');
@@ -518,12 +570,17 @@ async function ingestCoupangOrders({ daysBack = 1 } = {}) {
   const shopId = coupangShop.id;
   const shopName = coupangShop.name || '쿠팡';
 
-  // 모든 status 순회 + orderId 단위 dedupe
-  const statuses = ['ACCEPT', 'INSTRUCT', 'DEPARTURE', 'DELIVERING', 'FINAL_DELIVERY'];
+  // 모든 active status 순회 + orderId 단위 dedupe
+  const activeStatuses = ['ACCEPT', 'INSTRUCT', 'DEPARTURE', 'DELIVERING', 'FINAL_DELIVERY'];
+  // v2.8: 취소/반품 status 후보 (Wing API 정확한 값을 모를 수 있어 여러 값 시도)
+  const cancelStatuses = ['CANCEL', 'RETURNED'];
+
   const collected = new Map();
+  const canceledIds = new Set();
   const statusCounts = {};
 
-  for (const status of statuses) {
+  // active 주문
+  for (const status of activeStatuses) {
     try {
       const resp = await callWingAPI({ accessKey, secretKey, vendorId, status, createdAtFrom, createdAtTo });
       const list = (resp && Array.isArray(resp.data)) ? resp.data : [];
@@ -539,16 +596,37 @@ async function ingestCoupangOrders({ daysBack = 1 } = {}) {
     }
   }
 
+  // v2.8: 취소/반품 주문 (잘못된 status 값일 가능성 있어 try/catch 무시)
+  for (const status of cancelStatuses) {
+    try {
+      const resp = await callWingAPI({ accessKey, secretKey, vendorId, status, createdAtFrom, createdAtTo });
+      const list = (resp && Array.isArray(resp.data)) ? resp.data : [];
+      statusCounts[status] = list.length;
+      for (const order of list) {
+        if (order && order.orderId) canceledIds.add(String(order.orderId));
+      }
+    } catch (e) {
+      statusCounts[status] = `SKIP (${(e.message||'').slice(0,40)})`;
+      console.warn(`[COUPANG] cancel status ${status} 조회 실패 (무시):`, e.message);
+    }
+  }
+
   const erpOrders = Array.from(collected.values()).map(c => mapCoupangToErpOrder(c, shopId, shopName));
-  // v2.7: 매핑 자동 적용 (productMappings + 정확 일치)
+  // v2.7: 매핑 자동 적용
   const mappingResult = await applyProductMappingsToOrders(firestoreDb, erpOrders, shopId);
   console.log('[COUPANG] 매핑 자동 적용:', mappingResult.mapped, '건');
   const merge = await mergeOrdersIntoFirestore(firestoreDb, erpOrders);
+
+  // v2.8: 취소된 주문 ERP에서 제거
+  const removeResult = await removeOrdersFromFirestore(firestoreDb, canceledIds, shopId);
+  if (removeResult.removed > 0) console.log('[COUPANG] 취소/반품 삭제:', removeResult.removed, '건');
 
   return {
     fetched: erpOrders.length,
     added: merge.added,
     total: merge.total,
+    removed: removeResult.removed,
+    removedSamples: removeResult.samples,
     statusCounts,
     range: `${createdAtFrom} ~ ${createdAtTo}`,
     sampleNew: merge.sampleNew.map(o => ({ orderNo: o.orderNo, customer: o.customerName, product: o.productName, qty: o.qty, amount: o.paymentAmount }))
@@ -577,13 +655,23 @@ exports.fetchCoupangOrders = functions
         ? '\n\n*신규 주문 샘플:*\n' + result.sampleNew.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`).join('\n')
         : '';
       // v2.5: ERP 총 주문 / 상태별 라인 제거 + 별도 채널(르니브-주문자동화)로 전송
+      // v2.8: 취소/반품 삭제 정보 추가
+      const removedText = (result.removed > 0)
+        ? `\n🗑️ 취소/반품 삭제: ${result.removed}건` + (result.removedSamples && result.removedSamples.length
+          ? '\n*취소 주문:*\n' + result.removedSamples.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`).join('\n')
+          : '')
+        : '';
+      const titleParts = [];
+      if (result.added > 0) titleParts.push(`신규 ${result.added}건`);
+      if (result.removed > 0) titleParts.push(`취소 ${result.removed}건`);
+      const titleText = titleParts.length ? titleParts.join(' / ') : '신규/취소 없음';
       await notifySlack({
-        title: result.added > 0 ? `쿠팡 자동 주문 수집 — 신규 ${result.added}건` : '쿠팡 자동 주문 수집 — 신규 없음',
-        level: result.added > 0 ? 'success' : 'info',
+        title: `쿠팡 자동 주문 수집 — ${titleText}`,
+        level: (result.added > 0 || result.removed > 0) ? 'success' : 'info',
         details:
           `📦 가져옴: ${result.fetched}건\n` +
           `✅ 신규 추가: ${result.added}건\n` +
-          `📅 조회 기간: ${result.range}` + sampleText,
+          `📅 조회 기간: ${result.range}` + sampleText + removedText,
         webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
       });
       console.log('[COUPANG SCHED] 성공:', JSON.stringify(result));
@@ -865,17 +953,36 @@ async function ingestCafe24Orders({ daysBack = 1 } = {}) {
   }
   console.log('[CAFE24] 가져온 주문:', allOrders.length, '건');
 
+  // v2.8: 응답을 active/취소·반품으로 분리
+  const activeOrders = [];
+  const canceledIds = new Set();
+  for (const c of allOrders) {
+    const status = (c && c.order_status) || '';
+    if (status.startsWith('C') || status.startsWith('R')) {
+      if (c && c.order_id) canceledIds.add(String(c.order_id));
+    } else {
+      activeOrders.push(c);
+    }
+  }
+  console.log('[CAFE24] active:', activeOrders.length, '건 / 취소·반품:', canceledIds.size, '건');
+
   // 4) ERP 형식 매핑 + Firestore 머지
-  const erpOrders = allOrders.map(c => mapCafe24ToErpOrder(c, shopId, shopName));
-  // v2.7: 매핑 자동 적용 (productMappings + 정확 일치)
+  const erpOrders = activeOrders.map(c => mapCafe24ToErpOrder(c, shopId, shopName));
+  // v2.7: 매핑 자동 적용
   const mappingResult = await applyProductMappingsToOrders(firestoreDb, erpOrders, shopId);
   console.log('[CAFE24] 매핑 자동 적용:', mappingResult.mapped, '건');
   const merge = await mergeOrdersIntoFirestore(firestoreDb, erpOrders);
+
+  // v2.8: 취소/반품 주문 ERP에서 제거
+  const removeResult = await removeOrdersFromFirestore(firestoreDb, canceledIds, shopId);
+  if (removeResult.removed > 0) console.log('[CAFE24] 취소/반품 삭제:', removeResult.removed, '건');
 
   return {
     fetched: allOrders.length,
     added: merge.added,
     total: merge.total,
+    removed: removeResult.removed,
+    removedSamples: removeResult.samples,
     range: `${startDate} ~ ${endDate}`,
     sampleNew: merge.sampleNew.map(o => ({
       orderNo: o.orderNo, customer: o.customerName, product: o.productName, qty: o.qty, amount: o.paymentAmount
@@ -904,13 +1011,23 @@ exports.fetchCafe24Orders = functions
             `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`
           ).join('\n')
         : '';
+      // v2.8: 취소/반품 삭제 정보 추가
+      const removedText = (result.removed > 0)
+        ? `\n🗑️ 취소/반품 삭제: ${result.removed}건` + (result.removedSamples && result.removedSamples.length
+          ? '\n*취소 주문:*\n' + result.removedSamples.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`).join('\n')
+          : '')
+        : '';
+      const titleParts = [];
+      if (result.added > 0) titleParts.push(`신규 ${result.added}건`);
+      if (result.removed > 0) titleParts.push(`취소 ${result.removed}건`);
+      const titleText = titleParts.length ? titleParts.join(' / ') : '신규/취소 없음';
       await notifySlack({
-        title: result.added > 0 ? `자사몰(Cafe24) 자동 주문 수집 — 신규 ${result.added}건` : '자사몰(Cafe24) 자동 주문 수집 — 신규 없음',
-        level: result.added > 0 ? 'success' : 'info',
+        title: `자사몰(Cafe24) 자동 주문 수집 — ${titleText}`,
+        level: (result.added > 0 || result.removed > 0) ? 'success' : 'info',
         details:
           `📦 가져옴: ${result.fetched}건\n` +
           `✅ 신규 추가: ${result.added}건\n` +
-          `📅 조회 기간: ${result.range}` + sampleText,
+          `📅 조회 기간: ${result.range}` + sampleText + removedText,
         webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
       });
       console.log('[CAFE24 SCHED] 성공:', JSON.stringify(result));
