@@ -1,5 +1,10 @@
 // =============================================================================
-// Reniv ERP — Cloud Functions (v2.14, 2026-05, 백업 알림 채널 명시 분리)
+// Reniv ERP — Cloud Functions (v2.15, 2026-05, 자동 취소 시 재고 자동 복구)
+// =============================================================================
+// v2.15 변경:
+//   - removeOrdersFromFirestore가 stockDeducted된 주문 삭제 시 재고 자동 복구
+//   - items 컬렉션 갱신 + stockHistory 기록 (note: 취소/반품 자동복구)
+//   - Slack 알림에 "재고 자동 복구 N건" + 품목별 변화량 표시
 // =============================================================================
 // v2.14 변경:
 //   - 백업 함수 3개(scheduledFirestoreExport / manualBackup / pruneOldBackups)에
@@ -477,13 +482,14 @@ async function applyProductMappingsToOrders(firestoreDb, orders, shopId) {
   return { mapped };
 }
 
-// v2.8: 취소/반품된 orderNo들을 erp_data/shopOrders에서 제거
+// v2.8/v2.15: 취소/반품된 orderNo들을 erp_data/shopOrders에서 제거 + 재고 자동 복구
 //   - 동일 shopId 내에서만 매칭 (다른 쇼핑몰의 같은 주문번호 보호)
-//   - 삭제된 주문 샘플 최대 3건 반환 (Slack 알림용)
+//   - stockDeducted된 주문이라면 stockDeductedQty 만큼 items 재고 복구 + stockHistory 기록
+//   - 삭제된 주문 샘플 최대 3건 + 복구된 재고 정보 반환 (Slack 알림용)
 async function removeOrdersFromFirestore(firestoreDb, orderNos, shopId) {
-  if (!orderNos) return { removed: 0, samples: [] };
+  if (!orderNos) return { removed: 0, samples: [], restoredCount: 0, restoredItems: [] };
   const set = (orderNos instanceof Set) ? orderNos : new Set(Array.from(orderNos).map(String));
-  if (set.size === 0) return { removed: 0, samples: [] };
+  if (set.size === 0) return { removed: 0, samples: [], restoredCount: 0, restoredItems: [] };
 
   const docRef = firestoreDb.doc('erp_data/shopOrders');
   const snap = await docRef.get();
@@ -498,18 +504,23 @@ async function removeOrdersFromFirestore(firestoreDb, orderNos, shopId) {
   }
 
   const samples = [];
+  const toRestore = []; // v2.15: 재고 복구 대상 [{itemId, qty, orderNo, productName}]
   const filtered = existing.filter(o => {
     if (!o) return false;
     if (o.shopId !== shopId) return true;
     if (set.has(String(o.orderNo))) {
       if (samples.length < 3) {
         samples.push({
-          orderNo: o.orderNo,
-          customer: o.customerName,
-          product: o.productName,
-          qty: o.qty,
-          amount: o.paymentAmount
+          orderNo: o.orderNo, customer: o.customerName, product: o.productName,
+          qty: o.qty, amount: o.paymentAmount
         });
+      }
+      // v2.15: stockDeducted된 주문이면 재고 복구 대상에 추가
+      if (o.stockDeducted && o.itemId) {
+        const restoreQty = (typeof o.stockDeductedQty === 'number') ? o.stockDeductedQty : (parseInt(o.qty) || 1);
+        if (restoreQty > 0) {
+          toRestore.push({ itemId: o.itemId, qty: restoreQty, orderNo: o.orderNo, productName: o.productName });
+        }
       }
       return false;
     }
@@ -517,10 +528,57 @@ async function removeOrdersFromFirestore(firestoreDb, orderNos, shopId) {
   });
 
   const removed = existing.length - filtered.length;
+
+  // v2.15: items 컬렉션 + stockHistory 갱신 (재고 복구)
+  let restoredCount = 0;
+  const restoredItems = [];
+  if (toRestore.length > 0) {
+    const itemsRef = firestoreDb.doc('erp_data/items');
+    const itemsSnap = await itemsRef.get();
+    let items = [];
+    if (itemsSnap.exists) {
+      const raw = itemsSnap.data().data;
+      if (typeof raw === 'string') { try { items = JSON.parse(raw) || []; } catch (_) {} }
+      else if (Array.isArray(raw)) items = raw;
+    }
+
+    const histRef = firestoreDb.doc('erp_data/stockHistory');
+    const histSnap = await histRef.get();
+    let stockHistory = [];
+    if (histSnap.exists) {
+      const raw = histSnap.data().data;
+      if (typeof raw === 'string') { try { stockHistory = JSON.parse(raw) || []; } catch (_) {} }
+      else if (Array.isArray(raw)) stockHistory = raw;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    for (const r of toRestore) {
+      const item = items.find(i => i && i.id === r.itemId);
+      if (!item) continue;
+      const before = item.stock || 0;
+      item.stock = before + r.qty;
+      stockHistory.push({
+        id: Date.now() + Math.floor(Math.random() * 100000),
+        itemId: r.itemId, type: 'in', qty: r.qty,
+        price: item.price || 0,
+        date: today, lot: item.lot || '',
+        note: `취소/반품 자동복구 [${r.orderNo}] (자동 수집)`
+      });
+      restoredCount++;
+      restoredItems.push({ name: item.name || '-', qty: r.qty, before, after: item.stock, orderNo: r.orderNo });
+    }
+
+    if (restoredCount > 0) {
+      await itemsRef.set({ data: JSON.stringify(items), ts: Date.now() });
+      await histRef.set({ data: JSON.stringify(stockHistory), ts: Date.now() });
+      console.log('[CANCEL] 재고 자동 복구:', restoredCount, '건');
+    }
+  }
+
   if (removed > 0) {
     await docRef.set({ data: JSON.stringify(filtered), ts: Date.now() });
   }
-  return { removed, samples };
+  return { removed, samples, restoredCount, restoredItems };
 }
 
 // erp_data/shopOrders Firestore 문서에서 기존 주문 읽고 신규만 머지
@@ -763,6 +821,8 @@ async function ingestCoupangOrders({ daysBack = 7 } = {}) {
     total: merge.total,
     removed: removeResult.removed,
     removedSamples: removeResult.samples,
+    restoredCount: removeResult.restoredCount || 0,
+    restoredItems: removeResult.restoredItems || [],
     presumedCanceled: presumedCanceledIds.size,
     safetyTriggered,
     statusCounts,
@@ -793,10 +853,15 @@ exports.fetchCoupangOrders = functions
         ? '\n\n*신규 주문 샘플:*\n' + result.sampleNew.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`).join('\n')
         : '';
       // v2.5: ERP 총 주문 / 상태별 라인 제거 + 별도 채널(르니브-주문자동화)로 전송
-      // v2.9: 휴리스틱 취소 감지 정보 + Safety guard 안내
+      // v2.9/v2.15: 휴리스틱 취소 감지 정보 + 재고 복구 정보
       const removedText = (result.removed > 0)
         ? `\n🗑️ 취소/반품 자동 삭제: ${result.removed}건 _(휴리스틱 추정)_` + (result.removedSamples && result.removedSamples.length
           ? '\n*취소 추정 주문:*\n' + result.removedSamples.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`).join('\n')
+          : '')
+        + (result.restoredCount > 0
+          ? `\n📦 재고 자동 복구: ${result.restoredCount}건` + (result.restoredItems && result.restoredItems.length
+            ? '\n' + result.restoredItems.slice(0, 3).map(r => `  • ${r.name}: ${r.before} → ${r.after} (+${r.qty})`).join('\n')
+            : '')
           : '')
         : '';
       const safetyText = result.safetyTriggered
@@ -1165,6 +1230,8 @@ async function ingestCafe24Orders({ daysBack = 1 } = {}) {
     total: merge.total,
     removed: removeResult.removed,
     removedSamples: removeResult.samples,
+    restoredCount: removeResult.restoredCount || 0,
+    restoredItems: removeResult.restoredItems || [],
     range: `${startDate} ~ ${endDate}`,
     sampleNew: merge.sampleNew.map(o => ({
       orderNo: o.orderNo, customer: o.customerName, product: o.productName, qty: o.qty, amount: o.paymentAmount
@@ -1193,10 +1260,15 @@ exports.fetchCafe24Orders = functions
             `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`
           ).join('\n')
         : '';
-      // v2.8: 취소/반품 삭제 정보 추가
+      // v2.8/v2.15: 취소/반품 삭제 + 재고 복구 정보
       const removedText = (result.removed > 0)
         ? `\n🗑️ 취소/반품 삭제: ${result.removed}건` + (result.removedSamples && result.removedSamples.length
           ? '\n*취소 주문:*\n' + result.removedSamples.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`).join('\n')
+          : '')
+        + (result.restoredCount > 0
+          ? `\n📦 재고 자동 복구: ${result.restoredCount}건` + (result.restoredItems && result.restoredItems.length
+            ? '\n' + result.restoredItems.slice(0, 3).map(r => `  • ${r.name}: ${r.before} → ${r.after} (+${r.qty})`).join('\n')
+            : '')
           : '')
         : '';
       const titleParts = [];
