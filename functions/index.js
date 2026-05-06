@@ -119,8 +119,9 @@ function kstTimestampForFilename() {
 // Slack 알림 헬퍼
 //   level: 'success' | 'error' | 'info' | 'warning'
 // ─────────────────────────────────────────────────────────────
-async function notifySlack({ title, level, details, webhookOverride }) {
+async function notifySlack({ title, level, details, webhookOverride, titlePrefix }) {
   // v2.5: webhookOverride 가 있으면 그쪽으로 전송 (예: 주문 알림은 별도 채널)
+  // v2.16: titlePrefix 옵션 추가 — 미지정 시 [Reniv ERP 백업] (기본), 주문 알림은 [Reniv ERP 주문]
   const webhook = webhookOverride || (functions.config().slack || {}).webhook;
   if (!webhook) {
     console.warn('[SLACK] webhook 미설정 - 알림 건너뜀');
@@ -134,8 +135,12 @@ async function notifySlack({ title, level, details, webhookOverride }) {
     info:    { emoji: 'ℹ️',  color: '#1d9bd1', label: '정보' },
   }[level] || { emoji: '🔔', color: '#999999', label: level };
 
+  // v2.17: titlePrefix === '' (빈 문자열) 이면 prefix 없이 제목만 출력
+  //         titlePrefix === undefined 이면 기본값 '[Reniv ERP 백업]'
+  const prefix = (titlePrefix === undefined) ? '[Reniv ERP 백업]' : titlePrefix;
+  const titleText = prefix ? `${prefix} ${title}` : title;
   const payload = {
-    text: `${meta.emoji} [Reniv ERP 백업] ${title}`,
+    text: `${meta.emoji} ${titleText}`,
     attachments: [{
       color: meta.color,
       fields: [
@@ -878,7 +883,8 @@ exports.fetchCoupangOrders = functions
           `📦 가져옴: ${result.fetched}건\n` +
           `✅ 신규 추가: ${result.added}건\n` +
           `📅 조회 기간: ${result.range}` + sampleText + removedText + safetyText,
-        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+        titlePrefix: ''
       });
       console.log('[COUPANG SCHED] 성공:', JSON.stringify(result));
       return result;
@@ -892,7 +898,8 @@ exports.fetchCoupangOrders = functions
           `1. <https://console.firebase.google.com/project/${PROJECT_ID}/functions/logs|Functions 로그>\n` +
           `2. Wing 관리자 페이지 → API 설정 → 허용 IP 화이트리스트 (Functions IP가 막혔을 가능성)\n` +
           `3. firebase functions:secrets:get COUPANG_ACCESS_KEY 등 시크릿 등록 확인`,
-        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+        titlePrefix: ''
       });
       throw err;
     }
@@ -932,7 +939,8 @@ exports.manualFetchCoupangOrders = functions
           `👤 실행자: *${userName}* (\`${uid}\`)\n` +
           `📦 가져옴: ${result.fetched}건 / 신규 ${result.added}건\n` +
           `📅 조회 기간: ${result.range} (daysBack=${daysBack})`,
-        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+        titlePrefix: ''
       });
       return result;
     } catch (err) {
@@ -941,7 +949,8 @@ exports.manualFetchCoupangOrders = functions
         title: '쿠팡 수동 주문 수집 실패',
         level: 'error',
         details: `👤 ${userName}\n❌ ${err.message}`,
-        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+        titlePrefix: ''
       });
       throw new functions.https.HttpsError('internal', err.message);
     }
@@ -1282,7 +1291,8 @@ exports.fetchCafe24Orders = functions
           `📦 가져옴: ${result.fetched}건\n` +
           `✅ 신규 추가: ${result.added}건\n` +
           `📅 조회 기간: ${result.range}` + sampleText + removedText,
-        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+        titlePrefix: ''
       });
       console.log('[CAFE24 SCHED] 성공:', JSON.stringify(result));
       return result;
@@ -1296,7 +1306,8 @@ exports.fetchCafe24Orders = functions
           `1. <https://console.firebase.google.com/project/${PROJECT_ID}/functions/logs|Functions 로그>\n` +
           `2. Refresh Token 만료 가능성 — OAuth 콜백 페이지에서 재발급 후 firestoreDb의 system/cafe24_token 갱신\n` +
           `3. ERP 쇼핑몰 관리에 "자사몰" 또는 "Cafe24" 등록 확인`,
-        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+        titlePrefix: ''
       });
       throw err;
     }
@@ -1333,7 +1344,8 @@ exports.manualFetchCafe24Orders = functions
           `👤 실행자: *${userName}* (\`${uid}\`)\n` +
           `📦 가져옴: ${result.fetched}건 / 신규 ${result.added}건\n` +
           `📅 조회 기간: ${result.range} (daysBack=${daysBack})`,
-        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+        titlePrefix: ''
       });
       return result;
     } catch (err) {
@@ -1342,7 +1354,8 @@ exports.manualFetchCafe24Orders = functions
         title: '자사몰(Cafe24) 수동 주문 수집 실패',
         level: 'error',
         details: `👤 ${userName}\n❌ ${err.message}`,
-        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+        titlePrefix: ''
       });
       throw new functions.https.HttpsError('internal', err.message);
     }
