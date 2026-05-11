@@ -907,19 +907,19 @@ async function fetchCafe24OrdersRaw({ mallId, accessToken, startDate, endDate, l
 
 // Cafe24 주문 → ERP shopOrders 형식 매핑
 function mapCafe24ToErpOrder(c, shopId, shopName) {
-  // c: Cafe24 주문 객체
+  // v2.19 (2026.05): 한 주문에 여러 상품 → 각 상품별 별도 ERP 행 반환 (배열)
+  //   기존: 모든 상품을 하나의 행으로 합쳐서 productName 에 ' + ' 로 연결
+  //   문제: 매핑 안 됨 + 마진 분석 부정확
+  //   해결: items.length 행을 만들어 각 상품을 독립 행으로
   const items = Array.isArray(c.items) ? c.items : [];
-  const totalQty = items.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0) || 1;
-  const productNames = items.map(it => it.product_name || it.variant_name).filter(Boolean).join(' + ');
+  if (items.length === 0) return [];
   const buyer = c.buyer || {};
   const receiver = (Array.isArray(c.receivers) && c.receivers[0]) || c.receiver || {};
 
   // 주소 조립
   const address = [receiver.address1, receiver.address2].filter(Boolean).join(' ').trim();
 
-  // 배송완료 여부 판단 — Cafe24 order_status 코드 기반
-  // N00: 입금전, N10: 상품준비중, N20: 배송준비중, N21: 배송보류, N22: 배송대기, N30: 배송중, N40: 배송완료
-  // C##: 취소 시리즈, R##: 반품 시리즈
+  // 상태 (전체 주문 공통)
   const status = c.order_status || '';
   let mappedStatus = '배송 전';
   if (status.startsWith('N40')) mappedStatus = '배송완료';
@@ -927,9 +927,14 @@ function mapCafe24ToErpOrder(c, shopId, shopName) {
   else if (status.startsWith('C')) mappedStatus = '취소';
   else if (status.startsWith('R')) mappedStatus = '반품';
 
-  // v2.13: 네이버페이 충전금/포인트로 결제된 주문은 payment_amount=0으로 들어올 수 있음
-  //   → 다양한 결제/주문 금액 필드를 순차 시도, 모두 0이면 orderItems 가격×수량 합계로 fallback
-  const candidates = [
+  // 전체 결제 금액 결정 (item 비율 분배용)
+  const itemsTotal = items.reduce((s, it) => {
+    if (!it) return s;
+    const unit = Number(it.product_price) || Number(it.price) || Number(it.option_price) || 0;
+    const q = Number(it.quantity) || 1;
+    return s + unit * q;
+  }, 0);
+  const paymentCandidates = [
     Number(c.payment_amount),
     Number(c.actual_payment_amount),
     Number(c.total_pay_amount),
@@ -937,63 +942,63 @@ function mapCafe24ToErpOrder(c, shopId, shopName) {
     Number(c.order_price_amount),
     Number(c.total_payment_amount),
     Number(c.settle_price),
-    // 마지막 fallback: orderItems의 product_price × quantity 합계
-    items.reduce((s, it) => {
-      if (!it) return s;
-      const unit = Number(it.product_price) || Number(it.price) || Number(it.option_price) || 0;
-      const q = Number(it.quantity) || 1;
-      return s + unit * q;
-    }, 0)
+    itemsTotal
   ];
-  const paymentAmount = candidates.find(v => v && v > 0) || 0;
+  const totalPaymentAmount = paymentCandidates.find(v => v && v > 0) || 0;
 
-  // v2.13: 0원 주문이면 디버그 로그 (실제 응답 구조 파악용)
-  if (paymentAmount === 0 && c.order_id) {
-    console.warn('[CAFE24 DEBUG] 0원 주문 감지:', c.order_id, JSON.stringify({
-      payment_amount: c.payment_amount,
-      actual_payment_amount: c.actual_payment_amount,
-      total_pay_amount: c.total_pay_amount,
-      expected_payment_amount: c.expected_payment_amount,
-      order_price_amount: c.order_price_amount,
-      total_payment_amount: c.total_payment_amount,
-      settle_price: c.settle_price,
-      payment_method: c.payment_method,
-      itemsSample: items.slice(0, 1).map(i => ({
-        product_price: i && i.product_price,
-        price: i && i.price,
-        option_price: i && i.option_price,
-        quantity: i && i.quantity,
-        product_name: i && i.product_name
-      }))
-    }).slice(0, 1500));
+  if (totalPaymentAmount === 0 && c.order_id) {
+    console.warn('[CAFE24 DEBUG] 0원 주문 감지:', c.order_id);
   }
 
-  return {
-    id: Date.now() + Math.floor(Math.random() * 100000),
-    orderNo: String(c.order_id || ''),
-    orderDate: (c.order_date || '').slice(0, 10),
-    customerName: buyer.name || '',
-    customerPhone: fmtPhoneKr(buyer.cellphone || buyer.phone || ''),
-    email: buyer.email || '',
-    productName: productNames,
-    qty: totalQty,
-    paymentAmount,
-    recipientName: receiver.name || '',
-    recipientPhone: fmtPhoneKr(receiver.cellphone || receiver.phone || ''),
-    zipCode: receiver.zipcode || receiver.postal_code || '',
-    address,
-    deliveryNote: c.shipping_message || '',
-    paymentDate: (c.payment_date || '').slice(0, 10),
-    shipDate: (c.shipped_date || '').slice(0, 10),
-    shippingFee: Number(c.shipping_fee) || 0,
-    trackingNo: c.invoice_number || '',
-    status: mappedStatus,
-    shopId,
-    shopName,
-    source: 'cafe24_auto',
-    cafe24Status: status,
-    fetchedAt: Date.now()
-  };
+  const baseId = Date.now();
+  const orderNoBase = String(c.order_id || '');
+  const isMultiItem = items.length > 1;
+
+  return items.map((it, idx) => {
+    const productName = (it && (it.product_name || it.variant_name)) || '';
+    const qty = Number(it && it.quantity) || 1;
+    const unitPrice = Number(it && it.product_price) || Number(it && it.price) || Number(it && it.option_price) || 0;
+    const itemAmount = unitPrice * qty;
+    // 결제 금액 비율 분배
+    let itemPaymentAmount;
+    if (itemsTotal > 0 && totalPaymentAmount > 0) {
+      itemPaymentAmount = Math.round(totalPaymentAmount * itemAmount / itemsTotal);
+    } else if (totalPaymentAmount > 0) {
+      itemPaymentAmount = Math.round(totalPaymentAmount / items.length);
+    } else {
+      itemPaymentAmount = itemAmount;
+    }
+    // orderNo — 다중 상품이면 -1, -2 접미사 (중복 방지 + 같은 주문 식별)
+    const orderNo = isMultiItem ? `${orderNoBase}-${idx + 1}` : orderNoBase;
+    return {
+      id: baseId + Math.floor(Math.random() * 100000) + idx,
+      orderNo,
+      orderDate: (c.order_date || '').slice(0, 10),
+      customerName: buyer.name || '',
+      customerPhone: fmtPhoneKr(buyer.cellphone || buyer.phone || ''),
+      email: buyer.email || '',
+      productName,
+      qty,
+      paymentAmount: itemPaymentAmount,
+      recipientName: receiver.name || '',
+      recipientPhone: fmtPhoneKr(receiver.cellphone || receiver.phone || ''),
+      zipCode: receiver.zipcode || receiver.postal_code || '',
+      address,
+      deliveryNote: c.shipping_message || '',
+      paymentDate: (c.payment_date || '').slice(0, 10),
+      shipDate: (c.shipped_date || '').slice(0, 10),
+      shippingFee: idx === 0 ? (Number(c.shipping_fee) || 0) : 0,  // 첫 행에만 배송비
+      trackingNo: c.invoice_number || '',
+      status: mappedStatus,
+      shopId,
+      shopName,
+      source: 'cafe24_auto',
+      cafe24Status: status,
+      cafe24OriginalOrderId: orderNoBase,  // 같은 주문 그룹핑용
+      cafe24ItemIdx: idx,
+      fetchedAt: Date.now()
+    };
+  });
 }
 
 // erp_data/shops에서 자사몰(Cafe24) shop 객체 찾기
@@ -1104,7 +1109,7 @@ async function ingestCafe24Orders({ daysBack = 1 } = {}) {
   console.log('[CAFE24] active:', activeOrders.length, '건 / 취소·반품:', canceledIds.size, '건');
 
   // 4) ERP 형식 매핑 + Firestore 머지
-  const erpOrders = activeOrders.map(c => mapCafe24ToErpOrder(c, shopId, shopName));
+  const erpOrders = activeOrders.flatMap(c => mapCafe24ToErpOrder(c, shopId, shopName));  // v2.19: 다중 상품 분리
   // v2.7: 매핑 자동 적용
   const mappingResult = await applyProductMappingsToOrders(firestoreDb, erpOrders, shopId);
   console.log('[CAFE24] 매핑 자동 적용:', mappingResult.mapped, '건');
