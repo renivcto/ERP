@@ -2585,7 +2585,16 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div style="font-size:11.5px;color:#9d174d;line-height:1.6">결재 요청 → 지출 결의서 → 분류 '광고비' 선택 후 쇼핑몰·집행 기간·금액 입력 시 이 페이지에 자동 반영됩니다.</div>
         </div>
         <button type="button" onclick="openAdsManualModal()" style="background:#fff;color:#be185d;border:1px solid #fbcfe8;padding:9px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">+ 수동 추가</button>
+        <button type="button" onclick="openAdProjectModal()" style="background:#fff;color:#7c3aed;border:1px solid #ddd6fe;padding:9px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">+ 프로젝트 추가</button>
         <button type="button" onclick="openExpenseModalForAd(null)" style="background:#be185d;color:#fff;border:none;padding:9px 18px;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">+ 지출결의서 작성</button>
+      </div>
+      <!-- v1.9.776: 광고 프로젝트 카드 그리드 -->
+      <div id="ads-projects-section" style="margin-bottom:18px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="font-size:13.5px;font-weight:800;color:#0f172a;letter-spacing:-0.3px">🎯 광고 프로젝트별 성과</span>
+          <span style="font-size:11px;color:#94a3b8" id="ads-projects-count">0개</span>
+        </div>
+        <div id="ads-projects-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px"></div>
       </div>
       <!-- 필터 + 이력 표 -->
       <div class="card">
@@ -2594,8 +2603,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div style="display:flex;gap:8px;margin-left:auto;align-items:center">
             <select class="fs" id="ads-page-shop-filter" onchange="renderAdsPage()" style="min-width:140px"><option value="">전체 쇼핑몰</option></select>
             <select class="fs" id="ads-page-period-filter" onchange="renderAdsPage()" style="min-width:120px">
-              <option value="all">전체 기간</option>
-              <option value="thisMonth" selected>이번 달</option>
+              <option value="all" selected>전체 기간</option>
+              <option value="thisMonth">이번 달</option>
               <option value="lastMonth">지난 달</option>
               <option value="last3Months">최근 3개월</option>
               <option value="thisYear">올해</option>
@@ -2606,12 +2615,13 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <table class="tbl" style="text-align:center;margin:0">
             <thead><tr>
               <th style="width:120px">쇼핑몰</th>
-              <th style="width:80px">유형</th>
+              <th style="width:100px">프로젝트</th>
+              <th style="width:70px">유형</th>
               <th>기간</th>
-              <th style="width:120px">광고비</th>
-              <th style="width:120px">매출(기간)</th>
-              <th style="width:80px">ROAS</th>
-              <th style="width:90px">출처</th>
+              <th style="width:110px">광고비</th>
+              <th style="width:110px">매출(기간)</th>
+              <th style="width:70px">ROAS</th>
+              <th style="width:80px">출처</th>
               <th style="width:90px">관리</th>
             </tr></thead>
             <tbody id="ads-page-table"></tbody>
@@ -2635,6 +2645,10 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div class="fg">
             <label>쇼핑몰 <span class="req">*</span></label>
             <select class="fs" id="ads-manual-shop"></select>
+          </div>
+          <div class="fg">
+            <label>광고 프로젝트 <span style="font-size:10px;color:var(--gray-400)">(선택 — 프로젝트에 묶고 싶으면)</span></label>
+            <select class="fs" id="ads-manual-project"><option value="">없음 (단발성)</option></select>
           </div>
           <div class="fg">
             <label>광고 대상 제품 <span style="font-size:10px;color:var(--gray-400)">(선택 — 다중 가능)</span></label>
@@ -2669,6 +2683,46 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="modal-ft">
           <button class="btn btn-outline" onclick="closeModal('ads-manual-modal')">취소</button>
           <button class="btn btn-primary" onclick="saveAdsManual()" style="background:#be185d">저장</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ v1.9.776: 광고 프로젝트 추가/편집 모달 ══════════════ -->
+    <div class="overlay" id="overlay-ad-project-modal">
+      <div class="modal" style="width:620px;max-height:90vh;display:flex;flex-direction:column">
+        <div class="modal-hdr" style="background:linear-gradient(135deg,#f5f3ff,#ede9fe);border-bottom:1px solid #ddd6fe">
+          <span class="modal-ttl" style="color:#7c3aed" id="ad-project-modal-title">🎯 새 광고 프로젝트</span>
+          <button class="modal-x" onclick="closeModal('ad-project-modal')">✕</button>
+        </div>
+        <div class="modal-body" style="overflow-y:auto;flex:1;padding:18px 22px">
+          <input type="hidden" id="ad-project-edit-id" value="">
+          <div class="fg">
+            <label>프로젝트명 <span class="req">*</span></label>
+            <input class="fi" id="ad-project-name" placeholder="예: 올리브영 5월 메인 노출 / 320 크림 봄 캠페인">
+          </div>
+          <div class="fg">
+            <label>설명 <span style="font-size:10px;color:var(--gray-400)">(선택)</span></label>
+            <textarea class="fi" id="ad-project-desc" rows="2" placeholder="프로젝트 목표, 채널, 메모"></textarea>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="fg"><label>시작일 <span class="req">*</span></label><input class="fi" id="ad-project-start" type="date"></div>
+            <div class="fg"><label>종료일 <span class="req">*</span></label><input class="fi" id="ad-project-end" type="date"></div>
+          </div>
+          <div class="fg">
+            <label>광고 쇼핑몰 <span style="font-size:10px;color:var(--gray-400)">(다중 — 미선택 시 전체)</span></label>
+            <div id="ad-project-shops-wrap" style="border:1px solid var(--gray-200);border-radius:7px;padding:8px 10px;max-height:120px;overflow-y:auto;background:#f8fafc"></div>
+          </div>
+          <div class="fg">
+            <label>광고 대상 제품 <span style="font-size:10px;color:var(--gray-400)">(다중 — 미선택 시 전체)</span></label>
+            <div id="ad-project-items-wrap" style="border:1px solid var(--gray-200);border-radius:7px;padding:8px 10px;max-height:180px;overflow-y:auto;background:#f8fafc"></div>
+          </div>
+        </div>
+        <div class="modal-ft" style="display:flex;justify-content:space-between;align-items:center">
+          <button class="btn btn-outline" id="ad-project-delete-btn" onclick="deleteAdProject()" style="color:var(--red-500);display:none">🗑 삭제</button>
+          <div style="display:flex;gap:6px;margin-left:auto">
+            <button class="btn btn-outline" onclick="closeModal('ad-project-modal')">취소</button>
+            <button class="btn btn-primary" onclick="saveAdProject()" style="background:#7c3aed">저장</button>
+          </div>
         </div>
       </div>
     </div>
@@ -4796,7 +4850,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.774';
+const ERP_VERSION = 'v1.9.776';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -5568,6 +5622,8 @@ async function _doSaveDataInner() {
     // v1.9.614: 거래처 hub 데이터
     cooperators: dbToSave.cooperators || [],
     sellers:     dbToSave.sellers     || [],
+    // v1.9.776: 광고 프로젝트
+    adProjects:  dbToSave.adProjects  || [],
   };
 
   // v1.9.194 — 중요 컬렉션(orders/shopOrders/productions/items/vendors)에 대해
@@ -5761,7 +5817,7 @@ async function loadDataFromFirestore() {
     const cacheGetDoc = window._firestoreGetDoc;
     const docRef = window._firestoreDoc;
 
-    const keys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders','archivedItems','partSpecs','accounts','insights','newProducts','samples','approvals','expenses','approvalComments','feedPosts','cooperators','sellers','meta'];
+    const keys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders','archivedItems','partSpecs','accounts','insights','newProducts','samples','approvals','expenses','approvalComments','feedPosts','cooperators','sellers','adProjects','meta'];
     // 기본 getDoc 사용 (서버 우선, 오프라인 시 캐시 fallback)
     let snaps = await Promise.all(keys.map(k => cacheGetDoc(docRef(db, 'erp_data', k))));
     console.log('🔍 [FIRESTORE] 기본 읽기 완료');
@@ -12231,6 +12287,12 @@ function openAdsManualModal(editId) {
     shopSel.innerHTML = '<option value="">-- 선택 --</option>' +
       (DB.shops||[]).filter(s => s).map(s => `<option value="${s.id}">${(s.name||s.id).replace(/</g,'&lt;')}</option>`).join('');
   }
+  // 프로젝트 select 채우기
+  const projSel = document.getElementById('ads-manual-project');
+  if (projSel) {
+    projSel.innerHTML = '<option value="">없음 (단발성)</option>' +
+      (DB.adProjects||[]).filter(p => p).map(p => `<option value="${p.id}">${(p.name||'-').replace(/</g,'&lt;')}</option>`).join('');
+  }
   // 제품 multi-select 채우기 (체크박스 리스트)
   _renderAdsItemMultiSelect([]);
   // 기본값 — 이번 달
@@ -12252,6 +12314,7 @@ function openAdsManualModal(editId) {
       const found = (s.adsCosts||[]).find(a => String(a.id) === String(editId));
       if (found) {
         shopSel.value = s.id;
+        if (projSel) projSel.value = found.projectId || '';
         document.getElementById('ads-manual-type').value = found.type || 'monthly';
         document.getElementById('ads-manual-month').value = found.month || '';
         document.getElementById('ads-manual-start').value = found.startDate || '';
@@ -12333,6 +12396,9 @@ function saveAdsManual() {
     payload.endDate = date;
   }
 
+  // 광고 프로젝트
+  const projectId = document.getElementById('ads-manual-project').value;
+  if (projectId) payload.projectId = projectId;
   // 광고 대상 제품 (다중)
   const itemIds = Array.from(document.querySelectorAll('.ads-manual-item-cb:checked')).map(cb => parseInt(cb.value, 10));
   if (itemIds.length > 0) payload.itemIds = itemIds;
@@ -12380,6 +12446,214 @@ function deleteAdsManual(adId) {
   }
 }
 
+// v1.9.776: 프로젝트별 KPI 계산
+function _calcAdProjectKPI(project) {
+  if (!project) return { totalAds: 0, revenue: 0, roas: 0, adCount: 0, orderCount: 0 };
+  let totalAds = 0, adCount = 0;
+  (DB.shops || []).forEach(s => {
+    if (!s || !Array.isArray(s.adsCosts)) return;
+    s.adsCosts.forEach(a => {
+      if (!a || String(a.projectId || '') !== String(project.id)) return;
+      totalAds += Number(a.cost || 0);
+      adCount++;
+    });
+  });
+  // 프로젝트 기간 + 쇼핑몰 + 제품에 해당하는 매출
+  const shopSet = (project.shopIds && project.shopIds.length) ? new Set(project.shopIds.map(String)) : null;
+  const itemSet = (project.itemIds && project.itemIds.length) ? new Set(project.itemIds.map(String)) : null;
+  const startD = project.startDate ? new Date(project.startDate) : null;
+  const endD = project.endDate ? new Date(project.endDate + 'T23:59:59') : null;
+  let revenue = 0, orderCount = 0;
+  (DB.shopOrders || []).forEach(o => {
+    if (!o || !o.orderDate) return;
+    if (o.status === '취소' || o.status === '반품') return;
+    if (shopSet && !shopSet.has(String(o.shopId))) return;
+    if (itemSet) {
+      const oid = o.itemId != null ? String(o.itemId) : null;
+      if (!oid || !itemSet.has(oid)) return;
+    }
+    const od = new Date(o.orderDate);
+    if (startD && od < startD) return;
+    if (endD && od > endD) return;
+    revenue += Number(o.paymentAmount || o.totalPrice || 0);
+    orderCount++;
+  });
+  const roas = totalAds > 0 ? (revenue / totalAds * 100) : 0;
+  return { totalAds, revenue, roas, adCount, orderCount };
+}
+
+// v1.9.776: 프로젝트 카드 그리드 렌더
+function renderAdProjectCards() {
+  const grid = document.getElementById('ads-projects-grid');
+  const cntEl = document.getElementById('ads-projects-count');
+  if (!grid) return;
+  const projects = (DB.adProjects || []).slice();
+  if (cntEl) cntEl.textContent = projects.length + '개';
+  if (projects.length === 0) {
+    grid.innerHTML = '<div style="grid-column:1/-1;padding:24px;background:#fff;border:1px dashed #e2e8f0;border-radius:10px;text-align:center;color:#94a3b8;font-size:12.5px">아직 프로젝트가 없습니다. <button onclick="openAdProjectModal()" style="background:transparent;border:0;color:#7c3aed;font-weight:700;cursor:pointer;text-decoration:underline">+ 첫 프로젝트 만들기</button></div>';
+    return;
+  }
+  // 최신 시작일 순
+  projects.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
+  grid.innerHTML = projects.map(p => {
+    const kpi = _calcAdProjectKPI(p);
+    const roasColor = kpi.roas >= 200 ? '#16a34a' : (kpi.roas >= 100 ? '#0284c7' : (kpi.totalAds > 0 ? '#dc2626' : '#94a3b8'));
+    const roasStr = kpi.totalAds > 0 ? kpi.roas.toFixed(0) + '%' : '-';
+    // 쇼핑몰 badges
+    const shopBadges = (p.shopIds && p.shopIds.length > 0)
+      ? p.shopIds.map(sid => {
+          const s = (DB.shops||[]).find(x => String(x.id) === String(sid));
+          return s ? `<span style="background:#dbeafe;color:#1e40af;padding:1px 6px;border-radius:3px;font-size:9.5px;font-weight:700">🏪 ${(s.name||sid).slice(0,8)}</span>` : '';
+        }).join('')
+      : '<span style="background:#f1f5f9;color:#64748b;padding:1px 6px;border-radius:3px;font-size:9.5px">🏪 전체</span>';
+    const itemBadges = (p.itemIds && p.itemIds.length > 0)
+      ? p.itemIds.slice(0, 3).map(iid => {
+          const it = (DB.items||[]).find(x => x && x.id === iid);
+          return it ? `<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:3px;font-size:9.5px;font-weight:700">📦 ${(it.name||iid).slice(0,8)}</span>` : '';
+        }).join('') + (p.itemIds.length > 3 ? `<span style="font-size:9.5px;color:#94a3b8">+${p.itemIds.length - 3}</span>` : '')
+      : '';
+    return `<div style="background:#fff;border:1px solid var(--gray-200);border-left:3px solid #7c3aed;border-radius:10px;padding:12px 14px;cursor:pointer;transition:all .15s" onclick="openAdProjectModal('${p.id}')" onmouseenter="this.style.boxShadow='0 4px 14px rgba(0,0,0,.06)';this.style.transform='translateY(-1px)'" onmouseleave="this.style.boxShadow='';this.style.transform=''">
+      <div style="font-size:13.5px;font-weight:800;color:#0f172a;letter-spacing:-0.3px;margin-bottom:3px">${(p.name||'-').replace(/</g,'&lt;')}</div>
+      <div style="font-size:10.5px;color:#94a3b8;margin-bottom:10px">${p.startDate || '-'} ~ ${p.endDate || '-'}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <div>
+          <div style="font-size:10px;color:#94a3b8">광고비 (${kpi.adCount}건)</div>
+          <div style="font-size:14px;font-weight:800;color:#be185d;font-variant-numeric:tabular-nums">₩${kpi.totalAds.toLocaleString()}</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:#94a3b8">매출 (${kpi.orderCount}건)</div>
+          <div style="font-size:14px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums">₩${kpi.revenue.toLocaleString()}</div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px solid #f1f5f9">
+        <span style="font-size:10.5px;color:#94a3b8;font-weight:600">ROAS</span>
+        <span style="font-size:16px;font-weight:800;color:${roasColor}">${roasStr}</span>
+      </div>
+      <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:3px">${shopBadges} ${itemBadges}</div>
+    </div>`;
+  }).join('');
+}
+
+// v1.9.776: 프로젝트 추가/편집 모달
+function openAdProjectModal(editId) {
+  const titleEl = document.getElementById('ad-project-modal-title');
+  const editIdEl = document.getElementById('ad-project-edit-id');
+  const nameEl = document.getElementById('ad-project-name');
+  const descEl = document.getElementById('ad-project-desc');
+  const startEl = document.getElementById('ad-project-start');
+  const endEl = document.getElementById('ad-project-end');
+  const deleteBtn = document.getElementById('ad-project-delete-btn');
+
+  // 쇼핑몰 체크박스 채우기
+  const shopWrap = document.getElementById('ad-project-shops-wrap');
+  if (shopWrap) {
+    const shops = (DB.shops || []).filter(s => s);
+    if (shops.length === 0) {
+      shopWrap.innerHTML = '<div style="color:#94a3b8;font-size:11.5px;padding:6px">등록된 쇼핑몰 없음</div>';
+    } else {
+      shopWrap.innerHTML = shops.map(s => `<label style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:5px;cursor:pointer;font-size:12px;background:#fff;border:1px solid var(--gray-200);margin:2px"><input type="checkbox" class="ad-project-shop-cb" value="${s.id}"><span>${(s.name||s.id).replace(/</g,'&lt;')}</span></label>`).join('');
+    }
+  }
+
+  // 제품 체크박스 채우기
+  const itemWrap = document.getElementById('ad-project-items-wrap');
+  if (itemWrap) {
+    const items = (DB.items || []).filter(i => i && (i.type === '완제품' || !i.type));
+    if (items.length === 0) {
+      itemWrap.innerHTML = '<div style="color:#94a3b8;font-size:11.5px;padding:6px">등록된 완제품 없음</div>';
+    } else {
+      itemWrap.innerHTML = items.map(it => {
+        const code = it.code ? `<span style="color:#94a3b8;font-size:10.5px">(${it.code})</span> ` : '';
+        return `<label style="display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:5px;cursor:pointer;font-size:12px"><input type="checkbox" class="ad-project-item-cb" value="${it.id}">${code}<span>${(it.name||'-').replace(/</g,'&lt;')}</span></label>`;
+      }).join('');
+    }
+  }
+
+  if (editId) {
+    const p = (DB.adProjects || []).find(x => String(x.id) === String(editId));
+    if (p) {
+      titleEl.textContent = '🎯 프로젝트 편집: ' + (p.name || '-');
+      editIdEl.value = p.id;
+      nameEl.value = p.name || '';
+      descEl.value = p.description || '';
+      startEl.value = p.startDate || '';
+      endEl.value = p.endDate || '';
+      (p.shopIds || []).forEach(sid => {
+        const cb = document.querySelector('.ad-project-shop-cb[value="' + sid + '"]');
+        if (cb) cb.checked = true;
+      });
+      (p.itemIds || []).forEach(iid => {
+        const cb = document.querySelector('.ad-project-item-cb[value="' + iid + '"]');
+        if (cb) cb.checked = true;
+      });
+      if (deleteBtn) deleteBtn.style.display = '';
+    }
+  } else {
+    titleEl.textContent = '🎯 새 광고 프로젝트';
+    editIdEl.value = '';
+    nameEl.value = '';
+    descEl.value = '';
+    // default — 이번 달
+    const now = new Date();
+    startEl.value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+    endEl.value = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+    if (deleteBtn) deleteBtn.style.display = 'none';
+  }
+  openModal('ad-project-modal');
+}
+
+function saveAdProject() {
+  const editId = document.getElementById('ad-project-edit-id').value;
+  const name = document.getElementById('ad-project-name').value.trim();
+  if (!name) { showNotif('프로젝트명을 입력해주세요', 'warning'); return; }
+  const description = document.getElementById('ad-project-desc').value.trim();
+  const startDate = document.getElementById('ad-project-start').value;
+  const endDate = document.getElementById('ad-project-end').value;
+  if (!startDate || !endDate) { showNotif('시작일/종료일을 입력해주세요', 'warning'); return; }
+  if (startDate > endDate) { showNotif('시작일이 종료일보다 늦습니다', 'warning'); return; }
+  const shopIds = Array.from(document.querySelectorAll('.ad-project-shop-cb:checked')).map(cb => cb.value);
+  const itemIds = Array.from(document.querySelectorAll('.ad-project-item-cb:checked')).map(cb => parseInt(cb.value, 10));
+
+  if (!Array.isArray(DB.adProjects)) DB.adProjects = [];
+  if (editId) {
+    const idx = DB.adProjects.findIndex(p => String(p.id) === String(editId));
+    if (idx >= 0) {
+      DB.adProjects[idx] = { ...DB.adProjects[idx], name, description, startDate, endDate, shopIds, itemIds, updatedAt: Date.now() };
+    }
+  } else {
+    const newId = 'proj_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+    DB.adProjects.push({ id: newId, name, description, startDate, endDate, shopIds, itemIds, createdAt: Date.now(), updatedAt: Date.now() });
+  }
+  try { saveData(); } catch(_){}
+  closeModal('ad-project-modal');
+  showNotif('✅ 프로젝트 ' + (editId ? '수정' : '추가') + ' 완료', 'success');
+  try { renderAdsPage(); } catch(_){}
+}
+
+function deleteAdProject() {
+  const editId = document.getElementById('ad-project-edit-id').value;
+  if (!editId) return;
+  if (!confirm('이 프로젝트를 삭제하시겠습니까?\n\n(연결된 광고비는 그대로 남아있고, 프로젝트 연결만 끊어집니다)')) return;
+  if (!Array.isArray(DB.adProjects)) DB.adProjects = [];
+  const idx = DB.adProjects.findIndex(p => String(p.id) === String(editId));
+  if (idx >= 0) {
+    DB.adProjects.splice(idx, 1);
+    // 연결된 광고비의 projectId 끊기
+    (DB.shops || []).forEach(s => {
+      (s.adsCosts || []).forEach(a => {
+        if (String(a.projectId || '') === String(editId)) {
+          delete a.projectId;
+          a.updatedAt = Date.now();
+        }
+      });
+    });
+    try { saveData(); } catch(_){}
+    closeModal('ad-project-modal');
+    showNotif('✅ 프로젝트 삭제 완료', 'success');
+    try { renderAdsPage(); } catch(_){}
+  }
+}
+
 // v1.9.773: 광고비 관리 페이지 렌더 (별도 페이지)
 function renderAdsPage() {
   const kpiRow = document.getElementById('ads-kpi-row');
@@ -12412,7 +12686,7 @@ function renderAdsPage() {
   // 필터 적용
   const filterShopId = shopFilter ? shopFilter.value : '';
   const periodEl = document.getElementById('ads-page-period-filter');
-  const periodVal = periodEl ? periodEl.value : 'thisMonth';
+  const periodVal = periodEl ? periodEl.value : 'all';
 
   const now = new Date();
   const yr = now.getFullYear(), mo = now.getMonth(), dy = now.getDate();
@@ -12516,9 +12790,11 @@ function renderAdsPage() {
     return db - da;
   });
   if (filtered.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;color:#94a3b8;font-size:12px">광고비 이력이 없습니다</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="padding:24px;color:#94a3b8;font-size:12px">광고비 이력이 없습니다</td></tr>';
     return;
   }
+  // v1.9.776: 프로젝트 카드 그리드 렌더
+  try { renderAdProjectCards(); } catch(_){}
   tbody.innerHTML = filtered.map(a => {
     const startDate = a.startDate || a.date || (a.month + '-01');
     const endDate = a.endDate || a.startDate || a.date || (a.month + '-01');
@@ -12546,8 +12822,17 @@ function renderAdsPage() {
       });
       itemsLabel = `<div style="font-size:10px;color:#94a3b8;margin-top:2px">📦 ${itemNames.join(', ')}</div>`;
     }
+    // v1.9.776: 프로젝트 라벨
+    let projectLabel = '<span style="color:#cbd5e1;font-size:11px">-</span>';
+    if (a.projectId) {
+      const proj = (DB.adProjects || []).find(p => p && String(p.id) === String(a.projectId));
+      if (proj) {
+        projectLabel = `<span style="background:#ede9fe;color:#6d28d9;padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700;cursor:pointer" onclick="openAdProjectModal('${proj.id}')" title="프로젝트 보기">${(proj.name||'-').slice(0,12)}</span>`;
+      }
+    }
     return `<tr>
       <td style="font-weight:600;color:#0f172a">${a._shopName}${itemsLabel}</td>
+      <td>${projectLabel}</td>
       <td><span style="background:#f1f5f9;padding:2px 8px;border-radius:4px;font-size:10.5px">${typeLabel}</span></td>
       <td style="font-size:12.5px;color:#475569">${periodStr}</td>
       <td style="font-weight:700;color:#be185d;font-variant-numeric:tabular-nums">₩${Number(a.cost || 0).toLocaleString()}</td>
@@ -32339,7 +32624,7 @@ function initERPWhenReady() {
         }
       } catch(e) { console.warn('[v1.9.693] tombstone 사전 필터 실패:', e); }
       // v1.9.205: samples/approvals/expenses/approvalComments 추가 — 이전에는 병합 루프에 없어서 새로고침 시 DEFAULT_DB의 빈 배열로 덮어씌워져 데이터 손실 발생
-      ['vendors','items','orders','productions','stockHistory','quotes','tasks','users','shops','shopOrders','cs','archivedItems','partSpecs','samples','approvals','expenses','approvalComments','feedPosts','cooperators','sellers'].forEach(k => {
+      ['vendors','items','orders','productions','stockHistory','quotes','tasks','users','shops','shopOrders','cs','archivedItems','partSpecs','samples','approvals','expenses','approvalComments','feedPosts','cooperators','sellers','adProjects'].forEach(k => {
         if (Array.isArray(firestoreDB[k])) {
           merged[k] = firestoreDB[k]; // 빈 배열도 명시적 상태로 신뢰
         } else if (localDB[k] && localDB[k].length > 0) {
