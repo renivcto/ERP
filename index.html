@@ -2571,6 +2571,56 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       </div>
     </div>
 
+    <!-- ══════════════ v1.9.773: 광고비 관리 페이지 (별도 페이지) ══════════════ -->
+    <div class="page" id="page-ads">
+      <div class="page-hero">
+        <div class="ed-eyebrow">RENIV · ADS MANAGEMENT</div>
+        <div class="ed-title-hero">📢 광고비 관리</div>
+      </div>
+      <!-- KPI 카드 4개 -->
+      <div id="ads-kpi-row" style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px"></div>
+      <!-- 안내 + 지출결의서 작성 -->
+      <div style="background:linear-gradient(135deg,#fdf2f8,#fff7ed);border:1px solid #fbcfe8;border-radius:10px;padding:14px 16px;margin-bottom:18px;display:flex;align-items:center;gap:12px">
+        <div style="font-size:24px">📢</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:800;color:#be185d;margin-bottom:3px">광고비는 <u>지출결의서</u>가 단일 진실 (Single Source of Truth)</div>
+          <div style="font-size:11.5px;color:#9d174d;line-height:1.6">결재 요청 → 지출 결의서 → 분류 '광고비' 선택 후 쇼핑몰·집행 기간·금액 입력 시 이 페이지에 자동 반영됩니다.</div>
+        </div>
+        <button type="button" onclick="openExpenseModalForAd(null)" style="background:#be185d;color:#fff;border:none;padding:9px 18px;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">+ 지출결의서 작성</button>
+      </div>
+      <!-- 필터 + 이력 표 -->
+      <div class="card">
+        <div class="card-hdr">
+          <span class="card-ttl">📋 광고비 이력 (전 쇼핑몰 통합)</span>
+          <div style="display:flex;gap:8px;margin-left:auto;align-items:center">
+            <select class="fs" id="ads-page-shop-filter" onchange="renderAdsPage()" style="min-width:140px"><option value="">전체 쇼핑몰</option></select>
+            <select class="fs" id="ads-page-period-filter" onchange="renderAdsPage()" style="min-width:120px">
+              <option value="all">전체 기간</option>
+              <option value="thisMonth" selected>이번 달</option>
+              <option value="lastMonth">지난 달</option>
+              <option value="last3Months">최근 3개월</option>
+              <option value="thisYear">올해</option>
+            </select>
+          </div>
+        </div>
+        <div class="card-body" style="overflow-x:auto;padding:0">
+          <table class="tbl" style="text-align:center;margin:0">
+            <thead><tr>
+              <th style="width:120px">쇼핑몰</th>
+              <th style="width:80px">유형</th>
+              <th>기간</th>
+              <th style="width:120px">광고비</th>
+              <th style="width:120px">매출(기간)</th>
+              <th style="width:80px">ROAS</th>
+              <th style="width:90px">출처</th>
+              <th style="width:90px">관리</th>
+            </tr></thead>
+            <tbody id="ads-page-table"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- ══════════════ SETTINGS ══════════════ -->
     <div class="page" id="page-settings">
       <!-- 👤 내 프로필 카드 (로그아웃 포함) -->
@@ -4694,7 +4744,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.772';
+const ERP_VERSION = 'v1.9.773';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12119,6 +12169,180 @@ function removeRoasReport(startDate, endDate) {
   } catch(_){}
   showNotif('🗑️ 분석 항목이 삭제되었습니다', 'info');
 }
+// v1.9.773: 광고비 관리 페이지 렌더 (별도 페이지)
+function renderAdsPage() {
+  const kpiRow = document.getElementById('ads-kpi-row');
+  const tbody = document.getElementById('ads-page-table');
+  if (!kpiRow || !tbody) return;
+
+  // 모든 shop.adsCosts 를 통합 (각 항목에 shopId, shopName 추가)
+  const allAds = [];
+  (DB.shops || []).forEach(s => {
+    if (!s || !Array.isArray(s.adsCosts)) return;
+    s.adsCosts.forEach(a => {
+      if (!a) return;
+      allAds.push({ ...a, _shopId: s.id, _shopName: s.name || '-' });
+    });
+  });
+
+  // 쇼핑몰 필터 select 채우기
+  const shopFilter = document.getElementById('ads-page-shop-filter');
+  if (shopFilter && !shopFilter.dataset.populated) {
+    const shops = (DB.shops || []).filter(s => s);
+    shops.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = s.name || s.id;
+      shopFilter.appendChild(opt);
+    });
+    shopFilter.dataset.populated = '1';
+  }
+
+  // 필터 적용
+  const filterShopId = shopFilter ? shopFilter.value : '';
+  const periodEl = document.getElementById('ads-page-period-filter');
+  const periodVal = periodEl ? periodEl.value : 'thisMonth';
+
+  const now = new Date();
+  const yr = now.getFullYear(), mo = now.getMonth(), dy = now.getDate();
+  let periodStart = null, periodEnd = null;
+  if (periodVal === 'thisMonth') {
+    periodStart = new Date(yr, mo, 1);
+    periodEnd = new Date(yr, mo + 1, 0, 23, 59, 59);
+  } else if (periodVal === 'lastMonth') {
+    periodStart = new Date(yr, mo - 1, 1);
+    periodEnd = new Date(yr, mo, 0, 23, 59, 59);
+  } else if (periodVal === 'last3Months') {
+    periodStart = new Date(yr, mo - 2, 1);
+    periodEnd = new Date(yr, mo + 1, 0, 23, 59, 59);
+  } else if (periodVal === 'thisYear') {
+    periodStart = new Date(yr, 0, 1);
+    periodEnd = new Date(yr, 11, 31, 23, 59, 59);
+  }
+
+  // 필터링 — 쇼핑몰 + 기간
+  const filtered = allAds.filter(a => {
+    if (filterShopId && String(a._shopId) !== String(filterShopId)) return false;
+    if (periodStart && periodEnd) {
+      const adStart = new Date(a.startDate || a.date || a.month + '-01');
+      const adEnd = new Date(a.endDate || a.startDate || a.date || a.month + '-01');
+      // 광고 기간이 필터 기간과 겹치는지
+      if (adEnd < periodStart || adStart > periodEnd) return false;
+    }
+    return true;
+  });
+
+  // 기간 매출 계산 (KPI + ROAS 용)
+  function _periodRevenue(shopId, startDate, endDate) {
+    const orders = (DB.shopOrders || []).filter(o => {
+      if (!o || !o.orderDate) return false;
+      if (shopId && String(o.shopId) !== String(shopId)) return false;
+      if (o.status === '취소' || o.status === '반품') return false;
+      const od = new Date(o.orderDate);
+      if (startDate && od < new Date(startDate)) return false;
+      if (endDate && od > new Date(endDate + 'T23:59:59')) return false;
+      return true;
+    });
+    return orders.reduce((s, o) => s + Number(o.paymentAmount || o.totalPrice || 0), 0);
+  }
+
+  // KPI 계산
+  let totalAds = 0;
+  let totalRevenue = 0;
+  filtered.forEach(a => {
+    totalAds += Number(a.cost || 0);
+    const rev = _periodRevenue(a._shopId, a.startDate || a.date || (a.month + '-01'), a.endDate || a.startDate || a.date || (a.month + '-01'));
+    totalRevenue += rev;
+  });
+  const avgRoas = totalAds > 0 ? (totalRevenue / totalAds * 100) : 0;
+  const cntAuto = filtered.filter(a => a.expenseId).length;
+  const cntManual = filtered.length - cntAuto;
+
+  // 이번달 / 지난달 비교 (전체 광고비 — 필터 무관)
+  const thisMo = new Date(yr, mo, 1);
+  const thisMoEnd = new Date(yr, mo + 1, 0, 23, 59, 59);
+  const lastMo = new Date(yr, mo - 1, 1);
+  const lastMoEnd = new Date(yr, mo, 0, 23, 59, 59);
+  let thisMoAds = 0, lastMoAds = 0;
+  allAds.forEach(a => {
+    const adStart = new Date(a.startDate || a.date || (a.month + '-01'));
+    const adEnd = new Date(a.endDate || a.startDate || a.date || (a.month + '-01'));
+    if (!(adEnd < thisMo || adStart > thisMoEnd)) thisMoAds += Number(a.cost || 0);
+    if (!(adEnd < lastMo || adStart > lastMoEnd)) lastMoAds += Number(a.cost || 0);
+  });
+  const momPct = lastMoAds > 0 ? ((thisMoAds - lastMoAds) / lastMoAds * 100) : 0;
+  const momIcon = momPct > 0 ? '▲' : (momPct < 0 ? '▼' : '·');
+  const momColor = momPct > 0 ? '#dc2626' : (momPct < 0 ? '#16a34a' : '#94a3b8');
+
+  // KPI 카드 렌더
+  kpiRow.innerHTML = `
+    <div class="stat" style="border-left:3px solid #ec4899">
+      <div class="stat-lbl">총 광고비 <span style="color:#94a3b8;font-weight:500;font-size:10.5px">· ${_periodLabel(periodVal)}</span></div>
+      <div style="font-size:22px;font-weight:800;color:#be185d;letter-spacing:-0.5px;margin-top:3px">₩${totalAds.toLocaleString()}</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:3px">${filtered.length}건 집행</div>
+    </div>
+    <div class="stat" style="border-left:3px solid #16a34a">
+      <div class="stat-lbl">평균 ROAS <span style="color:#94a3b8;font-weight:500;font-size:10.5px">· ${_periodLabel(periodVal)}</span></div>
+      <div style="font-size:22px;font-weight:800;color:#16a34a;letter-spacing:-0.5px;margin-top:3px">${avgRoas > 0 ? avgRoas.toFixed(0) + '%' : '-'}</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:3px">매출 ₩${totalRevenue.toLocaleString()}</div>
+    </div>
+    <div class="stat" style="border-left:3px solid #0ea5e9">
+      <div class="stat-lbl">이번달 vs 지난달</div>
+      <div style="font-size:22px;font-weight:800;color:#0c4a6e;letter-spacing:-0.5px;margin-top:3px">₩${thisMoAds.toLocaleString()}</div>
+      <div style="font-size:11px;color:${momColor};margin-top:3px;font-weight:700">${momIcon} ${Math.abs(momPct).toFixed(1)}% (지난달 ₩${lastMoAds.toLocaleString()})</div>
+    </div>
+    <div class="stat" style="border-left:3px solid #f59e0b">
+      <div class="stat-lbl">자동/수동 비중</div>
+      <div style="font-size:22px;font-weight:800;color:#92400e;letter-spacing:-0.5px;margin-top:3px">${cntAuto} / ${cntManual}</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:3px">자동(지출결의서) · 수동</div>
+    </div>
+  `;
+
+  // 이력 표 렌더 — 최신 순
+  filtered.sort((a, b) => {
+    const da = new Date(a.startDate || a.date || (a.month + '-01'));
+    const db = new Date(b.startDate || b.date || (b.month + '-01'));
+    return db - da;
+  });
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;color:#94a3b8;font-size:12px">광고비 이력이 없습니다</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtered.map(a => {
+    const startDate = a.startDate || a.date || (a.month + '-01');
+    const endDate = a.endDate || a.startDate || a.date || (a.month + '-01');
+    const typeLabel = a.type === 'monthly' ? '월별' : (a.type === 'range' ? '기간' : (a.type === 'daily' ? '일별' : '-'));
+    let periodStr;
+    if (a.type === 'monthly') periodStr = a.month || (startDate || '').slice(0, 7);
+    else if (a.type === 'daily') periodStr = startDate;
+    else periodStr = `${startDate} ~ ${endDate}`;
+    const revenue = _periodRevenue(a._shopId, startDate, endDate);
+    const roasVal = a.cost > 0 ? (revenue / a.cost * 100) : 0;
+    const roasStr = roasVal > 0 ? roasVal.toFixed(0) + '%' : '-';
+    const isAuto = !!a.expenseId;
+    const sourceCell = isAuto
+      ? `<span style="background:#dcfce7;color:#15803d;padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700">자동</span>`
+      : `<span style="background:#fef9c3;color:#a16207;padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700">수동</span>`;
+    const editBtn = isAuto
+      ? `<button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 8px" onclick="_openLinkedExpense(${a.expenseId})">지출결의서</button>`
+      : `<button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 8px" onclick="(function(){const s=(DB.shops||[]).find(x=>x.id==='${a._shopId}'); if(s){window._selectedShopId=s.id; go('sales'); setTimeout(()=>{switchSalesTab('shops'); setTimeout(()=>openShopAdsPanel((DB.shops||[]).indexOf(s)),100);},100);}})()">수정</button>`;
+    return `<tr>
+      <td style="font-weight:600;color:#0f172a">${a._shopName}</td>
+      <td><span style="background:#f1f5f9;padding:2px 8px;border-radius:4px;font-size:10.5px">${typeLabel}</span></td>
+      <td style="font-size:12.5px;color:#475569">${periodStr}</td>
+      <td style="font-weight:700;color:#be185d;font-variant-numeric:tabular-nums">₩${Number(a.cost || 0).toLocaleString()}</td>
+      <td style="font-variant-numeric:tabular-nums;color:#64748b">₩${revenue.toLocaleString()}</td>
+      <td style="font-weight:700;color:${roasVal >= 200 ? '#16a34a' : (roasVal >= 100 ? '#0284c7' : '#dc2626')}">${roasStr}</td>
+      <td>${sourceCell}</td>
+      <td>${editBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+function _periodLabel(p) {
+  return ({ all:'전체', thisMonth:'이번 달', lastMonth:'지난 달', last3Months:'최근 3개월', thisYear:'올해' })[p] || p;
+}
+
 function renderShopAdsList(shopId) {
   const container = $('shop-ads-list'); if (!container) return;
   const shop = (DB.shops||[]).find(s => s.id === shopId); if (!shop || !shop.adsCosts?.length) { container.innerHTML = '<div style="text-align:center;color:var(--gray-400);padding:10px;font-size:12px">등록된 광고비가 없습니다 — 지출결의서에서 광고비를 등록하세요</div>'; return; }
