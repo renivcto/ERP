@@ -4694,7 +4694,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.771';
+const ERP_VERSION = 'v1.9.772';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -5428,8 +5428,12 @@ async function _doSaveDataInner() {
     return;
   }
   // 🛡️ 초기 로드 완료 전에는 Firestore에 쓰지 않음 (stale 데이터 덮어쓰기 방지)
+  // v1.9.772: skip 대신 pending queue 등록 → Firestore 로드 완료 시 자동 재시도
+  //   원인: fast-path 시점에 사용자가 작업 (매핑/도장/결재완료 등) 하면 Firestore 안 들어가
+  //         → 새로고침 시 Firestore 원본이 localStorage 변경을 덮어씌어 작업 사라짐
   if (!_firestoreDataLoaded) {
-    console.warn('⚠️ Firestore 초기 로드 미완료 — localStorage만 저장됨 (shopOrders:', (dbToSave.shopOrders||[]).length, ')');
+    console.warn('⚠️ Firestore 초기 로드 미완료 — localStorage만 저장됨 + pending queue 등록 (shopOrders:', (dbToSave.shopOrders||[]).length, ')');
+    window._pendingSaveAfterFsLoad = true;
     return;
   }
 
@@ -6449,6 +6453,9 @@ let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
       if (ap && ap.status !== 'approved') {
         ap.status = 'approved';
         ap.approvedAt = Date.now();
+  ap.updatedAt = Date.now();  // v1.9.772
+    ap.updatedAt = Date.now();  // v1.9.772
+        ap.updatedAt = Date.now();  // v1.9.772
         fixedCount++;
       }
     });
@@ -10715,6 +10722,7 @@ function applyProductMapping() {
       (DB.shopOrders||[]).forEach(o => {
         if (o && o.shopId === shopId && o.productName === shopProductName && !o.itemId) {
           o.itemId = itemIdNum;
+          o.updatedAt = Date.now();  // v1.9.772: EDIT RECOVERY 보호
           updatedCount++;
         }
       });
@@ -10723,7 +10731,7 @@ function applyProductMapping() {
     } else {
       // 기존 CSV 업로드 흐름
       orders.forEach(o => {
-        if (o.productName === shopProductName) o.itemId = itemIdNum;
+        if (o.productName === shopProductName) { o.itemId = itemIdNum; o.updatedAt = Date.now(); }  // v1.9.772
       });
     }
   });
@@ -17082,6 +17090,7 @@ function uploadStampForOrder(orderId, inputEl) {
     DB.orders[idx].stampData = e.target.result;
     DB.orders[idx].stampName = file.name;
     DB.orders[idx].stampUploadedAt = Date.now();
+    DB.orders[idx].updatedAt = Date.now();  // v1.9.772: EDIT RECOVERY 보호
     // v1.9.203: 결재 요청 페이지와 연동 — 날인 업로드 시 결재 완료 자동 전이
     try { syncApprovalFromOrderStamp(orderId); } catch(_){}
     saveData();
@@ -17122,6 +17131,8 @@ function syncApprovalFromOrderStamp(orderId) {
   if (shouldApprove && ap.status !== 'approved') {
     ap.status = 'approved';
     ap.approvedAt = Date.now();
+  ap.updatedAt = Date.now();  // v1.9.772
+    ap.updatedAt = Date.now();  // v1.9.772
     try { slackNotify('approval_done', ap); } catch(_){}
   } else if (!shouldApprove && ap.status === 'approved' && ap.auto !== false) {
     // 자동 승인된 것만 되돌리기 (사용자가 수동으로 결재 요청 페이지에서 승인한 것은 유지)
@@ -19102,6 +19113,8 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
     if (ap.status !== 'approved' && hasStampProof) {
       ap.status = 'approved';
       ap.approvedAt = Date.now();
+  ap.updatedAt = Date.now();  // v1.9.772
+    ap.updatedAt = Date.now();  // v1.9.772
       // v1.9.280: 수정 중 자동 승인 전이여도 슬랙 알림 발송 안 함
       if (!isEdit) {
         slackNotify('approval_done', ap);
@@ -20532,6 +20545,7 @@ function uploadStampAndApprove(orderId, inputEl) {
     o.stampData = e.target.result;
     o.stampName = file.name;
     o.stampUploadedAt = Date.now();
+    o.updatedAt = Date.now();  // v1.9.772
     // 결재 상태도 approved로 (syncApprovalFromOrderStamp 사용 — 기존 ap가 있으면 approved로 전이)
     try { syncApprovalFromOrderStamp(orderId); } catch(_){}
     // ap에 manualApprove 표시 (사용자가 명시적으로 승인한 것이므로)
@@ -20557,6 +20571,7 @@ function approveOrderFromTable(orderId) {
   }
   ap.status = 'approved';
   ap.approvedAt = Date.now();
+  ap.updatedAt = Date.now();  // v1.9.772
   ap.manualApprove = true; // v1.9.203: 수동 승인 플래그 — 날인 상태 변경 시 자동 되돌림 방지
   try { saveData(); } catch(_){}
   slackNotify('approval_done', ap);
@@ -21116,6 +21131,7 @@ function approveNonPo(id) {
   if (!confirm(`"${a.title}" 결재를 완료 처리하시겠습니까?`)) return;
   a.status = 'approved';
   a.approvedAt = Date.now();
+  a.updatedAt = Date.now();  // v1.9.772: EDIT RECOVERY 보호
   try { saveData(); } catch(_){}
   slackNotify('approval_done', a);
   renderApprovalPage();
@@ -32341,6 +32357,12 @@ function initERPWhenReady() {
       try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
       _firestoreDataLoaded = true;  // ✅ Firestore 쓰기 허용
       console.log('✅ Firestore 데이터 로드 완료 — Firestore 쓰기 활성화');
+      // v1.9.772: fast-path 시점에 사용자가 작업했던 변경 사항을 자동 재저장
+      if (window._pendingSaveAfterFsLoad) {
+        window._pendingSaveAfterFsLoad = false;
+        console.log('💾 [v772] pending save 실행 — fast-path 시점 변경 사항을 Firestore 에 저장');
+        setTimeout(() => { try { if (typeof _doSaveData === 'function') _doSaveData().catch(e => console.warn('pending save 실패:', e)); } catch(_){} }, 500);
+      }
       // 백필로 생성된 생산 레코드 또는 _processedOrders 변경이 있으면 Firestore에도 반영
       if (_backfillCreated > 0 || _pendingStockChanged) {
         console.log('💾 초기화 변경사항 Firestore 저장 요청 (백필:' + _backfillCreated + ', stockProcessed변경:' + _pendingStockChanged + ')');
