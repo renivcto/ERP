@@ -4479,7 +4479,7 @@ EXP YYYYMMDD 까지</textarea></div>
         </div>
         <div style="font-size:10.5px;color:#9d174d;margin-top:8px;line-height:1.45">※ 위 '금액'에 입력한 광고비가 선택한 쇼핑몰의 광고비 이력에 자동 등록됩니다. 광고 프로젝트를 선택하면 해당 프로젝트의 광고비로 함께 묶입니다.</div>
       </div>
-      <div class="fg"><label>제목<span class="req">*</span></label><input class="fi" id="ape-title" placeholder="광고비 선택 시 프로젝트 + 매체명으로 자동 채워집니다 (수정 가능)"></div>
+      <div class="fg"><label>제목<span class="req">*</span></label><input class="fi" id="ape-title" placeholder=""></div>
       <!-- v1.9.694: 지급처/업체 — 탭 필터 + select + 직접 입력 -->
       <div class="fg">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
@@ -4866,7 +4866,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.782';
+const ERP_VERSION = 'v1.9.783';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12693,14 +12693,17 @@ function _addCostFromAdProject() {
   window._preselectedAdEndDate = proj.endDate || '';
   setTimeout(() => {
     try { openExpenseModalForAd(shopId); } catch(e) { console.warn('지출결의서 모달 열기 실패:', e); }
+    // v1.9.783: 안전망 — 모달 오픈 후 한 번 더 제목 갱신
+    setTimeout(() => { try { _updateApeTitleFromAd(); } catch(_){} }, 80);
   }, 200);
 }
 
-// v1.9.782: 지출결의서 광고 모달 — 프로젝트명 + 매체/캠페인명 자동 합성 → 제목
+// v1.9.783: 지출결의서 광고 모달 — 프로젝트명 + 매체/캠페인명 자동 합성 → 제목
+// 카테고리 체크 완화: ape-ad-fields 가 보이면 동작 (광고 영역 사용 중)
 function _updateApeTitleFromAd() {
   try {
-    const cat = document.getElementById('ape-category');
-    if (cat && cat.value !== 'ad') return;  // 광고비 카테고리일 때만
+    const adFields = document.getElementById('ape-ad-fields');
+    if (adFields && adFields.style.display === 'none') return;  // 광고 영역 안 보이면 skip
     const titleEl = document.getElementById('ape-title');
     if (!titleEl) return;
     const projSel = document.getElementById('ape-ad-project');
@@ -12754,6 +12757,8 @@ function saveAdProject() {
       apeSel.innerHTML = '<option value="">없음 (단발성)</option>' +
         (DB.adProjects || []).map(p => `<option value="${p.id}">${(p.name||'-').replace(/</g,'&lt;')}</option>`).join('');
       if (prevVal) apeSel.value = prevVal;
+      // v1.9.783: 제목 자동 갱신
+      try { _updateApeTitleFromAd(); } catch(_){}
     }
   } catch(_){}
 }
@@ -23204,6 +23209,8 @@ function onApeCategoryChange() {
     if (cat === 'ad') {
       adFields.style.display = '';
       _populateApeAdShopDropdown();
+      // v1.9.783: 광고비 진입 시 제목 자동 갱신
+      try { _updateApeTitleFromAd(); } catch(_){}
     } else {
       adFields.style.display = 'none';
     }
