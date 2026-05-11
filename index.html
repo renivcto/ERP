@@ -2716,6 +2716,15 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             <label>광고 대상 제품 <span style="font-size:10px;color:var(--gray-400)">(다중 — 미선택 시 전체)</span></label>
             <div id="ad-project-items-wrap" style="border:1px solid var(--gray-200);border-radius:7px;padding:8px 10px;max-height:180px;overflow-y:auto;background:#f8fafc"></div>
           </div>
+          <!-- v1.9.777: 이 프로젝트의 광고비 이력 + 추가 버튼 (편집 모드만 보임) -->
+          <div id="ad-project-cost-section" style="display:none;border-top:1px solid #ede9fe;padding-top:14px;margin-top:6px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <span style="font-size:12.5px;font-weight:800;color:#7c3aed">💰 이 프로젝트의 광고비</span>
+              <button type="button" onclick="_addCostFromAdProject()" style="background:#7c3aed;color:#fff;border:none;padding:5px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">+ 광고비 추가</button>
+            </div>
+            <div id="ad-project-cost-list" style="background:#fafafa;border:1px solid var(--gray-200);border-radius:7px;max-height:200px;overflow-y:auto"></div>
+            <div id="ad-project-cost-summary" style="margin-top:8px;padding:8px 12px;background:#f5f3ff;border-radius:6px;font-size:11.5px;color:#5b21b6"></div>
+          </div>
         </div>
         <div class="modal-ft" style="display:flex;justify-content:space-between;align-items:center">
           <button class="btn btn-outline" id="ad-project-delete-btn" onclick="deleteAdProject()" style="color:var(--red-500);display:none">🗑 삭제</button>
@@ -4451,7 +4460,7 @@ EXP YYYYMMDD 까지</textarea></div>
             <input class="fi" id="ape-ad-platform" placeholder="예: 네이버 GFA · 카카오 키워드 · 자체 쿠폰">
           </div>
         </div>
-        <div class="fg2" style="margin-bottom:0">
+        <div class="fg2" style="margin-bottom:6px">
           <div class="fg" style="margin:0">
             <label>집행 시작일<span class="req">*</span></label>
             <input class="fi" id="ape-ad-start" type="date">
@@ -4459,6 +4468,14 @@ EXP YYYYMMDD 까지</textarea></div>
           <div class="fg" style="margin:0">
             <label>집행 종료일<span class="req">*</span></label>
             <input class="fi" id="ape-ad-end" type="date">
+          </div>
+        </div>
+        <!-- v1.9.777: 광고 프로젝트 select -->
+        <div class="fg" style="margin-bottom:0">
+          <label>광고 프로젝트 <span style="font-size:10px;color:var(--gray-400)">(선택 — 묶을 프로젝트)</span></label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <select class="fs" id="ape-ad-project" style="flex:1"><option value="">없음 (단발성)</option></select>
+            <button type="button" onclick="openAdProjectModal()" style="background:#7c3aed;color:#fff;border:none;padding:7px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">+ 새 프로젝트</button>
           </div>
         </div>
         <div style="font-size:10.5px;color:#9d174d;margin-top:8px;line-height:1.45">※ 위 '금액'에 입력한 광고비가 선택한 쇼핑몰의 광고비 이력에 자동 등록됩니다. 동일 쇼핑몰의 다른 광고 기간과 겹치지 않도록 주의해 주세요.</div>
@@ -4850,7 +4867,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.776';
+const ERP_VERSION = 'v1.9.777';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12587,8 +12604,15 @@ function openAdProjectModal(editId) {
         if (cb) cb.checked = true;
       });
       if (deleteBtn) deleteBtn.style.display = '';
+      // v1.9.777: 광고비 이력 영역 표시 + 렌더
+      const costSection = document.getElementById('ad-project-cost-section');
+      if (costSection) costSection.style.display = '';
+      _renderProjectCostList(p.id);
     }
   } else {
+    // 신규 — 광고비 이력 숨김
+    const costSection = document.getElementById('ad-project-cost-section');
+    if (costSection) costSection.style.display = 'none';
     titleEl.textContent = '🎯 새 광고 프로젝트';
     editIdEl.value = '';
     nameEl.value = '';
@@ -12600,6 +12624,58 @@ function openAdProjectModal(editId) {
     if (deleteBtn) deleteBtn.style.display = 'none';
   }
   openModal('ad-project-modal');
+}
+
+// v1.9.777: 프로젝트의 광고비 이력 렌더
+function _renderProjectCostList(projectId) {
+  const list = document.getElementById('ad-project-cost-list');
+  const summary = document.getElementById('ad-project-cost-summary');
+  if (!list) return;
+  const ads = [];
+  (DB.shops || []).forEach(s => {
+    if (!s || !Array.isArray(s.adsCosts)) return;
+    s.adsCosts.forEach(a => {
+      if (a && String(a.projectId || '') === String(projectId)) {
+        ads.push({ ...a, _shopId: s.id, _shopName: s.name });
+      }
+    });
+  });
+  if (ads.length === 0) {
+    list.innerHTML = '<div style="padding:14px;color:#94a3b8;font-size:11.5px;text-align:center">아직 광고비가 없습니다. <b>+ 광고비 추가</b> 또는 <b>지출결의서</b>에서 이 프로젝트를 선택하여 등록하세요.</div>';
+    if (summary) summary.textContent = '';
+    return;
+  }
+  ads.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
+  list.innerHTML = ads.map(a => {
+    const isAuto = !!a.expenseId;
+    const sourceLabel = isAuto
+      ? '<span style="background:#dcfce7;color:#15803d;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700">자동</span>'
+      : '<span style="background:#fef9c3;color:#a16207;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700">수동</span>';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #f1f5f9">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:700;color:#0f172a">${a._shopName || '-'} <span style="font-size:10.5px;color:#94a3b8;font-weight:500">${a.startDate||'-'} ~ ${a.endDate||'-'}</span> ${sourceLabel}</div>
+        ${a.memo ? `<div style="font-size:10.5px;color:#64748b;margin-top:2px">${(a.memo||'').replace(/</g,'&lt;')}</div>` : ''}
+      </div>
+      <div style="font-size:13px;font-weight:800;color:#be185d;font-variant-numeric:tabular-nums;white-space:nowrap">₩${Number(a.cost||0).toLocaleString()}</div>
+    </div>`;
+  }).join('');
+  const total = ads.reduce((s, a) => s + Number(a.cost || 0), 0);
+  if (summary) summary.innerHTML = `💰 <b>총 ${ads.length}건</b> · 합계 <b style="color:#be185d;font-size:13px">₩${total.toLocaleString()}</b>`;
+}
+
+// v1.9.777: 프로젝트 모달에서 광고비 추가 — 수동 입력 모달 열기 (projectId 미리 채움)
+function _addCostFromAdProject() {
+  const projectId = document.getElementById('ad-project-edit-id').value;
+  if (!projectId) { showNotif('먼저 프로젝트를 저장하세요', 'warning'); return; }
+  closeModal('ad-project-modal');
+  // 잠깐 후 수동 입력 모달 열기 + projectId 미리 선택
+  setTimeout(() => {
+    openAdsManualModal();
+    setTimeout(() => {
+      const sel = document.getElementById('ads-manual-project');
+      if (sel) sel.value = projectId;
+    }, 50);
+  }, 200);
 }
 
 function saveAdProject() {
@@ -23217,6 +23293,13 @@ function openExpenseModal() {
   if ($('ape-ad-shop')) { _populateApeAdShopDropdown(); $('ape-ad-shop').value = window._preselectedAdShopId || ''; window._preselectedAdShopId = null; }
   if ($('ape-ad-platform')) $('ape-ad-platform').value = '';
   if ($('ape-ad-start')) $('ape-ad-start').value = '';
+  // v1.9.777: 광고 프로젝트 select 채우기 (신규)
+  if ($('ape-ad-project')) {
+    $('ape-ad-project').innerHTML = '<option value="">없음 (단발성)</option>' +
+      (DB.adProjects||[]).filter(p => p).map(p => `<option value="${p.id}">${(p.name||'-').replace(/</g,'&lt;')}</option>`).join('');
+    $('ape-ad-project').value = window._preselectedAdProjectId || '';
+    window._preselectedAdProjectId = null;
+  }
   if ($('ape-ad-end')) $('ape-ad-end').value = '';
   try { onApeCategoryChange(); } catch(_){}
   renderApeAttachList();
@@ -23298,6 +23381,12 @@ function editExpense(id) {
   if ($('ape-ad-platform')) $('ape-ad-platform').value = e.adPlatform || '';
   if ($('ape-ad-start')) $('ape-ad-start').value = e.adStartDate || '';
   if ($('ape-ad-end')) $('ape-ad-end').value = e.adEndDate || '';
+  // v1.9.777: 광고 프로젝트 select 채우기 + 복원
+  if ($('ape-ad-project')) {
+    $('ape-ad-project').innerHTML = '<option value="">없음 (단발성)</option>' +
+      (DB.adProjects||[]).filter(p => p).map(p => `<option value="${p.id}">${(p.name||'-').replace(/</g,'&lt;')}</option>`).join('');
+    $('ape-ad-project').value = e.adProjectId || '';
+  }
   try { onApeCategoryChange(); } catch(_){}
   renderApeAttachList();
 }
@@ -23318,7 +23407,9 @@ function saveExpense() {
     if (!adShopId) { showNotif('광고 플랫폼(쇼핑몰)을 선택하세요', 'warning'); return; }
     if (!adStart || !adEnd) { showNotif('집행 시작일/종료일을 입력하세요', 'warning'); return; }
     if (adStart > adEnd) { showNotif('시작일이 종료일보다 늦습니다', 'warning'); return; }
-    _ad = { adShopId, adPlatform, adStartDate: adStart, adEndDate: adEnd };
+    // v1.9.777: 광고 프로젝트 ID 수집
+    const adProjectId = ($('ape-ad-project') && $('ape-ad-project').value) || '';
+    _ad = { adShopId, adPlatform, adStartDate: adStart, adEndDate: adEnd, adProjectId };
     // 동일 쇼핑몰 광고 기간 겹침 검사 (자기 자신 제외)
     const shopRef = (DB.shops||[]).find(s => s.id === adShopId);
     if (shopRef && Array.isArray(shopRef.adsCosts)) {
@@ -23357,11 +23448,12 @@ function saveExpense() {
         ex.adPlatform = _ad.adPlatform;
         ex.adStartDate = _ad.adStartDate;
         ex.adEndDate = _ad.adEndDate;
+        ex.adProjectId = _ad.adProjectId || '';  // v1.9.777
         try { _syncExpenseAdsToShop(ex); } catch(err) { console.warn('광고비 동기화 실패:', err); }
       } else {
         // 카테고리가 광고비에서 다른 카테고리로 바뀐 경우 → 기존 동기화 항목 제거
         if (_prevCat === 'ad') { try { _removeExpenseAdsFromShop(ex.id); } catch(_){} }
-        delete ex.adShopId; delete ex.adPlatform; delete ex.adStartDate; delete ex.adEndDate;
+        delete ex.adShopId; delete ex.adPlatform; delete ex.adStartDate; delete ex.adEndDate; delete ex.adProjectId;
       }
       try { saveData(); } catch(_){}
       closeModal('ap-expense');
@@ -23398,6 +23490,7 @@ function saveExpense() {
     note: $('ape-note').value || '',
     attachments: Array.isArray(_apeAttachments) ? _apeAttachments.slice() : [],
     quotes: Array.isArray(_apeQuotes) ? _apeQuotes.slice() : [],  // v1.9.694
+    ...(_ad ? { adShopId: _ad.adShopId, adPlatform: _ad.adPlatform, adStartDate: _ad.adStartDate, adEndDate: _ad.adEndDate, adProjectId: _ad.adProjectId || '' } : {}),  // v1.9.777
   };
   // v1.9.500: 광고비 필드 첨부 + 쇼핑몰 광고비 자동 동기화
   if (_ad) {
@@ -23445,7 +23538,8 @@ function _syncExpenseAdsToShop(expense) {
     cost: parseFloat(expense.amount) || 0,
     memo,
     platform: expense.adPlatform || '',
-    autoSynced: true
+    autoSynced: true,
+    projectId: expense.adProjectId || ''  // v1.9.777: 광고 프로젝트 연결
   };
   const idx = shop.adsCosts.findIndex(a => a.expenseId === expense.id);
   if (idx >= 0) {
