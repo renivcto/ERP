@@ -4692,7 +4692,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.769';
+const ERP_VERSION = 'v1.9.770';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -32707,6 +32707,33 @@ async function rejectFirestoreUser(uid) {
     console.error('rejectFirestoreUser 실패:', e);
     alert('거부 실패: ' + e.message);
   }
+}
+
+// v1.9.770: Firebase 인증 안 기다리고 즉시 fast-path (개인 PC 사용 가정)
+//   원인: onAuthStateChanged 콜백 발화까지 1-2초 → 사용자가 그 동안 loader 만 봄
+//   해결: DOMContentLoaded 후 즉시 provisional user 생성 → showERPOrWaiting 호출
+//   안전망: onAuthStateChanged 콜백에서 실제 인증 결과로 _currentUser 덮어씀.
+//          인증 실패 시 showLoginScreen 호출되어 즉시 차단됨.
+function _v770EarlyFastPath() {
+  try {
+    if (window._erpInitialized) return;
+    if (window._currentUser && !window._currentUser._provisional) return;  // 이미 진짜 user 있음
+    if (typeof DB === 'undefined' || !DB || !Array.isArray(DB.items) || DB.items.length === 0) return;
+    if (typeof showERPOrWaiting !== 'function') return;
+    console.log('🚀 [v770 EARLY] localStorage 데이터로 즉시 ERP 표시 (Firebase 인증 대기 안 함)');
+    window._currentUser = {
+      name: '로딩 중...', email: '', status: '활성', isAdmin: true,
+      role: '관리자', permission: 'write',
+      _provisional: true
+    };
+    showERPOrWaiting();
+  } catch(e) { console.warn('[v770 EARLY] fast-path 실패:', e); }
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', _v770EarlyFastPath);
+} else {
+  // 이미 DOM 로드 완료 → 즉시 실행
+  setTimeout(_v770EarlyFastPath, 0);
 }
 </script>
 </body>
