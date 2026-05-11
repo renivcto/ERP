@@ -4867,7 +4867,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.778';
+const ERP_VERSION = 'v1.9.779';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -11277,25 +11277,48 @@ function _mgLookupCogs(o) {
 }
 
 function _mgAllocateAds(order, shop) {
-  // 광고비를 매출 비례로 주문에 배분 — 주문일이 포함된 광고비 기간만 대상
+  // v1.9.779: 광고 기간이 겹쳐도 각 광고를 자기 기간 내 매출 비율로 올바르게 분배.
+  //   - 각 매칭 광고마다: (광고비 × 주문매출 / 광고기간내 총매출) 합산
+  //   - 매출은 자연스럽게 중복 합산되지 않음 (각 광고가 자기 비율만 가져감)
+  //   - 광고비는 모두 정확히 분배됨 (한 광고도 누락되지 않음)
   if (!shop || !Array.isArray(shop.adsCosts) || !shop.adsCosts.length) return 0;
   const orderDate = (order.orderDate || order.date || '').slice(0,10);
   if (!orderDate) return 0;
-  const a = shop.adsCosts.find(x => x.startDate <= orderDate && orderDate <= x.endDate);
-  if (!a) return 0;
-  const adCost = parseFloat(a.cost) || 0;
-  if (adCost <= 0) return 0;
-  // 같은 광고비 기간 내 매출 합 (취소/반품 제외)
-  const totalRevInPeriod = (DB.shopOrders||[]).reduce((s, o) => {
-    if (o.shopId !== shop.id) return s;
-    if (o.status === '취소' || o.status === '반품') return s;
-    const d = (o.orderDate||o.date||'').slice(0,10);
-    if (d < a.startDate || d > a.endDate) return s;
-    return s + (parseFloat(o.paymentAmount||o.totalPrice||0) || 0);
-  }, 0);
-  if (totalRevInPeriod <= 0) return 0;
   const orderRev = parseFloat(order.paymentAmount||order.totalPrice||0) || 0;
-  return adCost * orderRev / totalRevInPeriod;
+  if (orderRev <= 0) return 0;
+
+  // 주문일이 포함된 모든 광고 기간 찾기 (find → filter)
+  const matchingAds = shop.adsCosts.filter(x =>
+    x && x.startDate && x.endDate &&
+    x.startDate <= orderDate && orderDate <= x.endDate &&
+    (parseFloat(x.cost) || 0) > 0
+  );
+  if (!matchingAds.length) return 0;
+
+  // 광고 기간별 총매출 캐시 (같은 광고가 여러 주문에서 호출되므로 가능하면 캐시)
+  if (!shop._mgAdRevCache) shop._mgAdRevCache = {};
+  const cache = shop._mgAdRevCache;
+  const _periodKey = (a) => a.startDate + '_' + a.endDate;
+
+  let totalAllocated = 0;
+  for (const a of matchingAds) {
+    const adCost = parseFloat(a.cost) || 0;
+    const key = _periodKey(a);
+    let totalRev = cache[key];
+    if (totalRev == null) {
+      totalRev = (DB.shopOrders||[]).reduce((s, o) => {
+        if (o.shopId !== shop.id) return s;
+        if (o.status === '취소' || o.status === '반품') return s;
+        const d = (o.orderDate||o.date||'').slice(0,10);
+        if (d < a.startDate || d > a.endDate) return s;
+        return s + (parseFloat(o.paymentAmount||o.totalPrice||0) || 0);
+      }, 0);
+      cache[key] = totalRev;
+    }
+    if (totalRev <= 0) continue;
+    totalAllocated += adCost * orderRev / totalRev;
+  }
+  return totalAllocated;
 }
 
 function _mgPopulateShopFilter() {
@@ -11581,6 +11604,9 @@ function renderMarginAnalysis() {
     ? _periodComputeRange('mg')
     : _mgComputePeriod('이번 달');
   const shopFilter = $('mg-shop-filter')?.value || '';
+
+  // v1.9.779: _mgAllocateAds 캐시 초기화 (이번 렌더에서 fresh 계산 보장)
+  (DB.shops||[]).forEach(s => { if (s) s._mgAdRevCache = {}; });
 
   // 1) 주문 필터링
   let orders = (DB.shopOrders||[]).filter(o => {
@@ -12022,17 +12048,8 @@ function submitShopAdsCost() {
     startDate = $('shop-ads-date')?.value; if (!startDate) { alert('날짜를 선택해주세요.'); return; }
     endDate = startDate;
   }
-  // 겹침 검사 — 수정 모드면 자기 자신 제외 (자동 동기화 항목과 겹치면 추가 안내)
-  const overlap = shop.adsCosts.find(a =>
-    a.id != _editingAdsCostId && !(endDate < a.startDate || startDate > a.endDate)
-  );
-  if (overlap) {
-    if (overlap.expenseId) {
-      if (!confirm(`이 기간은 지출결의서 #${overlap.expenseId} (${overlap.startDate} ~ ${overlap.endDate}) 와 겹칩니다.\n수동 광고비를 추가하면 ROAS·마진 분석에 중복 합산될 수 있습니다.\n그래도 진행하시겠습니까?`)) return;
-    } else {
-      alert('광고 기간이 겹치지 않도록 설정해 주세요.'); return;
-    }
-  }
+  // v1.9.779: 광고 기간 겹침 경고 제거 — 동시 캠페인 (예: 네이버 GFA + 카카오 동시 진행) 가 정상.
+  //          _mgAllocateAds 가 다중 매칭 광고를 매출 비율로 올바르게 분배함.
   if (_editingAdsCostId != null) {
     // 수정 모드 — 기존 ROAS 보고서가 기간 키 기반이라면 같이 갱신
     const idx = shop.adsCosts.findIndex(a => a.id === _editingAdsCostId);
@@ -23421,16 +23438,8 @@ function saveExpense() {
     // v1.9.777: 광고 프로젝트 ID 수집
     const adProjectId = ($('ape-ad-project') && $('ape-ad-project').value) || '';
     _ad = { adShopId, adPlatform, adStartDate: adStart, adEndDate: adEnd, adProjectId };
-    // 동일 쇼핑몰 광고 기간 겹침 검사 (자기 자신 제외)
-    const shopRef = (DB.shops||[]).find(s => s.id === adShopId);
-    if (shopRef && Array.isArray(shopRef.adsCosts)) {
-      const overlap = shopRef.adsCosts.find(a =>
-        a.expenseId !== _editingExpenseId && !(adEnd < a.startDate || adStart > a.endDate)
-      );
-      if (overlap) {
-        if (!confirm(`이 쇼핑몰의 기존 광고 기간 ${overlap.startDate} ~ ${overlap.endDate} 와 겹칩니다.\n그래도 저장하시겠습니까? (마진/ROAS 계산에서 중복 합산될 수 있습니다)`)) return;
-      }
-    }
+    // v1.9.779: 광고 기간 겹침 경고 제거 — 프로젝트별로 겹치는 게 정상.
+    //          _mgAllocateAds 가 다중 매칭 광고를 매출 비율로 올바르게 분배함 (중복 합산 X).
   }
   // v1.9.229: 수정 모드 지원 / v1.9.233: 계좌번호 · 다중 첨부 지원
   if (_editingExpenseId) {
