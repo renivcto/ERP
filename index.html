@@ -85,6 +85,8 @@
           }
           try { const _now = new Date(); const _ls = _now.getFullYear()+'-'+String(_now.getMonth()+1).padStart(2,'0')+'-'+String(_now.getDate()).padStart(2,'0')+' '+String(_now.getHours()).padStart(2,'0')+':'+String(_now.getMinutes()).padStart(2,'0'); await setDoc(userRef, { lastLogin: _ls }, { merge: true }); } catch(e) {}
           window._currentUser = { ...data, uid: user.uid, permission: data.permission || 'read' };
+          // v1.9.771: 다음 새로고침 fast-path 를 위해 user 정보 localStorage 캐시
+          try { localStorage.setItem('reniv_last_user', JSON.stringify({ name: data.name, email: user.email, photo: user.photoURL||'', role: data.role||'멤버', isAdmin: data.isAdmin===true || (data.role==='CTO'), permission: data.permission || 'read' })); } catch(_){}
         }
       } catch(e) {
         // v2.0 보안 패치: Firestore 실패 시 무조건 관리자 부여하던 로직을 제거.
@@ -4692,7 +4694,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.770';
+const ERP_VERSION = 'v1.9.771';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -32721,9 +32723,17 @@ function _v770EarlyFastPath() {
     if (typeof DB === 'undefined' || !DB || !Array.isArray(DB.items) || DB.items.length === 0) return;
     if (typeof showERPOrWaiting !== 'function') return;
     console.log('🚀 [v770 EARLY] localStorage 데이터로 즉시 ERP 표시 (Firebase 인증 대기 안 함)');
+    // v1.9.771: localStorage 의 마지막 user 정보 사용 (두 번째 새로고침부터 즉시 정상 이름 표시)
+    let _lastUser = {};
+    try { _lastUser = JSON.parse(localStorage.getItem('reniv_last_user') || '{}'); } catch(_){}
     window._currentUser = {
-      name: '로딩 중...', email: '', status: '활성', isAdmin: true,
-      role: '관리자', permission: 'write',
+      name: _lastUser.name || '로딩 중...',
+      email: _lastUser.email || '',
+      photo: _lastUser.photo || '',
+      role: _lastUser.role || '관리자',
+      status: '활성',
+      isAdmin: _lastUser.isAdmin !== false,
+      permission: _lastUser.permission || 'write',
       _provisional: true
     };
     showERPOrWaiting();
