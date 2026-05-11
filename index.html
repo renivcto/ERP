@@ -2584,6 +2584,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div style="font-size:13px;font-weight:800;color:#be185d;margin-bottom:3px">광고비는 <u>지출결의서</u>가 단일 진실 (Single Source of Truth)</div>
           <div style="font-size:11.5px;color:#9d174d;line-height:1.6">결재 요청 → 지출 결의서 → 분류 '광고비' 선택 후 쇼핑몰·집행 기간·금액 입력 시 이 페이지에 자동 반영됩니다.</div>
         </div>
+        <button type="button" onclick="openAdsManualModal()" style="background:#fff;color:#be185d;border:1px solid #fbcfe8;padding:9px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">+ 수동 추가</button>
         <button type="button" onclick="openExpenseModalForAd(null)" style="background:#be185d;color:#fff;border:none;padding:9px 18px;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">+ 지출결의서 작성</button>
       </div>
       <!-- 필터 + 이력 표 -->
@@ -2615,6 +2616,59 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             </tr></thead>
             <tbody id="ads-page-table"></tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ v1.9.774: 광고비 수동 입력 모달 ══════════════ -->
+    <div class="overlay" id="overlay-ads-manual-modal">
+      <div class="modal" style="width:580px;max-height:88vh;display:flex;flex-direction:column">
+        <div class="modal-hdr" style="background:linear-gradient(135deg,#fdf2f8,#fff7ed);border-bottom:1px solid #fbcfe8">
+          <span class="modal-ttl" style="color:#be185d">📢 광고비 수동 입력</span>
+          <button class="modal-x" onclick="closeModal('ads-manual-modal')">✕</button>
+        </div>
+        <div class="modal-body" style="overflow-y:auto;flex:1;padding:18px 22px">
+          <div style="font-size:11px;color:#94a3b8;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;padding:7px 10px;margin-bottom:14px;line-height:1.5">
+            💡 광고비는 <b>지출결의서</b>가 단일 진실입니다. 이 폼은 <b>예외 수동 입력</b> 용도로만 사용하세요 (테스트 / 일회성 / 미결재 등).
+          </div>
+          <input type="hidden" id="ads-manual-edit-id" value="">
+          <div class="fg">
+            <label>쇼핑몰 <span class="req">*</span></label>
+            <select class="fs" id="ads-manual-shop"></select>
+          </div>
+          <div class="fg">
+            <label>광고 대상 제품 <span style="font-size:10px;color:var(--gray-400)">(선택 — 다중 가능)</span></label>
+            <div id="ads-manual-items-wrap" style="border:1px solid var(--gray-200);border-radius:7px;padding:8px 10px;max-height:180px;overflow-y:auto;background:#f8fafc"></div>
+            <div style="font-size:10.5px;color:var(--gray-400);margin-top:3px">미선택 시 쇼핑몰 전체 광고로 처리</div>
+          </div>
+          <div class="fg">
+            <label>입력 방식</label>
+            <select class="fs" id="ads-manual-type" onchange="_toggleAdsManualType()">
+              <option value="monthly">월별 입력</option>
+              <option value="range">기간별 입력</option>
+              <option value="daily">일별 입력</option>
+            </select>
+          </div>
+          <div class="fg" id="ads-manual-monthly-row">
+            <label>월 선택</label>
+            <input class="fi" id="ads-manual-month" type="month">
+          </div>
+          <div id="ads-manual-range-row" style="display:none;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="fg" style="margin:0"><label>시작일</label><input class="fi" id="ads-manual-start" type="date"></div>
+            <div class="fg" style="margin:0"><label>종료일</label><input class="fi" id="ads-manual-end" type="date"></div>
+          </div>
+          <div class="fg" id="ads-manual-daily-row" style="display:none;max-width:50%">
+            <label>날짜</label>
+            <input class="fi" id="ads-manual-date" type="date">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
+            <div class="fg"><label>광고비 (원) <span class="req">*</span></label><input class="fi" id="ads-manual-cost" type="number" min="0" placeholder="0원 입력 허용"></div>
+            <div class="fg"><label>비고</label><input class="fi" id="ads-manual-memo" placeholder=""></div>
+          </div>
+        </div>
+        <div class="modal-ft">
+          <button class="btn btn-outline" onclick="closeModal('ads-manual-modal')">취소</button>
+          <button class="btn btn-primary" onclick="saveAdsManual()" style="background:#be185d">저장</button>
         </div>
       </div>
     </div>
@@ -4742,7 +4796,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.773';
+const ERP_VERSION = 'v1.9.774';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12169,6 +12223,163 @@ function removeRoasReport(startDate, endDate) {
   } catch(_){}
   showNotif('🗑️ 분석 항목이 삭제되었습니다', 'info');
 }
+// v1.9.774: 광고비 수동 입력 모달 — 열기
+function openAdsManualModal(editId) {
+  // 쇼핑몰 select 채우기
+  const shopSel = document.getElementById('ads-manual-shop');
+  if (shopSel) {
+    shopSel.innerHTML = '<option value="">-- 선택 --</option>' +
+      (DB.shops||[]).filter(s => s).map(s => `<option value="${s.id}">${(s.name||s.id).replace(/</g,'&lt;')}</option>`).join('');
+  }
+  // 제품 multi-select 채우기 (체크박스 리스트)
+  _renderAdsItemMultiSelect([]);
+  // 기본값 — 이번 달
+  const now = new Date();
+  const ym = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  document.getElementById('ads-manual-type').value = 'monthly';
+  document.getElementById('ads-manual-month').value = ym;
+  document.getElementById('ads-manual-start').value = '';
+  document.getElementById('ads-manual-end').value = '';
+  document.getElementById('ads-manual-date').value = '';
+  document.getElementById('ads-manual-cost').value = '';
+  document.getElementById('ads-manual-memo').value = '';
+  document.getElementById('ads-manual-edit-id').value = '';
+  _toggleAdsManualType();
+
+  // 편집 모드 — 기존 값 채우기
+  if (editId) {
+    for (const s of (DB.shops||[])) {
+      const found = (s.adsCosts||[]).find(a => String(a.id) === String(editId));
+      if (found) {
+        shopSel.value = s.id;
+        document.getElementById('ads-manual-type').value = found.type || 'monthly';
+        document.getElementById('ads-manual-month').value = found.month || '';
+        document.getElementById('ads-manual-start').value = found.startDate || '';
+        document.getElementById('ads-manual-end').value = found.endDate || '';
+        document.getElementById('ads-manual-date').value = found.date || '';
+        document.getElementById('ads-manual-cost').value = found.cost || 0;
+        document.getElementById('ads-manual-memo').value = found.memo || '';
+        document.getElementById('ads-manual-edit-id').value = found.id;
+        _renderAdsItemMultiSelect(found.itemIds || []);
+        _toggleAdsManualType();
+        break;
+      }
+    }
+  }
+  openModal('ads-manual-modal');
+}
+
+// 광고 대상 제품 체크박스 리스트 렌더
+function _renderAdsItemMultiSelect(checkedIds) {
+  const wrap = document.getElementById('ads-manual-items-wrap');
+  if (!wrap) return;
+  const items = (DB.items||[]).filter(i => i && (i.type === '완제품' || !i.type));
+  const checkedSet = new Set((checkedIds||[]).map(String));
+  if (items.length === 0) {
+    wrap.innerHTML = '<div style="color:#94a3b8;font-size:11.5px;padding:6px">등록된 완제품 없음</div>';
+    return;
+  }
+  wrap.innerHTML = items.map(it => {
+    const checked = checkedSet.has(String(it.id)) ? 'checked' : '';
+    const code = it.code ? `<span style="color:#94a3b8;font-size:10.5px">(${it.code})</span> ` : '';
+    return `<label style="display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:5px;cursor:pointer;font-size:12px" onmouseenter="this.style.background='#fff'" onmouseleave="this.style.background='transparent'">
+      <input type="checkbox" class="ads-manual-item-cb" value="${it.id}" ${checked}>
+      ${code}<span>${(it.name||'-').replace(/</g,'&lt;')}</span>
+    </label>`;
+  }).join('');
+}
+
+// 입력 방식 토글 (월별/기간별/일별)
+function _toggleAdsManualType() {
+  const t = document.getElementById('ads-manual-type').value;
+  document.getElementById('ads-manual-monthly-row').style.display = (t === 'monthly') ? '' : 'none';
+  document.getElementById('ads-manual-range-row').style.display = (t === 'range') ? 'grid' : 'none';
+  document.getElementById('ads-manual-daily-row').style.display = (t === 'daily') ? '' : 'none';
+}
+
+// 광고비 수동 저장
+function saveAdsManual() {
+  const shopId = document.getElementById('ads-manual-shop').value;
+  if (!shopId) { showNotif('쇼핑몰을 선택해주세요', 'warning'); return; }
+  const shop = (DB.shops||[]).find(s => String(s.id) === String(shopId));
+  if (!shop) { showNotif('쇼핑몰을 찾을 수 없습니다', 'error'); return; }
+
+  const type = document.getElementById('ads-manual-type').value;
+  const month = document.getElementById('ads-manual-month').value;
+  const startDate = document.getElementById('ads-manual-start').value;
+  const endDate = document.getElementById('ads-manual-end').value;
+  const date = document.getElementById('ads-manual-date').value;
+  const cost = parseInt(document.getElementById('ads-manual-cost').value, 10) || 0;
+  const memo = document.getElementById('ads-manual-memo').value.trim();
+  const editId = document.getElementById('ads-manual-edit-id').value;
+
+  // 기간 검증
+  let payload = { type, cost, memo };
+  if (type === 'monthly') {
+    if (!month) { showNotif('월을 선택해주세요', 'warning'); return; }
+    payload.month = month;
+    payload.startDate = month + '-01';
+    const [y, m] = month.split('-').map(Number);
+    payload.endDate = new Date(y, m, 0).toISOString().slice(0, 10);
+  } else if (type === 'range') {
+    if (!startDate || !endDate) { showNotif('시작일/종료일을 입력해주세요', 'warning'); return; }
+    if (startDate > endDate) { showNotif('시작일이 종료일보다 늦습니다', 'warning'); return; }
+    payload.startDate = startDate;
+    payload.endDate = endDate;
+  } else {
+    if (!date) { showNotif('날짜를 선택해주세요', 'warning'); return; }
+    payload.date = date;
+    payload.startDate = date;
+    payload.endDate = date;
+  }
+
+  // 광고 대상 제품 (다중)
+  const itemIds = Array.from(document.querySelectorAll('.ads-manual-item-cb:checked')).map(cb => parseInt(cb.value, 10));
+  if (itemIds.length > 0) payload.itemIds = itemIds;
+
+  shop.adsCosts = shop.adsCosts || [];
+  if (editId) {
+    // 편집
+    const idx = shop.adsCosts.findIndex(a => String(a.id) === String(editId));
+    if (idx >= 0) {
+      shop.adsCosts[idx] = { ...shop.adsCosts[idx], ...payload, updatedAt: Date.now() };
+    }
+  } else {
+    // 신규
+    payload.id = (typeof nextId === 'function') ? nextId('adsCost') : (Date.now() + Math.floor(Math.random()*1000));
+    payload.createdAt = Date.now();
+    payload.updatedAt = Date.now();
+    shop.adsCosts.push(payload);
+  }
+  shop.updatedAt = Date.now();
+  try { saveData(); } catch(_){}
+  closeModal('ads-manual-modal');
+  showNotif('✅ 광고비 ' + (editId ? '수정' : '추가') + ' 완료', 'success');
+  try { renderAdsPage(); } catch(_){}
+}
+
+// 광고비 수동 삭제
+function deleteAdsManual(adId) {
+  if (!confirm('이 광고비를 삭제하시겠습니까?')) return;
+  for (const shop of (DB.shops||[])) {
+    if (!shop || !Array.isArray(shop.adsCosts)) continue;
+    const idx = shop.adsCosts.findIndex(a => String(a.id) === String(adId));
+    if (idx >= 0) {
+      const a = shop.adsCosts[idx];
+      if (a.expenseId) {
+        showNotif('자동 동기화 항목은 지출결의서에서 삭제하세요', 'warning');
+        return;
+      }
+      shop.adsCosts.splice(idx, 1);
+      shop.updatedAt = Date.now();
+      try { saveData(); } catch(_){}
+      showNotif('✅ 광고비 삭제 완료', 'success');
+      try { renderAdsPage(); } catch(_){}
+      return;
+    }
+  }
+}
+
 // v1.9.773: 광고비 관리 페이지 렌더 (별도 페이지)
 function renderAdsPage() {
   const kpiRow = document.getElementById('ads-kpi-row');
@@ -12325,9 +12536,18 @@ function renderAdsPage() {
       : `<span style="background:#fef9c3;color:#a16207;padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700">수동</span>`;
     const editBtn = isAuto
       ? `<button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 8px" onclick="_openLinkedExpense(${a.expenseId})">지출결의서</button>`
-      : `<button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 8px" onclick="(function(){const s=(DB.shops||[]).find(x=>x.id==='${a._shopId}'); if(s){window._selectedShopId=s.id; go('sales'); setTimeout(()=>{switchSalesTab('shops'); setTimeout(()=>openShopAdsPanel((DB.shops||[]).indexOf(s)),100);},100);}})()">수정</button>`;
+      : `<button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 6px" onclick="openAdsManualModal('${a.id}')">수정</button><button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 6px;margin-left:3px;color:var(--red-500)" onclick="deleteAdsManual('${a.id}')">삭제</button>`;
+    // v1.9.774: 광고 대상 제품 표시
+    let itemsLabel = '';
+    if (Array.isArray(a.itemIds) && a.itemIds.length > 0) {
+      const itemNames = a.itemIds.map(id => {
+        const it = (DB.items||[]).find(x => x && x.id === id);
+        return it ? (it.name || it.code || ('#'+id)) : ('#'+id);
+      });
+      itemsLabel = `<div style="font-size:10px;color:#94a3b8;margin-top:2px">📦 ${itemNames.join(', ')}</div>`;
+    }
     return `<tr>
-      <td style="font-weight:600;color:#0f172a">${a._shopName}</td>
+      <td style="font-weight:600;color:#0f172a">${a._shopName}${itemsLabel}</td>
       <td><span style="background:#f1f5f9;padding:2px 8px;border-radius:4px;font-size:10.5px">${typeLabel}</span></td>
       <td style="font-size:12.5px;color:#475569">${periodStr}</td>
       <td style="font-weight:700;color:#be185d;font-variant-numeric:tabular-nums">₩${Number(a.cost || 0).toLocaleString()}</td>
