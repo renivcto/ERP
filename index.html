@@ -4456,7 +4456,7 @@ EXP YYYYMMDD 까지</textarea></div>
           </div>
           <div class="fg" style="margin:0">
             <label>매체 / 캠페인명</label>
-            <input class="fi" id="ape-ad-platform" placeholder="예: 네이버 GFA · 카카오 키워드 · 자체 쿠폰">
+            <input class="fi" id="ape-ad-platform" placeholder="예: 네이버 GFA · 카카오 키워드 · 자체 쿠폰" oninput="_updateApeTitleFromAd()">
           </div>
         </div>
         <div class="fg2" style="margin-bottom:6px">
@@ -4473,13 +4473,13 @@ EXP YYYYMMDD 까지</textarea></div>
         <div class="fg" style="margin-bottom:0">
           <label>광고 프로젝트 <span style="font-size:10px;color:var(--gray-400)">(선택 — 묶을 프로젝트)</span></label>
           <div style="display:flex;gap:6px;align-items:center">
-            <select class="fs" id="ape-ad-project" style="flex:1"><option value="">없음 (단발성)</option></select>
+            <select class="fs" id="ape-ad-project" style="flex:1" onchange="_updateApeTitleFromAd()"><option value="">없음 (단발성)</option></select>
             <button type="button" onclick="openAdProjectModal()" style="background:#7c3aed;color:#fff;border:none;padding:7px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">+ 새 프로젝트</button>
           </div>
         </div>
         <div style="font-size:10.5px;color:#9d174d;margin-top:8px;line-height:1.45">※ 위 '금액'에 입력한 광고비가 선택한 쇼핑몰의 광고비 이력에 자동 등록됩니다. 광고 프로젝트를 선택하면 해당 프로젝트의 광고비로 함께 묶입니다.</div>
       </div>
-      <div class="fg"><label>제목<span class="req">*</span></label><input class="fi" id="ape-title" placeholder=""></div>
+      <div class="fg"><label>제목<span class="req">*</span></label><input class="fi" id="ape-title" placeholder="광고비 선택 시 프로젝트 + 매체명으로 자동 채워집니다 (수정 가능)"></div>
       <!-- v1.9.694: 지급처/업체 — 탭 필터 + select + 직접 입력 -->
       <div class="fg">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
@@ -4866,7 +4866,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.781';
+const ERP_VERSION = 'v1.9.782';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12694,6 +12694,29 @@ function _addCostFromAdProject() {
   setTimeout(() => {
     try { openExpenseModalForAd(shopId); } catch(e) { console.warn('지출결의서 모달 열기 실패:', e); }
   }, 200);
+}
+
+// v1.9.782: 지출결의서 광고 모달 — 프로젝트명 + 매체/캠페인명 자동 합성 → 제목
+function _updateApeTitleFromAd() {
+  try {
+    const cat = document.getElementById('ape-category');
+    if (cat && cat.value !== 'ad') return;  // 광고비 카테고리일 때만
+    const titleEl = document.getElementById('ape-title');
+    if (!titleEl) return;
+    const projSel = document.getElementById('ape-ad-project');
+    const platEl = document.getElementById('ape-ad-platform');
+    let projName = '';
+    if (projSel && projSel.value) {
+      const proj = (DB.adProjects || []).find(p => String(p.id) === String(projSel.value));
+      if (proj) projName = proj.name || '';
+    }
+    const platform = (platEl && platEl.value || '').trim();
+    let composed = '';
+    if (projName && platform) composed = projName + ' · ' + platform;
+    else if (projName)       composed = projName;
+    else if (platform)       composed = platform;
+    titleEl.value = composed;
+  } catch(e) { console.warn('_updateApeTitleFromAd 실패:', e); }
 }
 
 function saveAdProject() {
@@ -23331,6 +23354,8 @@ function openExpenseModal() {
     $('ape-ad-project').value = window._preselectedAdProjectId || '';
     window._preselectedAdProjectId = null;
   }
+  // v1.9.782: 광고비 카테고리이면 제목 자동 합성
+  try { _updateApeTitleFromAd(); } catch(_){}
   try { onApeCategoryChange(); } catch(_){}
   renderApeAttachList();
 }
