@@ -2688,7 +2688,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     </div>
 
     <!-- ══════════════ v1.9.776: 광고 프로젝트 추가/편집 모달 ══════════════ -->
-    <div class="overlay" id="overlay-ad-project-modal">
+    <div class="overlay" id="overlay-ad-project-modal" style="z-index:450">
       <div class="modal" style="width:620px;max-height:90vh;display:flex;flex-direction:column">
         <div class="modal-hdr" style="background:linear-gradient(135deg,#f5f3ff,#ede9fe);border-bottom:1px solid #ddd6fe">
           <span class="modal-ttl" style="color:#7c3aed" id="ad-project-modal-title">🎯 새 광고 프로젝트</span>
@@ -4478,7 +4478,7 @@ EXP YYYYMMDD 까지</textarea></div>
             <button type="button" onclick="openAdProjectModal()" style="background:#7c3aed;color:#fff;border:none;padding:7px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">+ 새 프로젝트</button>
           </div>
         </div>
-        <div style="font-size:10.5px;color:#9d174d;margin-top:8px;line-height:1.45">※ 위 '금액'에 입력한 광고비가 선택한 쇼핑몰의 광고비 이력에 자동 등록됩니다. 동일 쇼핑몰의 다른 광고 기간과 겹치지 않도록 주의해 주세요.</div>
+        <div style="font-size:10.5px;color:#9d174d;margin-top:8px;line-height:1.45">※ 위 '금액'에 입력한 광고비가 선택한 쇼핑몰의 광고비 이력에 자동 등록됩니다. 광고 프로젝트를 선택하면 해당 프로젝트의 광고비로 함께 묶입니다.</div>
       </div>
       <div class="fg"><label>제목<span class="req">*</span></label><input class="fi" id="ape-title" placeholder=""></div>
       <!-- v1.9.694: 지급처/업체 — 탭 필터 + select + 직접 입력 -->
@@ -4867,7 +4867,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.777';
+const ERP_VERSION = 'v1.9.778';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12704,6 +12704,17 @@ function saveAdProject() {
   closeModal('ad-project-modal');
   showNotif('✅ 프로젝트 ' + (editId ? '수정' : '추가') + ' 완료', 'success');
   try { renderAdsPage(); } catch(_){}
+  // v1.9.778: 지출결의서 모달이 열려있으면 광고 프로젝트 select 갱신 + 신규 자동 선택
+  try {
+    const apOverlay = document.getElementById('overlay-ap-expense');
+    const apeSel = document.getElementById('ape-ad-project');
+    if (apOverlay && apOverlay.classList.contains('show') && apeSel) {
+      const prevVal = editId ? String(editId) : (DB.adProjects[DB.adProjects.length - 1] || {}).id;
+      apeSel.innerHTML = '<option value="">없음 (단발성)</option>' +
+        (DB.adProjects || []).map(p => `<option value="${p.id}">${(p.name||'-').replace(/</g,'&lt;')}</option>`).join('');
+      if (prevVal) apeSel.value = prevVal;
+    }
+  } catch(_){}
 }
 
 function deleteAdProject() {
