@@ -2584,7 +2584,6 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div style="font-size:13px;font-weight:800;color:#be185d;margin-bottom:3px">광고비는 <u>지출결의서</u>가 단일 진실 (Single Source of Truth)</div>
           <div style="font-size:11.5px;color:#9d174d;line-height:1.6">결재 요청 → 지출 결의서 → 분류 '광고비' 선택 후 쇼핑몰·집행 기간·금액 입력 시 이 페이지에 자동 반영됩니다.</div>
         </div>
-        <button type="button" onclick="openAdsManualModal()" style="background:#fff;color:#be185d;border:1px solid #fbcfe8;padding:9px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">+ 수동 추가</button>
         <button type="button" onclick="openAdProjectModal()" style="background:#fff;color:#7c3aed;border:1px solid #ddd6fe;padding:9px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">+ 프로젝트 추가</button>
         <button type="button" onclick="openExpenseModalForAd(null)" style="background:#be185d;color:#fff;border:none;padding:9px 18px;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">+ 지출결의서 작성</button>
       </div>
@@ -4867,7 +4866,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.780';
+const ERP_VERSION = 'v1.9.781';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12680,44 +12679,20 @@ function _renderProjectCostList(projectId) {
   if (summary) summary.innerHTML = `💰 <b>총 ${ads.length}건</b> · 합계 <b style="color:#be185d;font-size:13px">₩${total.toLocaleString()}</b>`;
 }
 
-// v1.9.780: 프로젝트에서 광고비 추가 — 프로젝트 정보 (쇼핑몰/제품/기간) 모두 prefill
+// v1.9.781: 프로젝트에서 광고비 추가 — 지출결의서 모달 (수동 입력 모달 X, 단일 진실 원칙)
 function _addCostFromAdProject() {
   const projectId = document.getElementById('ad-project-edit-id').value;
   if (!projectId) { showNotif('먼저 프로젝트를 저장하세요', 'warning'); return; }
   const proj = (DB.adProjects || []).find(p => String(p.id) === String(projectId));
   if (!proj) { showNotif('프로젝트를 찾을 수 없습니다', 'warning'); return; }
   closeModal('ad-project-modal');
+  // 프로젝트 정보를 preselect 전역에 넣고 지출결의서 모달 열기
+  const shopId = (Array.isArray(proj.shopIds) && proj.shopIds.length > 0) ? proj.shopIds[0] : null;
+  window._preselectedAdProjectId = projectId;
+  window._preselectedAdStartDate = proj.startDate || '';
+  window._preselectedAdEndDate = proj.endDate || '';
   setTimeout(() => {
-    openAdsManualModal();
-    setTimeout(() => {
-      try {
-        // 1) 프로젝트 select
-        const projSel = document.getElementById('ads-manual-project');
-        if (projSel) projSel.value = projectId;
-
-        // 2) 쇼핑몰 select — project.shopIds[0] (여러 개면 첫 번째)
-        const shopSel = document.getElementById('ads-manual-shop');
-        if (shopSel && Array.isArray(proj.shopIds) && proj.shopIds.length > 0) {
-          shopSel.value = proj.shopIds[0];
-        }
-
-        // 3) 입력 방식 → 기간 입력 + 시작일/종료일
-        const typeSel = document.getElementById('ads-manual-type');
-        if (typeSel && proj.startDate && proj.endDate) {
-          typeSel.value = 'range';
-          if (typeof _toggleAdsManualType === 'function') _toggleAdsManualType();
-          const startEl = document.getElementById('ads-manual-start');
-          const endEl = document.getElementById('ads-manual-end');
-          if (startEl) startEl.value = proj.startDate;
-          if (endEl) endEl.value = proj.endDate;
-        }
-
-        // 4) 광고 대상 제품 — project.itemIds 체크
-        if (Array.isArray(proj.itemIds) && proj.itemIds.length > 0 && typeof _renderAdsItemMultiSelect === 'function') {
-          _renderAdsItemMultiSelect(proj.itemIds);
-        }
-      } catch(e) { console.warn('prefill 실패:', e); }
-    }, 60);
+    try { openExpenseModalForAd(shopId); } catch(e) { console.warn('지출결의서 모달 열기 실패:', e); }
   }, 200);
 }
 
@@ -23346,7 +23321,9 @@ function openExpenseModal() {
   // v1.9.500: 광고비 필드 초기화 + 카테고리에 따라 표시 토글
   if ($('ape-ad-shop')) { _populateApeAdShopDropdown(); $('ape-ad-shop').value = window._preselectedAdShopId || ''; window._preselectedAdShopId = null; }
   if ($('ape-ad-platform')) $('ape-ad-platform').value = '';
-  if ($('ape-ad-start')) $('ape-ad-start').value = '';
+  // v1.9.781: 광고 시작일/종료일 preselect 지원 (프로젝트에서 광고비 추가 시)
+  if ($('ape-ad-start')) { $('ape-ad-start').value = window._preselectedAdStartDate || ''; window._preselectedAdStartDate = null; }
+  if ($('ape-ad-end'))   { $('ape-ad-end').value   = window._preselectedAdEndDate   || ''; window._preselectedAdEndDate = null; }
   // v1.9.777: 광고 프로젝트 select 채우기 (신규)
   if ($('ape-ad-project')) {
     $('ape-ad-project').innerHTML = '<option value="">없음 (단발성)</option>' +
@@ -23354,7 +23331,6 @@ function openExpenseModal() {
     $('ape-ad-project').value = window._preselectedAdProjectId || '';
     window._preselectedAdProjectId = null;
   }
-  if ($('ape-ad-end')) $('ape-ad-end').value = '';
   try { onApeCategoryChange(); } catch(_){}
   renderApeAttachList();
 }
