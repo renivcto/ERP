@@ -1040,6 +1040,41 @@ async function saveCafe24RefreshToken(firestoreDb, refreshToken) {
 }
 
 // 메인 인입 로직
+// v2.20: 합쳐진 중복 행 자동 cleanup
+//   - 분리된 자식 행 (-1, -2 같은 접미사) 이 있는데 같은 originalOrderId 의 합쳐진 행 (접미사 없음) 도 있으면
+//   - 합쳐진 행을 자동 삭제 (v2.19 이전에 들어온 잘못된 데이터)
+async function cleanupMergedDuplicates(firestoreDb) {
+  const docRef = firestoreDb.doc('erp_data/shopOrders');
+  const snap = await docRef.get();
+  if (!snap.exists) return { removed: 0, total: 0 };
+  let orders = [];
+  try { orders = JSON.parse(snap.data().data) || []; } catch (_) { return { removed: 0, total: 0 }; }
+  // 분리된 행이 존재하는 originalOrderId 수집
+  const splitOriginalIds = new Set();
+  for (const o of orders) {
+    if (o && o.cafe24OriginalOrderId) {
+      splitOriginalIds.add(String(o.cafe24OriginalOrderId));
+    }
+  }
+  if (splitOriginalIds.size === 0) return { removed: 0, total: orders.length };
+  // 합쳐진 행 (orderNo 가 분리 origin 과 같은데 cafe24OriginalOrderId 가 없는) 삭제
+  const cleaned = orders.filter(o => {
+    if (!o) return false;
+    if (o.cafe24OriginalOrderId) return true;  // 분리된 자식 행은 유지
+    if (splitOriginalIds.has(String(o.orderNo))) {
+      console.log('[CLEANUP] 합쳐진 중복 삭제:', o.orderNo, '-', (o.productName||'').slice(0, 50));
+      return false;
+    }
+    return true;
+  });
+  const removed = orders.length - cleaned.length;
+  if (removed > 0) {
+    await docRef.set({ data: JSON.stringify(cleaned), ts: Date.now() });
+    console.log('[CLEANUP] 합쳐진 중복', removed, '건 자동 삭제 완료');
+  }
+  return { removed, total: cleaned.length };
+}
+
 async function ingestCafe24Orders({ daysBack = 1 } = {}) {
   const mallId = (process.env.CAFE24_MALL_ID || '').trim();
   const clientId = (process.env.CAFE24_CLIENT_ID || '').trim();
@@ -1115,6 +1150,13 @@ async function ingestCafe24Orders({ daysBack = 1 } = {}) {
   console.log('[CAFE24] 매핑 자동 적용:', mappingResult.mapped, '건');
   const merge = await mergeOrdersIntoFirestore(firestoreDb, erpOrders);
 
+  // v2.20: 합쳐진 중복 행 자동 cleanup (v2.19 이전 잘못 합쳐진 데이터 정리)
+  let cleanup = { removed: 0, total: merge.total };
+  try {
+    cleanup = await cleanupMergedDuplicates(firestoreDb);
+    if (cleanup.removed > 0) console.log('[CAFE24] cleanup:', cleanup.removed, '건 자동 정리됨');
+  } catch (e) { console.warn('[CAFE24] cleanup 실패:', e.message); }
+
   // v2.18: 자동 취소/반품 삭제 비활성화 — 사용자 요청으로 수동 처리 전환
   //   (canceledIds는 ERP에 추가하지 않고 그대로 무시. 기존 ERP 주문은 유저가 수동으로 삭제)
   if (canceledIds.size > 0) {
@@ -1124,7 +1166,8 @@ async function ingestCafe24Orders({ daysBack = 1 } = {}) {
   return {
     fetched: allOrders.length,
     added: merge.added,
-    total: merge.total,
+    cleanedUp: cleanup.removed,
+    total: cleanup.total || merge.total,
     range: `${startDate} ~ ${endDate}`,
     sampleNew: merge.sampleNew.map(o => ({
       orderNo: o.orderNo, customer: o.customerName, product: o.productName, qty: o.qty, amount: o.paymentAmount
