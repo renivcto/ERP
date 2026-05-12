@@ -4866,7 +4866,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.783';
+const ERP_VERSION = 'v1.9.784';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10338,8 +10338,52 @@ function downloadOrderTemplate() {
   a.click(); URL.revokeObjectURL(a.href);
 }
 
+// v1.9.784: 합쳐진 중복 주문 자동 cleanup
+// 원리: cafe24OriginalOrderId 를 가진 행(=split 자식)이 있는 orderNo 수집 →
+//       같은 orderNo 이지만 cafe24OriginalOrderId 없는 행(=병합 부모) 제거
+function _cleanupMergedShopOrders() {
+  try {
+    const orders = DB.shopOrders || [];
+    if (!orders.length) return 0;
+    // 1) split 자식 행의 originalOrderId 수집
+    const splitOriginalIds = new Set();
+    for (const o of orders) {
+      if (o && o.cafe24OriginalOrderId) splitOriginalIds.add(String(o.cafe24OriginalOrderId));
+    }
+    if (splitOriginalIds.size === 0) return 0;
+    // 2) cafe24OriginalOrderId 없는데 orderNo 가 splitOriginalIds 에 포함되면 제거 + tombstone
+    const before = orders.length;
+    if (!Array.isArray(DB._deletedShopOrderSigs)) DB._deletedShopOrderSigs = [];
+    const removed = [];
+    DB.shopOrders = orders.filter(o => {
+      if (!o) return false;
+      if (o.cafe24OriginalOrderId) return true;
+      if (splitOriginalIds.has(String(o.orderNo))) {
+        removed.push(o);
+        return false;
+      }
+      return true;
+    });
+    // tombstone 등록 (재생성 방지)
+    for (const r of removed) {
+      const sig = 'merged:' + String(r.orderNo);
+      if (!DB._deletedShopOrderSigs.some(x => x && x.sig === sig)) {
+        DB._deletedShopOrderSigs.push({ sig, ts: Date.now(), reason: 'merged-cleanup' });
+      }
+    }
+    const diff = before - DB.shopOrders.length;
+    if (diff > 0) {
+      console.log('[v1.9.784] 합쳐진 중복 주문', diff, '건 자동 정리');
+      try { if (typeof saveData === 'function') saveData(); } catch(_){}
+    }
+    return diff;
+  } catch(e) { console.warn('_cleanupMergedShopOrders 실패:', e); return 0; }
+}
+
 function renderShopOrderTable() {
   const tbody = $('shop-order-table'); if (!tbody) return;
+  // v1.9.784: 합쳐진 중복 자동 정리
+  try { _cleanupMergedShopOrders(); } catch(_){}
   // v1.9.379: 기간 필터 초기화 (한 번만 효력 있음)
   if (typeof _periodInit === 'function') _periodInit('so');
   const period = (typeof _periodComputeRange === 'function') ? _periodComputeRange('so') : { start:'', end:'' };
@@ -10622,6 +10666,12 @@ async function deleteShopOrder(id) {
         note: `주문삭제 재고복구 [${o.orderNo}] ${restoreQty}개`
       });
     }
+  }
+  // v1.9.784: 삭제 tombstone — 다음 fetch 때 재생성 방지
+  if (!Array.isArray(DB._deletedShopOrderSigs)) DB._deletedShopOrderSigs = [];
+  const sig = 'manual:' + String(o.orderNo || '') + ':' + String(o.customerName || '');
+  if (!DB._deletedShopOrderSigs.some(x => x && x.sig === sig)) {
+    DB._deletedShopOrderSigs.push({ sig, ts: Date.now(), orderNo: o.orderNo, reason: 'manual-delete' });
   }
   DB.shopOrders = (DB.shopOrders||[]).filter(x => x.id !== id);
   await saveDataNow(); renderShopOrderTable();
