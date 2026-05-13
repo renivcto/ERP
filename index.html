@@ -4876,7 +4876,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.786';
+const ERP_VERSION = 'v1.9.787';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -5402,6 +5402,18 @@ async function _doSaveDataInner() {
       idbSet('order_stamp_' + o.id, o.stampData);
       try { _saveSharedOrderPdf(o.id, 'stamp', o.stampData, o.stampName); } catch(_){}
       dbToSave.orders[i].stampData = '__idb__';
+    }
+    // v1.9.787: 마감자료 (다중 첨부) IDB 오프로드 + Firestore 백업
+    if (Array.isArray(o.closingDocs) && o.closingDocs.length > 0) {
+      dbToSave.orders[i].closingDocs = o.closingDocs.map((doc, di) => {
+        if (!doc) return doc;
+        if (doc.data && typeof doc.data === 'string' && doc.data !== '__idb__' && doc.data.length > 100) {
+          try { idbSet('order_closing_' + o.id + '_' + di, doc.data); } catch(e) { console.warn('IDB save closing doc 실패:', e); }
+          try { _saveSharedOrderClosing(o.id, di, doc.data, doc.name||''); } catch(_){}
+          return { ...doc, data: '__idb__' };
+        }
+        return doc;
+      });
     }
   });
   // 업체 견적서/첨부파일/통장사본 바이너리 → IndexedDB 분리 (Firestore 1MB 한도 회피)
@@ -17359,7 +17371,9 @@ function _editOrderDirect(o, dbIdx) {
   $('o-stamp-preview').style.display='none';
   if (o.stampName) { $('o-stamp-existing-name').textContent=o.stampName; $('o-stamp-existing').style.display='block'; }
   else { $('o-stamp-existing').style.display='none'; }
-  // v1.9.786: 마감자료 복원
+  // v1.9.786: 마감자료 복원 — IDB 마커는 그대로 두고 viewOrderClosingDoc 가 lazy load
+  // v1.9.787: 발주서 ID 저장 (IDB lookup 키 용)
+  window._currentEditOrderId = o.id;
   _orderClosingDocs = Array.isArray(o.closingDocs) ? o.closingDocs.slice() : [];
   if ($('o-closing-docs-input')) $('o-closing-docs-input').value = '';
   try { renderOrderClosingDocsList(); } catch(_){}
@@ -18051,9 +18065,27 @@ function _orderRemoveClosingDoc(idx) {
   renderOrderClosingDocsList();
 }
 
-function viewOrderClosingDoc(idx) {
+async function viewOrderClosingDoc(idx) {
   const d = _orderClosingDocs[idx];
-  if (!d || !d.data) { showNotif('파일을 찾을 수 없습니다', 'warning'); return; }
+  if (!d) { showNotif('파일을 찾을 수 없습니다', 'warning'); return; }
+  // v1.9.787: IDB 마커면 lazy load (IDB → Firestore fallback)
+  if (d.data === '__idb__' || !d.data) {
+    const oid = window._currentEditOrderId;
+    if (!oid) { showNotif('파일 로드 실패: 발주서 ID 없음', 'warning'); return; }
+    try {
+      let real = null;
+      try { real = await idbGet('order_closing_' + oid + '_' + idx); } catch(_){}
+      if (!real || real === '__idb__') {
+        try { real = await _loadSharedOrderClosing(oid, idx); } catch(_){}
+      }
+      if (real && real !== '__idb__') {
+        d.data = real;  // cache 메모리
+      } else {
+        showNotif('⚠️ 파일 데이터 없음 (IDB/Firestore 모두 미발견)', 'warning');
+        return;
+      }
+    } catch(e) { console.warn('마감자료 lazy load 실패:', e); showNotif('파일 로드 실패', 'warning'); return; }
+  }
   try {
     // base64 data URL → Blob → 새 탭에서 열기
     const parts = d.data.split(',');
@@ -18067,7 +18099,6 @@ function viewOrderClosingDoc(idx) {
     const blob = new Blob([buf], { type: mime });
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');
-    // 메모리 정리는 새 탭이 사용 중일 수 있으므로 30초 후 revoke
     setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 30000);
   } catch(e) {
     console.warn('viewOrderClosingDoc 실패:', e);
@@ -18579,6 +18610,8 @@ function saveOrder() {
     taxInvoice: existing.taxInvoice || '미수령',
     // v1.9.786: 마감자료 (거래명세서·마감서)
     closingDocs: Array.isArray(_orderClosingDocs) ? _orderClosingDocs.slice() : (existing.closingDocs || []),
+    // v1.9.787: 머지 보호 (v1.9.405 머지 로직이 updatedAt 큰 쪽을 선택)
+    updatedAt: Date.now(),
   };
   let _savedOrderId = null;
   if (isEdit && dbIdx >= 0) {
@@ -18654,6 +18687,9 @@ function saveOrder() {
   closeModal('add-order'); renderOrderTable();
   updateBadges();
   _orderPdfData=null; _orderPdfName=null; _orderStampData=null; _orderStampName=null;
+  // v1.9.787: 마감자료 임시 변수도 초기화
+  _orderClosingDocs = [];
+  window._currentEditOrderId = null;
 
   // 드래프트 비우기 (v1.9.194)
   try { localStorage.removeItem('reniv_order_draft'); } catch(_){}
@@ -32279,6 +32315,34 @@ async function _loadSharedOrderPdf(orderId, kind) {
     const snap = await window._firestoreGetDoc(ref);
     if (snap.exists()) return snap.data().data || null;
   } catch(e) { console.warn(kind + ' Firestore 로드 실패:', e); }
+  return null;
+}
+
+// v1.9.787: 발주서 마감자료 (다중 첨부) Firestore 백업/로드
+async function _saveSharedOrderClosing(orderId, idx, dataUrl, fileName) {
+  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return;
+  if (!dataUrl || dataUrl === '__idb__' || dataUrl === '__stored__') return;
+  if (typeof dataUrl !== 'string') return;
+  if (dataUrl.length > 900000) {
+    console.log('📦 [closing] order ' + orderId + '#' + idx + ' 너무 큼 (' + dataUrl.length + ' bytes), Firestore 백업 안 함 (IDB 만)');
+    return;
+  }
+  try {
+    const docId = 'order_' + orderId + '_closing_' + idx;
+    const ref = window._firestoreDoc(window._firebaseDb, 'orderPdfs', docId);
+    await window._firestoreSetDoc(ref, { data: dataUrl, name: fileName||'', kind: 'closing', idx: idx, ts: Date.now() });
+    console.log('✅ [closing] order ' + orderId + '#' + idx + ' Firestore 백업 (' + dataUrl.length + ' bytes)');
+  } catch(e) { console.warn('closing Firestore 저장 실패:', e); }
+}
+
+async function _loadSharedOrderClosing(orderId, idx) {
+  if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return null;
+  try {
+    const docId = 'order_' + orderId + '_closing_' + idx;
+    const ref = window._firestoreDoc(window._firebaseDb, 'orderPdfs', docId);
+    const snap = await window._firestoreGetDoc(ref);
+    if (snap.exists()) return snap.data().data || null;
+  } catch(e) { console.warn('closing Firestore 로드 실패:', e); }
   return null;
 }
 
