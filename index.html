@@ -4213,6 +4213,16 @@ EXP YYYYMMDD 까지</textarea></div>
         </div>
       </div>
 
+      <!-- v1.9.786: 마감자료 (거래명세서·마감서) — 다중 첨부 -->
+      <div class="fg" style="margin-top:10px">
+        <label>📑 마감자료 <span style="color:var(--gray-400);font-weight:400">(거래명세서·마감서 등 · 여러 파일 가능)</span></label>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <input type="file" id="o-closing-docs-input" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.xlsx,.xls,.csv,.docx,.doc,.hwp" multiple onchange="handleOrderClosingDocs(this)" style="flex:1">
+          <span style="font-size:10.5px;color:var(--gray-400)">PDF · 이미지 · 엑셀 · 워드 등 (15MB 이하)</span>
+        </div>
+        <div id="o-closing-docs-list" style="display:flex;flex-direction:column;gap:5px"></div>
+      </div>
+
     </div>
     <div class="modal-ft" style="justify-content:space-between">
       <button class="btn btn-danger btn-sm" id="order-delete-btn" style="display:none">🗑️ 삭제</button>
@@ -4866,7 +4876,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.785';
+const ERP_VERSION = 'v1.9.786';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7713,6 +7723,15 @@ function openModal(id) {
     if (id === 'add-quote') { populateVendorSelect('q-vendor'); ensureQuoteRows(); }
     if (id === 'add-order') {
       ensureOrderRows();
+      // v1.9.786: 신규 모드일 때만 마감자료 초기화 (편집 모드는 editOrderByIdx 에서 복원함)
+      try {
+        const isEdit = editingId['add-order'] !== null && editingId['add-order'] !== undefined;
+        if (!isEdit) {
+          _orderClosingDocs = [];
+          if ($('o-closing-docs-input')) $('o-closing-docs-input').value = '';
+          if (typeof renderOrderClosingDocsList === 'function') renderOrderClosingDocsList();
+        }
+      } catch(_){}
       // v1.9.194 — 작성 중 드래프트 자동 복원 제안 (신규 작성 시에만)
       try {
         const isEdit = editingId['add-order'] !== null && editingId['add-order'] !== undefined;
@@ -17340,6 +17359,10 @@ function _editOrderDirect(o, dbIdx) {
   $('o-stamp-preview').style.display='none';
   if (o.stampName) { $('o-stamp-existing-name').textContent=o.stampName; $('o-stamp-existing').style.display='block'; }
   else { $('o-stamp-existing').style.display='none'; }
+  // v1.9.786: 마감자료 복원
+  _orderClosingDocs = Array.isArray(o.closingDocs) ? o.closingDocs.slice() : [];
+  if ($('o-closing-docs-input')) $('o-closing-docs-input').value = '';
+  try { renderOrderClosingDocsList(); } catch(_){}
   // v1.9.111 — 결재 날인 필요 없음 체크박스 상태 복원
   if ($('o-stamp-not-required')) $('o-stamp-not-required').checked = !!o.stampNotRequired;
   openModal('add-order');
@@ -17971,6 +17994,87 @@ function fillOrderVendor() {
 let _orderPdfData = null;   // 원본
 let _orderPdfName = null;
 let _orderStampData = null; // 도장 날인본
+// v1.9.786: 마감자료 (거래명세서·마감서) — 다중 첨부
+let _orderClosingDocs = [];  // [{ name, data, type, size, addedAt }]
+
+function handleOrderClosingDocs(input) {
+  const files = input.files;
+  if (!files || !files.length) return;
+  Array.from(files).forEach(f => {
+    if (f.size > 15 * 1024 * 1024) {
+      showNotif('⚠️ 15MB 이상 파일은 업로드 불가: ' + f.name, 'warning');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      _orderClosingDocs.push({
+        name: f.name,
+        data: e.target.result,
+        type: f.type,
+        size: f.size,
+        addedAt: Date.now()
+      });
+      renderOrderClosingDocsList();
+    };
+    reader.readAsDataURL(f);
+  });
+  input.value = '';  // 같은 파일 재선택 가능하도록 초기화
+}
+
+function renderOrderClosingDocsList() {
+  const wrap = document.getElementById('o-closing-docs-list');
+  if (!wrap) return;
+  if (!_orderClosingDocs.length) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = _orderClosingDocs.map((d, i) => {
+    const nm = (d.name || '마감자료').replace(/</g, '&lt;');
+    const sizeKB = d.size ? Math.round(d.size / 1024) : 0;
+    const sizeText = sizeKB > 1024 ? (sizeKB / 1024).toFixed(1) + 'MB' : sizeKB + 'KB';
+    const icon = (d.type && d.type.startsWith('image/')) ? '🖼️' :
+                 (d.type === 'application/pdf') ? '📕' : '📄';
+    return '<div style="display:flex;align-items:center;justify-content:space-between;background:#fef3c7;border:1px solid #fcd34d;border-radius:7px;padding:6px 11px;font-size:12px">' +
+      '<span style="display:flex;align-items:center;gap:7px;overflow:hidden;flex:1">' +
+      icon + ' <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#78350f;font-weight:600">' + nm + '</span>' +
+      '<span style="color:#a16207;font-size:10.5px;flex-shrink:0">(' + sizeText + ')</span>' +
+      '</span>' +
+      '<div style="display:flex;gap:4px;flex-shrink:0">' +
+      '<button type="button" onclick="viewOrderClosingDoc(' + i + ')" style="background:#fff;color:#a16207;border:1px solid #fcd34d;padding:2px 8px;border-radius:4px;font-size:10.5px;cursor:pointer;font-weight:600">보기</button>' +
+      '<button type="button" onclick="_orderRemoveClosingDoc(' + i + ')" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;padding:2px 8px;border-radius:4px;font-size:10.5px;cursor:pointer;font-weight:600">삭제</button>' +
+      '</div>' +
+      '</div>';
+  }).join('');
+}
+
+function _orderRemoveClosingDoc(idx) {
+  if (idx < 0 || idx >= _orderClosingDocs.length) return;
+  if (!confirm('이 마감자료를 삭제하시겠습니까?')) return;
+  _orderClosingDocs.splice(idx, 1);
+  renderOrderClosingDocsList();
+}
+
+function viewOrderClosingDoc(idx) {
+  const d = _orderClosingDocs[idx];
+  if (!d || !d.data) { showNotif('파일을 찾을 수 없습니다', 'warning'); return; }
+  try {
+    // base64 data URL → Blob → 새 탭에서 열기
+    const parts = d.data.split(',');
+    const meta = parts[0] || '';
+    const b64 = parts[1] || '';
+    const mimeMatch = meta.match(/data:([^;]+)/);
+    const mime = (mimeMatch ? mimeMatch[1] : d.type) || 'application/octet-stream';
+    const byteString = atob(b64);
+    const buf = new Uint8Array(byteString.length);
+    for (let i = 0; i < byteString.length; i++) buf[i] = byteString.charCodeAt(i);
+    const blob = new Blob([buf], { type: mime });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    // 메모리 정리는 새 탭이 사용 중일 수 있으므로 30초 후 revoke
+    setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 30000);
+  } catch(e) {
+    console.warn('viewOrderClosingDoc 실패:', e);
+    showNotif('파일 보기 실패', 'warning');
+  }
+}
+
 let _orderStampName = null;
 
 // 날인 불필요 → 결재 전으로 되돌리기 (확인 후)
@@ -18473,6 +18577,8 @@ function saveOrder() {
     urgentPrepay: !!($('o-urgent-prepay') && $('o-urgent-prepay').checked),
     urgentBalance: !!($('o-urgent-balance') && $('o-urgent-balance').checked),
     taxInvoice: existing.taxInvoice || '미수령',
+    // v1.9.786: 마감자료 (거래명세서·마감서)
+    closingDocs: Array.isArray(_orderClosingDocs) ? _orderClosingDocs.slice() : (existing.closingDocs || []),
   };
   let _savedOrderId = null;
   if (isEdit && dbIdx >= 0) {
