@@ -1846,7 +1846,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
                     <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:130px">총 생산량</th>
                     <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:120px">단가 (원)</th>
                     <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:130px">소계 (원)</th>
-                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:60px">출처</th>
+                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:100px">출처</th>
                   </tr>
                 </thead>
                 <tbody id="ce-bom-rows">
@@ -1866,14 +1866,16 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
               <table style="width:100%;border-collapse:collapse;font-size:12px">
                 <thead style="background:#fef2f5;border-bottom:1px solid #fbcfe8">
                   <tr>
-                    <th style="padding:7px 8px;text-align:left;font-weight:700;color:#9d174d">항목명</th>
-                    <th style="padding:7px 8px;text-align:right;font-weight:700;color:#9d174d;width:140px">금액 (원)</th>
-                    <th style="padding:7px 8px;text-align:left;font-weight:700;color:#9d174d">메모</th>
-                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:50px"></th>
+                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d">항목명</th>
+                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:120px">단가 (원)</th>
+                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:90px">수량</th>
+                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:140px">합계 (원)</th>
+                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d">메모</th>
+                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:60px"></th>
                   </tr>
                 </thead>
                 <tbody id="ce-extra-rows">
-                  <tr><td colspan="4" style="padding:14px;text-align:center;color:#94a3b8">아직 없음 · "+ 비용 추가" 클릭</td></tr>
+                  <tr><td colspan="6" style="padding:14px;text-align:center;color:#94a3b8">아직 없음 · "+ 비용 추가" 클릭</td></tr>
                 </tbody>
               </table>
             </div>
@@ -5039,7 +5041,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.799';
+const ERP_VERSION = 'v1.9.800';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13311,10 +13313,19 @@ function _ceRenderBomRows(productId, productionQty, existingRows) {
       '</td>' +
       '<td style="padding:4px 6px"><input type="number" class="ce-row-price" value="' + unitPrice + '" data-source="' + priceSource + '" min="0" step="any" oninput="this.dataset.source=\'manual\';_ceCalcRowSubtotal(this.closest(\'tr\'));_ceRecalcAll();" style="width:100%;padding:4px 6px;text-align:center;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums"></td>' +
       '<td class="ce-row-subtotal" style="padding:6px 8px;text-align:center;font-weight:700;color:#0f172a;font-variant-numeric:tabular-nums">₩' + Math.round(subtotal).toLocaleString() + '</td>' +
-      '<td style="padding:6px 8px;text-align:center">' + sourceBadge + '</td>' +
+      '<td style="padding:6px 8px;text-align:center;white-space:nowrap">' + sourceBadge +
+        ' <button type="button" onclick="_ceRemoveBomRow(this.closest(\'tr\'))" title="이 자재 행 제거 (BOM은 유지 · 제품 다시 선택하면 복원)" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;padding:2px 5px;border-radius:4px;font-size:10px;cursor:pointer;margin-left:4px;line-height:1">🗑</button>' +
+      '</td>' +
       '</tr>';
   }).join('');
   tbody.innerHTML = rowsHtml;
+}
+
+// v1.9.800: BOM 행 제거 (시나리오에서만 — BOM 원본은 유지)
+function _ceRemoveBomRow(tr) {
+  if (!tr) return;
+  tr.remove();
+  _ceRecalcAll();
 }
 
 // 한 행의 소계 재계산
@@ -13330,10 +13341,18 @@ function _ceCalcRowSubtotal(tr) {
   subEl.textContent = '₩' + Math.round(subtotal).toLocaleString();
 }
 
-// 추가 비용 행 추가 (인건비/운반비/가공비 등)
-function _ceAddExtraRow(label, amount, memo) {
+// v1.9.800: 추가 비용 행 추가 — 단가 × 수량 = 합계 자동 계산
+function _ceAddExtraRow(label, unitPrice, qty, memo) {
   if (!Array.isArray(window._ceExtraRows)) window._ceExtraRows = [];
-  window._ceExtraRows.push({ label: label || '', amount: amount || 0, memo: memo || '' });
+  const up = parseFloat(unitPrice) || 0;
+  const q = (qty != null && qty !== '') ? (parseFloat(qty) || 0) : 1;
+  window._ceExtraRows.push({
+    label: label || '',
+    unitPrice: up,
+    qty: q,
+    amount: up * q,
+    memo: memo || ''
+  });
   _ceRenderExtraRows();
   _ceRecalcAll();
 }
@@ -13349,17 +13368,43 @@ function _ceRenderExtraRows() {
   const tbody = document.getElementById('ce-extra-rows');
   if (!tbody) return;
   if (!window._ceExtraRows || !window._ceExtraRows.length) {
-    tbody.innerHTML = '<tr><td colspan="4" style="padding:14px;text-align:center;color:#94a3b8">아직 없음 · "+ 비용 추가" 클릭</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:14px;text-align:center;color:#94a3b8">아직 없음 · "+ 비용 추가" 클릭</td></tr>';
     return;
   }
+  // v1.9.800: 기존 amount-only 행 호환 (unitPrice/qty 없으면 채워줌)
+  window._ceExtraRows.forEach(r => {
+    if (r && (r.unitPrice == null || r.qty == null)) {
+      r.unitPrice = (r.amount != null) ? parseFloat(r.amount) || 0 : 0;
+      r.qty = 1;
+    }
+  });
   tbody.innerHTML = window._ceExtraRows.map((r, i) => {
+    const up = parseFloat(r.unitPrice) || 0;
+    const q = parseFloat(r.qty) || 0;
+    const amt = up * q;
+    r.amount = amt;  // 캐시 갱신
     return '<tr data-extra-idx="' + i + '" style="border-bottom:1px solid #f1f5f9">' +
-      '<td style="padding:4px 6px"><input type="text" class="ce-extra-label" value="' + (r.label || '').replace(/"/g,'&quot;') + '" oninput="window._ceExtraRows[' + i + '].label=this.value" placeholder="예: 인건비 / 운반비" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:12px"></td>' +
-      '<td style="padding:4px 6px"><input type="number" class="ce-extra-amount" value="' + (r.amount || 0) + '" min="0" step="any" oninput="window._ceExtraRows[' + i + '].amount=parseFloat(this.value)||0;_ceRecalcAll()" style="width:100%;padding:4px 6px;text-align:right;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums"></td>' +
+      '<td style="padding:4px 6px"><input type="text" class="ce-extra-label" value="' + (r.label || '').replace(/"/g,'&quot;') + '" oninput="window._ceExtraRows[' + i + '].label=this.value" placeholder="예: 인건비 / 운반비" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;text-align:center"></td>' +
+      '<td style="padding:4px 6px"><input type="number" class="ce-extra-up" value="' + up + '" min="0" step="any" oninput="window._ceExtraRows[' + i + '].unitPrice=parseFloat(this.value)||0;_ceUpdateExtraAmt(' + i + ');_ceRecalcAll()" style="width:100%;padding:4px 6px;text-align:center;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums"></td>' +
+      '<td style="padding:4px 6px"><input type="number" class="ce-extra-qty" value="' + q + '" min="0" step="any" oninput="window._ceExtraRows[' + i + '].qty=parseFloat(this.value)||0;_ceUpdateExtraAmt(' + i + ');_ceRecalcAll()" style="width:100%;padding:4px 6px;text-align:center;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums"></td>' +
+      '<td class="ce-extra-amt" style="padding:6px 8px;text-align:center;font-weight:700;color:#0f172a;font-variant-numeric:tabular-nums">₩' + Math.round(amt).toLocaleString() + '</td>' +
       '<td style="padding:4px 6px"><input type="text" class="ce-extra-memo" value="' + (r.memo || '').replace(/"/g,'&quot;') + '" oninput="window._ceExtraRows[' + i + '].memo=this.value" placeholder="(선택)" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:12px"></td>' +
       '<td style="padding:4px 6px;text-align:center"><button type="button" onclick="_ceRemoveExtraRow(' + i + ')" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;padding:3px 8px;border-radius:4px;font-size:10.5px;cursor:pointer;font-weight:700">삭제</button></td>' +
       '</tr>';
   }).join('');
+}
+
+// v1.9.800: 한 행의 amount(합계) 셀만 빠르게 갱신
+function _ceUpdateExtraAmt(idx) {
+  const r = window._ceExtraRows[idx];
+  if (!r) return;
+  const up = parseFloat(r.unitPrice) || 0;
+  const q = parseFloat(r.qty) || 0;
+  const amt = up * q;
+  r.amount = amt;
+  const tr = document.querySelector('tr[data-extra-idx="' + idx + '"]');
+  const cell = tr && tr.querySelector('.ce-extra-amt');
+  if (cell) cell.textContent = '₩' + Math.round(amt).toLocaleString();
 }
 
 // 모든 합계 재계산
