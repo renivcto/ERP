@@ -884,6 +884,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="nav-item" onclick="go('vendor')"><span class="ico">🏢</span>생산 업체</div>
       <div class="nav-item" onclick="go('bom')"><span class="ico">⚙️</span>BOM 관리</div>
       <div class="nav-item" onclick="go('order')"><span class="ico">📋</span>발주서</div>
+      <div class="nav-item" onclick="go('costest')"><span class="ico">💰</span>생산 예상 비용</div>
     </div>
     <div class="nav-item" onclick="clickNavItem('item','item-sub')" id="nav-item"><span class="ico">🗂️</span>품목 관리</div>
     <div class="nav-sub" id="item-sub">
@@ -1794,6 +1795,139 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             </colgroup>
             <thead><tr><th style="font-size:11.5px">분류</th><th style="font-size:11.5px">업체명</th><th style="font-size:11.5px">품목</th><th style="font-size:11.5px">발주일</th><th style="font-size:11.5px">납기일</th><th style="font-size:11.5px">결제금액<br>(VAT포함)</th><th style="font-size:11.5px">입고상태</th><th style="font-size:11.5px">결재 날인</th><th style="font-size:11.5px">이메일</th><th style="font-size:11.5px">수정</th></tr></thead>
             <tbody id="order-table"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ v1.9.788: 생산 예상 비용 ══════════════ -->
+    <div class="page" id="page-costest">
+      <div style="font-size:11px;color:#a3266b;letter-spacing:2px;margin-bottom:4px;font-weight:600">RENIV · COST ESTIMATE</div>
+      <h2 style="font-size:32px;font-weight:800;margin:0 0 18px;letter-spacing:-0.5px">💰 생산 예상 비용</h2>
+
+      <!-- 상단 입력 카드 -->
+      <div class="card" style="margin-bottom:16px;border:1px solid #fde2e7;background:linear-gradient(135deg,#fff,#fff7f9)">
+        <div class="card-hdr" style="background:transparent;border-bottom:1px solid #fbcfe8">
+          <span class="card-title" style="color:#9d174d">📝 새 예상 비용 작성 <span style="font-size:11px;color:#be185d;font-weight:500;margin-left:6px">(VAT 별도 기준)</span></span>
+        </div>
+        <div class="card-body" style="padding:16px 18px">
+          <input type="hidden" id="ce-edit-id" value="">
+          <!-- 기본 정보 -->
+          <div style="display:grid;grid-template-columns:1.5fr 1.5fr 1fr;gap:10px;margin-bottom:14px">
+            <div class="fg" style="margin:0">
+              <label>시나리오명 <span style="font-size:10px;color:var(--gray-400)">(예: 2026-05 1차, 가격 인상 후)</span></label>
+              <input class="fi" id="ce-scenario" placeholder="자동 생성: 제품명 - 작성일">
+            </div>
+            <div class="fg" style="margin:0">
+              <label>제품 <span class="req">*</span></label>
+              <select class="fs" id="ce-product" onchange="_ceOnProductChange()">
+                <option value="">— 제품 선택 —</option>
+              </select>
+            </div>
+            <div class="fg" style="margin:0">
+              <label>생산 수량 <span class="req">*</span></label>
+              <input class="fi" id="ce-qty" type="number" min="0" placeholder="0" oninput="_ceQtyChange()" style="text-align:right">
+            </div>
+          </div>
+
+          <!-- BOM 자재 표 -->
+          <div style="margin-bottom:14px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+              <span style="font-size:13px;font-weight:700;color:#0f172a">📦 BOM 자재</span>
+              <span style="font-size:11px;color:var(--gray-500)">단가는 가장 최근 발주서에서 자동 매칭 · 수량/단가 수동 수정 가능</span>
+            </div>
+            <div style="border:1px solid var(--gray-200);border-radius:8px;overflow:hidden;background:#fff">
+              <table style="width:100%;border-collapse:collapse;font-size:12px" id="ce-bom-table">
+                <thead style="background:#fef2f5;border-bottom:1px solid #fbcfe8">
+                  <tr>
+                    <th style="padding:7px 8px;text-align:left;font-weight:700;color:#9d174d">자재명</th>
+                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:60px">단위</th>
+                    <th style="padding:7px 8px;text-align:right;font-weight:700;color:#9d174d;width:90px">단위 사용량</th>
+                    <th style="padding:7px 8px;text-align:right;font-weight:700;color:#9d174d;width:110px">총 사용량</th>
+                    <th style="padding:7px 8px;text-align:right;font-weight:700;color:#9d174d;width:120px">단가 (원)</th>
+                    <th style="padding:7px 8px;text-align:right;font-weight:700;color:#9d174d;width:130px">소계 (원)</th>
+                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:60px">출처</th>
+                  </tr>
+                </thead>
+                <tbody id="ce-bom-rows">
+                  <tr><td colspan="7" style="padding:18px;text-align:center;color:#94a3b8">제품을 선택하면 BOM 자재가 표시됩니다</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 추가 비용 행 (인건비/운반비/가공비 등) -->
+          <div style="margin-bottom:14px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+              <span style="font-size:13px;font-weight:700;color:#0f172a">➕ 추가 비용 <span style="font-size:11px;color:var(--gray-400);font-weight:500">(인건비 · 운반비 · 가공비 등)</span></span>
+              <button type="button" onclick="_ceAddExtraRow()" style="background:#fff;color:#be185d;border:1px solid #fbcfe8;padding:5px 12px;border-radius:6px;font-size:11.5px;font-weight:700;cursor:pointer">+ 비용 추가</button>
+            </div>
+            <div style="border:1px solid var(--gray-200);border-radius:8px;overflow:hidden;background:#fff">
+              <table style="width:100%;border-collapse:collapse;font-size:12px">
+                <thead style="background:#fef2f5;border-bottom:1px solid #fbcfe8">
+                  <tr>
+                    <th style="padding:7px 8px;text-align:left;font-weight:700;color:#9d174d">항목명</th>
+                    <th style="padding:7px 8px;text-align:right;font-weight:700;color:#9d174d;width:140px">금액 (원)</th>
+                    <th style="padding:7px 8px;text-align:left;font-weight:700;color:#9d174d">메모</th>
+                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:50px"></th>
+                  </tr>
+                </thead>
+                <tbody id="ce-extra-rows">
+                  <tr><td colspan="4" style="padding:14px;text-align:center;color:#94a3b8">아직 없음 · "+ 비용 추가" 클릭</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 합계 -->
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+            <div style="padding:12px 14px;border:1px solid #fde2e7;border-radius:8px;background:#fff">
+              <div style="font-size:10.5px;color:var(--gray-500);font-weight:600;margin-bottom:4px">자재비</div>
+              <div style="font-size:18px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums" id="ce-total-mat">₩0</div>
+            </div>
+            <div style="padding:12px 14px;border:1px solid #fde2e7;border-radius:8px;background:#fff">
+              <div style="font-size:10.5px;color:var(--gray-500);font-weight:600;margin-bottom:4px">추가 비용</div>
+              <div style="font-size:18px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums" id="ce-total-extra">₩0</div>
+            </div>
+            <div style="padding:12px 14px;border:1px solid #be185d;border-radius:8px;background:#fdf2f8">
+              <div style="font-size:10.5px;color:#be185d;font-weight:700;margin-bottom:4px">총 예상 비용 (VAT 별도)</div>
+              <div style="font-size:20px;font-weight:800;color:#be185d;font-variant-numeric:tabular-nums" id="ce-total-cost">₩0</div>
+            </div>
+            <div style="padding:12px 14px;border:1px solid #fde2e7;border-radius:8px;background:#fff">
+              <div style="font-size:10.5px;color:var(--gray-500);font-weight:600;margin-bottom:4px">단위당 (1개)</div>
+              <div style="font-size:18px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums" id="ce-perunit">₩0</div>
+            </div>
+          </div>
+
+          <!-- 메모 + 저장 버튼 -->
+          <div class="fg" style="margin-bottom:10px"><label>메모 <span style="font-size:10px;color:var(--gray-400)">(선택)</span></label><textarea class="fta" id="ce-memo" rows="2" placeholder="이번 시나리오의 가정·전제·특이사항"></textarea></div>
+          <div style="display:flex;justify-content:flex-end;gap:8px">
+            <button type="button" class="btn btn-outline" onclick="_ceResetForm()" style="font-size:12.5px">초기화</button>
+            <button type="button" class="btn btn-primary" onclick="_ceSave()" style="background:#be185d;font-size:12.5px">💾 저장</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 하단 시나리오 목록 표 -->
+      <div class="card">
+        <div class="card-hdr"><span class="card-title">📋 저장된 시나리오 <span id="ce-list-count" style="font-size:11px;color:var(--gray-500);font-weight:500;margin-left:6px"></span></span></div>
+        <div class="card-body" style="padding:0">
+          <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+            <thead style="background:#f8fafc;border-bottom:1px solid var(--gray-200)">
+              <tr>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:#475569">시나리오명</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:#475569">제품</th>
+                <th style="padding:10px 12px;text-align:right;font-weight:700;color:#475569;width:100px">생산수량</th>
+                <th style="padding:10px 12px;text-align:right;font-weight:700;color:#475569;width:130px">자재비</th>
+                <th style="padding:10px 12px;text-align:right;font-weight:700;color:#475569;width:130px">추가비</th>
+                <th style="padding:10px 12px;text-align:right;font-weight:700;color:#475569;width:140px">총비용</th>
+                <th style="padding:10px 12px;text-align:right;font-weight:700;color:#475569;width:110px">단위당</th>
+                <th style="padding:10px 12px;text-align:center;font-weight:700;color:#475569;width:100px">작성일</th>
+              </tr>
+            </thead>
+            <tbody id="ce-list-tbody">
+              <tr><td colspan="8" style="padding:24px;text-align:center;color:#94a3b8">저장된 시나리오가 없습니다. 위에서 작성해 보세요.</td></tr>
+            </tbody>
           </table>
         </div>
       </div>
@@ -7467,7 +7601,8 @@ const PAGE_TITLES = {
   archive:'📥 아카이브',
   bom:'BOM 관리',production:'생산 현황',stock:'재고 관리',quote:'견적서',
   order:'발주서',sites:'사이트 / 계정',insight:'🌱 신제품 개발',accounts:'🔑 외부 계정',users:'사용자 관리',qc:'품질 관리',cost:'원가 분석',settings:'설정 프로필',
-  cs:'CS 관리',customers:'👥 고객 정보',sales:'판매 관리',approval:'🖋️ 결재 요청',ads:'📢 광고비 관리'
+  cs:'CS 관리',customers:'👥 고객 정보',sales:'판매 관리',approval:'🖋️ 결재 요청',ads:'📢 광고비 관리',
+  costest:'💰 생산 예상 비용'
 };
 
 function go(page) {
@@ -7497,11 +7632,11 @@ function go(page) {
   // Auto-open production sub-nav when on production / bom / vendor / order pages
   const prodSub = $('production-sub');
   if (prodSub) {
-    if (page === 'production' || page === 'bom' || page === 'vendor' || page === 'order') prodSub.classList.add('open');
+    if (page === 'production' || page === 'bom' || page === 'vendor' || page === 'order' || page === 'costest') prodSub.classList.add('open');
     else prodSub.classList.remove('open');
   }
   // 생산 관리 nav item도 하위 페이지(bom/vendor/order)에서 active 유지
-  if (page === 'bom' || page === 'vendor' || page === 'order') {
+  if (page === 'bom' || page === 'vendor' || page === 'order' || page === 'costest') {
     const np = $('nav-production');
     if (np) np.classList.add('active');
   }
@@ -7550,6 +7685,7 @@ function go(page) {
     stock: renderStock,
     quote: renderQuoteTable,
     order: renderOrderTable,
+    costest: () => { try { renderCostEstPage(); } catch(e) { console.warn('renderCostEstPage 실패:', e); } },
     approval: () => { if (typeof renderApprovalPage === 'function') renderApprovalPage(); },
     sites: () => {
       // 상위 탭(사이트/계정) 현재 상태에 맞는 서브페이지 렌더링
