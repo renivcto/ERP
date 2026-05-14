@@ -5038,7 +5038,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.793';
+const ERP_VERSION = 'v1.9.794';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6048,7 +6048,7 @@ async function loadDataFromFirestore() {
     if (!snaps[metaIdx].exists()) { console.log('Firestore meta 없음 (최초 사용)'); return { _noData: true }; }
 
     const result = {};
-    const collKeys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders','archivedItems','partSpecs','accounts','insights','newProducts','samples','approvals','expenses','approvalComments','feedPosts','cooperators','sellers'];
+    const collKeys = ['vendors','items','orders','productions','stockHistory','quotes','cs','shops','shopOrders','archivedItems','partSpecs','accounts','insights','newProducts','samples','approvals','expenses','approvalComments','feedPosts','cooperators','sellers','adProjects','costEstimates'];
     snaps.slice(0, collKeys.length).forEach((snap, i) => {
       const exists = snap.exists();
       if (exists) {
@@ -13202,9 +13202,12 @@ function _ceRenderBomRows(productId, productionQty, existingRows) {
     }
     const perUnit = parseFloat(b.qty) || 0;  // BOM 1개당 사용량
     const totalQty = existing ? (existing.qty || 0) : (perUnit * productionQty);
-    const priceInfo = _ceGetLatestUnitPrice(b.itemId);
-    const unitPrice = existing ? (existing.unitPrice || 0) : priceInfo.price;
-    const priceSource = existing ? (existing.priceSource || 'order') : (priceInfo.price > 0 ? 'order' : 'manual');
+    // v1.9.794: qty + price 통합 조회 → 발주 이력(qty>0) 있으면 단가 0이어도 발주 버튼 표시
+    const orderInfo = _ceGetLatestOrderInfo(b.itemId);
+    const hasOrderHistory = !!(orderInfo && orderInfo.qty > 0);
+    const orderPrice = orderInfo ? (orderInfo.price || 0) : 0;
+    const unitPrice = existing ? (existing.unitPrice || 0) : orderPrice;
+    const priceSource = existing ? (existing.priceSource || 'order') : (orderPrice > 0 ? 'order' : 'manual');
     const subtotal = totalQty * unitPrice;
     const userEdited = existing ? '1' : '0';
     const sourceBadge = priceSource === 'order'
@@ -13219,7 +13222,7 @@ function _ceRenderBomRows(productId, productionQty, existingRows) {
       '<td style="padding:4px 6px">' +
         '<div style="display:flex;gap:3px;align-items:center">' +
           '<input type="number" class="ce-row-qty" value="' + _ceFmtQty(totalQty) + '" data-user-edited="' + userEdited + '" min="0" step="any" oninput="this.dataset.userEdited=\'1\';_ceCalcRowSubtotal(this.closest(\'tr\'));_ceRecalcAll();" style="flex:1;min-width:0;padding:4px 6px;text-align:center;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums">' +
-          (priceInfo.price > 0
+          (hasOrderHistory
             ? '<button type="button" onclick="_ceUseOrderQty(this.closest(\'tr\'))" title="최근 발주서 수량으로 채우기 (MOQ 반영)" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:3px 6px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:700;line-height:1;flex-shrink:0">📋</button>'
             : '<span style="color:#cbd5e1;font-size:11px;padding:3px 4px" title="발주 이력 없음">—</span>') +
         '</div>' +
