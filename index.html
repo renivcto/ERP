@@ -5038,7 +5038,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.795';
+const ERP_VERSION = 'v1.9.796';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13080,6 +13080,52 @@ function _ceOnProductChange() {
   _ceRecalcAll();
 }
 
+// v1.9.796: 콘솔 진단 도구 — F12 콘솔에서 _ceDiag('자재명') 호출
+window._ceDiag = function(searchName) {
+  const items = (DB.items || []).filter(i => i && (i.name || '').includes(searchName));
+  console.log('\n=== 🔍 자재 검색:', searchName, '===');
+  if (!items.length) { console.log('❌ 자재명에 "' + searchName + '" 포함된 자재 없음'); return; }
+  items.forEach(it => {
+    console.log('\n📦 Item:', { id: it.id, name: it.name, code: it.code, type: it.type, price: it.price });
+    // 1) 같은 itemId 매칭
+    const ordsById = [];
+    (DB.orders || []).forEach(o => {
+      if (!Array.isArray(o.rows)) return;
+      o.rows.forEach(r => {
+        if (String(r.itemId) === String(it.id)) {
+          ordsById.push({ orderId: o.id, orderDate: o.orderDate, rowItemId: r.itemId, rowName: r.name, qty: r.qty, price: r.price });
+        }
+      });
+    });
+    console.log('  ✅ itemId 매칭 발주서:', ordsById.length, '건', ordsById);
+    // 2) 같은 이름으로 매칭 (다른 itemId 일 가능성 확인)
+    const ordsByName = [];
+    (DB.orders || []).forEach(o => {
+      if (!Array.isArray(o.rows)) return;
+      o.rows.forEach(r => {
+        if ((r.name || '').includes(searchName) && String(r.itemId) !== String(it.id)) {
+          ordsByName.push({ orderId: o.id, orderDate: o.orderDate, rowItemId: r.itemId, rowName: r.name, qty: r.qty, price: r.price });
+        }
+      });
+    });
+    if (ordsByName.length) {
+      console.warn('  ⚠️ 같은 이름인데 다른 itemId 발주서:', ordsByName.length, '건', ordsByName);
+      console.warn('  💡 → BOM의 itemId(' + it.id + ')와 발주서의 itemId가 달라 매칭 실패합니다.');
+    }
+    // 3) BOM 안의 이 자재
+    const inBoms = [];
+    Object.keys(DB.boms || {}).forEach(pid => {
+      (DB.boms[pid] || []).forEach((b, bi) => {
+        if (String(b.itemId) === String(it.id)) {
+          inBoms.push({ productId: pid, bomIdx: bi, qty: b.qty, unit: b.unit });
+        }
+      });
+    });
+    console.log('  📋 BOM 등록:', inBoms.length, '건', inBoms);
+  });
+  console.log('\n=== 진단 끝 ===\n');
+};
+
 // v1.9.792: 수치 정밀도 보존 포맷 (매우 작은 수 ~ 큰 수까지)
 function _ceFmtQty(n) {
   if (!isFinite(n) || n === 0) return '0';
@@ -13348,34 +13394,57 @@ function _ceCollectData() {
   };
 }
 
-// v1.9.795: async + await + localStorage 즉시 저장 (새로고침 시 데이터 손실 방지)
+// v1.9.796: 강력한 진단 + silent failure 차단
 async function _ceSave() {
-  if (typeof requireWrite === 'function' && !requireWrite()) return;
-  const data = _ceCollectData();
-  if (!data) return;
-  if (!Array.isArray(DB.costEstimates)) DB.costEstimates = [];
-  const editId = document.getElementById('ce-edit-id').value;
-  const now = Date.now();
-  if (editId) {
-    const idx = DB.costEstimates.findIndex(e => String(e.id) === String(editId));
-    if (idx >= 0) {
-      DB.costEstimates[idx] = { ...DB.costEstimates[idx], ...data, updatedAt: now };
-      showNotif('✅ 생산 예상 비용 수정 완료', 'success');
-    }
-  } else {
-    const newId = 'est_' + now + '_' + Math.floor(Math.random() * 1000);
-    DB.costEstimates.push({ id: newId, ...data, createdAt: now, updatedAt: now });
-    showNotif('✅ 생산 예상 비용 저장 완료', 'success');
-  }
-  // 1) 즉시 localStorage 동기 저장 (Firestore 비동기 대기 없이 영구 저장 보장)
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e){ console.warn('localStorage 저장 실패:', e); }
-  // 2) Firestore 비동기 저장 await (서버 동기화 보장)
+  console.log('🟢 [_ceSave] 시작');
   try {
-    if (typeof saveDataNow === 'function') await saveDataNow();
-    else if (typeof saveData === 'function') saveData();
-  } catch(e) { console.warn('saveDataNow 실패:', e); }
-  _ceResetForm();
-  _ceRenderTable();
+    if (typeof requireWrite === 'function' && !requireWrite()) {
+      console.warn('🔴 [_ceSave] requireWrite false — 쓰기 권한 없음');
+      return;
+    }
+    console.log('🟢 [_ceSave] requireWrite 통과');
+    const data = _ceCollectData();
+    if (!data) {
+      console.warn('🔴 [_ceSave] _ceCollectData null — 필수 입력 누락');
+      return;
+    }
+    console.log('🟢 [_ceSave] 데이터 수집 완료:', { product: data.productName, qty: data.productionQty, total: data.totalCost });
+    if (!Array.isArray(DB.costEstimates)) DB.costEstimates = [];
+    const editId = document.getElementById('ce-edit-id').value;
+    const now = Date.now();
+    if (editId) {
+      const idx = DB.costEstimates.findIndex(e => String(e.id) === String(editId));
+      if (idx >= 0) {
+        DB.costEstimates[idx] = { ...DB.costEstimates[idx], ...data, updatedAt: now };
+        showNotif('✅ 생산 예상 비용 수정 완료', 'success');
+      }
+    } else {
+      const newId = 'est_' + now + '_' + Math.floor(Math.random() * 1000);
+      DB.costEstimates.push({ id: newId, ...data, createdAt: now, updatedAt: now });
+      showNotif('✅ 생산 예상 비용 저장 완료', 'success');
+    }
+    console.log('🟢 [_ceSave] DB.costEstimates 길이:', DB.costEstimates.length);
+    // 1) 즉시 localStorage 동기 저장
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(DB));
+      console.log('🟢 [_ceSave] localStorage 저장 완료');
+    } catch(e){ console.error('🔴 [_ceSave] localStorage 저장 실패:', e); alert('저장 실패 (localStorage): ' + e.message); }
+    // 2) Firestore 비동기 저장
+    try {
+      if (typeof saveDataNow === 'function') {
+        await saveDataNow();
+        console.log('🟢 [_ceSave] Firestore 저장 완료');
+      } else if (typeof saveData === 'function') {
+        saveData();
+      }
+    } catch(e) { console.error('🔴 [_ceSave] Firestore 저장 실패:', e); }
+    _ceResetForm();
+    _ceRenderTable();
+    console.log('🟢 [_ceSave] 완료');
+  } catch(e) {
+    console.error('🔴 [_ceSave] 예외 발생:', e);
+    alert('저장 중 예외가 발생했습니다: ' + e.message);
+  }
 }
 
 // 수정 모드 로드
