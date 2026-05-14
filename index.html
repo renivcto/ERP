@@ -5038,7 +5038,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.794';
+const ERP_VERSION = 'v1.9.795';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6669,6 +6669,9 @@ const DEFAULT_DB = {
   _deletedShopIds: [],  // v1.9.691
   // v1.9.594 — 고객 등급 수동 override (key → tier)
   customerOverrides: {},
+  // v1.9.795: 초기화 누락 방지
+  adProjects: [],
+  costEstimates: [],
   _nextId: {vendor:8, item:24, prod:5, stock:6, quote:3, order:8, task:8, qc:3, approval:1, expense:1, comment:1, sample:1, feedPost:1, feedComment:1}
 };
 
@@ -13110,14 +13113,16 @@ function _ceQtyChange() {
   _ceRecalcAll();
 }
 
-// v1.9.790: 가장 최근 발주서 정보 통합 조회 (qty + price + 메타)
+// v1.9.790/795: 가장 최근 발주서 정보 통합 조회 (qty + price + 메타)
+//   v795: itemId 비교를 String 으로 (number vs string 타입 불일치 차단)
 function _ceGetLatestOrderInfo(itemId) {
-  if (!DB.orders || !itemId) return null;
+  if (!DB.orders || itemId == null || itemId === '') return null;
+  const targetId = String(itemId);
   const matches = [];
   for (const o of DB.orders) {
     if (!o || !Array.isArray(o.rows)) continue;
     for (const r of o.rows) {
-      if (r.itemId === itemId) {
+      if (r && r.itemId != null && String(r.itemId) === targetId) {
         matches.push({
           qty: parseFloat(r.qty) || 0,
           price: parseFloat(r.price) || 0,
@@ -13343,8 +13348,8 @@ function _ceCollectData() {
   };
 }
 
-// 저장
-function _ceSave() {
+// v1.9.795: async + await + localStorage 즉시 저장 (새로고침 시 데이터 손실 방지)
+async function _ceSave() {
   if (typeof requireWrite === 'function' && !requireWrite()) return;
   const data = _ceCollectData();
   if (!data) return;
@@ -13362,7 +13367,13 @@ function _ceSave() {
     DB.costEstimates.push({ id: newId, ...data, createdAt: now, updatedAt: now });
     showNotif('✅ 생산 예상 비용 저장 완료', 'success');
   }
-  try { saveDataNow ? saveDataNow() : saveData(); } catch(_){}
+  // 1) 즉시 localStorage 동기 저장 (Firestore 비동기 대기 없이 영구 저장 보장)
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e){ console.warn('localStorage 저장 실패:', e); }
+  // 2) Firestore 비동기 저장 await (서버 동기화 보장)
+  try {
+    if (typeof saveDataNow === 'function') await saveDataNow();
+    else if (typeof saveData === 'function') saveData();
+  } catch(e) { console.warn('saveDataNow 실패:', e); }
   _ceResetForm();
   _ceRenderTable();
 }
@@ -13419,15 +13430,19 @@ function _ceUpdateFormHeader(isEdit, name) {
   }
 }
 
-// 삭제 (수정 모드 안에서)
-function _ceDelete(id) {
+// v1.9.795: 삭제 — async + await + 즉시 localStorage 저장
+async function _ceDelete(id) {
   if (typeof requireWrite === 'function' && !requireWrite()) return;
   if (!id) return;
   const est = (DB.costEstimates || []).find(e => String(e.id) === String(id));
   if (!est) return;
   if (!confirm('이 시나리오를 삭제하시겠습니까?\n\n[' + (est.scenarioName || '-') + ']')) return;
   DB.costEstimates = DB.costEstimates.filter(e => String(e.id) !== String(id));
-  try { saveDataNow ? saveDataNow() : saveData(); } catch(_){}
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+  try {
+    if (typeof saveDataNow === 'function') await saveDataNow();
+    else if (typeof saveData === 'function') saveData();
+  } catch(_){}
   _ceResetForm();
   _ceRenderTable();
   showNotif('🗑 시나리오 삭제 완료', 'success');
