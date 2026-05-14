@@ -5038,7 +5038,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.796';
+const ERP_VERSION = 'v1.9.797';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13044,6 +13044,17 @@ window._ceExtraRows = window._ceExtraRows || [];  // 추가 비용 임시 보관
 
 // 페이지 진입 시 호출
 function renderCostEstPage() {
+  // v1.9.797: 별도 키에서 costEstimates 복원 (메인 머지에서 누락된 경우 대비)
+  try {
+    const backup = localStorage.getItem('renivCostEstimates');
+    if (backup) {
+      const arr = JSON.parse(backup);
+      if (Array.isArray(arr) && arr.length > (DB.costEstimates || []).length) {
+        console.log('📦 [costest] 별도 키에서 복원:', arr.length, '건 (DB:', (DB.costEstimates||[]).length, '건)');
+        DB.costEstimates = arr;
+      }
+    }
+  } catch(e) { console.warn('costEstimates 별도 키 복원 실패:', e); }
   // 제품 select 채우기 (완제품 + BOM 있는 것)
   const sel = document.getElementById('ce-product');
   if (sel) {
@@ -13424,20 +13435,18 @@ async function _ceSave() {
       showNotif('✅ 생산 예상 비용 저장 완료', 'success');
     }
     console.log('🟢 [_ceSave] DB.costEstimates 길이:', DB.costEstimates.length);
-    // 1) 즉시 localStorage 동기 저장
+    // v1.9.797: 별도 키 사용 (메인 STORE_KEY는 quota 초과 위험 — IDB 오프로드 안 된 데이터 포함)
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify(DB));
-      console.log('🟢 [_ceSave] localStorage 저장 완료');
-    } catch(e){ console.error('🔴 [_ceSave] localStorage 저장 실패:', e); alert('저장 실패 (localStorage): ' + e.message); }
-    // 2) Firestore 비동기 저장
+      localStorage.setItem('renivCostEstimates', JSON.stringify(DB.costEstimates || []));
+      console.log('🟢 [_ceSave] 별도 키 localStorage 저장 완료 (' + (DB.costEstimates || []).length + '건)');
+    } catch(e){ console.error('🔴 [_ceSave] 별도 키 저장 실패:', e); }
+    // saveData(): IDB 오프로드 + debounced Firestore 저장 (큰 데이터 안전 처리)
     try {
-      if (typeof saveDataNow === 'function') {
-        await saveDataNow();
-        console.log('🟢 [_ceSave] Firestore 저장 완료');
-      } else if (typeof saveData === 'function') {
+      if (typeof saveData === 'function') {
         saveData();
+        console.log('🟢 [_ceSave] saveData 호출 (IDB 오프로드 + Firestore)');
       }
-    } catch(e) { console.error('🔴 [_ceSave] Firestore 저장 실패:', e); }
+    } catch(e) { console.error('🔴 [_ceSave] saveData 실패:', e); }
     _ceResetForm();
     _ceRenderTable();
     console.log('🟢 [_ceSave] 완료');
@@ -13507,11 +13516,9 @@ async function _ceDelete(id) {
   if (!est) return;
   if (!confirm('이 시나리오를 삭제하시겠습니까?\n\n[' + (est.scenarioName || '-') + ']')) return;
   DB.costEstimates = DB.costEstimates.filter(e => String(e.id) !== String(id));
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
-  try {
-    if (typeof saveDataNow === 'function') await saveDataNow();
-    else if (typeof saveData === 'function') saveData();
-  } catch(_){}
+  // v1.9.797: 별도 키 저장
+  try { localStorage.setItem('renivCostEstimates', JSON.stringify(DB.costEstimates || [])); } catch(_){}
+  try { if (typeof saveData === 'function') saveData(); } catch(_){}
   _ceResetForm();
   _ceRenderTable();
   showNotif('🗑 시나리오 삭제 완료', 'success');
