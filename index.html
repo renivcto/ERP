@@ -1840,12 +1840,12 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
               <table style="width:100%;border-collapse:collapse;font-size:12px" id="ce-bom-table">
                 <thead style="background:#fef2f5;border-bottom:1px solid #fbcfe8">
                   <tr>
-                    <th style="padding:7px 8px;text-align:left;font-weight:700;color:#9d174d">자재명</th>
+                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d">자재명</th>
                     <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:60px">단위</th>
-                    <th style="padding:7px 8px;text-align:right;font-weight:700;color:#9d174d;width:90px">단위 사용량</th>
-                    <th style="padding:7px 8px;text-align:right;font-weight:700;color:#9d174d;width:110px">총 생산량</th>
-                    <th style="padding:7px 8px;text-align:right;font-weight:700;color:#9d174d;width:120px">단가 (원)</th>
-                    <th style="padding:7px 8px;text-align:right;font-weight:700;color:#9d174d;width:130px">소계 (원)</th>
+                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:90px">단위 사용량</th>
+                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:130px">총 생산량</th>
+                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:120px">단가 (원)</th>
+                    <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:130px">소계 (원)</th>
                     <th style="padding:7px 8px;text-align:center;font-weight:700;color:#9d174d;width:60px">출처</th>
                   </tr>
                 </thead>
@@ -5010,7 +5010,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.791';
+const ERP_VERSION = 'v1.9.792';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13047,6 +13047,19 @@ function _ceOnProductChange() {
   _ceRecalcAll();
 }
 
+// v1.9.792: 수치 정밀도 보존 포맷 (매우 작은 수 ~ 큰 수까지)
+function _ceFmtQty(n) {
+  if (!isFinite(n) || n === 0) return '0';
+  const abs = Math.abs(n);
+  if (abs >= 1) {
+    // 정수면 그대로, 소수 있으면 최대 4자리
+    return Number.isInteger(n) ? String(n) : n.toFixed(4).replace(/\.?0+$/, '');
+  }
+  if (abs >= 0.0001) return n.toFixed(6).replace(/\.?0+$/, '');
+  // 1.8e-7 같은 매우 작은 수 — 12자리까지 정확히 보존
+  return n.toFixed(12).replace(/\.?0+$/, '');
+}
+
 // 생산 수량 변경 시 — 자동 계산된 행만 갱신 (사용자 수정 행은 그대로)
 function _ceQtyChange() {
   const pid = parseInt(document.getElementById('ce-product').value || '0');
@@ -13060,7 +13073,7 @@ function _ceQtyChange() {
     const qtyInput = tr.querySelector('.ce-row-qty');
     const overridden = qtyInput && qtyInput.dataset.userEdited === '1';
     if (!overridden && qtyInput) {
-      qtyInput.value = (perUnit * qty).toFixed(2).replace(/\.00$/, '');
+      qtyInput.value = _ceFmtQty(perUnit * qty);
       _ceCalcRowSubtotal(tr);
     }
   });
@@ -13170,19 +13183,19 @@ function _ceRenderBomRows(productId, productionQty, existingRows) {
     const code = item.code ? '<span style="color:#94a3b8;font-size:10.5px">(' + item.code + ')</span> ' : '';
     const unit = item.unit || item.spec || '-';
     return '<tr data-ce-row="1" data-item-id="' + b.itemId + '" data-per-unit="' + perUnit + '" style="border-bottom:1px solid #f1f5f9">' +
-      '<td style="padding:6px 8px">' + code + '<span style="font-weight:600">' + (item.name || '-').replace(/</g,'&lt;') + '</span></td>' +
+      '<td style="padding:6px 8px;text-align:center">' + code + '<span style="font-weight:600">' + (item.name || '-').replace(/</g,'&lt;') + '</span></td>' +
       '<td style="padding:6px 8px;text-align:center;color:#64748b;font-size:11px">' + unit + '</td>' +
-      '<td style="padding:6px 8px;text-align:right;color:#64748b;font-variant-numeric:tabular-nums">' + perUnit + '</td>' +
+      '<td style="padding:6px 8px;text-align:center;color:#64748b;font-variant-numeric:tabular-nums">' + _ceFmtQty(perUnit) + '</td>' +
       '<td style="padding:4px 6px">' +
         '<div style="display:flex;gap:3px;align-items:center">' +
-          '<input type="number" class="ce-row-qty" value="' + totalQty + '" data-user-edited="' + userEdited + '" min="0" step="any" oninput="this.dataset.userEdited=\'1\';_ceCalcRowSubtotal(this.closest(\'tr\'));_ceRecalcAll();" style="flex:1;min-width:0;padding:4px 6px;text-align:right;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums">' +
+          '<input type="number" class="ce-row-qty" value="' + _ceFmtQty(totalQty) + '" data-user-edited="' + userEdited + '" min="0" step="any" oninput="this.dataset.userEdited=\'1\';_ceCalcRowSubtotal(this.closest(\'tr\'));_ceRecalcAll();" style="flex:1;min-width:0;padding:4px 6px;text-align:center;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums">' +
           (priceInfo.price > 0
             ? '<button type="button" onclick="_ceUseOrderQty(this.closest(\'tr\'))" title="최근 발주서 수량으로 채우기 (MOQ 반영)" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:3px 6px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:700;line-height:1;flex-shrink:0">📋</button>'
             : '<span style="color:#cbd5e1;font-size:11px;padding:3px 4px" title="발주 이력 없음">—</span>') +
         '</div>' +
       '</td>' +
-      '<td style="padding:4px 6px"><input type="number" class="ce-row-price" value="' + unitPrice + '" data-source="' + priceSource + '" min="0" step="any" oninput="this.dataset.source=\'manual\';_ceCalcRowSubtotal(this.closest(\'tr\'));_ceRecalcAll();" style="width:100%;padding:4px 6px;text-align:right;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums"></td>' +
-      '<td class="ce-row-subtotal" style="padding:6px 8px;text-align:right;font-weight:700;color:#0f172a;font-variant-numeric:tabular-nums">₩' + Math.round(subtotal).toLocaleString() + '</td>' +
+      '<td style="padding:4px 6px"><input type="number" class="ce-row-price" value="' + unitPrice + '" data-source="' + priceSource + '" min="0" step="any" oninput="this.dataset.source=\'manual\';_ceCalcRowSubtotal(this.closest(\'tr\'));_ceRecalcAll();" style="width:100%;padding:4px 6px;text-align:center;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums"></td>' +
+      '<td class="ce-row-subtotal" style="padding:6px 8px;text-align:center;font-weight:700;color:#0f172a;font-variant-numeric:tabular-nums">₩' + Math.round(subtotal).toLocaleString() + '</td>' +
       '<td style="padding:6px 8px;text-align:center">' + sourceBadge + '</td>' +
       '</tr>';
   }).join('');
