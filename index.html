@@ -1834,7 +1834,10 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div style="margin-bottom:14px">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
               <span style="font-size:13px;font-weight:700;color:#0f172a">📦 BOM 자재</span>
-              <span style="font-size:11px;color:var(--gray-500)">단가는 가장 최근 발주서에서 자동 매칭 · 수량/단가 수동 수정 가능</span>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:11px;color:var(--gray-500)">단가/수량 최근 발주서 자동 매칭 · 셀에서 직접 수정 가능</span>
+                <button type="button" onclick="_ceUseOrderQtyAll()" title="모든 자재의 수량을 최근 발주서 수량으로 일괄 변경 (MOQ 반영)" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:4px 9px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer;white-space:nowrap">📋 모두 발주서 수량으로</button>
+              </div>
             </div>
             <div style="border:1px solid var(--gray-200);border-radius:8px;overflow:hidden;background:#fff">
               <table style="width:100%;border-collapse:collapse;font-size:12px" id="ce-bom-table">
@@ -5010,7 +5013,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.789';
+const ERP_VERSION = 'v1.9.790';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13067,21 +13070,74 @@ function _ceQtyChange() {
   _ceRecalcAll();
 }
 
-// 가장 최근 발주서 단가 조회
-function _ceGetLatestUnitPrice(itemId) {
-  if (!DB.orders || !itemId) return { price: 0, source: '' };
+// v1.9.790: 가장 최근 발주서 정보 통합 조회 (qty + price + 메타)
+function _ceGetLatestOrderInfo(itemId) {
+  if (!DB.orders || !itemId) return null;
   const matches = [];
   for (const o of DB.orders) {
     if (!o || !Array.isArray(o.rows)) continue;
     for (const r of o.rows) {
-      if (r.itemId === itemId && (r.price || 0) > 0) {
-        matches.push({ price: parseFloat(r.price) || 0, orderDate: o.orderDate || '' });
+      if (r.itemId === itemId) {
+        matches.push({
+          qty: parseFloat(r.qty) || 0,
+          price: parseFloat(r.price) || 0,
+          orderDate: o.orderDate || '',
+          serial: o.serial || '',
+          orderId: o.id
+        });
       }
     }
   }
-  if (!matches.length) return { price: 0, source: '' };
+  if (!matches.length) return null;
   matches.sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
-  return { price: matches[0].price, source: matches[0].orderDate || '발주서' };
+  return matches[0];
+}
+
+// 가장 최근 발주서 단가 조회 (v1.9.789 호환 wrapper)
+function _ceGetLatestUnitPrice(itemId) {
+  const info = _ceGetLatestOrderInfo(itemId);
+  if (!info || (info.price || 0) <= 0) return { price: 0, source: '' };
+  return { price: info.price, source: info.orderDate || '발주서' };
+}
+
+// v1.9.790: 한 행에 최근 발주서 수량/단가 적용
+function _ceUseOrderQty(tr) {
+  if (!tr) return;
+  const itemId = parseInt(tr.dataset.itemId) || 0;
+  if (!itemId) return;
+  const info = _ceGetLatestOrderInfo(itemId);
+  if (!info || info.qty <= 0) {
+    showNotif('해당 자재의 발주서 수량이 없습니다', 'warning');
+    return;
+  }
+  const qtyEl = tr.querySelector('.ce-row-qty');
+  const priceEl = tr.querySelector('.ce-row-price');
+  if (qtyEl) { qtyEl.value = info.qty; qtyEl.dataset.userEdited = '1'; qtyEl.dataset.source = 'order'; }
+  if (priceEl && info.price > 0) { priceEl.value = info.price; priceEl.dataset.source = 'order'; }
+  _ceCalcRowSubtotal(tr);
+  _ceRecalcAll();
+}
+
+// v1.9.790: 모든 BOM 행에 일괄 적용
+function _ceUseOrderQtyAll() {
+  const tbody = document.getElementById('ce-bom-rows');
+  if (!tbody) return;
+  const rows = tbody.querySelectorAll('tr[data-ce-row]');
+  if (!rows.length) { showNotif('적용할 자재가 없습니다', 'warning'); return; }
+  let applied = 0, skipped = 0;
+  rows.forEach(tr => {
+    const itemId = parseInt(tr.dataset.itemId) || 0;
+    const info = _ceGetLatestOrderInfo(itemId);
+    if (!info || info.qty <= 0) { skipped++; return; }
+    const qtyEl = tr.querySelector('.ce-row-qty');
+    const priceEl = tr.querySelector('.ce-row-price');
+    if (qtyEl) { qtyEl.value = info.qty; qtyEl.dataset.userEdited = '1'; qtyEl.dataset.source = 'order'; }
+    if (priceEl && info.price > 0) { priceEl.value = info.price; priceEl.dataset.source = 'order'; }
+    _ceCalcRowSubtotal(tr);
+    applied++;
+  });
+  _ceRecalcAll();
+  showNotif('📋 발주서 수량 적용: ' + applied + '건' + (skipped ? ' (발주 이력 없음: ' + skipped + '건)' : ''), 'success');
 }
 
 // BOM 행 렌더 (제품 선택 또는 수정 모드에서 호출)
@@ -13120,7 +13176,14 @@ function _ceRenderBomRows(productId, productionQty, existingRows) {
       '<td style="padding:6px 8px">' + code + '<span style="font-weight:600">' + (item.name || '-').replace(/</g,'&lt;') + '</span></td>' +
       '<td style="padding:6px 8px;text-align:center;color:#64748b;font-size:11px">' + unit + '</td>' +
       '<td style="padding:6px 8px;text-align:right;color:#64748b;font-variant-numeric:tabular-nums">' + perUnit + '</td>' +
-      '<td style="padding:4px 6px"><input type="number" class="ce-row-qty" value="' + totalQty + '" data-user-edited="' + userEdited + '" min="0" step="any" oninput="this.dataset.userEdited=\'1\';_ceCalcRowSubtotal(this.closest(\'tr\'));_ceRecalcAll();" style="width:100%;padding:4px 6px;text-align:right;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums"></td>' +
+      '<td style="padding:4px 6px">' +
+        '<div style="display:flex;gap:3px;align-items:center">' +
+          '<input type="number" class="ce-row-qty" value="' + totalQty + '" data-user-edited="' + userEdited + '" min="0" step="any" oninput="this.dataset.userEdited=\'1\';_ceCalcRowSubtotal(this.closest(\'tr\'));_ceRecalcAll();" style="flex:1;min-width:0;padding:4px 6px;text-align:right;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums">' +
+          (priceInfo.price > 0
+            ? '<button type="button" onclick="_ceUseOrderQty(this.closest(\'tr\'))" title="최근 발주서 수량으로 채우기 (MOQ 반영)" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:3px 6px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:700;line-height:1;flex-shrink:0">📋</button>'
+            : '<span style="color:#cbd5e1;font-size:11px;padding:3px 4px" title="발주 이력 없음">—</span>') +
+        '</div>' +
+      '</td>' +
       '<td style="padding:4px 6px"><input type="number" class="ce-row-price" value="' + unitPrice + '" data-source="' + priceSource + '" min="0" step="any" oninput="this.dataset.source=\'manual\';_ceCalcRowSubtotal(this.closest(\'tr\'));_ceRecalcAll();" style="width:100%;padding:4px 6px;text-align:right;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums"></td>' +
       '<td class="ce-row-subtotal" style="padding:6px 8px;text-align:right;font-weight:700;color:#0f172a;font-variant-numeric:tabular-nums">₩' + Math.round(subtotal).toLocaleString() + '</td>' +
       '<td style="padding:6px 8px;text-align:center">' + sourceBadge + '</td>' +
