@@ -5010,7 +5010,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.787';
+const ERP_VERSION = 'v1.9.789';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13002,6 +13002,370 @@ function deleteAdProject() {
     showNotif('✅ 프로젝트 삭제 완료', 'success');
     try { renderAdsPage(); } catch(_){}
   }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// v1.9.789: 생산 예상 비용 (Cost Estimate)
+// ════════════════════════════════════════════════════════════════════
+window._ceExtraRows = window._ceExtraRows || [];  // 추가 비용 임시 보관
+
+// 페이지 진입 시 호출
+function renderCostEstPage() {
+  // 제품 select 채우기 (완제품 + BOM 있는 것)
+  const sel = document.getElementById('ce-product');
+  if (sel) {
+    const cur = sel.value;
+    const items = (DB.items || []).filter(i => i && (i.type === '완제품' || !i.type));
+    sel.innerHTML = '<option value="">— 제품 선택 —</option>' +
+      items.map(i => {
+        const hasBom = !!(DB.boms && DB.boms[i.id] && DB.boms[i.id].length);
+        const codeStr = i.code ? '(' + i.code + ') ' : '';
+        const bomTag = hasBom ? '' : ' [BOM 없음]';
+        return '<option value="' + i.id + '">' + codeStr + (i.name || '-').replace(/</g,'&lt;') + bomTag + '</option>';
+      }).join('');
+    if (cur) sel.value = cur;
+  }
+  // 하단 표 렌더
+  _ceRenderTable();
+}
+
+// 제품 select 변경 시
+function _ceOnProductChange() {
+  const pid = parseInt(document.getElementById('ce-product').value || '0');
+  const qtyEl = document.getElementById('ce-qty');
+  const qty = parseFloat(qtyEl.value) || 0;
+  // 시나리오명 자동 생성 (비어있을 때만)
+  const scEl = document.getElementById('ce-scenario');
+  if (scEl && !scEl.value.trim() && pid) {
+    const item = (DB.items || []).find(i => i.id === pid);
+    if (item) {
+      const today = new Date().toISOString().slice(0,10);
+      scEl.value = (item.name || '제품') + ' · ' + today;
+    }
+  }
+  _ceRenderBomRows(pid, qty, null);
+  _ceRecalcAll();
+}
+
+// 생산 수량 변경 시 — 자동 계산된 행만 갱신 (사용자 수정 행은 그대로)
+function _ceQtyChange() {
+  const pid = parseInt(document.getElementById('ce-product').value || '0');
+  const qty = parseFloat(document.getElementById('ce-qty').value) || 0;
+  if (!pid) return;
+  // 기존 행에서 수동 수정된 수량/단가 유지하면서 자동 행만 재계산
+  const tbody = document.getElementById('ce-bom-rows');
+  if (!tbody) return;
+  tbody.querySelectorAll('tr[data-ce-row]').forEach(tr => {
+    const perUnit = parseFloat(tr.dataset.perUnit) || 0;
+    const qtyInput = tr.querySelector('.ce-row-qty');
+    const overridden = qtyInput && qtyInput.dataset.userEdited === '1';
+    if (!overridden && qtyInput) {
+      qtyInput.value = (perUnit * qty).toFixed(2).replace(/\.00$/, '');
+      _ceCalcRowSubtotal(tr);
+    }
+  });
+  _ceRecalcAll();
+}
+
+// 가장 최근 발주서 단가 조회
+function _ceGetLatestUnitPrice(itemId) {
+  if (!DB.orders || !itemId) return { price: 0, source: '' };
+  const matches = [];
+  for (const o of DB.orders) {
+    if (!o || !Array.isArray(o.rows)) continue;
+    for (const r of o.rows) {
+      if (r.itemId === itemId && (r.price || 0) > 0) {
+        matches.push({ price: parseFloat(r.price) || 0, orderDate: o.orderDate || '' });
+      }
+    }
+  }
+  if (!matches.length) return { price: 0, source: '' };
+  matches.sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
+  return { price: matches[0].price, source: matches[0].orderDate || '발주서' };
+}
+
+// BOM 행 렌더 (제품 선택 또는 수정 모드에서 호출)
+function _ceRenderBomRows(productId, productionQty, existingRows) {
+  const tbody = document.getElementById('ce-bom-rows');
+  if (!tbody) return;
+  if (!productId) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:18px;text-align:center;color:#94a3b8">제품을 선택하면 BOM 자재가 표시됩니다</td></tr>';
+    return;
+  }
+  const bom = (DB.boms && DB.boms[productId]) || [];
+  if (!bom.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:18px;text-align:center;color:#94a3b8">이 제품에 등록된 BOM이 없습니다. 먼저 BOM 관리에서 등록해 주세요.</td></tr>';
+    return;
+  }
+  const rowsHtml = bom.map((b, bi) => {
+    const item = (DB.items || []).find(i => i.id === b.itemId) || {};
+    // 기존 행 데이터 찾기 (수정 모드)
+    let existing = null;
+    if (Array.isArray(existingRows)) {
+      existing = existingRows.find(r => r && r.itemId === b.itemId);
+    }
+    const perUnit = parseFloat(b.qty) || 0;  // BOM 1개당 사용량
+    const totalQty = existing ? (existing.qty || 0) : (perUnit * productionQty);
+    const priceInfo = _ceGetLatestUnitPrice(b.itemId);
+    const unitPrice = existing ? (existing.unitPrice || 0) : priceInfo.price;
+    const priceSource = existing ? (existing.priceSource || 'order') : (priceInfo.price > 0 ? 'order' : 'manual');
+    const subtotal = totalQty * unitPrice;
+    const userEdited = existing ? '1' : '0';
+    const sourceBadge = priceSource === 'order'
+      ? '<span style="background:#dcfce7;color:#15803d;padding:2px 6px;border-radius:3px;font-size:9.5px;font-weight:700" title="최근 발주서 단가">발주</span>'
+      : '<span style="background:#fef9c3;color:#a16207;padding:2px 6px;border-radius:3px;font-size:9.5px;font-weight:700" title="수동 입력">수동</span>';
+    const code = item.code ? '<span style="color:#94a3b8;font-size:10.5px">(' + item.code + ')</span> ' : '';
+    const unit = item.unit || item.spec || '-';
+    return '<tr data-ce-row="1" data-item-id="' + b.itemId + '" data-per-unit="' + perUnit + '" style="border-bottom:1px solid #f1f5f9">' +
+      '<td style="padding:6px 8px">' + code + '<span style="font-weight:600">' + (item.name || '-').replace(/</g,'&lt;') + '</span></td>' +
+      '<td style="padding:6px 8px;text-align:center;color:#64748b;font-size:11px">' + unit + '</td>' +
+      '<td style="padding:6px 8px;text-align:right;color:#64748b;font-variant-numeric:tabular-nums">' + perUnit + '</td>' +
+      '<td style="padding:4px 6px"><input type="number" class="ce-row-qty" value="' + totalQty + '" data-user-edited="' + userEdited + '" min="0" step="any" oninput="this.dataset.userEdited=\'1\';_ceCalcRowSubtotal(this.closest(\'tr\'));_ceRecalcAll();" style="width:100%;padding:4px 6px;text-align:right;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums"></td>' +
+      '<td style="padding:4px 6px"><input type="number" class="ce-row-price" value="' + unitPrice + '" data-source="' + priceSource + '" min="0" step="any" oninput="this.dataset.source=\'manual\';_ceCalcRowSubtotal(this.closest(\'tr\'));_ceRecalcAll();" style="width:100%;padding:4px 6px;text-align:right;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums"></td>' +
+      '<td class="ce-row-subtotal" style="padding:6px 8px;text-align:right;font-weight:700;color:#0f172a;font-variant-numeric:tabular-nums">₩' + Math.round(subtotal).toLocaleString() + '</td>' +
+      '<td style="padding:6px 8px;text-align:center">' + sourceBadge + '</td>' +
+      '</tr>';
+  }).join('');
+  tbody.innerHTML = rowsHtml;
+}
+
+// 한 행의 소계 재계산
+function _ceCalcRowSubtotal(tr) {
+  if (!tr) return;
+  const qtyEl = tr.querySelector('.ce-row-qty');
+  const priceEl = tr.querySelector('.ce-row-price');
+  const subEl = tr.querySelector('.ce-row-subtotal');
+  if (!qtyEl || !priceEl || !subEl) return;
+  const qty = parseFloat(qtyEl.value) || 0;
+  const price = parseFloat(priceEl.value) || 0;
+  const subtotal = qty * price;
+  subEl.textContent = '₩' + Math.round(subtotal).toLocaleString();
+}
+
+// 추가 비용 행 추가 (인건비/운반비/가공비 등)
+function _ceAddExtraRow(label, amount, memo) {
+  if (!Array.isArray(window._ceExtraRows)) window._ceExtraRows = [];
+  window._ceExtraRows.push({ label: label || '', amount: amount || 0, memo: memo || '' });
+  _ceRenderExtraRows();
+  _ceRecalcAll();
+}
+
+function _ceRemoveExtraRow(idx) {
+  if (!Array.isArray(window._ceExtraRows)) return;
+  window._ceExtraRows.splice(idx, 1);
+  _ceRenderExtraRows();
+  _ceRecalcAll();
+}
+
+function _ceRenderExtraRows() {
+  const tbody = document.getElementById('ce-extra-rows');
+  if (!tbody) return;
+  if (!window._ceExtraRows || !window._ceExtraRows.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="padding:14px;text-align:center;color:#94a3b8">아직 없음 · "+ 비용 추가" 클릭</td></tr>';
+    return;
+  }
+  tbody.innerHTML = window._ceExtraRows.map((r, i) => {
+    return '<tr data-extra-idx="' + i + '" style="border-bottom:1px solid #f1f5f9">' +
+      '<td style="padding:4px 6px"><input type="text" class="ce-extra-label" value="' + (r.label || '').replace(/"/g,'&quot;') + '" oninput="window._ceExtraRows[' + i + '].label=this.value" placeholder="예: 인건비 / 운반비" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:12px"></td>' +
+      '<td style="padding:4px 6px"><input type="number" class="ce-extra-amount" value="' + (r.amount || 0) + '" min="0" step="any" oninput="window._ceExtraRows[' + i + '].amount=parseFloat(this.value)||0;_ceRecalcAll()" style="width:100%;padding:4px 6px;text-align:right;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums"></td>' +
+      '<td style="padding:4px 6px"><input type="text" class="ce-extra-memo" value="' + (r.memo || '').replace(/"/g,'&quot;') + '" oninput="window._ceExtraRows[' + i + '].memo=this.value" placeholder="(선택)" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:12px"></td>' +
+      '<td style="padding:4px 6px;text-align:center"><button type="button" onclick="_ceRemoveExtraRow(' + i + ')" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;padding:3px 8px;border-radius:4px;font-size:10.5px;cursor:pointer;font-weight:700">삭제</button></td>' +
+      '</tr>';
+  }).join('');
+}
+
+// 모든 합계 재계산
+function _ceRecalcAll() {
+  const tbody = document.getElementById('ce-bom-rows');
+  let totalMat = 0;
+  if (tbody) {
+    tbody.querySelectorAll('tr[data-ce-row]').forEach(tr => {
+      const qty = parseFloat(tr.querySelector('.ce-row-qty')?.value) || 0;
+      const price = parseFloat(tr.querySelector('.ce-row-price')?.value) || 0;
+      totalMat += qty * price;
+    });
+  }
+  let totalExtra = 0;
+  if (Array.isArray(window._ceExtraRows)) {
+    totalExtra = window._ceExtraRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+  }
+  const totalCost = totalMat + totalExtra;
+  const qty = parseFloat(document.getElementById('ce-qty')?.value) || 0;
+  const perUnit = qty > 0 ? totalCost / qty : 0;
+  if (document.getElementById('ce-total-mat')) document.getElementById('ce-total-mat').textContent = '₩' + Math.round(totalMat).toLocaleString();
+  if (document.getElementById('ce-total-extra')) document.getElementById('ce-total-extra').textContent = '₩' + Math.round(totalExtra).toLocaleString();
+  if (document.getElementById('ce-total-cost')) document.getElementById('ce-total-cost').textContent = '₩' + Math.round(totalCost).toLocaleString();
+  if (document.getElementById('ce-perunit')) document.getElementById('ce-perunit').textContent = '₩' + Math.round(perUnit).toLocaleString();
+}
+
+// 폼 → 객체로 수집
+function _ceCollectData() {
+  const productId = parseInt(document.getElementById('ce-product').value || '0');
+  if (!productId) { showNotif('제품을 선택하세요', 'warning'); return null; }
+  const item = (DB.items || []).find(i => i.id === productId) || {};
+  const productionQty = parseFloat(document.getElementById('ce-qty').value) || 0;
+  if (!productionQty) { showNotif('생산 수량을 입력하세요', 'warning'); return null; }
+  const scenarioName = document.getElementById('ce-scenario').value.trim() || ((item.name || '제품') + ' · ' + new Date().toISOString().slice(0,10));
+  const memo = document.getElementById('ce-memo').value || '';
+  // BOM 행 수집
+  const bomRows = [];
+  const tbody = document.getElementById('ce-bom-rows');
+  if (tbody) {
+    tbody.querySelectorAll('tr[data-ce-row]').forEach(tr => {
+      const itemId = parseInt(tr.dataset.itemId) || 0;
+      const it = (DB.items || []).find(i => i.id === itemId) || {};
+      const perUnit = parseFloat(tr.dataset.perUnit) || 0;
+      const q = parseFloat(tr.querySelector('.ce-row-qty')?.value) || 0;
+      const p = parseFloat(tr.querySelector('.ce-row-price')?.value) || 0;
+      const priceSource = tr.querySelector('.ce-row-price')?.dataset.source || 'order';
+      bomRows.push({
+        itemId, itemName: it.name || '', itemCode: it.code || '',
+        perUnit, qty: q, unitPrice: p, subtotal: q * p, priceSource
+      });
+    });
+  }
+  // 추가 비용 행 수집
+  const extraRows = (window._ceExtraRows || []).filter(r => r && (r.label || r.amount));
+  const totalMaterial = bomRows.reduce((s, r) => s + (r.subtotal || 0), 0);
+  const totalExtra = extraRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+  const totalCost = totalMaterial + totalExtra;
+  const perUnitCost = productionQty > 0 ? totalCost / productionQty : 0;
+  return {
+    scenarioName, productId, productName: item.name || '', productionQty,
+    bomRows, extraRows: extraRows.slice(),
+    totalMaterial, totalExtra, totalCost, perUnitCost, memo
+  };
+}
+
+// 저장
+function _ceSave() {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  const data = _ceCollectData();
+  if (!data) return;
+  if (!Array.isArray(DB.costEstimates)) DB.costEstimates = [];
+  const editId = document.getElementById('ce-edit-id').value;
+  const now = Date.now();
+  if (editId) {
+    const idx = DB.costEstimates.findIndex(e => String(e.id) === String(editId));
+    if (idx >= 0) {
+      DB.costEstimates[idx] = { ...DB.costEstimates[idx], ...data, updatedAt: now };
+      showNotif('✅ 생산 예상 비용 수정 완료', 'success');
+    }
+  } else {
+    const newId = 'est_' + now + '_' + Math.floor(Math.random() * 1000);
+    DB.costEstimates.push({ id: newId, ...data, createdAt: now, updatedAt: now });
+    showNotif('✅ 생산 예상 비용 저장 완료', 'success');
+  }
+  try { saveDataNow ? saveDataNow() : saveData(); } catch(_){}
+  _ceResetForm();
+  _ceRenderTable();
+}
+
+// 수정 모드 로드
+function _ceLoadForEdit(id) {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  const est = (DB.costEstimates || []).find(e => String(e.id) === String(id));
+  if (!est) { showNotif('시나리오를 찾을 수 없습니다', 'warning'); return; }
+  document.getElementById('ce-edit-id').value = est.id;
+  document.getElementById('ce-scenario').value = est.scenarioName || '';
+  document.getElementById('ce-product').value = est.productId || '';
+  document.getElementById('ce-qty').value = est.productionQty || '';
+  document.getElementById('ce-memo').value = est.memo || '';
+  window._ceExtraRows = Array.isArray(est.extraRows) ? est.extraRows.slice() : [];
+  _ceRenderBomRows(est.productId, est.productionQty, est.bomRows);
+  _ceRenderExtraRows();
+  _ceRecalcAll();
+  // 페이지 상단으로 스크롤 + 수정 모드 시각화
+  try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch(_) { window.scrollTo(0,0); }
+  _ceUpdateFormHeader(true, est.scenarioName);
+}
+
+// 수정 모드 헤더 / 버튼 변경
+function _ceUpdateFormHeader(isEdit, name) {
+  const card = document.querySelector('#page-costest .card');
+  const hdr = card ? card.querySelector('.card-hdr .card-title') : null;
+  if (hdr) {
+    hdr.innerHTML = isEdit
+      ? '✏️ 수정 중: <span style="color:#0f172a">' + (name || '-').replace(/</g,'&lt;') + '</span> <span style="font-size:11px;color:#be185d;font-weight:500;margin-left:6px">(VAT 별도 기준)</span>'
+      : '📝 새 예상 비용 작성 <span style="font-size:11px;color:#be185d;font-weight:500;margin-left:6px">(VAT 별도 기준)</span>';
+  }
+  // 카드 색상도 살짝 변경
+  if (card) card.style.borderColor = isEdit ? '#fcd34d' : '#fde2e7';
+  // 저장 버튼 텍스트 + 삭제/취소 버튼 노출
+  const ft = card ? card.querySelector('.card-body > div:last-child') : null;
+  if (ft) {
+    if (isEdit) {
+      ft.innerHTML =
+        '<button type="button" class="btn btn-outline" onclick="_ceDelete(document.getElementById(\'ce-edit-id\').value)" style="color:var(--red-500);border-color:#fca5a5;font-size:12.5px">🗑 삭제</button>' +
+        '<button type="button" class="btn btn-outline" onclick="_ceResetForm()" style="font-size:12.5px;margin-left:auto">취소</button>' +
+        '<button type="button" class="btn btn-primary" onclick="_ceSave()" style="background:#a16207;font-size:12.5px;margin-left:8px">💾 수정 저장</button>';
+      ft.style.display = 'flex';
+      ft.style.justifyContent = 'flex-start';
+      ft.style.gap = '8px';
+    } else {
+      ft.innerHTML =
+        '<button type="button" class="btn btn-outline" onclick="_ceResetForm()" style="font-size:12.5px">초기화</button>' +
+        '<button type="button" class="btn btn-primary" onclick="_ceSave()" style="background:#be185d;font-size:12.5px">💾 저장</button>';
+      ft.style.display = 'flex';
+      ft.style.justifyContent = 'flex-end';
+      ft.style.gap = '8px';
+    }
+  }
+}
+
+// 삭제 (수정 모드 안에서)
+function _ceDelete(id) {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  if (!id) return;
+  const est = (DB.costEstimates || []).find(e => String(e.id) === String(id));
+  if (!est) return;
+  if (!confirm('이 시나리오를 삭제하시겠습니까?\n\n[' + (est.scenarioName || '-') + ']')) return;
+  DB.costEstimates = DB.costEstimates.filter(e => String(e.id) !== String(id));
+  try { saveDataNow ? saveDataNow() : saveData(); } catch(_){}
+  _ceResetForm();
+  _ceRenderTable();
+  showNotif('🗑 시나리오 삭제 완료', 'success');
+}
+
+// 폼 초기화 (신규 모드로 복귀)
+function _ceResetForm() {
+  document.getElementById('ce-edit-id').value = '';
+  document.getElementById('ce-scenario').value = '';
+  document.getElementById('ce-product').value = '';
+  document.getElementById('ce-qty').value = '';
+  document.getElementById('ce-memo').value = '';
+  window._ceExtraRows = [];
+  _ceRenderBomRows(0, 0, null);
+  _ceRenderExtraRows();
+  _ceRecalcAll();
+  _ceUpdateFormHeader(false, '');
+}
+
+// 하단 표 렌더
+function _ceRenderTable() {
+  const tbody = document.getElementById('ce-list-tbody');
+  if (!tbody) return;
+  const list = (DB.costEstimates || []).slice().sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+  const cnt = document.getElementById('ce-list-count');
+  if (cnt) cnt.textContent = list.length ? '· 총 ' + list.length + '건' : '';
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:#94a3b8">저장된 시나리오가 없습니다. 위에서 작성해 보세요.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(e => {
+    const dt = e.updatedAt || e.createdAt || 0;
+    const dateStr = dt ? new Date(dt).toISOString().slice(0,10) : '-';
+    return '<tr onclick="_ceLoadForEdit(\'' + e.id + '\')" style="cursor:pointer;border-bottom:1px solid #f1f5f9;transition:background .15s" onmouseenter="this.style.background=\'#fef9fb\'" onmouseleave="this.style.background=\'\'">' +
+      '<td style="padding:10px 12px;font-weight:600;color:#0f172a">' + (e.scenarioName || '-').replace(/</g,'&lt;') + '</td>' +
+      '<td style="padding:10px 12px;color:#475569">' + (e.productName || '-').replace(/</g,'&lt;') + '</td>' +
+      '<td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums">' + Number(e.productionQty || 0).toLocaleString() + '</td>' +
+      '<td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums">₩' + Math.round(e.totalMaterial || 0).toLocaleString() + '</td>' +
+      '<td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums">₩' + Math.round(e.totalExtra || 0).toLocaleString() + '</td>' +
+      '<td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;color:#be185d">₩' + Math.round(e.totalCost || 0).toLocaleString() + '</td>' +
+      '<td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums">₩' + Math.round(e.perUnitCost || 0).toLocaleString() + '</td>' +
+      '<td style="padding:10px 12px;text-align:center;color:#94a3b8;font-size:11.5px">' + dateStr + '</td>' +
+      '</tr>';
+  }).join('');
 }
 
 // v1.9.773: 광고비 관리 페이지 렌더 (별도 페이지)
