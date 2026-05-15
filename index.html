@@ -1769,6 +1769,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="page" id="page-order">
       <!-- v1.9.396: 발주서 작성 + 기간 필터를 한 줄에, 테이블은 콜그룹+table-layout:fixed 로 노트북 화면도 가로 스크롤 없이 한 화면에 -->
       <div style="display:flex;justify-content:flex-start;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="openOverseasPoModal(null)" style="background:#1e3a8a">🌐 + 해외 PO 작성</button>
         <button class="btn btn-primary btn-sm" onclick="if(requireWrite()){editingId['add-order']=null;const b=$('order-delete-btn');if(b)b.style.display='none';populateVendorSelect('o-vendor');$('o-vendor').value='';$('o-date').value=today();$('o-in-date').value='';$('o-receiver').value='';$('o-addr').value='';$('o-serial').value='';$('o-contact').value='';$('o-phone').value='';$('o-note').value='';$('o-status').value='진행중';$('o-stock-status').value='입고전';$('o-footer').value='※ 납기 일자 확인 및 준수를 부탁드립니다.\n납기 지연이 예상될 경우, 아래 연락처로 사전 공유해 주시면 감사하겠습니다.\n(송희강 이사 010-3328-3652 / 권다빈 이사 010-8874-5722)';$('order-modal-rows').innerHTML='';_orderPdfData=null;_orderPdfName=null;_orderStampData=null;_orderStampName=null;if($('o-pdf'))$('o-pdf').value='';if($('o-stamp-pdf'))$('o-stamp-pdf').value='';$('o-pdf-preview').style.display='none';$('o-stamp-preview').style.display='none';if($('o-pdf-existing'))$('o-pdf-existing').style.display='none';if($('o-stamp-existing'))$('o-stamp-existing').style.display='none';if($('o-stamp-not-required'))$('o-stamp-not-required').checked=false;if($('o-prepay-pct'))$('o-prepay-pct').value=0;if($('o-balance-due'))$('o-balance-due').value='';if($('o-urgent'))$('o-urgent').checked=false;if(typeof updatePrepayPreview==='function')updatePrepayPreview();openModal('add-order')}">+ 발주서 작성</button>
         <!-- 기간 필터 — 발주일(orderDate) 기준 -->
         <div class="period-filter" data-prefix="po" style="display:flex;gap:5px;align-items:center;flex-wrap:nowrap">
@@ -1796,6 +1797,121 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             <thead><tr><th style="font-size:11.5px">분류</th><th style="font-size:11.5px">업체명</th><th style="font-size:11.5px">품목</th><th style="font-size:11.5px">발주일</th><th style="font-size:11.5px">납기일</th><th style="font-size:11.5px">결제금액<br>(VAT포함)</th><th style="font-size:11.5px">입고상태</th><th style="font-size:11.5px">결재 날인</th><th style="font-size:11.5px">이메일</th><th style="font-size:11.5px">수정</th></tr></thead>
             <tbody id="order-table"></tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ v1.9.803: 해외 PO 모달 ══════════════ -->
+    <div class="overlay" id="overlay-add-po">
+      <div class="modal" style="max-width:1100px;width:95vw;max-height:92vh;display:flex;flex-direction:column">
+        <div class="modal-hdr" style="background:linear-gradient(135deg,#1e3a8a,#3b82f6);color:#fff">
+          <span class="modal-ttl" style="color:#fff">🌐 해외 PO 작성/수정 <span style="font-size:11px;font-weight:500;margin-left:8px;opacity:0.85">Purchase Order — Overseas</span></span>
+          <button class="modal-x" onclick="closeModal('add-po')" style="color:#fff">✕</button>
+        </div>
+        <div class="modal-body" style="overflow-y:auto;flex:1;padding:18px 22px">
+          <input type="hidden" id="po-edit-id" value="">
+
+          <!-- 상단: PO 번호 / 날짜 / 결제 / 운송 / 통화 -->
+          <div style="display:grid;grid-template-columns:1.3fr 1fr 1.2fr 1.4fr 0.8fr;gap:10px;margin-bottom:14px">
+            <div class="fg" style="margin:0"><label>PO Number <span style="font-size:10px;color:var(--gray-400)">(자동 생성)</span></label><input class="fi" id="po-number" placeholder="PO-YYYYMMDD-001"></div>
+            <div class="fg" style="margin:0"><label>PO Date</label><input class="fi" id="po-date" type="date"></div>
+            <div class="fg" style="margin:0"><label>Payment</label><select class="fs" id="po-payment"><option>Credit Card</option><option>T/T (Wire Transfer)</option><option>L/C</option><option>PayPal</option><option>Cash</option></select></div>
+            <div class="fg" style="margin:0"><label>Shipping Terms</label><select class="fs" id="po-shipping"><option>Paid by Buyer (주문자 지불)</option><option>Paid by Seller (공급자 지불)</option><option>EXW (Ex Works)</option><option>FOB</option><option>CIF</option><option>DDP</option><option>DDU</option></select></div>
+            <div class="fg" style="margin:0"><label>Currency</label><select class="fs" id="po-currency" onchange="calcPoTotal()"><option>USD</option><option>AUD</option><option>EUR</option><option>JPY</option><option>CNY</option><option>GBP</option></select></div>
+          </div>
+
+          <!-- BUYER + SUPPLIER 그리드 -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+            <!-- BUYER -->
+            <div style="border:1px solid #dbeafe;border-radius:8px;padding:12px 14px;background:#f8fafc">
+              <div style="font-size:13px;font-weight:800;color:#1e3a8a;margin-bottom:10px;letter-spacing:-0.3px">👤 BUYER / 주문자</div>
+              <div class="fg" style="margin-bottom:8px"><label>Company</label><input class="fi" id="po-buyer-company" value="RENIV Corp."></div>
+              <div class="fg" style="margin-bottom:8px"><label>Order Contact</label><input class="fi" id="po-buyer-contact" value="Stella Song (+61-421-597-337)"></div>
+              <div class="fg" style="margin-bottom:8px"><label>Korea Contact Person</label><input class="fi" id="po-buyer-kr-person" value="Kwon Da-bin (권다빈)"></div>
+              <div class="fg" style="margin-bottom:8px"><label>Korea Office Tel</label><input class="fi" id="po-buyer-kr-tel" value="+82-70-8065-3279"></div>
+              <div class="fg" style="margin:0"><label>Korea Contact Mobile</label><input class="fi" id="po-buyer-kr-mobile" value="+82-10-8874-5722"></div>
+            </div>
+            <!-- SUPPLIER -->
+            <div style="border:1px solid #fde2e7;border-radius:8px;padding:12px 14px;background:#fff7f9">
+              <div style="font-size:13px;font-weight:800;color:#9d174d;margin-bottom:10px;letter-spacing:-0.3px">🏭 SUPPLIER / 공급자</div>
+              <div class="fg" style="margin-bottom:8px"><label>Company</label><input class="fi" id="po-supplier-company" placeholder=""></div>
+              <div class="fg" style="margin-bottom:8px"><label>Contact Person</label><input class="fi" id="po-supplier-contact" placeholder=""></div>
+              <div class="fg" style="margin-bottom:8px"><label>Product</label><input class="fi" id="po-supplier-product" placeholder=""></div>
+              <div class="fg" style="margin-bottom:8px"><label>Reference (URL)</label><input class="fi" id="po-supplier-reference" placeholder="https://..."></div>
+              <div class="fg" style="margin:0"><label>Capacity</label><input class="fi" id="po-supplier-capacity" placeholder=""></div>
+            </div>
+          </div>
+
+          <!-- DELIVERY ADDRESS -->
+          <div style="border:1px solid #fef3c7;border-radius:8px;padding:12px 14px;background:#fffbeb;margin-bottom:14px">
+            <div style="font-size:13px;font-weight:800;color:#92400e;margin-bottom:10px;letter-spacing:-0.3px">📦 DELIVERY ADDRESS / 배송지</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="fg" style="margin:0"><label>Company</label><input class="fi" id="po-delivery-company" placeholder=""></div>
+              <div class="fg" style="margin:0"><label>Contact Person</label><input class="fi" id="po-delivery-contact" placeholder=""></div>
+              <div class="fg" style="margin:0;grid-column:1/-1"><label>Address</label><input class="fi" id="po-delivery-address" placeholder=""></div>
+              <div class="fg" style="margin:0"><label>Company Tel</label><input class="fi" id="po-delivery-tel" placeholder=""></div>
+              <div class="fg" style="margin:0"><label>Mobile</label><input class="fi" id="po-delivery-mobile" placeholder=""></div>
+            </div>
+          </div>
+
+          <!-- 품목 표 -->
+          <div style="margin-bottom:14px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <span style="font-size:13px;font-weight:800;color:#0f172a">📋 Items / 품목</span>
+              <button type="button" class="btn btn-outline btn-sm" onclick="addPoRow()" style="background:#fef2f5;color:#be185d;border:1px solid #fbcfe8;padding:5px 12px;font-size:11.5px;font-weight:700">+ 품목 추가</button>
+            </div>
+            <div style="border:1px solid var(--gray-200);border-radius:8px;overflow:hidden;background:#fff">
+              <table style="width:100%;border-collapse:collapse;font-size:12px" id="po-items-table">
+                <thead style="background:#f8fafc;border-bottom:1px solid var(--gray-200)">
+                  <tr>
+                    <th style="padding:7px 6px;text-align:center;font-weight:700;color:#475569;width:36px">No.</th>
+                    <th style="padding:7px 6px;text-align:center;font-weight:700;color:#475569;min-width:200px">Item Description<br><span style="font-weight:500;font-size:10px;color:#94a3b8">품목명</span></th>
+                    <th style="padding:7px 6px;text-align:center;font-weight:700;color:#475569;width:100px">Product Code<br><span style="font-weight:500;font-size:10px;color:#94a3b8">제품코드</span></th>
+                    <th style="padding:7px 6px;text-align:center;font-weight:700;color:#475569;width:80px">Capacity<br><span style="font-weight:500;font-size:10px;color:#94a3b8">용량</span></th>
+                    <th style="padding:7px 6px;text-align:center;font-weight:700;color:#475569;width:100px">Unit Price<br><span style="font-weight:500;font-size:10px;color:#94a3b8">단가</span></th>
+                    <th style="padding:7px 6px;text-align:center;font-weight:700;color:#475569;width:90px">Quantity<br><span style="font-weight:500;font-size:10px;color:#94a3b8">수량</span></th>
+                    <th style="padding:7px 6px;text-align:center;font-weight:700;color:#475569;width:110px">Amount<br><span style="font-weight:500;font-size:10px;color:#94a3b8">금액</span></th>
+                    <th style="padding:7px 6px;text-align:center;font-weight:700;color:#475569;min-width:120px">Remarks<br><span style="font-weight:500;font-size:10px;color:#94a3b8">비고</span></th>
+                    <th style="padding:7px 6px;text-align:center;font-weight:700;color:#475569;width:40px"></th>
+                  </tr>
+                </thead>
+                <tbody id="po-items-rows"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 운송료 / Duties / 합계 -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
+            <div class="fg" style="margin:0"><label>Ocean Freight <span style="font-size:10px;color:var(--gray-400)">(해상운송료)</span></label><input class="fi" id="po-ocean-freight" type="number" min="0" step="any" value="0" oninput="calcPoTotal()" style="text-align:right;font-variant-numeric:tabular-nums"></div>
+            <div class="fg" style="margin:0"><label>Duties and Taxes <span style="font-size:10px;color:var(--gray-400)">(관세·부가세)</span></label><select class="fs" id="po-duties"><option>Collect</option><option>Prepaid</option><option>Paid by Buyer</option><option>Paid by Seller</option></select></div>
+            <div class="fg" style="margin:0"><label>분류 (ERP 내부)</label><select class="fs" id="po-item-type"><option value="부자재">부자재</option><option value="원자재">원자재</option><option value="OEM">OEM</option><option value="외주가공">외주가공</option><option value="완제품">완제품</option></select></div>
+          </div>
+
+          <!-- 합계 카드 -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
+            <div style="padding:12px 14px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;text-align:center">
+              <div style="font-size:10.5px;color:var(--gray-500);font-weight:600;margin-bottom:4px">Product Total / 제품 합계</div>
+              <div style="font-size:18px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums" id="po-total-product">0.00</div>
+            </div>
+            <div style="padding:12px 14px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;text-align:center">
+              <div style="font-size:10.5px;color:var(--gray-500);font-weight:600;margin-bottom:4px">+ Freight</div>
+              <div style="font-size:18px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums" id="po-total-freight">0.00</div>
+            </div>
+            <div style="padding:12px 14px;border:1px solid #1e3a8a;border-radius:8px;background:#eff6ff;text-align:center">
+              <div style="font-size:10.5px;color:#1e3a8a;font-weight:700;margin-bottom:4px">TOTAL (Product + Freight)</div>
+              <div style="font-size:20px;font-weight:800;color:#1e3a8a;font-variant-numeric:tabular-nums"><span id="po-total-currency">USD</span> <span id="po-grand-total">0.00</span></div>
+            </div>
+          </div>
+
+          <!-- 비고 -->
+          <div class="fg" style="margin-bottom:0"><label>비고 / Notes</label><textarea class="fta" id="po-note" rows="2" placeholder=""></textarea></div>
+        </div>
+        <div class="modal-ft" style="display:flex;justify-content:space-between;align-items:center">
+          <button class="btn btn-danger btn-sm" id="po-delete-btn" onclick="deletePoFromEdit()" style="display:none">🗑 삭제</button>
+          <div style="display:flex;gap:8px;margin-left:auto">
+            <button class="btn btn-outline" onclick="closeModal('add-po')">취소</button>
+            <button class="btn btn-primary" onclick="savePo()" style="background:#1e3a8a">💾 저장</button>
+          </div>
         </div>
       </div>
     </div>
@@ -5044,7 +5160,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.802';
+const ERP_VERSION = 'v1.9.805';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -18272,6 +18388,307 @@ function deleteOrderByIdx(idx) {
   closeModal('add-order'); renderOrderTable(); renderDashboard(); updateBadges(); showNotif('발주서가 삭제되었습니다');
 }
 
+// ════════════════════════════════════════════════════════════════════
+// v1.9.804: 해외 PO (Overseas Purchase Order)
+// ════════════════════════════════════════════════════════════════════
+
+// PO 번호 자동 생성: PO-YYYYMMDD-NNN
+function _genPoNumber() {
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = String(today.getMonth() + 1).padStart(2, '0');
+  const d = String(today.getDate()).padStart(2, '0');
+  const prefix = 'PO-' + y + m + d + '-';
+  // 같은 날짜의 기존 PO 번호 중 최대 NNN 찾기
+  let maxN = 0;
+  (DB.orders || []).forEach(o => {
+    if (o && o.isOverseas && typeof o.poNumber === 'string' && o.poNumber.startsWith(prefix)) {
+      const n = parseInt(o.poNumber.slice(prefix.length)) || 0;
+      if (n > maxN) maxN = n;
+    }
+  });
+  return prefix + String(maxN + 1).padStart(3, '0');
+}
+
+// 모달 열기 (편집 모드면 기존 데이터 복원, 신규면 디폴트 채움)
+function openOverseasPoModal(editId) {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  // 초기화
+  document.getElementById('po-edit-id').value = editId || '';
+  const order = editId ? (DB.orders || []).find(o => o && o.id === editId) : null;
+  if (order && order.isOverseas) {
+    // 편집 모드
+    document.getElementById('po-number').value = order.poNumber || '';
+    document.getElementById('po-date').value = order.orderDate || today();
+    document.getElementById('po-payment').value = order.payment || 'Credit Card';
+    document.getElementById('po-shipping').value = order.shippingTerm || 'Paid by Buyer (주문자 지불)';
+    document.getElementById('po-currency').value = order.currency || 'USD';
+    const b = order.buyer || {};
+    document.getElementById('po-buyer-company').value = b.company || 'RENIV Corp.';
+    document.getElementById('po-buyer-contact').value = b.orderContact || 'Stella Song (+61-421-597-337)';
+    document.getElementById('po-buyer-kr-person').value = b.koreaContactPerson || 'Kwon Da-bin (권다빈)';
+    document.getElementById('po-buyer-kr-tel').value = b.koreaTel || '+82-70-8065-3279';
+    document.getElementById('po-buyer-kr-mobile').value = b.koreaMobile || '+82-10-8874-5722';
+    const s = order.supplier || {};
+    document.getElementById('po-supplier-company').value = s.company || '';
+    document.getElementById('po-supplier-contact').value = s.contactPerson || '';
+    document.getElementById('po-supplier-product').value = s.product || '';
+    document.getElementById('po-supplier-reference').value = s.reference || '';
+    document.getElementById('po-supplier-capacity').value = s.capacity || '';
+    const da = order.deliveryAddr || {};
+    document.getElementById('po-delivery-company').value = da.company || '';
+    document.getElementById('po-delivery-contact').value = da.contactPerson || '';
+    document.getElementById('po-delivery-address').value = da.address || '';
+    document.getElementById('po-delivery-tel').value = da.tel || '';
+    document.getElementById('po-delivery-mobile').value = da.mobile || '';
+    document.getElementById('po-ocean-freight').value = order.oceanFreight || 0;
+    document.getElementById('po-duties').value = order.dutiesAndTaxes || 'Collect';
+    document.getElementById('po-item-type').value = order.itemType || '부자재';
+    document.getElementById('po-note').value = order.note || '';
+    // 품목 행 복원
+    document.getElementById('po-items-rows').innerHTML = '';
+    (order.rows || []).forEach(r => addPoRow(r));
+    if ((order.rows || []).length === 0) addPoRow();
+    // 삭제 버튼 표시
+    const delBtn = document.getElementById('po-delete-btn');
+    if (delBtn) delBtn.style.display = '';
+  } else {
+    // 신규 모드 — Buyer 디폴트 + 빈 supplier/delivery
+    document.getElementById('po-number').value = _genPoNumber();
+    document.getElementById('po-date').value = today();
+    document.getElementById('po-payment').value = 'Credit Card';
+    document.getElementById('po-shipping').value = 'Paid by Buyer (주문자 지불)';
+    document.getElementById('po-currency').value = 'USD';
+    document.getElementById('po-buyer-company').value = 'RENIV Corp.';
+    document.getElementById('po-buyer-contact').value = 'Stella Song (+61-421-597-337)';
+    document.getElementById('po-buyer-kr-person').value = 'Kwon Da-bin (권다빈)';
+    document.getElementById('po-buyer-kr-tel').value = '+82-70-8065-3279';
+    document.getElementById('po-buyer-kr-mobile').value = '+82-10-8874-5722';
+    document.getElementById('po-supplier-company').value = '';
+    document.getElementById('po-supplier-contact').value = '';
+    document.getElementById('po-supplier-product').value = '';
+    document.getElementById('po-supplier-reference').value = '';
+    document.getElementById('po-supplier-capacity').value = '';
+    document.getElementById('po-delivery-company').value = '';
+    document.getElementById('po-delivery-contact').value = '';
+    document.getElementById('po-delivery-address').value = '';
+    document.getElementById('po-delivery-tel').value = '';
+    document.getElementById('po-delivery-mobile').value = '';
+    document.getElementById('po-ocean-freight').value = 0;
+    document.getElementById('po-duties').value = 'Collect';
+    document.getElementById('po-item-type').value = '부자재';
+    document.getElementById('po-note').value = '';
+    document.getElementById('po-items-rows').innerHTML = '';
+    addPoRow();
+    // 삭제 버튼 숨김
+    const delBtn = document.getElementById('po-delete-btn');
+    if (delBtn) delBtn.style.display = 'none';
+  }
+  calcPoTotal();
+  openModal('add-po');
+}
+
+// 품목 행 추가
+function addPoRow(row) {
+  const tbody = document.getElementById('po-items-rows');
+  if (!tbody) return;
+  const rowsCount = tbody.querySelectorAll('tr').length;
+  const no = rowsCount + 1;
+  const r = row || {};
+  const tr = document.createElement('tr');
+  tr.style.borderBottom = '1px solid #f1f5f9';
+  tr.innerHTML =
+    '<td style="padding:4px 6px;text-align:center;color:#94a3b8;font-weight:600">' + no + '</td>' +
+    '<td style="padding:4px 6px">' +
+      '<select class="po-row-item fs" onchange="_onPoItemChange(this)" style="width:100%;font-size:12px;padding:4px 6px;margin-bottom:3px"><option value="">— 품목 선택 —</option></select>' +
+      '<input type="text" class="po-row-desc fi" value="' + ((r.description || r.name || '').replace(/"/g,'&quot;')) + '" placeholder="Item Description" style="width:100%;padding:4px 6px;font-size:12px;text-align:center">' +
+    '</td>' +
+    '<td style="padding:4px 6px"><input type="text" class="po-row-code fi" value="' + ((r.code || r.productCode || '').replace(/"/g,'&quot;')) + '" placeholder="—" style="width:100%;padding:4px 6px;font-size:12px;text-align:center"></td>' +
+    '<td style="padding:4px 6px"><input type="text" class="po-row-cap fi" value="' + ((r.capacity || '').replace(/"/g,'&quot;')) + '" placeholder="" style="width:100%;padding:4px 6px;font-size:12px;text-align:center"></td>' +
+    '<td style="padding:4px 6px"><input type="number" class="po-row-price fi" value="' + (r.price || r.unitPrice || 0) + '" min="0" step="any" oninput="_calcPoRowAmount(this.closest(\'tr\'));calcPoTotal()" style="width:100%;padding:4px 6px;font-size:12px;text-align:center;font-variant-numeric:tabular-nums"></td>' +
+    '<td style="padding:4px 6px"><input type="number" class="po-row-qty fi" value="' + (r.qty || r.quantity || 0) + '" min="0" step="any" oninput="_calcPoRowAmount(this.closest(\'tr\'));calcPoTotal()" style="width:100%;padding:4px 6px;font-size:12px;text-align:center;font-variant-numeric:tabular-nums"></td>' +
+    '<td class="po-row-amt" style="padding:6px 8px;text-align:center;font-weight:700;color:#0f172a;font-variant-numeric:tabular-nums">' + ((parseFloat(r.price||r.unitPrice||0) * parseFloat(r.qty||r.quantity||0)) || 0).toFixed(2) + '</td>' +
+    '<td style="padding:4px 6px"><input type="text" class="po-row-remarks fi" value="' + ((r.remarks || '').replace(/"/g,'&quot;')) + '" placeholder="" style="width:100%;padding:4px 6px;font-size:12px;text-align:center"></td>' +
+    '<td style="padding:4px 6px;text-align:center"><button type="button" onclick="this.closest(\'tr\').remove();_renumberPoRows();calcPoTotal()" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;padding:3px 7px;border-radius:4px;font-size:10.5px;cursor:pointer;font-weight:700">🗑</button></td>';
+  tbody.appendChild(tr);
+  // 품목 select 채움
+  const sel = tr.querySelector('.po-row-item');
+  _populatePoItemSelect(sel, r.itemId);
+}
+
+// 품목 select 채우기 (전체 items)
+function _populatePoItemSelect(sel, currentItemId) {
+  if (!sel) return;
+  const items = (DB.items || []).filter(i => i);
+  sel.innerHTML = '<option value="">— 품목 선택 —</option>' +
+    items.map(i => {
+      const code = i.code ? '(' + i.code + ') ' : '';
+      const name = (i.name || '-').replace(/</g, '&lt;');
+      const sel2 = (currentItemId && String(i.id) === String(currentItemId)) ? ' selected' : '';
+      return '<option value="' + i.id + '"' + sel2 + '>' + code + name + '</option>';
+    }).join('');
+}
+
+// 품목 select 변경 시 자동 채움
+function _onPoItemChange(sel) {
+  const tr = sel.closest('tr');
+  if (!tr) return;
+  const itemId = parseInt(sel.value) || 0;
+  if (!itemId) return;
+  const item = (DB.items || []).find(i => i.id === itemId);
+  if (!item) return;
+  const descEl = tr.querySelector('.po-row-desc');
+  const codeEl = tr.querySelector('.po-row-code');
+  const capEl = tr.querySelector('.po-row-cap');
+  const priceEl = tr.querySelector('.po-row-price');
+  if (descEl && !descEl.value) descEl.value = item.name || '';
+  if (codeEl && !codeEl.value) codeEl.value = item.code || '';
+  if (capEl && !capEl.value) capEl.value = item.spec || '';
+  if (priceEl && (!priceEl.value || parseFloat(priceEl.value) === 0)) priceEl.value = item.price || 0;
+  _calcPoRowAmount(tr);
+  calcPoTotal();
+}
+
+// 한 행 금액 = 단가 × 수량
+function _calcPoRowAmount(tr) {
+  if (!tr) return;
+  const price = parseFloat(tr.querySelector('.po-row-price')?.value) || 0;
+  const qty = parseFloat(tr.querySelector('.po-row-qty')?.value) || 0;
+  const amtEl = tr.querySelector('.po-row-amt');
+  if (amtEl) amtEl.textContent = (price * qty).toFixed(2);
+}
+
+// 행 번호 재계산
+function _renumberPoRows() {
+  const tbody = document.getElementById('po-items-rows');
+  if (!tbody) return;
+  tbody.querySelectorAll('tr').forEach((tr, i) => {
+    const noCell = tr.querySelector('td:first-child');
+    if (noCell) noCell.textContent = i + 1;
+  });
+}
+
+// 합계 계산
+function calcPoTotal() {
+  const tbody = document.getElementById('po-items-rows');
+  let productTotal = 0;
+  if (tbody) {
+    tbody.querySelectorAll('tr').forEach(tr => {
+      const price = parseFloat(tr.querySelector('.po-row-price')?.value) || 0;
+      const qty = parseFloat(tr.querySelector('.po-row-qty')?.value) || 0;
+      productTotal += price * qty;
+    });
+  }
+  const freight = parseFloat(document.getElementById('po-ocean-freight')?.value) || 0;
+  const grand = productTotal + freight;
+  const cur = document.getElementById('po-currency')?.value || 'USD';
+  const setEl = (id, val) => { const e = document.getElementById(id); if (e) e.textContent = val; };
+  setEl('po-total-product', productTotal.toFixed(2));
+  setEl('po-total-freight', freight.toFixed(2));
+  setEl('po-grand-total', grand.toFixed(2));
+  setEl('po-total-currency', cur);
+}
+
+// 저장
+function savePo() {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  const editId = document.getElementById('po-edit-id').value;
+  const tbody = document.getElementById('po-items-rows');
+  const rows = [];
+  if (tbody) {
+    tbody.querySelectorAll('tr').forEach(tr => {
+      const itemIdRaw = tr.querySelector('.po-row-item')?.value || '';
+      const itemId = itemIdRaw ? parseInt(itemIdRaw) : null;
+      const desc = tr.querySelector('.po-row-desc')?.value?.trim() || '';
+      const code = tr.querySelector('.po-row-code')?.value?.trim() || '';
+      const cap = tr.querySelector('.po-row-cap')?.value?.trim() || '';
+      const price = parseFloat(tr.querySelector('.po-row-price')?.value) || 0;
+      const qty = parseFloat(tr.querySelector('.po-row-qty')?.value) || 0;
+      const remarks = tr.querySelector('.po-row-remarks')?.value?.trim() || '';
+      if (!desc && !qty) return;
+      rows.push({
+        itemId, code, name: desc, description: desc, productCode: code,
+        capacity: cap, qty, price, quantity: qty, unitPrice: price,
+        amount: qty * price, remarks
+      });
+    });
+  }
+  if (!rows.length) { showNotif('품목을 1개 이상 입력해 주세요', 'warning'); return; }
+
+  const productTotal = rows.reduce((s, r) => s + (r.amount || 0), 0);
+  const oceanFreight = parseFloat(document.getElementById('po-ocean-freight').value) || 0;
+  const data = {
+    isOverseas: true,
+    poNumber: document.getElementById('po-number').value.trim(),
+    orderDate: document.getElementById('po-date').value || today(),
+    payment: document.getElementById('po-payment').value,
+    shippingTerm: document.getElementById('po-shipping').value,
+    currency: document.getElementById('po-currency').value || 'USD',
+    buyer: {
+      company: document.getElementById('po-buyer-company').value,
+      orderContact: document.getElementById('po-buyer-contact').value,
+      koreaContactPerson: document.getElementById('po-buyer-kr-person').value,
+      koreaTel: document.getElementById('po-buyer-kr-tel').value,
+      koreaMobile: document.getElementById('po-buyer-kr-mobile').value
+    },
+    supplier: {
+      company: document.getElementById('po-supplier-company').value,
+      contactPerson: document.getElementById('po-supplier-contact').value,
+      product: document.getElementById('po-supplier-product').value,
+      reference: document.getElementById('po-supplier-reference').value,
+      capacity: document.getElementById('po-supplier-capacity').value
+    },
+    deliveryAddr: {
+      company: document.getElementById('po-delivery-company').value,
+      contactPerson: document.getElementById('po-delivery-contact').value,
+      address: document.getElementById('po-delivery-address').value,
+      tel: document.getElementById('po-delivery-tel').value,
+      mobile: document.getElementById('po-delivery-mobile').value
+    },
+    rows,
+    oceanFreight,
+    dutiesAndTaxes: document.getElementById('po-duties').value,
+    productTotal,
+    grandTotal: productTotal + oceanFreight,
+    itemType: document.getElementById('po-item-type').value,
+    note: document.getElementById('po-note').value,
+    status: '진행중',
+    stockStatus: '입고전',
+    updatedAt: Date.now()
+  };
+
+  if (!Array.isArray(DB.orders)) DB.orders = [];
+  if (editId) {
+    const idx = DB.orders.findIndex(o => o && String(o.id) === String(editId));
+    if (idx >= 0) {
+      DB.orders[idx] = { ...DB.orders[idx], ...data };
+      showNotif('✅ 해외 PO 수정 완료', 'success');
+    }
+  } else {
+    const newId = (typeof nextId === 'function') ? nextId('order') : (Date.now());
+    DB.orders.push({ id: newId, createdAt: Date.now(), ...data });
+    showNotif('✅ 해외 PO 저장 완료', 'success');
+  }
+  try { if (typeof saveData === 'function') saveData(); } catch(_){}
+  closeModal('add-po');
+  try { renderOrderTable(); } catch(_){}
+}
+
+// 삭제
+function deletePoFromEdit() {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  const editId = document.getElementById('po-edit-id').value;
+  if (!editId) return;
+  const o = (DB.orders || []).find(x => x && String(x.id) === String(editId));
+  if (!o) return;
+  if (!confirm('이 해외 PO를 삭제하시겠습니까?\n\n[' + (o.poNumber || '-') + ']')) return;
+  DB.orders = DB.orders.filter(x => x && String(x.id) !== String(editId));
+  try { if (typeof saveData === 'function') saveData(); } catch(_){}
+  closeModal('add-po');
+  try { renderOrderTable(); } catch(_){}
+  showNotif('🗑 해외 PO 삭제 완료', 'success');
+}
+
 function renderOrderTable() {
   // v1.9.396: 기간 필터 (발주일 orderDate 기준)
   if (typeof _periodInit === 'function') _periodInit('po');
@@ -18382,24 +18799,43 @@ function renderOrderTable() {
     const typeChipTxt = {원자재:'#2d7a4a', 부자재:'#7c4dbd', OEM:'#2874a0', 외주가공:'#5a6670', 완제품:'#9a7520'};
     const typeChipBd = {원자재:'#b8e8c8', 부자재:'#d4bfee', OEM:'#b0d8f5', 외주가공:'#d4dae0', 완제품:'#f0dea0'};
     const vType = v.type || '';
-    const typeBadge = vType
-      ? `<span style="display:inline-block;padding:1px 8px;border-radius:9px;font-size:10px;font-weight:600;white-space:nowrap;background:${typeChipBg[vType]||'#f1f5f9'};color:${typeChipTxt[vType]||'#475569'};border:1px solid ${typeChipBd[vType]||'#cbd5e1'}">${vType}</span>`
-      : '';
+    // v1.9.805: 해외 PO 분기
+    const isPo = !!o.isOverseas;
+    let typeBadge;
+    if (isPo) {
+      typeBadge = '<span style="display:inline-block;padding:1px 8px;border-radius:9px;font-size:10px;font-weight:700;white-space:nowrap;background:#dbeafe;color:#1e3a8a;border:1px solid #93c5fd">🌐 해외 PO</span>';
+    } else {
+      typeBadge = vType
+        ? `<span style="display:inline-block;padding:1px 8px;border-radius:9px;font-size:10px;font-weight:600;white-space:nowrap;background:${typeChipBg[vType]||'#f1f5f9'};color:${typeChipTxt[vType]||'#475569'};border:1px solid ${typeChipBd[vType]||'#cbd5e1'}">${vType}</span>`
+        : '';
+    }
+    // 업체명: 해외 PO는 supplier.company, 국내는 vendor
+    const supplierName = isPo ? ((o.supplier && o.supplier.company) || '—') : (v.company||'-');
+    const supplierClickHandler = isPo ? '' : `onclick="viewVendor(${o.vendorId})"`;
+    // 금액: 해외 PO는 통화 + grandTotal (VAT 없음), 국내는 VAT 포함
+    const amountDisplay = isPo
+      ? `${o.currency||'USD'} ${(parseFloat(o.grandTotal)||0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`
+      : fmtW(total);
+    // 수정 버튼 핸들러
+    const editHandler = isPo ? `openOverseasPoModal(${o.id})` : `editOrderByIdx(${dbIdx})`;
+    // 결재 날인 / 이메일: 해외 PO는 일단 빈 셀
+    const stampCellFinal = isPo ? '<span style="color:#cbd5e1;font-size:10.5px">—</span>' : stampBadge;
+    const emailCellFinal = isPo
+      ? '<span style="color:#cbd5e1;font-size:10.5px">—</span>'
+      : `<button title="결재 날인된 발주서를 이메일로 발송 (Outlook 새 메일 창 열림)" onclick="sendOrderEmail(${o.id})" style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;padding:2px 7px;border-radius:5px;font-size:10.5px;cursor:pointer;font-weight:700;line-height:1.3" onmouseenter="this.style.background='#ffedd5'" onmouseleave="this.style.background='#fff7ed'">이메일</button>`;
     // v1.9.400: 품목 클릭 → 발주서 미리보기, 관리 열은 수정 아이콘만으로 컴팩트화, 폰트 12px (업체명·품목명 0.5pt 업)
     return `<tr style="background:${rowBg}">
       <td style="text-align:center;padding:8px 2px;vertical-align:middle">${typeBadge}</td>
-      <td class="lnk" style="text-align:center;font-size:12px;line-height:1.4;word-break:keep-all;padding:8px 6px;vertical-align:middle" onclick="viewVendor(${o.vendorId})" title="${o.serial||'PO-'+String(o.id).padStart(3,'0')}">${v.company||'-'}</td>
-      <td style="font-size:12px;line-height:1.45;padding:8px 8px;vertical-align:middle;cursor:pointer" onclick="previewOrderByIdx(${dbIdx})" title="클릭하면 발주서 보기"><div style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:keep-all;color:#1e40af" onmouseenter="this.style.textDecoration=\'underline\'" onmouseleave="this.style.textDecoration=\'none\'">${itemList}</div></td>
+      <td class="lnk" style="text-align:center;font-size:12px;line-height:1.4;word-break:keep-all;padding:8px 6px;vertical-align:middle" ${supplierClickHandler} title="${o.poNumber||o.serial||'PO-'+String(o.id).padStart(3,'0')}">${supplierName}</td>
+      <td style="font-size:12px;line-height:1.45;padding:8px 8px;vertical-align:middle;cursor:pointer" onclick="${isPo?editHandler:`previewOrderByIdx(${dbIdx})`}" title="클릭하면 ${isPo?'해외 PO 수정':'발주서 보기'}"><div style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:keep-all;color:#1e40af" onmouseenter="this.style.textDecoration=\'underline\'" onmouseleave="this.style.textDecoration=\'none\'">${itemList}</div></td>
       <td style="text-align:center;font-size:11.5px;padding:8px 2px;vertical-align:middle;white-space:nowrap;color:var(--gray-700)">${o.orderDate||'-'}</td>
       <td style="text-align:center;padding:8px 2px;vertical-align:middle">${inDisplay}</td>
-      <td style="text-align:center;font-size:12px;padding:8px 4px;vertical-align:middle;white-space:nowrap;font-weight:600">${fmtW(total)}</td>
+      <td style="text-align:center;font-size:12px;padding:8px 4px;vertical-align:middle;white-space:nowrap;font-weight:600">${amountDisplay}</td>
       <td style="text-align:center;padding:8px 8px;vertical-align:middle">${stockStatusBadge(o.stockStatus, o.id)}</td>
-      <td style="text-align:center;padding:8px 8px;vertical-align:middle">${stampBadge}</td>
-      <td style="text-align:center;padding:8px 4px;vertical-align:middle">
-        <button title="결재 날인된 발주서를 이메일로 발송 (Outlook 새 메일 창 열림)" onclick="sendOrderEmail(${o.id})" style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;padding:2px 7px;border-radius:5px;font-size:10.5px;cursor:pointer;font-weight:700;line-height:1.3" onmouseenter="this.style.background='#ffedd5'" onmouseleave="this.style.background='#fff7ed'">이메일</button>
-      </td>
+      <td style="text-align:center;padding:8px 8px;vertical-align:middle">${stampCellFinal}</td>
+      <td style="text-align:center;padding:8px 4px;vertical-align:middle">${emailCellFinal}</td>
       <td style="text-align:center;padding:8px 6px;vertical-align:middle">
-        <button title="수정" onclick="editOrderByIdx(${dbIdx})" style="background:#eef2ff;color:#6366f1;border:1px solid #e0e7ff;width:24px;height:22px;padding:0;border-radius:5px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1">✏️</button>
+        <button title="수정" onclick="${editHandler}" style="background:#eef2ff;color:#6366f1;border:1px solid #e0e7ff;width:24px;height:22px;padding:0;border-radius:5px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1">✏️</button>
       </td>
     </tr>`;
   }).join('') || '<tr><td colspan="10" class="empty">발주서가 없습니다</td></tr>';
