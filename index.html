@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.852';
+const ERP_VERSION = 'v1.9.853';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29038,6 +29038,20 @@ function openExpenseApprovalForm(expenseId) {
   const fmtW = n => '₩' + Number(n||0).toLocaleString('ko-KR');
   const fmtNum = n => Number(n||0).toLocaleString('ko-KR');
 
+  // v1.9.853: 해외 PO 면 단가/금액/합계를 원래 통화로 표시
+  let _isOverseasPo = false;
+  let _overseasCurrency = '';
+  if ((e.category === 'po_prepay' || e.category === 'po_balance') && e.orderId) {
+    const _ord = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
+    if (_ord && _ord.isOverseas) {
+      _isOverseasPo = true;
+      _overseasCurrency = String(_ord.currency || 'USD').toUpperCase();
+    }
+  }
+  const fmtAmt = n => _isOverseasPo
+    ? (_overseasCurrency + ' ' + Number(n||0).toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+    : fmtW(n);
+
   // 집행내역 합계
   const execTotal = execRows.reduce((s,r) => s + (Number(r.subtotal)||0), 0);
 
@@ -29046,8 +29060,8 @@ function openExpenseApprovalForm(expenseId) {
       <td style="text-align:center">${r.no}</td>
       <td style="text-align:left;padding-left:10px">${r.name}${r.spec?` <span style="color:#6b7280;font-size:11px">(${r.spec})</span>`:''}</td>
       <td style="text-align:right">${fmtNum(r.qty)}</td>
-      <td style="text-align:right">${fmtW(r.price)}</td>
-      <td style="text-align:right;font-weight:600">${fmtW(r.subtotal)}</td>
+      <td style="text-align:right">${fmtAmt(r.price)}</td>
+      <td style="text-align:right;font-weight:600">${fmtAmt(r.subtotal)}</td>
     </tr>`).join('');
 
   const w = window.open('', '_blank');
@@ -29127,7 +29141,7 @@ function openExpenseApprovalForm(expenseId) {
           ${rowsHtml}
           <tr class="total-row">
             <td colspan="4" style="text-align:right">합           계</td>
-            <td style="text-align:right">${fmtW(execTotal)}</td>
+            <td style="text-align:right">${fmtAmt(execTotal)}</td>
           </tr>
           ${(e.category==='po_prepay'||e.category==='po_balance') && percent !== 100 ? `
           <tr class="total-row" style="background:#fef3c7">
