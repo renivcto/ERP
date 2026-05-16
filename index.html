@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.828';
+const ERP_VERSION = 'v1.9.829';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -14170,16 +14170,77 @@ function renderShopAdsList(shopId) {
     }).join('') + '</tbody></table>';
 }
 
-// v1.9.500/819: adsCosts 행 → 연결된 지출결의서 열기 (광고 프로젝트 모달 먼저 닫기 — z-index 충돌 회피)
+// v1.9.500/819/829: adsCosts 행 → 연결된 지출결의서 열기 (광고 프로젝트 모달 먼저 닫기 — z-index 충돌 회피)
+//   v829: expense 못 찾으면 광고비 직접 수정 (inline) — sync 깨진 케이스 복구
 function _openLinkedExpense(expenseId) {
   if (expenseId == null) { showNotif('연결된 지출결의서를 찾을 수 없습니다', 'warning'); return; }
   const e = (DB.expenses||[]).find(x => String(x.id) === String(expenseId));
-  if (!e) { showNotif('지출결의서 #' + expenseId + ' 를 찾을 수 없습니다 (이미 삭제되었을 수 있음)', 'warning'); return; }
+  if (!e) {
+    // v829: 지출결의서 없을 때 광고비 행 직접 수정 (cost/기간 prompt)
+    if (typeof _editAdsCostInline === 'function') { _editAdsCostInline(expenseId); return; }
+    showNotif('지출결의서 #' + expenseId + ' 를 찾을 수 없습니다', 'warning'); return;
+  }
   // v1.9.819: 광고 프로젝트 모달이 열려있으면 먼저 닫기 (z-index 450이라 지출결의서 모달 가림)
   try { if (typeof closeModal === 'function') closeModal('ad-project-modal'); } catch(_){}
   setTimeout(() => {
     if (typeof editExpense === 'function') editExpense(e.id);
   }, 100);
+}
+
+// v1.9.829: 광고비 행 직접 수정 (지출결의서 sync 깨진 경우 사용)
+//   금액 / 시작일 / 종료일 을 순차 prompt 로 수정
+function _editAdsCostInline(expenseId) {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  let foundShop = null, foundCost = null;
+  (DB.shops || []).forEach(s => {
+    (s.adsCosts || []).forEach(a => {
+      if (String(a.expenseId || '') === String(expenseId)) {
+        foundShop = s; foundCost = a;
+      }
+    });
+  });
+  if (!foundCost) { showNotif('광고비 행을 찾을 수 없습니다', 'warning'); return; }
+
+  // 금액 입력
+  const curCost = Number(foundCost.cost || 0);
+  const costStr = prompt('광고비 금액 (₩)\n\n현재: ' + curCost.toLocaleString(), curCost);
+  if (costStr == null) return;
+  const newCost = parseFloat(String(costStr).replace(/[^0-9.\-]/g, ''));
+  if (!Number.isFinite(newCost) || newCost < 0) { showNotif('올바른 숫자를 입력해주세요', 'warning'); return; }
+
+  // 시작일 입력
+  const curStart = foundCost.startDate || '';
+  const startStr = prompt('시작일 (YYYY-MM-DD)\n취소 시 변경 안 함', curStart);
+  let newStart = curStart;
+  if (startStr != null) {
+    const s = String(startStr).trim();
+    if (s && !/^\d{4}-\d{2}-\d{2}$/.test(s)) { showNotif('날짜 형식이 잘못되었습니다 (YYYY-MM-DD)', 'warning'); return; }
+    newStart = s || curStart;
+  }
+
+  // 종료일 입력
+  const curEnd = foundCost.endDate || '';
+  const endStr = prompt('종료일 (YYYY-MM-DD)\n취소 시 변경 안 함', curEnd);
+  let newEnd = curEnd;
+  if (endStr != null) {
+    const ee = String(endStr).trim();
+    if (ee && !/^\d{4}-\d{2}-\d{2}$/.test(ee)) { showNotif('날짜 형식이 잘못되었습니다 (YYYY-MM-DD)', 'warning'); return; }
+    newEnd = ee || curEnd;
+  }
+
+  // 업데이트
+  foundCost.cost = newCost;
+  foundCost.startDate = newStart;
+  foundCost.endDate = newEnd;
+  foundCost.updatedAt = Date.now();
+  try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  showNotif('✅ 광고비 수정 완료 (₩' + newCost.toLocaleString() + ')', 'success');
+  // 프로젝트 모달의 광고비 이력 + 광고비 페이지 갱신
+  try {
+    const projId = document.getElementById('ad-project-edit-id')?.value;
+    if (projId && typeof _renderProjectCostList === 'function') _renderProjectCostList(projId);
+  } catch(_){}
+  try { if (typeof renderAdsPage === 'function') renderAdsPage(); } catch(_){}
 }
 
 // v1.9.355: 광고비 기간 행 클릭 시 호출 — ROAS 시작일/종료일을 채우고 즉시 분석
