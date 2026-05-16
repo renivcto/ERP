@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.834';
+const ERP_VERSION = 'v1.9.835';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13216,29 +13216,61 @@ function saveAdProject() {
   } catch(_){}
 }
 
+// v1.9.835: 프로젝트 삭제 시 연결된 광고비 행 + 지출결의서 모두 cascade 삭제
 function deleteAdProject() {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
   const editId = document.getElementById('ad-project-edit-id').value;
   if (!editId) return;
-  if (!confirm('이 프로젝트를 삭제하시겠습니까?\n\n(연결된 광고비는 그대로 남아있고, 프로젝트 연결만 끊어집니다)')) return;
+
+  // 사전 집계: 연결된 광고비 행 / expense 수
+  let adsCostCount = 0;
+  const expenseIdsToDelete = [];
+  (DB.shops || []).forEach(s => {
+    (s.adsCosts || []).forEach(a => {
+      if (String(a.projectId || '') === String(editId)) {
+        adsCostCount++;
+        if (a.expenseId != null) expenseIdsToDelete.push(a.expenseId);
+      }
+    });
+  });
+  const proj = (DB.adProjects || []).find(p => String(p.id) === String(editId));
+  const projName = proj ? (proj.name || '-') : '-';
+
+  const msg = '[' + projName + '] 프로젝트를 삭제하시겠습니까?\n\n' +
+    '⚠️ 연결된 광고비 ' + adsCostCount + '건' +
+    (expenseIdsToDelete.length > 0 ? (' + 지출결의서 ' + expenseIdsToDelete.length + '건') : '') +
+    ' 도 함께 삭제됩니다.';
+  if (!confirm(msg)) return;
+
   if (!Array.isArray(DB.adProjects)) DB.adProjects = [];
   const idx = DB.adProjects.findIndex(p => String(p.id) === String(editId));
-  if (idx >= 0) {
-    DB.adProjects.splice(idx, 1);
-    // 연결된 광고비의 projectId 끊기
-    (DB.shops || []).forEach(s => {
-      (s.adsCosts || []).forEach(a => {
-        if (String(a.projectId || '') === String(editId)) {
-          delete a.projectId;
-          a.updatedAt = Date.now();
-        }
-      });
+  if (idx < 0) { showNotif('프로젝트를 찾을 수 없습니다', 'warning'); return; }
+
+  // 1) 프로젝트 자체 삭제
+  DB.adProjects.splice(idx, 1);
+
+  // 2) 연결된 광고비(adsCosts) 행 삭제 — 각 shop 의 adsCosts 배열에서 매칭하는 항목 제거
+  (DB.shops || []).forEach(s => {
+    if (!Array.isArray(s.adsCosts)) return;
+    s.adsCosts = s.adsCosts.filter(a => String(a.projectId || '') !== String(editId));
+  });
+
+  // 3) 연결된 지출결의서(expenses) 도 삭제 + tombstone
+  if (expenseIdsToDelete.length > 0) {
+    if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
+    expenseIdsToDelete.forEach(eid => {
+      if (!DB._deletedExpenseIds.includes(eid)) DB._deletedExpenseIds.push(eid);
     });
-    // v1.9.827: saveData -> saveDataNow (즉시 저장)
-    try { if (typeof saveDataNow === 'function') { saveDataNow(); } else { saveData(); } } catch(_){}
-    closeModal('ad-project-modal');
-    showNotif('✅ 프로젝트 삭제 완료', 'success');
-    try { renderAdsPage(); } catch(_){}
+    DB.expenses = (DB.expenses || []).filter(e => !e || !expenseIdsToDelete.includes(e.id));
   }
+
+  // 4) 즉시 저장 + 모든 관련 화면 갱신
+  try { if (typeof saveDataNow === 'function') { saveDataNow(); } else { saveData(); } } catch(_){}
+  closeModal('ad-project-modal');
+  showNotif('🗑 프로젝트 삭제 완료 (광고비 ' + adsCostCount + '건' +
+    (expenseIdsToDelete.length > 0 ? (' + 지출결의서 ' + expenseIdsToDelete.length + '건') : '') + ' 동반 삭제)', 'success');
+  try { renderAdsPage(); } catch(_){}
+  try { renderApprovalPage(); } catch(_){}
 }
 
 // ════════════════════════════════════════════════════════════════════
