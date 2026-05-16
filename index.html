@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.846';
+const ERP_VERSION = 'v1.9.847';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -19018,6 +19018,73 @@ function calcPoTotal() {
   setEl('po-total-currency', cur);
 }
 
+// v1.9.847: 해외 PO 결재/지출 자동 동기화 (일반 발주서의 syncOrderApprovalAndExpense 와 별도)
+//   해외 PO 는 vendorId 가 없어 일반 동기화 함수가 동작 안 함 → 전용 헬퍼
+function _syncOverseasPoApprovalExpense(orderId) {
+  const o = (DB.orders||[]).find(x => x && x.id === orderId);
+  if (!o || !o.isOverseas) return;
+  const grandTotal = (parseFloat(o.grandTotal)) ||
+    (parseFloat(o.productTotal)||0) + (parseFloat(o.oceanFreight)||0);
+  const vendorName = (o.supplier && o.supplier.company) || '-';
+  const currency = o.currency || 'USD';
+  const dueDate = o.balanceDueDate || o.deliveryDate || '';
+
+  // approval 자동 생성
+  if (!Array.isArray(DB.approvals)) DB.approvals = [];
+  let ap = DB.approvals.find(a => a && a.type === 'po_approval' && (a.refId === o.id || Number(a.refId) === Number(o.id)));
+  if (!ap) {
+    ap = {
+      id: (typeof nextId === 'function') ? nextId('approval') : Date.now(),
+      type: 'po_approval',
+      refId: o.id,
+      title: `[해외 PO] ${vendorName}`,
+      amount: grandTotal,
+      status: (o.stampData || o.stampNotRequired) ? 'approved' : 'pending',
+      priority: o.urgent ? 'urgent' : 'normal',
+      createdAt: o.createdAt || Date.now(),
+      approvedAt: (o.stampData || o.stampNotRequired) ? Date.now() : 0,
+    };
+    DB.approvals.push(ap);
+  } else {
+    // 업데이트
+    ap.title = `[해외 PO] ${vendorName}`;
+    ap.amount = grandTotal;
+    ap.updatedAt = Date.now();
+  }
+
+  // expense (잔금 100%) 자동 생성
+  if (!Array.isArray(DB.expenses)) DB.expenses = [];
+  let exp = DB.expenses.find(e => e && e.category === 'po_balance' && (e.orderId === o.id || Number(e.orderId) === Number(o.id)));
+  const note = `해외 PO 잔금 100% (${currency} ${(grandTotal).toFixed(2)})`;
+  if (!exp) {
+    exp = {
+      id: (typeof nextId === 'function') ? nextId('expense') : (Date.now() + 1),
+      approvalId: ap.id,
+      orderId: o.id,
+      category: 'po_balance',
+      title: `[해외 잔금] ${vendorName}`,
+      vendor: vendorName,
+      amount: grandTotal,
+      dueDate: dueDate,
+      paidDate: '',
+      paidStatus: 'requested',
+      taxInvoice: '미수령',
+      urgent: !!o.urgentBalance,
+      createdAt: Date.now(),
+      note: note,
+    };
+    DB.expenses.push(exp);
+  } else if (exp.paidStatus !== 'paid') {
+    // 미지급 시만 업데이트
+    exp.title = `[해외 잔금] ${vendorName}`;
+    exp.vendor = vendorName;
+    exp.amount = grandTotal;
+    exp.dueDate = dueDate || exp.dueDate || '';
+    exp.note = note;
+    exp.updatedAt = Date.now();
+  }
+}
+
 // 저장
 function savePo() {
   if (typeof requireWrite === 'function' && !requireWrite()) return;
@@ -19103,20 +19170,30 @@ function savePo() {
   };
 
   if (!Array.isArray(DB.orders)) DB.orders = [];
+  let _savedOrderId = null;
   if (editId) {
     const idx = DB.orders.findIndex(o => o && String(o.id) === String(editId));
     if (idx >= 0) {
       DB.orders[idx] = { ...DB.orders[idx], ...data };
+      _savedOrderId = DB.orders[idx].id;
       showNotif('✅ 해외 PO 수정 완료', 'success');
     }
   } else {
     const newId = (typeof nextId === 'function') ? nextId('order') : (Date.now());
     DB.orders.push({ id: newId, createdAt: Date.now(), ...data });
+    _savedOrderId = newId;
     showNotif('✅ 해외 PO 저장 완료', 'success');
   }
-  try { if (typeof saveData === 'function') saveData(); } catch(_){}
+  // v1.9.847: 결재/지출 자동 동기화 + saveDataNow
+  try { if (_savedOrderId != null) _syncOverseasPoApprovalExpense(_savedOrderId); } catch(e) { console.warn('overseas PO sync 실패:', e); }
+  if (typeof saveDataNow === 'function') {
+    saveDataNow().catch(e => console.warn('savePo saveDataNow 실패:', e));
+  } else {
+    try { saveData(); } catch(_){}
+  }
   closeModal('add-po');
   try { renderOrderTable(); } catch(_){}
+  try { if (typeof renderApprovalPage === 'function') renderApprovalPage(); } catch(_){}
 }
 
 // v1.9.813: 해외 PO 미리보기 (xlsx 양식과 동일 HTML 레이아웃 새 창)
