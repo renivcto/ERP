@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.848';
+const ERP_VERSION = 'v1.9.849';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7213,6 +7213,11 @@ function dedupSamplesV218() {
 // v1.9.222: serial 포맷만 다른 경우(예: "2025/12/29-1" vs "20251229-1") 도 동일로 판정
 //           → 공백, /, -, . 제거 후 소문자화하여 비교
 function _orderSignatureV218(o) {
+  // v1.9.849: 해외 PO 는 poNumber 기반 unique sig (vendorId 없으니 content sig 충돌 위험)
+  if (o && o.isOverseas && o.poNumber) {
+    const normalized = String(o.poNumber).replace(/[\s\/\-.]/g, '').toLowerCase();
+    if (normalized) return 'po:' + normalized;
+  }
   if (o.serial && String(o.serial).trim()) {
     const normalized = String(o.serial).replace(/[\s\/\-.]/g, '').toLowerCase();
     if (normalized) return 'serial:' + normalized;
@@ -19249,6 +19254,24 @@ function savePo() {
     _savedOrderId = newId;
     showNotif('✅ 해외 PO 저장 완료', 'success');
   }
+  // v1.9.849: 새 PO 의 sig 를 tombstone 에서 제거 (재생성 케이스 — 좀비 부활 방지)
+  try {
+    if (_savedOrderId != null && typeof _clearOrderTombstoneForSig === 'function') {
+      const _newPo = (DB.orders||[]).find(x => x && x.id === _savedOrderId);
+      if (_newPo) {
+        const sig = _orderSignatureV218(_newPo);
+        if (sig) _clearOrderTombstoneForSig(sig);
+        // 옛 content 기반 tombstone 도 제거 (마이그레이션 — 해외 PO 옛 sig)
+        if (_newPo.isOverseas && Array.isArray(DB._deletedOrderSigs)) {
+          DB._deletedOrderSigs = DB._deletedOrderSigs.filter(t => {
+            if (!t || !t.sig) return false;
+            // 옛 content 형식이면서 같은 rows 면 제거
+            return !(String(t.sig).startsWith('content|') && t.sig.includes((_newPo.rows||[]).map(r => (r.name||'') + ':' + Math.round(r.qty||0) + ':' + Math.round(r.price||0)).join(';')));
+          });
+        }
+      }
+    }
+  } catch(e) { console.warn('savePo tombstone 청소 실패:', e); }
   // v1.9.847: 결재/지출 자동 동기화 + saveDataNow
   try { if (_savedOrderId != null) _syncOverseasPoApprovalExpense(_savedOrderId); } catch(e) { console.warn('overseas PO sync 실패:', e); }
   if (typeof saveDataNow === 'function') {
