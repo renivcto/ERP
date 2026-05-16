@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.845';
+const ERP_VERSION = 'v1.9.846';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26079,7 +26079,13 @@ let _editingExpenseId = null;
 function editExpense(id) {
   const e = (DB.expenses||[]).find(x => x.id === id);
   if (!e) return;
-  if (e.orderId) { alert('발주서와 연결된 지출결의서는 발주서에서 수정해 주세요.'); return; }
+  // v1.9.846: 발주서 연결 막힘은 po_prepay / po_balance 카테고리에만 적용
+  //   광고비(ad), 기타 등은 발주서와 무관하므로 수정 허용
+  if (e.orderId && (e.category === 'po_prepay' || e.category === 'po_balance')) {
+    const linkedOrder = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
+    if (linkedOrder) { alert('발주서와 연결된 지출결의서는 발주서에서 수정해 주세요.'); return; }
+    // 고아 — 발주서가 없으므로 수정 허용
+  }
   _editingExpenseId = id;
   _apeAttachments = Array.isArray(e.attachments) ? e.attachments.slice() : [];
   _apeQuotes = Array.isArray(e.quotes) ? e.quotes.slice() : []; // v1.9.694
