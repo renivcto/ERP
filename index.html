@@ -5201,7 +5201,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.822';
+const ERP_VERSION = 'v1.9.823';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -18961,7 +18961,8 @@ function previewOverseasPo(orderId) {
 </style>
 </head><body>
 <div class="top-actions">
-  <button class="btn-print" onclick="window.print()">🖨 인쇄 / PDF 저장</button>
+  <button class="btn-print" onclick="window.opener && window.opener._generateOverseasPoPdfForm(${o.id})">📝 입력 가능 PDF 저장</button>
+  <button class="btn-print" style="background:#475569" onclick="window.print()">🖨 인쇄 / 일반 PDF</button>
   <button class="btn-close" onclick="window.close()">✕ 닫기</button>
 </div>
 <div class="sheet">
@@ -19063,6 +19064,239 @@ function previewOverseasPo(orderId) {
   w.document.open();
   w.document.write(html);
   w.document.close();
+}
+
+// v1.9.823: 입력 가능한 PDF 생성 (pdf-lib + Form Field)
+async function _generateOverseasPoPdfForm(orderId) {
+  const order = (DB.orders || []).find(o => o && o.id === orderId);
+  if (!order || !order.isOverseas) { showNotif('해외 PO를 찾을 수 없습니다', 'warning'); return; }
+
+  // pdf-lib 동적 로드
+  if (!window.PDFLib) {
+    try {
+      showNotif('PDF 라이브러리 로딩 중...', 'info');
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js';
+        s.onload = resolve;
+        s.onerror = () => reject(new Error('pdf-lib 로드 실패'));
+        document.head.appendChild(s);
+      });
+    } catch(e) {
+      showNotif('PDF 라이브러리 로드 실패: ' + e.message, 'warning');
+      return;
+    }
+  }
+
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]); // A4
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const form = pdfDoc.getForm();
+
+  // 색상 정의
+  const NAVY = rgb(0.118, 0.227, 0.541);
+  const GRAY = rgb(0.39, 0.45, 0.55);
+  const LIGHT_GRAY = rgb(0.79, 0.83, 0.88);
+  const PINK = rgb(0.61, 0.09, 0.30);
+
+  // 상단 헤더
+  page.drawText('PURCHASE ORDER', { x: 30, y: 800, size: 22, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
+  page.drawText(order.poNumber || '', { x: 420, y: 805, size: 11, font: fontBold, color: NAVY });
+  page.drawLine({ start: {x: 30, y: 790}, end: {x: 565, y: 790}, thickness: 1.5, color: rgb(0,0,0) });
+
+  // 상단 정보 행
+  let y = 775;
+  function drawInfoLine(x, label, value) {
+    page.drawText(label, { x, y, size: 8, font: fontBold, color: GRAY });
+    page.drawText(String(value || '-'), { x: x + 50, y, size: 9, font, color: rgb(0.06, 0.09, 0.16) });
+  }
+  drawInfoLine(30, 'PO Date:', order.orderDate);
+  drawInfoLine(150, 'Delivery:', order.deliveryDate);
+  drawInfoLine(280, 'Payment:', order.payment);
+  drawInfoLine(440, 'Shipping:', order.shippingTerm);
+
+  // BUYER + SUPPLIER 박스
+  y = 745;
+  function drawBox(x, yTop, w, h, color) {
+    page.drawRectangle({ x, y: yTop - h, width: w, height: h, borderColor: color, borderWidth: 1 });
+  }
+  function drawSectionTitle(x, yTop, text, color) {
+    page.drawText(text, { x: x + 8, y: yTop - 14, size: 10, font: fontBold, color });
+    page.drawLine({ start: {x: x + 8, y: yTop - 19}, end: {x: x + 250, y: yTop - 19}, thickness: 0.5, color: LIGHT_GRAY });
+  }
+  function drawKV(x, yLine, label, value) {
+    page.drawText(label, { x: x + 8, y: yLine, size: 8, font, color: GRAY });
+    page.drawText(String(value || '-').slice(0, 50), { x: x + 95, y: yLine, size: 9, font, color: rgb(0.06, 0.09, 0.16) });
+  }
+  drawBox(30, 745, 260, 130, LIGHT_GRAY);
+  drawSectionTitle(30, 745, 'BUYER', NAVY);
+  const b = order.buyer || {};
+  drawKV(30, 720, 'Company', b.company);
+  drawKV(30, 707, 'Representative', b.representative);
+  drawKV(30, 694, 'Order Contact', b.orderContact);
+  drawKV(30, 681, 'Korea Contact', b.koreaContactPerson);
+  drawKV(30, 668, 'Korea Tel', b.koreaTel);
+  drawKV(30, 655, 'Korea Mobile', b.koreaMobile);
+
+  drawBox(305, 745, 260, 130, LIGHT_GRAY);
+  drawSectionTitle(305, 745, 'SUPPLIER', PINK);
+  const sp = order.supplier || {};
+  drawKV(305, 720, 'Company', sp.company);
+  drawKV(305, 707, 'Representative', sp.representative);
+  drawKV(305, 694, 'Contact Person', sp.contactPerson);
+  drawKV(305, 681, 'Product', sp.product);
+  drawKV(305, 668, 'Reference', (sp.reference || '').slice(0, 40));
+  drawKV(305, 655, 'Capacity', sp.capacity);
+
+  // DELIVERY ADDRESS
+  y = 610;
+  drawBox(30, y, 535, 85, LIGHT_GRAY);
+  drawSectionTitle(30, y, 'DELIVERY ADDRESS', rgb(0.57, 0.27, 0.05));
+  const da = order.deliveryAddr || {};
+  drawKV(30, y - 28, 'Company', da.company);
+  drawKV(30, y - 41, 'Address', da.address);
+  drawKV(30, y - 54, 'Contact Person', da.contactPerson);
+  drawKV(30, y - 67, 'Company Tel', da.tel);
+  drawKV(310, y - 67, 'Mobile', da.mobile);
+
+  // PAYMENT DETAILS + PRODUCT INFORMATION (form fields!)
+  y = 515;
+  function drawDashedBox(x, yTop, w, h, color) {
+    const dashLen = 3, gapLen = 2;
+    for (let dx = 0; dx < w; dx += dashLen + gapLen) {
+      page.drawLine({ start:{x: x + dx, y: yTop}, end: {x: Math.min(x + dx + dashLen, x + w), y: yTop}, thickness: 1, color });
+    }
+    for (let dx = 0; dx < w; dx += dashLen + gapLen) {
+      page.drawLine({ start:{x: x + dx, y: yTop - h}, end: {x: Math.min(x + dx + dashLen, x + w), y: yTop - h}, thickness: 1, color });
+    }
+    for (let dy = 0; dy < h; dy += dashLen + gapLen) {
+      page.drawLine({ start:{x, y: yTop - dy}, end: {x, y: yTop - Math.min(dy + dashLen, h)}, thickness: 1, color });
+    }
+    for (let dy = 0; dy < h; dy += dashLen + gapLen) {
+      page.drawLine({ start:{x: x + w, y: yTop - dy}, end: {x: x + w, y: yTop - Math.min(dy + dashLen, h)}, thickness: 1, color });
+    }
+  }
+
+  drawDashedBox(30, y, 260, 130, rgb(0.98, 0.81, 0.91));
+  drawSectionTitle(30, y, 'PAYMENT DETAILS', PINK);
+  page.drawText('(to be filled by supplier)', { x: 152, y: y - 14, size: 7, font, color: PINK });
+
+  function addFormField(name, x, yTop, w, h, initial) {
+    const field = form.createTextField(name);
+    field.setText(initial || '');
+    field.addToPage(page, { x, y: yTop - h, width: w, height: h, borderColor: rgb(0.8, 0.5, 0.7), borderWidth: 0.5, backgroundColor: rgb(1, 0.97, 0.99) });
+    return field;
+  }
+
+  let py = y - 30;
+  ['Bank Name', 'Account No.', 'SWIFT / BIC', 'Beneficiary', 'Bank Address'].forEach((label, i) => {
+    const fieldName = ['bank_name', 'bank_account', 'bank_swift', 'bank_beneficiary', 'bank_address'][i];
+    const initial = (order.bank || {})[['name', 'account', 'swift', 'beneficiary', 'address'][i]] || '';
+    page.drawText(label, { x: 38, y: py, size: 8, font, color: GRAY });
+    addFormField(fieldName, 115, py + 8, 165, 14, initial);
+    py -= 18;
+  });
+
+  // PRODUCT INFORMATION
+  drawDashedBox(305, y, 260, 130, rgb(0.98, 0.81, 0.91));
+  drawSectionTitle(305, y, 'PRODUCT INFORMATION', PINK);
+  page.drawText('(to be filled by supplier)', { x: 458, y: y - 14, size: 7, font, color: PINK });
+
+  py = y - 30;
+  ['Production Date', 'Expiry Date', 'Lot / Batch No.', 'Country of Origin', 'Remarks'].forEach((label, i) => {
+    const fieldName = ['production_date', 'expiry_date', 'lot_no', 'country_of_origin', 'supplier_remarks'][i];
+    const initial = [order.productionDate, order.expiryDate, order.lotNo, order.countryOfOrigin, order.supplierRemarks][i] || '';
+    page.drawText(label, { x: 313, y: py, size: 8, font, color: GRAY });
+    addFormField(fieldName, 405, py + 8, 150, 14, initial);
+    py -= 18;
+  });
+
+  // Items 표
+  y = 370;
+  const cols = [
+    { w: 35, label: 'No.' },
+    { w: 175, label: 'Item Description' },
+    { w: 75, label: 'Product Code' },
+    { w: 55, label: 'Capacity' },
+    { w: 65, label: 'Unit Price' },
+    { w: 50, label: 'Quantity' },
+    { w: 80, label: 'Amount' }
+  ];
+  let cx = 30;
+  page.drawRectangle({ x: 30, y: y - 18, width: 535, height: 18, color: NAVY });
+  cols.forEach(col => {
+    page.drawText(col.label, { x: cx + 4, y: y - 12, size: 9, font: fontBold, color: rgb(1,1,1) });
+    cx += col.w;
+  });
+  const rows = order.rows || [];
+  const cur = order.currency || 'USD';
+  let ry = y - 18;
+  rows.forEach((r, i) => {
+    ry -= 16;
+    const qty = parseFloat(r.qty || r.quantity) || 0;
+    const price = parseFloat(r.price || r.unitPrice) || 0;
+    const amount = qty * price;
+    cx = 30;
+    const vals = [
+      String(i + 1),
+      (r.name || r.description || '-').slice(0, 30),
+      r.code || r.productCode || '-',
+      r.capacity || '-',
+      price.toFixed(2),
+      qty.toString(),
+      amount.toFixed(2)
+    ];
+    if (i % 2 === 0) {
+      page.drawRectangle({ x: 30, y: ry, width: 535, height: 16, color: rgb(0.97, 0.98, 0.99) });
+    }
+    vals.forEach((v, j) => {
+      page.drawText(v, { x: cx + 4, y: ry + 5, size: 8.5, font, color: rgb(0.06, 0.09, 0.16) });
+      cx += cols[j].w;
+    });
+  });
+  page.drawRectangle({ x: 30, y: ry, width: 535, height: y - ry, borderColor: rgb(0.8, 0.83, 0.87), borderWidth: 0.5 });
+
+  // 합계
+  y = ry - 20;
+  const productTotal = parseFloat(order.productTotal) || rows.reduce((s, r) => s + ((parseFloat(r.qty)||0) * (parseFloat(r.price)||0)), 0);
+  const oceanFreight = parseFloat(order.oceanFreight) || 0;
+  const grandTotal = productTotal + oceanFreight;
+  page.drawText('Product Total', { x: 380, y, size: 9, font, color: GRAY });
+  page.drawText(cur + ' ' + productTotal.toFixed(2), { x: 490, y, size: 9, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
+  page.drawText('Ocean Freight', { x: 380, y: y - 14, size: 9, font, color: GRAY });
+  page.drawText(cur + ' ' + oceanFreight.toFixed(2), { x: 490, y: y - 14, size: 9, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
+  page.drawLine({ start:{x: 375, y: y - 22}, end: {x: 565, y: y - 22}, thickness: 1.5, color: NAVY });
+  page.drawText('TOTAL', { x: 380, y: y - 34, size: 10, font: fontBold, color: NAVY });
+  page.drawText(cur + ' ' + grandTotal.toFixed(2), { x: 480, y: y - 34, size: 11, font: fontBold, color: NAVY });
+  page.drawText('Duties and Taxes', { x: 380, y: y - 50, size: 9, font, color: GRAY });
+  page.drawText(order.dutiesAndTaxes || '-', { x: 490, y: y - 50, size: 9, font, color: rgb(0.06, 0.09, 0.16) });
+
+  // 서명 영역
+  y = ry - 100;
+  page.drawLine({ start:{x: 30, y}, end: {x: 565, y}, thickness: 0.5, color: LIGHT_GRAY });
+  page.drawText('Authorized by (Buyer)', { x: 80, y: y - 18, size: 10, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
+  page.drawText('Confirmed by (Supplier)', { x: 360, y: y - 18, size: 10, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
+  const sigBuyer = form.createTextField('signature_buyer');
+  sigBuyer.setText('');
+  sigBuyer.addToPage(page, { x: 50, y: y - 70, width: 200, height: 30, borderColor: rgb(0.6, 0.65, 0.72), borderWidth: 0.5 });
+  const sigSupplier = form.createTextField('signature_supplier');
+  sigSupplier.setText('');
+  sigSupplier.addToPage(page, { x: 330, y: y - 70, width: 200, height: 30, borderColor: rgb(0.6, 0.65, 0.72), borderWidth: 0.5 });
+
+  // PDF 저장
+  const pdfBytes = await pdfDoc.save();
+  const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = (order.poNumber || 'PurchaseOrder') + '_fillable.pdf';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  showNotif('입력 가능한 PDF 다운로드 시작', 'success');
 }
 
 // 삭제
