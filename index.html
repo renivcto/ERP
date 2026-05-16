@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.849';
+const ERP_VERSION = 'v1.9.850';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13083,9 +13083,15 @@ function _renderProjectCostList(projectId) {
   ads.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
   list.innerHTML = ads.map(a => {
     const isAuto = !!a.expenseId;
-    const sourceLabel = isAuto
-      ? '<span style="background:#dcfce7;color:#15803d;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700">자동</span>'
-      : '<span style="background:#fef9c3;color:#a16207;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700">수동</span>';
+    // v1.9.850: expense title 가져와서 표시 (자동/수동 배지 제거)
+    let titleLabel = '';
+    if (isAuto) {
+      const exp = (DB.expenses||[]).find(e => e && e.id === a.expenseId);
+      if (exp && exp.title) titleLabel = exp.title;
+      else if (a.memo) titleLabel = a.memo;
+    } else if (a.memo) {
+      titleLabel = a.memo;
+    }
     // v1.9.810: 수정 / 삭제 버튼
     const editBtn = isAuto
       ? `<button type="button" onclick="event.stopPropagation();_openLinkedExpense(${a.expenseId})" title="지출결의서에서 수정" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:3px 8px;border-radius:4px;font-size:10.5px;cursor:pointer;font-weight:700">지출결의서</button>`
@@ -13095,8 +13101,8 @@ function _renderProjectCostList(projectId) {
       : `<button type="button" onclick="event.stopPropagation();deleteAdsManual('${a.id}')" title="삭제" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;padding:3px 8px;border-radius:4px;font-size:10.5px;cursor:pointer;font-weight:700">🗑</button>`;
     return `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #f1f5f9">
       <div style="flex:1;min-width:0">
-        <div style="font-size:12px;font-weight:700;color:#0f172a">${a._shopName || '-'} <span style="font-size:10.5px;color:#94a3b8;font-weight:500">${a.startDate||'-'} ~ ${a.endDate||'-'}</span> ${sourceLabel}</div>
-        ${a.memo ? `<div style="font-size:10.5px;color:#64748b;margin-top:2px">${(a.memo||'').replace(/</g,'&lt;')}</div>` : ''}
+        <div style="font-size:12px;font-weight:700;color:#0f172a">${a._shopName || '-'} <span style="font-size:10.5px;color:#94a3b8;font-weight:500">${a.startDate||'-'} ~ ${a.endDate||'-'}</span></div>
+        ${titleLabel ? `<div style="font-size:11.5px;color:#475569;margin-top:3px;font-weight:600">${titleLabel.replace(/</g,'&lt;')}</div>` : ''}
       </div>
       <div style="font-size:13px;font-weight:800;color:#be185d;font-variant-numeric:tabular-nums;white-space:nowrap">₩${Number(a.cost||0).toLocaleString()}</div>
       <div style="display:flex;gap:4px;flex-shrink:0">${editBtn}${delBtn}</div>
