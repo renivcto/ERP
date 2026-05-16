@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.851';
+const ERP_VERSION = 'v1.9.852';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -14004,6 +14004,64 @@ function _onAdsKpiPeriodChange() {
 }
 
 // v1.9.773: 광고비 관리 페이지 렌더 (별도 페이지)
+// v1.9.852: po_balance/po_prepay expense 의 vendor 자동 채움
+//   해외 PO 면 supplier.company, 국내면 vendor.company
+function _fillMissingPoExpenseVendor() {
+  if (!Array.isArray(DB.expenses)) return 0;
+  let filled = 0;
+  DB.expenses.forEach(e => {
+    if (!e) return;
+    if (e.category !== 'po_balance' && e.category !== 'po_prepay') return;
+    if (e.vendor && String(e.vendor).trim() && e.vendor !== '-') return;
+    if (!e.orderId) return;
+    const order = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
+    if (!order) return;
+    if (order.isOverseas && order.supplier && order.supplier.company) {
+      e.vendor = order.supplier.company;
+      filled++;
+    } else if (order.vendorId) {
+      const v = (DB.vendors||[]).find(x => x && x.id === order.vendorId);
+      if (v && v.company) { e.vendor = v.company; filled++; }
+    }
+  });
+  if (filled > 0) {
+    console.warn('🔧 [v852] PO expense vendor 자동 채움: ' + filled + '건');
+    try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  }
+  return filled;
+}
+
+// v1.9.852: 해외 PO expense 의 amount 를 KRW 로 영구 환산 (한 번만)
+async function _convertOverseasExpenseToKrw() {
+  if (!Array.isArray(DB.expenses)) return 0;
+  const targets = DB.expenses.filter(e =>
+    e && (e.category === 'po_balance' || e.category === 'po_prepay') &&
+    !e.__krwConverted && e.orderId);
+  if (targets.length === 0) return 0;
+  let converted = 0;
+  for (const e of targets) {
+    const order = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
+    if (!order) continue;
+    if (!order.isOverseas) { e.__krwConverted = true; continue; }
+    const cur = String(order.currency || 'USD').toUpperCase();
+    if (cur === 'KRW') { e.__krwConverted = true; continue; }
+    let rate = 0;
+    try { rate = await _getKrwRate(cur); } catch(_){}
+    if (rate > 0) {
+      e._origAmount = (e._origAmount != null) ? e._origAmount : e.amount;
+      e._origCurrency = cur;
+      e.amount = Math.round((parseFloat(e.amount) || 0) * rate);
+      e.__krwConverted = true;
+      converted++;
+    }
+  }
+  if (converted > 0) {
+    console.warn('💱 [v852] 해외 PO expense ' + converted + '건 KRW 환산 완료');
+    try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  }
+  return converted;
+}
+
 // v1.9.851: 광고 expense 의 vendor 필드가 비어있으면 shop name 자동 채움
 function _fillMissingAdExpenseVendor() {
   if (!Array.isArray(DB.expenses)) return 0;
@@ -22946,6 +23004,15 @@ function renderApprovalPage() {
   try { if (typeof _restoreMissingAdExpenses === 'function') _restoreMissingAdExpenses(); } catch(_){}
   // v1.9.851: 광고 expense 의 vendor 자동 채움
   try { if (typeof _fillMissingAdExpenseVendor === 'function') _fillMissingAdExpenseVendor(); } catch(_){}
+  // v1.9.852: PO expense vendor 자동 채움 + 해외 PO expense KRW 환산 (async, fire-and-forget)
+  try { if (typeof _fillMissingPoExpenseVendor === 'function') _fillMissingPoExpenseVendor(); } catch(_){}
+  try {
+    if (typeof _convertOverseasExpenseToKrw === 'function') {
+      _convertOverseasExpenseToKrw().then(n => {
+        if (n > 0) { try { renderApprovalPage(); } catch(_){} }  // 환산 완료 후 재렌더
+      }).catch(e => console.warn('KRW 환산 실패:', e));
+    }
+  } catch(_){}
   // v1.9.844: 좀비 광고 expense (중복 지출결의서) 자동 정리
   try { if (typeof _cleanupZombieAdExpenses === 'function') _cleanupZombieAdExpenses(); } catch(_){}
   // 현재 탭 유지
