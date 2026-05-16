@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.841';
+const ERP_VERSION = 'v1.9.842';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -14152,7 +14152,70 @@ function renderAdsPage() {
   }
   // v1.9.776: 프로젝트 카드 그리드 렌더
   try { renderAdProjectCards(); } catch(_){}
-  tbody.innerHTML = filtered.map(a => {
+
+  // v1.9.842: 프로젝트별 그룹화 — projectId 있는 행은 같은 프로젝트끼리 합산
+  const groupMap = new Map();  // projectId -> array of ads
+  const singleAds = [];        // projectId 없는 단일 행
+  filtered.forEach(a => {
+    if (a.projectId) {
+      if (!groupMap.has(a.projectId)) groupMap.set(a.projectId, []);
+      groupMap.get(a.projectId).push(a);
+    } else {
+      singleAds.push(a);
+    }
+  });
+
+  // 그룹 행 빌더
+  function _renderGroupRow(projectId, adsList) {
+    const proj = (DB.adProjects || []).find(p => p && String(p.id) === String(projectId));
+    const projName = proj ? (proj.name || '-') : '(삭제된 프로젝트)';
+    // 합계
+    const totalCost = adsList.reduce((s, a) => s + (parseFloat(a.cost) || 0), 0);
+    // 그룹 기간 (가장 이른 시작 ~ 가장 늦은 종료)
+    const allStarts = adsList.map(a => a.startDate || a.date || (a.month + '-01')).filter(Boolean);
+    const allEnds = adsList.map(a => a.endDate || a.startDate || a.date || (a.month + '-01')).filter(Boolean);
+    const minStart = allStarts.sort()[0] || '';
+    const maxEnd = allEnds.sort()[allEnds.length - 1] || '';
+    const periodStr = (minStart && maxEnd) ? (minStart === maxEnd ? minStart : `${minStart} ~ ${maxEnd}`) : '-';
+    // 매출 = 같은 쇼핑몰 + 그룹 기간 합산 (한 번만)
+    const shopIds = Array.from(new Set(adsList.map(a => a._shopId)));
+    let revenue = 0;
+    shopIds.forEach(sid => { revenue += _periodRevenue(sid, minStart, maxEnd); });
+    const roasVal = totalCost > 0 ? (revenue / totalCost * 100) : 0;
+    const roasStr = roasVal > 0 ? roasVal.toFixed(0) + '%' : '-';
+    const netMargin = revenue - totalCost;
+    const netColor = netMargin > 0 ? '#16a34a' : (netMargin < 0 ? '#dc2626' : '#94a3b8');
+    const netStr = revenue > 0 ? '₩' + netMargin.toLocaleString() : '-';
+    // 쇼핑몰 라벨 (그룹의 첫 항목 기준 또는 다중)
+    const shopNames = Array.from(new Set(adsList.map(a => a._shopName)));
+    const shopLabel = shopNames.length === 1 ? shopNames[0] : `${shopNames[0]} 외 ${shopNames.length - 1}`;
+    // 유형: 그룹 안의 type 들 (대표값 하나)
+    const types = Array.from(new Set(adsList.map(a => a.type)));
+    const type0 = types[0];
+    const typeLabel = type0 === 'monthly' ? '월별' : (type0 === 'range' ? '기간' : (type0 === 'daily' ? '일별' : '-')) + (types.length > 1 ? ' 외' : '');
+    // 프로젝트 라벨 (클릭 시 모달)
+    const projectLabel = proj
+      ? `<span style="color:#6d28d9;font-weight:600;cursor:pointer;white-space:nowrap" onclick="openAdProjectModal('${proj.id}')" title="프로젝트 상세 (광고비 ${adsList.length}건)" onmouseenter="this.style.textDecoration='underline'" onmouseleave="this.style.textDecoration='none'">${projName}</span>`
+      : `<span style="color:#94a3b8">${projName}</span>`;
+    // 관리: 광고비 N건 라벨 (프로젝트 클릭으로 상세 모달)
+    const editBtn = proj
+      ? `<button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 8px" onclick="openAdProjectModal('${proj.id}')">광고비 ${adsList.length}건</button>`
+      : `<span style="color:#94a3b8;font-size:10.5px">${adsList.length}건</span>`;
+    return `<tr style="background:#fafaff">
+      <td style="font-weight:600;color:#0f172a;white-space:nowrap">${shopLabel}</td>
+      <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${projectLabel}</td>
+      <td style="white-space:nowrap"><span style="background:#ede9fe;color:#6d28d9;padding:2px 8px;border-radius:4px;font-size:10.5px">${typeLabel}</span></td>
+      <td style="font-size:12.5px;color:#475569;white-space:nowrap">${periodStr}</td>
+      <td style="font-weight:800;color:#be185d;font-variant-numeric:tabular-nums;white-space:nowrap">₩${totalCost.toLocaleString()}<div style="font-size:10px;color:#94a3b8;font-weight:500;margin-top:1px">합계 ${adsList.length}건</div></td>
+      <td style="font-weight:700;white-space:nowrap;color:${roasVal >= 200 ? '#16a34a' : (roasVal >= 100 ? '#0284c7' : '#dc2626')}">${roasStr}</td>
+      <td style="font-variant-numeric:tabular-nums;color:#64748b;white-space:nowrap">${revenue > 0 ? '₩' + revenue.toLocaleString() : '-'}</td>
+      <td style="font-weight:700;color:${netColor};font-variant-numeric:tabular-nums;white-space:nowrap">${netStr}</td>
+      <td style="white-space:nowrap">${editBtn}</td>
+    </tr>`;
+  }
+
+  // 단일 행 빌더 (기존 로직)
+  function _renderSingleRow(a) {
     const startDate = a.startDate || a.date || (a.month + '-01');
     const endDate = a.endDate || a.startDate || a.date || (a.month + '-01');
     const typeLabel = a.type === 'monthly' ? '월별' : (a.type === 'range' ? '기간' : (a.type === 'daily' ? '일별' : '-'));
@@ -14163,7 +14226,6 @@ function renderAdsPage() {
     const revenue = _periodRevenue(a._shopId, startDate, endDate);
     const roasVal = a.cost > 0 ? (revenue / a.cost * 100) : 0;
     const roasStr = roasVal > 0 ? roasVal.toFixed(0) + '%' : '-';
-    // v1.9.811: Net 마진 = 매출 - 광고비 (광고비 차감 마진)
     const netMargin = revenue - (parseFloat(a.cost) || 0);
     const netColor = netMargin > 0 ? '#16a34a' : (netMargin < 0 ? '#dc2626' : '#94a3b8');
     const netStr = revenue > 0 ? '₩' + netMargin.toLocaleString() : '-';
@@ -14171,7 +14233,6 @@ function renderAdsPage() {
     const editBtn = isAuto
       ? `<button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 8px" onclick="_openLinkedExpense(${a.expenseId})">지출결의서</button>`
       : `<button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 6px" onclick="openAdsManualModal('${a.id}')">수정</button><button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 6px;margin-left:3px;color:var(--red-500)" onclick="deleteAdsManual('${a.id}')">삭제</button>`;
-    // v1.9.774: 광고 대상 제품 표시
     let itemsLabel = '';
     if (Array.isArray(a.itemIds) && a.itemIds.length > 0) {
       const itemNames = a.itemIds.map(id => {
@@ -14180,14 +14241,7 @@ function renderAdsPage() {
       });
       itemsLabel = `<div style="font-size:10px;color:#94a3b8;margin-top:2px">📦 ${itemNames.join(', ')}</div>`;
     }
-    // v1.9.776: 프로젝트 라벨
-    let projectLabel = '<span style="color:#cbd5e1;font-size:11px">-</span>';
-    if (a.projectId) {
-      const proj = (DB.adProjects || []).find(p => p && String(p.id) === String(a.projectId));
-      if (proj) {
-        projectLabel = `<span style="color:#6d28d9;font-weight:600;cursor:pointer;white-space:nowrap" onclick="openAdProjectModal('${proj.id}')" title="프로젝트 보기" onmouseenter="this.style.textDecoration='underline'" onmouseleave="this.style.textDecoration='none'">${proj.name||'-'}</span>`;
-      }
-    }
+    const projectLabel = '<span style="color:#cbd5e1;font-size:11px">-</span>';
     return `<tr>
       <td style="font-weight:600;color:#0f172a;white-space:nowrap">${a._shopName}${itemsLabel}</td>
       <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${projectLabel}</td>
@@ -14199,6 +14253,22 @@ function renderAdsPage() {
       <td style="font-weight:700;color:${netColor};font-variant-numeric:tabular-nums;white-space:nowrap">${netStr}</td>
       <td style="white-space:nowrap">${editBtn}</td>
     </tr>`;
+  }
+
+  // 모든 항목 (그룹 + 단일) 을 최신 시작일 기준 정렬
+  const renderList = [];
+  groupMap.forEach((adsList, projectId) => {
+    const earliestStart = adsList.map(a => a.startDate || a.date || (a.month+'-01')).sort()[0] || '';
+    renderList.push({ kind: 'group', sortKey: earliestStart, projectId, adsList });
+  });
+  singleAds.forEach(a => {
+    renderList.push({ kind: 'single', sortKey: (a.startDate || a.date || (a.month+'-01')), ad: a });
+  });
+  renderList.sort((x, y) => (y.sortKey || '').localeCompare(x.sortKey || ''));
+
+  tbody.innerHTML = renderList.map(item => {
+    if (item.kind === 'group') return _renderGroupRow(item.projectId, item.adsList);
+    return _renderSingleRow(item.ad);
   }).join('');
 }
 
