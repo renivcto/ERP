@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.837';
+const ERP_VERSION = 'v1.9.838';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -19311,27 +19311,33 @@ async function generatePdfWithForm() {
       addFormField(prodFieldNames[i], 405, py + 8, 150, 14, initial);
       py -= 18;
     });
+    // v1.9.838: Items table — 글씨 1pt 키움 + 행 높이 확장 + 가운데 정렬
     y = 370;
     const cols = [
-      { w: 35, label: "No." },
+      { w: 35,  label: "No." },
       { w: 175, label: "Item Description" },
-      { w: 75, label: "Product Code" },
-      { w: 55, label: "Capacity" },
-      { w: 65, label: "Unit Price" },
-      { w: 50, label: "Quantity" },
-      { w: 80, label: "Amount" }
+      { w: 75,  label: "Product Code" },
+      { w: 55,  label: "Capacity" },
+      { w: 65,  label: "Unit Price" },
+      { w: 50,  label: "Quantity" },
+      { w: 80,  label: "Amount" }
     ];
+    const HEADER_H = 24, ROW_H = 22, HEADER_FS = 10, CELL_FS = 9.5;
     let cx = 30;
-    page.drawRectangle({ x: 30, y: y - 18, width: 535, height: 18, color: NAVY });
+    // 헤더 배경 + 가운데 정렬 텍스트
+    page.drawRectangle({ x: 30, y: y - HEADER_H, width: 535, height: HEADER_H, color: NAVY });
     cols.forEach(function(col) {
-      page.drawText(col.label, { x: cx + 4, y: y - 12, size: 9, font: fontBold, color: rgb(1,1,1) });
+      const tw = fontBold.widthOfTextAtSize(col.label, HEADER_FS);
+      const tx = cx + (col.w - tw) / 2;
+      const ty = y - HEADER_H + (HEADER_H - HEADER_FS) / 2 + 1.5;
+      page.drawText(col.label, { x: tx, y: ty, size: HEADER_FS, font: fontBold, color: rgb(1,1,1) });
       cx += col.w;
     });
     const rows = order.rows || [];
     const cur = order.currency || "USD";
-    let ry = y - 18;
+    let ry = y - HEADER_H;
     rows.forEach(function(r, i) {
-      ry -= 16;
+      ry -= ROW_H;
       const qty = parseFloat(r.qty || r.quantity) || 0;
       const price = parseFloat(r.price || r.unitPrice) || 0;
       const amount = qty * price;
@@ -19346,13 +19352,17 @@ async function generatePdfWithForm() {
         amount.toFixed(2)
       ];
       if (i % 2 === 0) {
-        page.drawRectangle({ x: 30, y: ry, width: 535, height: 16, color: rgb(0.97, 0.98, 0.99) });
+        page.drawRectangle({ x: 30, y: ry, width: 535, height: ROW_H, color: rgb(0.97, 0.98, 0.99) });
       }
       vals.forEach(function(v, j) {
-        page.drawText(v, { x: cx + 4, y: ry + 5, size: 8.5, font, color: rgb(0.06, 0.09, 0.16) });
+        const tw = font.widthOfTextAtSize(v, CELL_FS);
+        const tx = cx + (cols[j].w - tw) / 2;
+        const ty = ry + (ROW_H - CELL_FS) / 2 + 1.5;
+        page.drawText(v, { x: tx, y: ty, size: CELL_FS, font, color: rgb(0.06, 0.09, 0.16) });
         cx += cols[j].w;
       });
     });
+    // 표 외곽 테두리
     page.drawRectangle({ x: 30, y: ry, width: 535, height: y - ry, borderColor: rgb(0.8, 0.83, 0.87), borderWidth: 0.5 });
     y = ry - 20;
     const productTotal = parseFloat(order.productTotal) || rows.reduce(function(s, r) { return s + ((parseFloat(r.qty)||0) * (parseFloat(r.price)||0)); }, 0);
@@ -19367,11 +19377,16 @@ async function generatePdfWithForm() {
     page.drawText(cur + " " + grandTotal.toFixed(2), { x: 480, y: y - 34, size: 11, font: fontBold, color: NAVY });
     page.drawText("Duties and Taxes", { x: 380, y: y - 50, size: 9, font, color: GRAY });
     page.drawText(order.dutiesAndTaxes || "-", { x: 490, y: y - 50, size: 9, font, color: rgb(0.06, 0.09, 0.16) });
+    // v1.9.838: 사인 라벨 가운데 정렬 (각 박스 중심에)
     y = ry - 100;
     page.drawLine({ start:{x: 30, y}, end: {x: 565, y}, thickness: 0.5, color: LIGHT_GRAY });
-    page.drawText("Authorized by (Buyer)", { x: 80, y: y - 18, size: 10, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
-    page.drawText("Confirmed by (Supplier)", { x: 360, y: y - 18, size: 10, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
-    // v1.9.836: 서명란 — form text field 대신 빈 박스 (잉크/주석 위에 그려지도록) + 높이 2배
+    const _bl = "Authorized by (Buyer)";
+    const _sl = "Confirmed by (Supplier)";
+    const _blW = fontBold.widthOfTextAtSize(_bl, 10);
+    const _slW = fontBold.widthOfTextAtSize(_sl, 10);
+    page.drawText(_bl, { x: 150 - _blW / 2, y: y - 18, size: 10, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
+    page.drawText(_sl, { x: 430 - _slW / 2, y: y - 18, size: 10, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
+    // v1.9.836: 서명란 — form text field 대신 빈 박스 (잉크/주석 위에 그려지도록)
     page.drawRectangle({ x: 50, y: y - 90, width: 200, height: 60, borderColor: rgb(0.6, 0.65, 0.72), borderWidth: 0.5 });
     page.drawRectangle({ x: 330, y: y - 90, width: 200, height: 60, borderColor: rgb(0.6, 0.65, 0.72), borderWidth: 0.5 });
     // v1.9.832: NeedAppearances=true + updateFieldAppearances — 입력 텍스트가 박스 안에 표시되도록
