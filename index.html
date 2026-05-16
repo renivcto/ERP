@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.843';
+const ERP_VERSION = 'v1.9.844';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13993,6 +13993,40 @@ function _onAdsKpiPeriodChange() {
 }
 
 // v1.9.773: 광고비 관리 페이지 렌더 (별도 페이지)
+// v1.9.844: 좀비 광고 expense 중복 자동 정리
+//   같은 (adProjectId, adShopId, amount, adStartDate, adEndDate) 의 광고 expense 들 중
+//   최신 1개만 남기고 나머지는 tombstone + 삭제
+function _cleanupZombieAdExpenses() {
+  if (!Array.isArray(DB.expenses)) return 0;
+  const adExpenses = DB.expenses.filter(e => e && e.category === 'ad');
+  if (adExpenses.length === 0) return 0;
+  function _key(e) {
+    return [e.adProjectId || '', e.adShopId || '', String(e.amount || 0), e.adStartDate || '', e.adEndDate || ''].join('|');
+  }
+  const groupMap = new Map();
+  adExpenses.forEach(e => {
+    const k = _key(e);
+    if (!groupMap.has(k)) groupMap.set(k, []);
+    groupMap.get(k).push(e);
+  });
+  const idsToRemove = [];
+  groupMap.forEach((group) => {
+    if (group.length <= 1) return;
+    // 최신 (createdAt or id) 순 정렬 — 최신 1개 keep, 나머지 삭제
+    group.sort((a, b) => (b.createdAt || b.id || 0) - (a.createdAt || a.id || 0));
+    for (let i = 1; i < group.length; i++) idsToRemove.push(group[i].id);
+  });
+  if (idsToRemove.length === 0) return 0;
+  if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
+  idsToRemove.forEach(id => { DB._deletedExpenseIds.push({ id: id, ts: Date.now() }); });
+  // 광고비 행도 함께 정리
+  idsToRemove.forEach(id => { try { _removeExpenseAdsFromShop(id); } catch(_){} });
+  DB.expenses = DB.expenses.filter(e => !e || !idsToRemove.includes(e.id));
+  console.warn('🪦 [v844] 좀비 광고 expense ' + idsToRemove.length + '건 자동 정리:', idsToRemove);
+  try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  return idsToRemove.length;
+}
+
 // v1.9.839: 좀비 광고비 자동 정리 (expense tombstone 기반)
 function _cleanupZombieAdsCosts() {
   if (!Array.isArray(DB._deletedExpenseIds) || DB._deletedExpenseIds.length === 0) return 0;
@@ -14016,6 +14050,8 @@ function _cleanupZombieAdsCosts() {
 }
 
 function renderAdsPage() {
+  // v1.9.844: 좀비 광고 expense (중복 지출결의서) 자동 정리
+  try { _cleanupZombieAdExpenses(); } catch(_){}
   // v1.9.839: 페이지 진입 시 좀비 광고비 자동 정리
   try { _cleanupZombieAdsCosts(); } catch(_){}
   const kpiRow = document.getElementById('ads-kpi-row');
@@ -22713,6 +22749,8 @@ function resyncOrderExpenses(orderId) {
 function renderApprovalPage() {
   // v1.9.834: 결재 페이지 진입 시 좀비 PO 제거 (삭제됐는데 부활한 것 차단)
   try { if (typeof applyOrderTombstonesV226 === 'function') applyOrderTombstonesV226(); } catch(_){}
+  // v1.9.844: 좀비 광고 expense (중복 지출결의서) 자동 정리
+  try { if (typeof _cleanupZombieAdExpenses === 'function') _cleanupZombieAdExpenses(); } catch(_){}
   // 현재 탭 유지
   try { updateApprovalStats(); } catch(_){}
   // v1.9.418: 기간 필터 입력란 기본값 채움 (월/주/일/from/to)
