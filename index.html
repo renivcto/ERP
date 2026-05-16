@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.818';
+const ERP_VERSION = 'v1.9.819';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13098,18 +13098,26 @@ function _renderProjectCostList(projectId) {
   if (summary) summary.innerHTML = `💰 <b>총 ${ads.length}건</b> · 합계 <b style="color:#be185d;font-size:13px">₩${total.toLocaleString()}</b>`;
 }
 
-// v1.9.810: 자동 광고비 행 삭제 = 연결된 지출결의서 삭제 (단일 진실 원칙)
+// v1.9.810/819: 자동 광고비 행 삭제 = 연결된 지출결의서 삭제 (단일 진실 원칙)
+//   v819: expense 못 찾아도 광고비(adsCosts)는 삭제 — sync 깨진 상태 복구
 function _deleteAutoCostFromProject(expenseId) {
   if (typeof requireWrite === 'function' && !requireWrite()) return;
   if (!expenseId) return;
   const exp = (DB.expenses || []).find(e => String(e.id) === String(expenseId));
-  if (!exp) { showNotif('연결된 지출결의서를 찾을 수 없습니다', 'warning'); return; }
-  if (!confirm('이 광고비는 지출결의서 #' + expenseId + ' 와 연결되어 있습니다.\n지출결의서를 삭제하시겠습니까? (광고비도 자동 제거됩니다)')) return;
-  // 지출결의서 삭제 + tombstone
-  if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
-  if (!DB._deletedExpenseIds.includes(expenseId)) DB._deletedExpenseIds.push(expenseId);
-  DB.expenses = (DB.expenses || []).filter(e => String(e.id) !== String(expenseId));
-  // 광고비 동기화 항목도 제거
+  let msg;
+  if (exp) {
+    msg = '이 광고비는 지출결의서 #' + expenseId + ' 와 연결되어 있습니다.\n지출결의서를 삭제하시겠습니까? (광고비도 자동 제거됩니다)';
+  } else {
+    msg = '연결된 지출결의서 #' + expenseId + ' 를 찾을 수 없습니다 (이미 삭제됨).\n광고비 행만 제거하시겠습니까?';
+  }
+  if (!confirm(msg)) return;
+  // 지출결의서 삭제 + tombstone (있는 경우)
+  if (exp) {
+    if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
+    if (!DB._deletedExpenseIds.includes(expenseId)) DB._deletedExpenseIds.push(expenseId);
+    DB.expenses = (DB.expenses || []).filter(e => String(e.id) !== String(expenseId));
+  }
+  // 광고비 동기화 항목도 제거 (expense 유무와 무관)
   try { _removeExpenseAdsFromShop(expenseId); } catch(_){}
   try { saveData(); } catch(_){}
   // 프로젝트 모달의 광고비 이력 + 광고비 페이지 갱신
@@ -13119,7 +13127,7 @@ function _deleteAutoCostFromProject(expenseId) {
   } catch(_){}
   try { renderAdsPage(); } catch(_){}
   try { renderApprovalPage(); } catch(_){}
-  showNotif('🗑 광고비 (지출결의서 #' + expenseId + ') 삭제 완료', 'success');
+  showNotif(exp ? ('🗑 광고비 (지출결의서 #' + expenseId + ') 삭제 완료') : ('🗑 광고비 행 제거 완료 (지출결의서 #' + expenseId + ' 는 이미 삭제됨)'), 'success');
 }
 
 // v1.9.781: 프로젝트에서 광고비 추가 — 지출결의서 모달 (수동 입력 모달 X, 단일 진실 원칙)
@@ -14158,12 +14166,16 @@ function renderShopAdsList(shopId) {
     }).join('') + '</tbody></table>';
 }
 
-// v1.9.500: adsCosts 행 → 연결된 지출결의서 열기
+// v1.9.500/819: adsCosts 행 → 연결된 지출결의서 열기 (광고 프로젝트 모달 먼저 닫기 — z-index 충돌 회피)
 function _openLinkedExpense(expenseId) {
-  if (expenseId == null) { alert('연결된 지출결의서를 찾을 수 없습니다'); return; }
-  const e = (DB.expenses||[]).find(x => x.id === Number(expenseId) || x.id === expenseId);
-  if (!e) { alert('지출결의서를 찾을 수 없습니다 (이미 삭제되었을 수 있음)'); return; }
-  if (typeof editExpense === 'function') editExpense(e.id);
+  if (expenseId == null) { showNotif('연결된 지출결의서를 찾을 수 없습니다', 'warning'); return; }
+  const e = (DB.expenses||[]).find(x => String(x.id) === String(expenseId));
+  if (!e) { showNotif('지출결의서 #' + expenseId + ' 를 찾을 수 없습니다 (이미 삭제되었을 수 있음)', 'warning'); return; }
+  // v1.9.819: 광고 프로젝트 모달이 열려있으면 먼저 닫기 (z-index 450이라 지출결의서 모달 가림)
+  try { if (typeof closeModal === 'function') closeModal('ad-project-modal'); } catch(_){}
+  setTimeout(() => {
+    if (typeof editExpense === 'function') editExpense(e.id);
+  }, 100);
 }
 
 // v1.9.355: 광고비 기간 행 클릭 시 호출 — ROAS 시작일/종료일을 채우고 즉시 분석
