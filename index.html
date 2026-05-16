@@ -2868,8 +2868,20 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 
     <!-- ══════════════ v1.9.773: 광고비 관리 페이지 (별도 페이지) ══════════════ -->
     <div class="page" id="page-ads">
-      <!-- KPI 카드 4개 -->
-      <div id="ads-kpi-row" style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px"></div>
+      <!-- v1.9.811: KPI 기간 필터 -->
+      <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-bottom:10px">
+        <span style="font-size:11.5px;color:#475569;font-weight:600">📅 기간:</span>
+        <select class="fs" id="ads-kpi-period" onchange="_onAdsKpiPeriodChange()" style="min-width:110px;font-size:12px;height:32px;padding:5px 10px">
+          <option value="all" selected>전체</option>
+          <option value="thisMonth">월간 (이번 달)</option>
+          <option value="range">기간 직접 선택</option>
+        </select>
+        <input class="fi" id="ads-kpi-from" type="date" onchange="renderAdsPage()" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px">
+        <span id="ads-kpi-tilde" style="display:none;color:#94a3b8">~</span>
+        <input class="fi" id="ads-kpi-to" type="date" onchange="renderAdsPage()" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px">
+      </div>
+      <!-- KPI 카드 3개 (자동/수동 비중 삭제) -->
+      <div id="ads-kpi-row" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px"></div>
       <!-- v1.9.809: 버튼 행 (안내 박스 + 프로젝트 그리드 제거) -->
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:14px">
         <button type="button" onclick="openAdProjectModal()" style="background:#fff;color:#7c3aed;border:1px solid #ddd6fe;padding:9px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">+ 프로젝트 추가</button>
@@ -2884,7 +2896,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <!-- 필터 + 이력 표 -->
       <div class="card">
         <div class="card-hdr">
-          <span class="card-ttl">📋 광고비 이력 (전 쇼핑몰 통합)</span>
+          <span class="card-ttl">📋 광고비 이력</span>
           <div style="display:flex;gap:8px;margin-left:auto;align-items:center">
             <select class="fs" id="ads-page-shop-filter" onchange="renderAdsPage()" style="min-width:140px"><option value="">전체 쇼핑몰</option></select>
             <select class="fs" id="ads-page-period-filter" onchange="renderAdsPage()" style="min-width:120px">
@@ -2900,13 +2912,13 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <table class="tbl" style="text-align:center;margin:0">
             <thead><tr>
               <th style="width:120px">쇼핑몰</th>
-              <th style="width:100px">프로젝트</th>
+              <th style="width:140px">프로젝트</th>
               <th style="width:70px">유형</th>
               <th>기간</th>
               <th style="width:110px">광고비</th>
-              <th style="width:110px">매출(기간)</th>
-              <th style="width:70px">ROAS</th>
-              <th style="width:80px">출처</th>
+              <th style="width:80px">ROAS</th>
+              <th style="width:120px">매출(기간)</th>
+              <th style="width:120px">Net 마진</th>
               <th style="width:90px">관리</th>
             </tr></thead>
             <tbody id="ads-page-table"></tbody>
@@ -5162,7 +5174,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.810';
+const ERP_VERSION = 'v1.9.812';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13872,6 +13884,25 @@ async function _ceDeleteSelected() {
   showNotif('🗑 ' + removed + '건 시나리오 삭제 완료', 'success');
 }
 
+// v1.9.811: KPI 기간 필터 변경 핸들러
+function _onAdsKpiPeriodChange() {
+  const sel = document.getElementById('ads-kpi-period');
+  const isRange = sel && sel.value === 'range';
+  const fromEl = document.getElementById('ads-kpi-from');
+  const toEl = document.getElementById('ads-kpi-to');
+  const tildeEl = document.getElementById('ads-kpi-tilde');
+  if (fromEl) fromEl.style.display = isRange ? '' : 'none';
+  if (toEl) toEl.style.display = isRange ? '' : 'none';
+  if (tildeEl) tildeEl.style.display = isRange ? '' : 'none';
+  if (isRange && fromEl && !fromEl.value) {
+    const today = new Date();
+    const monthAgo = new Date(today); monthAgo.setMonth(monthAgo.getMonth() - 1);
+    fromEl.value = monthAgo.toISOString().slice(0, 10);
+    toEl.value = today.toISOString().slice(0, 10);
+  }
+  renderAdsPage();
+}
+
 // v1.9.773: 광고비 관리 페이지 렌더 (별도 페이지)
 function renderAdsPage() {
   const kpiRow = document.getElementById('ads-kpi-row');
@@ -13994,11 +14025,6 @@ function renderAdsPage() {
       <div style="font-size:22px;font-weight:800;color:#0c4a6e;letter-spacing:-0.5px;margin-top:3px">₩${thisMoAds.toLocaleString()}</div>
       <div style="font-size:11px;color:${momColor};margin-top:3px;font-weight:700">${momIcon} ${Math.abs(momPct).toFixed(1)}% (지난달 ₩${lastMoAds.toLocaleString()})</div>
     </div>
-    <div class="stat" style="border-left:3px solid #f59e0b">
-      <div class="stat-lbl">자동/수동 비중</div>
-      <div style="font-size:22px;font-weight:800;color:#92400e;letter-spacing:-0.5px;margin-top:3px">${cntAuto} / ${cntManual}</div>
-      <div style="font-size:11px;color:#94a3b8;margin-top:3px">자동(지출결의서) · 수동</div>
-    </div>
   `;
 
   // 이력 표 렌더 — 최신 순
@@ -14024,10 +14050,11 @@ function renderAdsPage() {
     const revenue = _periodRevenue(a._shopId, startDate, endDate);
     const roasVal = a.cost > 0 ? (revenue / a.cost * 100) : 0;
     const roasStr = roasVal > 0 ? roasVal.toFixed(0) + '%' : '-';
+    // v1.9.811: Net 마진 = 매출 - 광고비 (광고비 차감 마진)
+    const netMargin = revenue - (parseFloat(a.cost) || 0);
+    const netColor = netMargin > 0 ? '#16a34a' : (netMargin < 0 ? '#dc2626' : '#94a3b8');
+    const netStr = revenue > 0 ? '₩' + netMargin.toLocaleString() : '-';
     const isAuto = !!a.expenseId;
-    const sourceCell = isAuto
-      ? `<span style="background:#dcfce7;color:#15803d;padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700">자동</span>`
-      : `<span style="background:#fef9c3;color:#a16207;padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700">수동</span>`;
     const editBtn = isAuto
       ? `<button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 8px" onclick="_openLinkedExpense(${a.expenseId})">지출결의서</button>`
       : `<button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 6px" onclick="openAdsManualModal('${a.id}')">수정</button><button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 6px;margin-left:3px;color:var(--red-500)" onclick="deleteAdsManual('${a.id}')">삭제</button>`;
@@ -14045,7 +14072,7 @@ function renderAdsPage() {
     if (a.projectId) {
       const proj = (DB.adProjects || []).find(p => p && String(p.id) === String(a.projectId));
       if (proj) {
-        projectLabel = `<span style="background:#ede9fe;color:#6d28d9;padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700;cursor:pointer" onclick="openAdProjectModal('${proj.id}')" title="프로젝트 보기">${(proj.name||'-').slice(0,12)}</span>`;
+        projectLabel = `<span style="color:#6d28d9;font-weight:600;cursor:pointer;white-space:nowrap" onclick="openAdProjectModal('${proj.id}')" title="프로젝트 보기" onmouseenter="this.style.textDecoration='underline'" onmouseleave="this.style.textDecoration='none'">${proj.name||'-'}</span>`;
       }
     }
     return `<tr>
@@ -14054,9 +14081,9 @@ function renderAdsPage() {
       <td><span style="background:#f1f5f9;padding:2px 8px;border-radius:4px;font-size:10.5px">${typeLabel}</span></td>
       <td style="font-size:12.5px;color:#475569">${periodStr}</td>
       <td style="font-weight:700;color:#be185d;font-variant-numeric:tabular-nums">₩${Number(a.cost || 0).toLocaleString()}</td>
-      <td style="font-variant-numeric:tabular-nums;color:#64748b">₩${revenue.toLocaleString()}</td>
       <td style="font-weight:700;color:${roasVal >= 200 ? '#16a34a' : (roasVal >= 100 ? '#0284c7' : '#dc2626')}">${roasStr}</td>
-      <td>${sourceCell}</td>
+      <td style="font-variant-numeric:tabular-nums;color:#64748b">${revenue > 0 ? '₩' + revenue.toLocaleString() : '-'}</td>
+      <td style="font-weight:700;color:${netColor};font-variant-numeric:tabular-nums">${netStr}</td>
       <td>${editBtn}</td>
     </tr>`;
   }).join('');
