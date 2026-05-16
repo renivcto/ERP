@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.831';
+const ERP_VERSION = 'v1.9.832';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -19149,7 +19149,7 @@ async function generatePdfWithForm() {
       tries++;
     }
     if (!window.PDFLib) { alert("PDF 라이브러리 로드 실패 (인터넷 연결 확인)"); return; }
-    const { PDFDocument, StandardFonts, rgb } = PDFLib;
+    const { PDFDocument, StandardFonts, rgb, PDFName, PDFBool } = PDFLib;
     const order = PO_DATA;
     const pdfDoc = await PDFDocument.create();
     const page = pdfDoc.addPage([595.28, 841.89]);
@@ -19324,6 +19324,9 @@ async function generatePdfWithForm() {
     const sigSupplier = form.createTextField("signature_supplier");
     sigSupplier.setText("");
     sigSupplier.addToPage(page, { x: 330, y: y - 70, width: 200, height: 30, borderColor: rgb(0.6, 0.65, 0.72), borderWidth: 0.5 });
+    // v1.9.832: NeedAppearances=true + updateFieldAppearances — 입력 텍스트가 박스 안에 표시되도록
+    try { form.acroForm.dict.set(PDFName.of("NeedAppearances"), PDFBool.True); } catch(e) { console.warn("NeedAppearances set fail", e); }
+    try { form.updateFieldAppearances(font); } catch(e) { console.warn("updateFieldAppearances fail", e); }
     const pdfBytes = await pdfDoc.save();
     const blob = new Blob([pdfBytes], { type: "application/pdf" });
     const url = URL.createObjectURL(blob);
@@ -19371,7 +19374,7 @@ async function _generateOverseasPoPdfForm(orderId) {
     }
   }
 
-  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  const { PDFDocument, StandardFonts, rgb, PDFName, PDFBool } = PDFLib;
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([595.28, 841.89]); // A4
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -19567,6 +19570,10 @@ async function _generateOverseasPoPdfForm(orderId) {
   const sigSupplier = form.createTextField('signature_supplier');
   sigSupplier.setText('');
   sigSupplier.addToPage(page, { x: 330, y: y - 70, width: 200, height: 30, borderColor: rgb(0.6, 0.65, 0.72), borderWidth: 0.5 });
+
+  // v1.9.832: NeedAppearances + updateFieldAppearances
+  try { form.acroForm.dict.set(PDFName.of("NeedAppearances"), PDFBool.True); } catch(e) { console.warn("NeedAppearances set fail", e); }
+  try { form.updateFieldAppearances(font); } catch(e) { console.warn("updateFieldAppearances fail", e); }
 
   // PDF 저장
   const pdfBytes = await pdfDoc.save();
