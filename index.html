@@ -5173,7 +5173,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.807';
+const ERP_VERSION = 'v1.9.808';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -18867,16 +18867,13 @@ function renderOrderTable() {
     const typeChipTxt = {원자재:'#2d7a4a', 부자재:'#7c4dbd', OEM:'#2874a0', 외주가공:'#5a6670', 완제품:'#9a7520'};
     const typeChipBd = {원자재:'#b8e8c8', 부자재:'#d4bfee', OEM:'#b0d8f5', 외주가공:'#d4dae0', 완제품:'#f0dea0'};
     const vType = v.type || '';
-    // v1.9.805: 해외 PO 분기
+    // v1.9.805/808: 해외 PO 분기 — 분류는 ERP 내부 분류(o.itemType) 사용, 결재/이메일은 발주서와 동일
     const isPo = !!o.isOverseas;
-    let typeBadge;
-    if (isPo) {
-      typeBadge = '<span style="display:inline-block;padding:1px 8px;border-radius:9px;font-size:10px;font-weight:700;white-space:nowrap;background:#dbeafe;color:#1e3a8a;border:1px solid #93c5fd">🌐 해외 PO</span>';
-    } else {
-      typeBadge = vType
-        ? `<span style="display:inline-block;padding:1px 8px;border-radius:9px;font-size:10px;font-weight:600;white-space:nowrap;background:${typeChipBg[vType]||'#f1f5f9'};color:${typeChipTxt[vType]||'#475569'};border:1px solid ${typeChipBd[vType]||'#cbd5e1'}">${vType}</span>`
-        : '';
-    }
+    // 분류 배지: 해외 PO도 동일한 분류 (부자재/원자재/OEM/외주가공/완제품) 색상 사용
+    const displayType = isPo ? (o.itemType || itemType || '') : vType;
+    const typeBadge = displayType
+      ? `<span style="display:inline-block;padding:1px 8px;border-radius:9px;font-size:10px;font-weight:600;white-space:nowrap;background:${typeChipBg[displayType]||'#f1f5f9'};color:${typeChipTxt[displayType]||'#475569'};border:1px solid ${typeChipBd[displayType]||'#cbd5e1'}">${displayType}</span>`
+      : '';
     // 업체명: 해외 PO는 supplier.company, 국내는 vendor
     const supplierName = isPo ? ((o.supplier && o.supplier.company) || '—') : (v.company||'-');
     const supplierClickHandler = isPo ? '' : `onclick="viewVendor(${o.vendorId})"`;
@@ -18886,11 +18883,6 @@ function renderOrderTable() {
       : fmtW(total);
     // 수정 버튼 핸들러
     const editHandler = isPo ? `openOverseasPoModal(${o.id})` : `editOrderByIdx(${dbIdx})`;
-    // 결재 날인 / 이메일: 해외 PO는 일단 빈 셀
-    const stampCellFinal = isPo ? '<span style="color:#cbd5e1;font-size:10.5px">—</span>' : stampBadge;
-    const emailCellFinal = isPo
-      ? '<span style="color:#cbd5e1;font-size:10.5px">—</span>'
-      : `<button title="결재 날인된 발주서를 이메일로 발송 (Outlook 새 메일 창 열림)" onclick="sendOrderEmail(${o.id})" style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;padding:2px 7px;border-radius:5px;font-size:10.5px;cursor:pointer;font-weight:700;line-height:1.3" onmouseenter="this.style.background='#ffedd5'" onmouseleave="this.style.background='#fff7ed'">이메일</button>`;
     // v1.9.400: 품목 클릭 → 발주서 미리보기, 관리 열은 수정 아이콘만으로 컴팩트화, 폰트 12px (업체명·품목명 0.5pt 업)
     return `<tr style="background:${rowBg}">
       <td style="text-align:center;padding:8px 2px;vertical-align:middle">${typeBadge}</td>
@@ -18900,8 +18892,10 @@ function renderOrderTable() {
       <td style="text-align:center;padding:8px 2px;vertical-align:middle">${inDisplay}</td>
       <td style="text-align:center;font-size:12px;padding:8px 4px;vertical-align:middle;white-space:nowrap;font-weight:600">${amountDisplay}</td>
       <td style="text-align:center;padding:8px 8px;vertical-align:middle">${stockStatusBadge(o.stockStatus, o.id)}</td>
-      <td style="text-align:center;padding:8px 8px;vertical-align:middle">${stampCellFinal}</td>
-      <td style="text-align:center;padding:8px 4px;vertical-align:middle">${emailCellFinal}</td>
+      <td style="text-align:center;padding:8px 8px;vertical-align:middle">${stampBadge}</td>
+      <td style="text-align:center;padding:8px 4px;vertical-align:middle">
+        <button title="결재 날인된 발주서를 이메일로 발송 (Outlook 새 메일 창 열림)" onclick="sendOrderEmail(${o.id})" style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;padding:2px 7px;border-radius:5px;font-size:10.5px;cursor:pointer;font-weight:700;line-height:1.3" onmouseenter="this.style.background='#ffedd5'" onmouseleave="this.style.background='#fff7ed'">이메일</button>
+      </td>
       <td style="text-align:center;padding:8px 6px;vertical-align:middle">
         <button title="수정" onclick="${editHandler}" style="background:#eef2ff;color:#6366f1;border:1px solid #e0e7ff;width:24px;height:22px;padding:0;border-radius:5px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1">✏️</button>
       </td>
