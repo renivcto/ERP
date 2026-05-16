@@ -3020,7 +3020,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <input type="hidden" id="ad-project-edit-id" value="">
           <div class="fg">
             <label>프로젝트명 <span class="req">*</span></label>
-            <input class="fi" id="ad-project-name" placeholder="예: 올리브영 5월 메인 노출 / 320 크림 봄 캠페인">
+            <input class="fi" id="ad-project-name" placeholder="">
           </div>
           <div class="fg">
             <label>설명 <span style="font-size:10px;color:var(--gray-400)">(선택)</span></label>
@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.836';
+const ERP_VERSION = 'v1.9.837';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13037,17 +13037,20 @@ function openAdProjectModal(editId) {
       _renderProjectCostList(p.id);
     }
   } else {
-    // 신규 — 광고비 이력 숨김
+    // v1.9.837: 신규 — 광고비 영역도 보이게 (클릭 시 자동 저장 후 모달 열림)
     const costSection = document.getElementById('ad-project-cost-section');
-    if (costSection) costSection.style.display = 'none';
+    if (costSection) costSection.style.display = '';
+    const costList = document.getElementById('ad-project-cost-list');
+    if (costList) costList.innerHTML = '<div style="padding:14px;text-align:center;color:#94a3b8;font-size:12px">먼저 프로젝트를 저장하면 광고비가 표시됩니다</div>';
+    const costSummary = document.getElementById('ad-project-cost-summary');
+    if (costSummary) costSummary.textContent = '';
     titleEl.textContent = '🎯 새 광고 프로젝트';
     editIdEl.value = '';
     nameEl.value = '';
     descEl.value = '';
-    // default — 이번 달
-    const now = new Date();
-    startEl.value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-    endEl.value = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+    // v1.9.837: default 값 제거 — 사용자가 직접 입력
+    startEl.value = '';
+    endEl.value = '';
     if (deleteBtn) deleteBtn.style.display = 'none';
   }
   openModal('ad-project-modal');
@@ -13133,8 +13136,26 @@ function _deleteAutoCostFromProject(expenseId) {
 
 // v1.9.781: 프로젝트에서 광고비 추가 — 지출결의서 모달 (수동 입력 모달 X, 단일 진실 원칙)
 function _addCostFromAdProject() {
-  const projectId = document.getElementById('ad-project-edit-id').value;
-  if (!projectId) { showNotif('먼저 프로젝트를 저장하세요', 'warning'); return; }
+  let projectId = document.getElementById('ad-project-edit-id').value;
+  // v1.9.837: 신규 프로젝트 모드라면 먼저 자동 저장
+  if (!projectId) {
+    const name = document.getElementById('ad-project-name').value.trim();
+    const startDate = document.getElementById('ad-project-start').value;
+    const endDate = document.getElementById('ad-project-end').value;
+    if (!name) { showNotif('프로젝트명을 먼저 입력해주세요', 'warning'); return; }
+    if (!startDate || !endDate) { showNotif('시작일/종료일을 먼저 입력해주세요', 'warning'); return; }
+    if (startDate > endDate) { showNotif('시작일이 종료일보다 늦습니다', 'warning'); return; }
+    const description = document.getElementById('ad-project-desc').value.trim();
+    const shopIds = Array.from(document.querySelectorAll('.ad-project-shop-cb:checked')).map(cb => cb.value);
+    const itemIds = Array.from(document.querySelectorAll('.ad-project-item-cb:checked')).map(cb => parseInt(cb.value, 10));
+    if (!Array.isArray(DB.adProjects)) DB.adProjects = [];
+    const newId = 'proj_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+    DB.adProjects.push({ id: newId, name, description, startDate, endDate, shopIds, itemIds, createdAt: Date.now(), updatedAt: Date.now() });
+    try { if (typeof saveDataNow === 'function') { saveDataNow(); } else { saveData(); } } catch(_){}
+    document.getElementById('ad-project-edit-id').value = newId;
+    projectId = newId;
+    showNotif('✅ 프로젝트 임시 저장 — 광고비 추가 진행', 'info');
+  }
   const proj = (DB.adProjects || []).find(p => String(p.id) === String(projectId));
   if (!proj) { showNotif('프로젝트를 찾을 수 없습니다', 'warning'); return; }
   closeModal('ad-project-modal');
