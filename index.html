@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.850';
+const ERP_VERSION = 'v1.9.851';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -14004,6 +14004,27 @@ function _onAdsKpiPeriodChange() {
 }
 
 // v1.9.773: 광고비 관리 페이지 렌더 (별도 페이지)
+// v1.9.851: 광고 expense 의 vendor 필드가 비어있으면 shop name 자동 채움
+function _fillMissingAdExpenseVendor() {
+  if (!Array.isArray(DB.expenses)) return 0;
+  let filled = 0;
+  DB.expenses.forEach(e => {
+    if (!e || e.category !== 'ad') return;
+    if (e.vendor && String(e.vendor).trim()) return;
+    if (!e.adShopId) return;
+    const shop = (DB.shops||[]).find(s => s && s.id === e.adShopId);
+    if (shop && shop.name) {
+      e.vendor = shop.name;
+      filled++;
+    }
+  });
+  if (filled > 0) {
+    console.warn('🔧 [v851] 광고 expense vendor 자동 채움: ' + filled + '건');
+    try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  }
+  return filled;
+}
+
 // v1.9.848: 광고비 행 (adsCosts) 에 expenseId 가 있는데 DB.expenses 에 없는 케이스를
 //          광고비 행 데이터로 자동 복원 (지출결의서 페이지에 보이도록)
 function _restoreMissingAdExpenses() {
@@ -22923,6 +22944,8 @@ function renderApprovalPage() {
   try { if (typeof applyOrderTombstonesV226 === 'function') applyOrderTombstonesV226(); } catch(_){}
   // v1.9.848: 누락된 광고 expense 복원
   try { if (typeof _restoreMissingAdExpenses === 'function') _restoreMissingAdExpenses(); } catch(_){}
+  // v1.9.851: 광고 expense 의 vendor 자동 채움
+  try { if (typeof _fillMissingAdExpenseVendor === 'function') _fillMissingAdExpenseVendor(); } catch(_){}
   // v1.9.844: 좀비 광고 expense (중복 지출결의서) 자동 정리
   try { if (typeof _cleanupZombieAdExpenses === 'function') _cleanupZombieAdExpenses(); } catch(_){}
   // 현재 탭 유지
