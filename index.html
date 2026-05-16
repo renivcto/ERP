@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.847';
+const ERP_VERSION = 'v1.9.848';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13993,6 +13993,53 @@ function _onAdsKpiPeriodChange() {
 }
 
 // v1.9.773: 광고비 관리 페이지 렌더 (별도 페이지)
+// v1.9.848: 광고비 행 (adsCosts) 에 expenseId 가 있는데 DB.expenses 에 없는 케이스를
+//          광고비 행 데이터로 자동 복원 (지출결의서 페이지에 보이도록)
+function _restoreMissingAdExpenses() {
+  if (!Array.isArray(DB.expenses)) DB.expenses = [];
+  const existing = new Set(DB.expenses.map(e => e && e.id).filter(x => x != null));
+  // tombstone 도 확인 (의도적 삭제는 복원 안 함)
+  const tombSet = new Set();
+  (DB._deletedExpenseIds || []).forEach(t => {
+    tombSet.add(typeof t === 'object' && t ? t.id : t);
+  });
+  let restored = 0;
+  (DB.shops || []).forEach(s => {
+    if (!s || !Array.isArray(s.adsCosts)) return;
+    s.adsCosts.forEach(a => {
+      if (!a || a.expenseId == null) return;
+      if (existing.has(a.expenseId)) return;
+      if (tombSet.has(a.expenseId)) return;  // 의도적 삭제
+      const proj = (DB.adProjects || []).find(p => p && String(p.id) === String(a.projectId));
+      const projName = proj ? (proj.name || '광고비') : (a.platform || '광고비');
+      DB.expenses.push({
+        id: a.expenseId,
+        category: 'ad',
+        title: projName + (a.platform ? ' · ' + a.platform : ''),
+        vendor: s.name || '-',
+        amount: parseFloat(a.cost) || 0,
+        adShopId: s.id,
+        adPlatform: a.platform || '',
+        adStartDate: a.startDate || '',
+        adEndDate: a.endDate || '',
+        adProjectId: a.projectId || '',
+        dueDate: a.startDate || '',
+        paidDate: '',
+        paidStatus: 'requested',
+        createdAt: a.createdAt || Date.now(),
+        note: '광고비 행에서 자동 복원',
+      });
+      existing.add(a.expenseId);
+      restored++;
+    });
+  });
+  if (restored > 0) {
+    console.warn('🔧 [v848] 누락된 광고 expense ' + restored + '건 자동 복원');
+    try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  }
+  return restored;
+}
+
 // v1.9.844: 좀비 광고 expense 중복 자동 정리
 //   같은 (adProjectId, adShopId, amount, adStartDate, adEndDate) 의 광고 expense 들 중
 //   최신 1개만 남기고 나머지는 tombstone + 삭제
@@ -14009,12 +14056,28 @@ function _cleanupZombieAdExpenses() {
     if (!groupMap.has(k)) groupMap.set(k, []);
     groupMap.get(k).push(e);
   });
+  // v1.9.848: 광고비 행 (adsCosts) 에 연결된 expense ID 수집 — 이건 절대 삭제 안 함
+  const linkedExpenseIds = new Set();
+  (DB.shops || []).forEach(s => {
+    (s.adsCosts || []).forEach(a => {
+      if (a && a.expenseId != null) linkedExpenseIds.add(a.expenseId);
+    });
+  });
   const idsToRemove = [];
   groupMap.forEach((group) => {
     if (group.length <= 1) return;
-    // 최신 (createdAt or id) 순 정렬 — 최신 1개 keep, 나머지 삭제
-    group.sort((a, b) => (b.createdAt || b.id || 0) - (a.createdAt || a.id || 0));
-    for (let i = 1; i < group.length; i++) idsToRemove.push(group[i].id);
+    // 광고비 행 연결된 것 우선 keep + 그 다음 최신순
+    group.sort((a, b) => {
+      const aL = linkedExpenseIds.has(a.id) ? 1 : 0;
+      const bL = linkedExpenseIds.has(b.id) ? 1 : 0;
+      if (aL !== bL) return bL - aL;
+      return (b.createdAt || b.id || 0) - (a.createdAt || a.id || 0);
+    });
+    for (let i = 1; i < group.length; i++) {
+      // 광고비 행에 매핑된 것은 절대 삭제 X
+      if (linkedExpenseIds.has(group[i].id)) continue;
+      idsToRemove.push(group[i].id);
+    }
   });
   if (idsToRemove.length === 0) return 0;
   if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
@@ -14050,6 +14113,8 @@ function _cleanupZombieAdsCosts() {
 }
 
 function renderAdsPage() {
+  // v1.9.848: 누락된 광고 expense 복원 먼저 (지출결의서 페이지에서 누락 fix)
+  try { _restoreMissingAdExpenses(); } catch(_){}
   // v1.9.844: 좀비 광고 expense (중복 지출결의서) 자동 정리
   try { _cleanupZombieAdExpenses(); } catch(_){}
   // v1.9.839: 페이지 진입 시 좀비 광고비 자동 정리
@@ -22827,6 +22892,8 @@ function resyncOrderExpenses(orderId) {
 function renderApprovalPage() {
   // v1.9.834: 결재 페이지 진입 시 좀비 PO 제거 (삭제됐는데 부활한 것 차단)
   try { if (typeof applyOrderTombstonesV226 === 'function') applyOrderTombstonesV226(); } catch(_){}
+  // v1.9.848: 누락된 광고 expense 복원
+  try { if (typeof _restoreMissingAdExpenses === 'function') _restoreMissingAdExpenses(); } catch(_){}
   // v1.9.844: 좀비 광고 expense (중복 지출결의서) 자동 정리
   try { if (typeof _cleanupZombieAdExpenses === 'function') _cleanupZombieAdExpenses(); } catch(_){}
   // 현재 탭 유지
