@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.829';
+const ERP_VERSION = 'v1.9.830';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -19124,9 +19124,20 @@ function previewOverseasPo(orderId) {
 const PO_DATA_RAW = ${JSON.stringify(o).replace(/</g, "\\u003c")};
 function _sanitize(v) {
   if (v == null) return v;
-  if (typeof v === "string") return v.replace(/[^\x00-\x7F]/g, "").replace(/\(\s*\)/g, "").replace(/\s+/g, " ").trim();
+  if (typeof v === "string") {
+    var out = "";
+    for (var i = 0; i < v.length; i++) {
+      var c = v.charCodeAt(i);
+      if (c <= 127) out += v.charAt(i);
+    }
+    // 빈 괄호 정리 (regex 회피)
+    out = out.split("()").join("").split("( )").join("").split("(  )").join("");
+    // 중복 공백 정리
+    while (out.indexOf("  ") !== -1) out = out.split("  ").join(" ");
+    return out.trim();
+  }
   if (Array.isArray(v)) return v.map(_sanitize);
-  if (typeof v === "object") { const r = {}; for (const k in v) r[k] = _sanitize(v[k]); return r; }
+  if (typeof v === "object") { var r = {}; for (var k in v) r[k] = _sanitize(v[k]); return r; }
   return v;
 }
 const PO_DATA = _sanitize(PO_DATA_RAW);
