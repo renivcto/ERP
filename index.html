@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.830';
+const ERP_VERSION = 'v1.9.831';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -19583,6 +19583,7 @@ async function _generateOverseasPoPdfForm(orderId) {
 }
 
 // 삭제
+// v1.9.831: tombstone 추가 + 연결 expense/approval 정리 + saveDataNow (좀비 부활 fix)
 function deletePoFromEdit() {
   if (typeof requireWrite === 'function' && !requireWrite()) return;
   const editId = document.getElementById('po-edit-id').value;
@@ -19590,8 +19591,26 @@ function deletePoFromEdit() {
   const o = (DB.orders || []).find(x => x && String(x.id) === String(editId));
   if (!o) return;
   if (!confirm('이 해외 PO를 삭제하시겠습니까?\n\n[' + (o.poNumber || '-') + ']')) return;
+  // v831: 시그니처 기반 tombstone (Firestore sync 시 부활 방지)
+  try { if (typeof _recordOrderTombstone === 'function') _recordOrderTombstone(o); } catch(_){}
+  // v831: 연결된 productions / processedOrders / expenses / approvals 정리 (deleteOrder 와 동일)
+  try {
+    DB.productions = (DB.productions||[]).filter(p => {
+      if (p.orderId === o.id) return false;
+      if (o.serial && o.serial !== '' && p.serial === o.serial) return false;
+      return true;
+    });
+    if (o.id != null) DB._processedOrders = (DB._processedOrders||[]).filter(x => x !== o.id);
+    if (Array.isArray(DB.expenses)) DB.expenses = DB.expenses.filter(e => !e || e.orderId !== o.id);
+    if (Array.isArray(DB.approvals)) DB.approvals = DB.approvals.filter(a => !a || !((a.type === 'po_approval' || a.type === 'po') && a.refId === o.id));
+  } catch(_){}
   DB.orders = DB.orders.filter(x => x && String(x.id) !== String(editId));
-  try { if (typeof saveData === 'function') saveData(); } catch(_){}
+  // v831: saveData -> saveDataNow (즉시 저장)
+  if (typeof saveDataNow === 'function') {
+    saveDataNow().catch(e => console.warn('deletePoFromEdit saveDataNow 실패:', e));
+  } else {
+    try { saveData(); } catch(_){}
+  }
   closeModal('add-po');
   try { renderOrderTable(); } catch(_){}
   showNotif('🗑 해외 PO 삭제 완료', 'success');
