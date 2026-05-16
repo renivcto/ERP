@@ -1850,7 +1850,6 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             <div style="font-size:13px;font-weight:800;color:#92400e;margin-bottom:10px;letter-spacing:-0.3px">📦 DELIVERY ADDRESS</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
               <div class="fg" style="margin:0"><label>Company</label><input class="fi" id="po-delivery-company" placeholder=""></div>
-              <div class="fg" style="margin:0"><label>Representative</label><input class="fi" id="po-delivery-representative" placeholder=""></div>
               <div class="fg" style="margin:0"><label>Contact Person</label><input class="fi" id="po-delivery-contact" placeholder=""></div>
               <div class="fg" style="margin:0;grid-column:1/-1"><label>Address</label><input class="fi" id="po-delivery-address" placeholder=""></div>
               <div class="fg" style="margin:0"><label>Company Tel</label><input class="fi" id="po-delivery-tel" placeholder=""></div>
@@ -5199,7 +5198,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.819';
+const ERP_VERSION = 'v1.9.820';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -18537,7 +18536,6 @@ function openOverseasPoModal(editId) {
     document.getElementById('po-supplier-capacity').value = s.capacity || '';
     const da = order.deliveryAddr || {};
     document.getElementById('po-delivery-company').value = da.company || '';
-    document.getElementById('po-delivery-representative').value = da.representative || '';
     document.getElementById('po-delivery-contact').value = da.contactPerson || '';
     document.getElementById('po-delivery-address').value = da.address || '';
     document.getElementById('po-delivery-tel').value = da.tel || '';
@@ -18586,7 +18584,6 @@ function openOverseasPoModal(editId) {
     document.getElementById('po-supplier-reference').value = '';
     document.getElementById('po-supplier-capacity').value = '';
     document.getElementById('po-delivery-company').value = '';
-    document.getElementById('po-delivery-representative').value = '';
     document.getElementById('po-delivery-contact').value = '';
     document.getElementById('po-delivery-address').value = '';
     document.getElementById('po-delivery-tel').value = '';
@@ -18826,7 +18823,6 @@ function savePo() {
     },
     deliveryAddr: {
       company: document.getElementById('po-delivery-company').value,
-      representative: document.getElementById('po-delivery-representative').value,
       contactPerson: document.getElementById('po-delivery-contact').value,
       address: document.getElementById('po-delivery-address').value,
       tel: document.getElementById('po-delivery-tel').value,
@@ -18907,7 +18903,7 @@ function previewOverseasPo(orderId) {
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(o.poNumber || 'Purchase Order')}</title>
 <style>
   @page { size: A4; margin: 12mm; }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   body { font-family: 'Helvetica Neue', Arial, '맑은 고딕', sans-serif; color: #0f172a; margin: 0; padding: 20px; background: #f8fafc; }
   .sheet { max-width: 900px; margin: 0 auto; background: #fff; padding: 30px 36px; box-shadow: 0 4px 20px rgba(0,0,0,.08); border-radius: 6px; }
   .top-actions { max-width: 900px; margin: 0 auto 14px; display: flex; justify-content: flex-end; gap: 8px; }
@@ -18925,9 +18921,19 @@ function previewOverseasPo(orderId) {
   .info-block .row { display: flex; gap: 8px; padding: 3.5px 0; font-size: 12px; }
   .info-block .row .lbl { flex: 0 0 130px; color: #64748b; font-weight: 600; }
   .info-block .row .val { flex: 1; color: #0f172a; word-break: break-word; }
+  .info-block .row .val.editable { min-height: 16px; padding: 2px 6px; border-radius: 3px; cursor: text; outline: none; transition: background .12s; }
+  .info-block .row .val.editable:hover { background: rgba(190,24,93,0.06); }
+  .info-block .row .val.editable:focus { background: #fff; border: 1px solid #be185d; padding: 1px 5px; }
+  .info-block .row .val.editable:empty::before { content: attr(data-placeholder); color: #cbd5e1; font-style: italic; }
+  @media print {
+    .info-block .row .val.editable { padding: 0; background: transparent !important; border: none !important; }
+    .info-block .row .val.editable:empty::before { content: '__________________'; color: #94a3b8; font-style: normal; }
+  }
   table.items { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 12px; }
-  table.items th { background: #1e3a8a; color: #fff; padding: 9px 6px; font-weight: 700; font-size: 11.5px; border: 1px solid #1e3a8a; }
-  table.items td { border: 1px solid #cbd5e1; padding: 6px 8px; vertical-align: middle; }
+  table.items th { background: #1e3a8a !important; color: #fff !important; padding: 9px 6px; font-weight: 700; font-size: 11.5px; border: 1px solid #1e3a8a; letter-spacing: 0.2px; }
+  table.items td { border: 1px solid #cbd5e1; padding: 8px 8px; vertical-align: middle; background: #fff; }
+  table.items tbody tr:nth-child(even) td { background: #f8fafc; }
+  table.items tbody tr:hover td { background: #eff6ff; }
   .totals { display: flex; justify-content: flex-end; margin-bottom: 18px; }
   .totals table { font-size: 12px; }
   .totals td { padding: 5px 12px; }
@@ -18984,29 +18990,28 @@ function previewOverseasPo(orderId) {
   <div class="info-block" style="margin-bottom:18px">
     <h3>DELIVERY ADDRESS</h3>
     <div class="row"><div class="lbl">Company</div><div class="val">${esc(da.company || '-')}</div></div>
-    <div class="row"><div class="lbl">Representative</div><div class="val">${esc(da.representative || '-')}</div></div>
     <div class="row"><div class="lbl">Address</div><div class="val">${esc(da.address || '-')}</div></div>
     <div class="row"><div class="lbl">Contact Person</div><div class="val">${esc(da.contactPerson || '-')}</div></div>
     <div class="row"><div class="lbl">Company Tel</div><div class="val">${esc(da.tel || '-')}</div></div>
     <div class="row"><div class="lbl">Mobile</div><div class="val">${esc(da.mobile || '-')}</div></div>
   </div>
-  <!-- v1.9.817: PAYMENT DETAILS + SUPPLIER-FILLED 박스 -->
+  <!-- v1.9.817/820: PAYMENT DETAILS + PRODUCT INFORMATION 박스 (값 클릭해서 입력 가능) -->
   <div class="grid-2" style="margin-bottom:18px">
     <div class="info-block" style="border:1.5px dashed #fbcfe8;background:#fff7f9">
       <h3 style="color:#9d174d">PAYMENT DETAILS <span style="font-size:9.5px;font-weight:600;color:#be185d;letter-spacing:0">(to be filled by supplier)</span></h3>
-      <div class="row"><div class="lbl">Bank Name</div><div class="val">${esc((o.bank && o.bank.name) || '-')}</div></div>
-      <div class="row"><div class="lbl">Account No.</div><div class="val">${esc((o.bank && o.bank.account) || '-')}</div></div>
-      <div class="row"><div class="lbl">SWIFT / BIC</div><div class="val">${esc((o.bank && o.bank.swift) || '-')}</div></div>
-      <div class="row"><div class="lbl">Beneficiary</div><div class="val">${esc((o.bank && o.bank.beneficiary) || '-')}</div></div>
-      <div class="row"><div class="lbl">Bank Address</div><div class="val">${esc((o.bank && o.bank.address) || '-')}</div></div>
+      <div class="row"><div class="lbl">Bank Name</div><div class="val editable" contenteditable="true" data-placeholder="Click to enter">${esc((o.bank && o.bank.name) || '')}</div></div>
+      <div class="row"><div class="lbl">Account No.</div><div class="val editable" contenteditable="true" data-placeholder="Click to enter">${esc((o.bank && o.bank.account) || '')}</div></div>
+      <div class="row"><div class="lbl">SWIFT / BIC</div><div class="val editable" contenteditable="true" data-placeholder="Click to enter">${esc((o.bank && o.bank.swift) || '')}</div></div>
+      <div class="row"><div class="lbl">Beneficiary</div><div class="val editable" contenteditable="true" data-placeholder="Click to enter">${esc((o.bank && o.bank.beneficiary) || '')}</div></div>
+      <div class="row"><div class="lbl">Bank Address</div><div class="val editable" contenteditable="true" data-placeholder="Click to enter">${esc((o.bank && o.bank.address) || '')}</div></div>
     </div>
     <div class="info-block" style="border:1.5px dashed #fbcfe8;background:#fff7f9">
       <h3 style="color:#9d174d">PRODUCT INFORMATION <span style="font-size:9.5px;font-weight:600;color:#be185d;letter-spacing:0">(to be filled by supplier)</span></h3>
-      <div class="row"><div class="lbl">Production Date</div><div class="val">${esc(o.productionDate || '-')}</div></div>
-      <div class="row"><div class="lbl">Expiry Date</div><div class="val">${esc(o.expiryDate || '-')}</div></div>
-      <div class="row"><div class="lbl">Lot / Batch No.</div><div class="val">${esc(o.lotNo || '-')}</div></div>
-      <div class="row"><div class="lbl">Country of Origin</div><div class="val">${esc(o.countryOfOrigin || '-')}</div></div>
-      <div class="row"><div class="lbl">Remarks</div><div class="val">${esc(o.supplierRemarks || '-')}</div></div>
+      <div class="row"><div class="lbl">Production Date</div><div class="val editable" contenteditable="true" data-placeholder="YYYY-MM-DD">${esc(o.productionDate || '')}</div></div>
+      <div class="row"><div class="lbl">Expiry Date</div><div class="val editable" contenteditable="true" data-placeholder="YYYY-MM-DD">${esc(o.expiryDate || '')}</div></div>
+      <div class="row"><div class="lbl">Lot / Batch No.</div><div class="val editable" contenteditable="true" data-placeholder="Click to enter">${esc(o.lotNo || '')}</div></div>
+      <div class="row"><div class="lbl">Country of Origin</div><div class="val editable" contenteditable="true" data-placeholder="Click to enter">${esc(o.countryOfOrigin || '')}</div></div>
+      <div class="row"><div class="lbl">Remarks</div><div class="val editable" contenteditable="true" data-placeholder="Click to enter">${esc(o.supplierRemarks || '')}</div></div>
     </div>
   </div>
   <table class="items">
