@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.833';
+const ERP_VERSION = 'v1.9.834';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -22501,8 +22501,8 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
         approvalId: ap.id,
         orderId,
         category: 'po_balance',
-        title: `[잔금 ${balPctDisp}%] ${vendorName(o.vendorId)}`,
-        vendor: vendorName(o.vendorId),
+        title: `[잔금 ${balPctDisp}%] ${(o.isOverseas && o.supplier && o.supplier.company) ? o.supplier.company : vendorName(o.vendorId)}`,
+        vendor: (o.isOverseas && o.supplier && o.supplier.company) ? o.supplier.company : vendorName(o.vendorId),
         amount: balance,
         dueDate: o.balanceDueDate || o.payDate || '',
         paidDate: '',
@@ -22514,8 +22514,8 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
       };
       DB.expenses.push(expBal);
     } else {
-      expBal.title = `[잔금 ${balPctDisp}%] ${vendorName(o.vendorId)}`;
-      expBal.vendor = vendorName(o.vendorId);
+      expBal.title = `[잔금 ${balPctDisp}%] ${(o.isOverseas && o.supplier && o.supplier.company) ? o.supplier.company : vendorName(o.vendorId)}`;
+      expBal.vendor = (o.isOverseas && o.supplier && o.supplier.company) ? o.supplier.company : vendorName(o.vendorId);
       expBal.amount = balance;
       expBal.dueDate = o.balanceDueDate || o.payDate || expBal.dueDate || '';
       expBal.urgent = !!o.urgentBalance;  // v1.9.210
@@ -22548,6 +22548,8 @@ function resyncOrderExpenses(orderId) {
 
 // ═══════════════════ 결재 페이지 렌더 ═══════════════════
 function renderApprovalPage() {
+  // v1.9.834: 결재 페이지 진입 시 좀비 PO 제거 (삭제됐는데 부활한 것 차단)
+  try { if (typeof applyOrderTombstonesV226 === 'function') applyOrderTombstonesV226(); } catch(_){}
   // 현재 탭 유지
   try { updateApprovalStats(); } catch(_){}
   // v1.9.418: 기간 필터 입력란 기본값 채움 (월/주/일/from/to)
@@ -23680,7 +23682,8 @@ function renderApprovalPoTable() {
     return;
   }
   tb.innerHTML = orders.map(o => {
-    const v = vendorName(o.vendorId);
+    // v1.9.834: 해외 PO 는 supplier.company 사용 (vendorId 없음)
+    const v = (o.isOverseas && o.supplier && o.supplier.company) ? o.supplier.company : vendorName(o.vendorId);
     const itemSummary = (o.rows[0]&&o.rows[0].name||'-') + (o.rows.length>1?` 외 ${o.rows.length-1}건`:'');
     const apStatus = getOrderApprovalStatus(o);
     // v1.9.210: 응급 플래그를 결재/선급금/잔금 3개로 분리 — 각 버튼이 독립적으로 깜빡임
