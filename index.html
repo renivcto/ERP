@@ -2987,7 +2987,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           </div>
           <div class="fg">
             <label>설명 <span style="font-size:10px;color:var(--gray-400)">(선택)</span></label>
-            <textarea class="fi" id="ad-project-desc" rows="2" placeholder="프로젝트 목표, 채널, 메모"></textarea>
+            <input class="fi" id="ad-project-desc" placeholder="">
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div class="fg"><label>시작일 <span class="req">*</span></label><input class="fi" id="ad-project-start" type="date"></div>
@@ -5162,7 +5162,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.809';
+const ERP_VERSION = 'v1.9.810';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13041,16 +13041,48 @@ function _renderProjectCostList(projectId) {
     const sourceLabel = isAuto
       ? '<span style="background:#dcfce7;color:#15803d;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700">자동</span>'
       : '<span style="background:#fef9c3;color:#a16207;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700">수동</span>';
+    // v1.9.810: 수정 / 삭제 버튼
+    const editBtn = isAuto
+      ? `<button type="button" onclick="event.stopPropagation();_openLinkedExpense(${a.expenseId})" title="지출결의서에서 수정" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:3px 8px;border-radius:4px;font-size:10.5px;cursor:pointer;font-weight:700">지출결의서</button>`
+      : `<button type="button" onclick="event.stopPropagation();openAdsManualModal('${a.id}')" title="수동 광고비 수정" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:3px 8px;border-radius:4px;font-size:10.5px;cursor:pointer;font-weight:700">수정</button>`;
+    const delBtn = isAuto
+      ? `<button type="button" onclick="event.stopPropagation();_deleteAutoCostFromProject(${a.expenseId})" title="지출결의서 삭제 (광고비 자동 제거)" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;padding:3px 8px;border-radius:4px;font-size:10.5px;cursor:pointer;font-weight:700">🗑</button>`
+      : `<button type="button" onclick="event.stopPropagation();deleteAdsManual('${a.id}')" title="삭제" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;padding:3px 8px;border-radius:4px;font-size:10.5px;cursor:pointer;font-weight:700">🗑</button>`;
     return `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #f1f5f9">
       <div style="flex:1;min-width:0">
         <div style="font-size:12px;font-weight:700;color:#0f172a">${a._shopName || '-'} <span style="font-size:10.5px;color:#94a3b8;font-weight:500">${a.startDate||'-'} ~ ${a.endDate||'-'}</span> ${sourceLabel}</div>
         ${a.memo ? `<div style="font-size:10.5px;color:#64748b;margin-top:2px">${(a.memo||'').replace(/</g,'&lt;')}</div>` : ''}
       </div>
       <div style="font-size:13px;font-weight:800;color:#be185d;font-variant-numeric:tabular-nums;white-space:nowrap">₩${Number(a.cost||0).toLocaleString()}</div>
+      <div style="display:flex;gap:4px;flex-shrink:0">${editBtn}${delBtn}</div>
     </div>`;
   }).join('');
   const total = ads.reduce((s, a) => s + Number(a.cost || 0), 0);
   if (summary) summary.innerHTML = `💰 <b>총 ${ads.length}건</b> · 합계 <b style="color:#be185d;font-size:13px">₩${total.toLocaleString()}</b>`;
+}
+
+// v1.9.810: 자동 광고비 행 삭제 = 연결된 지출결의서 삭제 (단일 진실 원칙)
+function _deleteAutoCostFromProject(expenseId) {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  if (!expenseId) return;
+  const exp = (DB.expenses || []).find(e => String(e.id) === String(expenseId));
+  if (!exp) { showNotif('연결된 지출결의서를 찾을 수 없습니다', 'warning'); return; }
+  if (!confirm('이 광고비는 지출결의서 #' + expenseId + ' 와 연결되어 있습니다.\n지출결의서를 삭제하시겠습니까? (광고비도 자동 제거됩니다)')) return;
+  // 지출결의서 삭제 + tombstone
+  if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
+  if (!DB._deletedExpenseIds.includes(expenseId)) DB._deletedExpenseIds.push(expenseId);
+  DB.expenses = (DB.expenses || []).filter(e => String(e.id) !== String(expenseId));
+  // 광고비 동기화 항목도 제거
+  try { _removeExpenseAdsFromShop(expenseId); } catch(_){}
+  try { saveData(); } catch(_){}
+  // 프로젝트 모달의 광고비 이력 + 광고비 페이지 갱신
+  try {
+    const projId = document.getElementById('ad-project-edit-id')?.value;
+    if (projId) _renderProjectCostList(projId);
+  } catch(_){}
+  try { renderAdsPage(); } catch(_){}
+  try { renderApprovalPage(); } catch(_){}
+  showNotif('🗑 광고비 (지출결의서 #' + expenseId + ') 삭제 완료', 'success');
 }
 
 // v1.9.781: 프로젝트에서 광고비 추가 — 지출결의서 모달 (수동 입력 모달 X, 단일 진실 원칙)
