@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.838';
+const ERP_VERSION = 'v1.9.839';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13993,7 +13993,31 @@ function _onAdsKpiPeriodChange() {
 }
 
 // v1.9.773: 광고비 관리 페이지 렌더 (별도 페이지)
+// v1.9.839: 좀비 광고비 자동 정리 (expense tombstone 기반)
+function _cleanupZombieAdsCosts() {
+  if (!Array.isArray(DB._deletedExpenseIds) || DB._deletedExpenseIds.length === 0) return 0;
+  const tombSet = new Set(DB._deletedExpenseIds.map(x => (typeof x === 'object' && x) ? String(x.id) : String(x)));
+  let removed = 0;
+  (DB.shops || []).forEach(s => {
+    if (!s || !Array.isArray(s.adsCosts)) return;
+    const before = s.adsCosts.length;
+    s.adsCosts = s.adsCosts.filter(a => {
+      if (!a) return false;
+      if (a.expenseId == null) return true;
+      return !tombSet.has(String(a.expenseId));
+    });
+    removed += (before - s.adsCosts.length);
+  });
+  if (removed > 0) {
+    console.warn('🪦 [v839] 좀비 광고비 ' + removed + '건 자동 정리');
+    try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  }
+  return removed;
+}
+
 function renderAdsPage() {
+  // v1.9.839: 페이지 진입 시 좀비 광고비 자동 정리
+  try { _cleanupZombieAdsCosts(); } catch(_){}
   const kpiRow = document.getElementById('ads-kpi-row');
   const tbody = document.getElementById('ads-page-table');
   if (!kpiRow || !tbody) return;
