@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.832';
+const ERP_VERSION = 'v1.9.833';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -22339,6 +22339,54 @@ function onPrepayAmtInput() {
 }
 
 function fmtWon(n) { return '₩' + (Math.round(n||0)).toLocaleString(); }
+
+// v1.9.833: 외화 → KRW 환율 조회 (24시간 localStorage 캐시 + open.er-api.com)
+async function _getKrwRate(currency) {
+  currency = String(currency || 'USD').toUpperCase();
+  if (currency === 'KRW') return 1;
+  const cacheKey = '_erpKrwRate_' + currency;
+  try {
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+    if (cached && cached.rate > 0 && (Date.now() - cached.timestamp) < 24*60*60*1000) {
+      return cached.rate;
+    }
+  } catch(_){}
+  try {
+    const resp = await fetch('https://open.er-api.com/v6/latest/' + currency);
+    const data = await resp.json();
+    const rate = data && data.rates && data.rates.KRW;
+    if (rate && rate > 0) {
+      try { localStorage.setItem(cacheKey, JSON.stringify({ rate: rate, timestamp: Date.now() })); } catch(_){}
+      return rate;
+    }
+  } catch(e) { console.warn('[v833] 환율 조회 실패:', e); }
+  // fallback: 오래된 캐시라도 사용
+  try {
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+    if (cached && cached.rate > 0) {
+      console.warn('[v833] 환율 API 실패, 오래된 캐시 사용:', cached);
+      return cached.rate;
+    }
+  } catch(_){}
+  return 0;
+}
+
+// v1.9.833: 해외 PO 객체를 한화 환산본으로 deep clone (원본 보존)
+async function _convertOverseasOrderToKrw(oRaw) {
+  if (!oRaw || !oRaw.isOverseas) return { o: oRaw, exchangeInfo: null };
+  const cur = String(oRaw.currency || 'USD').toUpperCase();
+  if (cur === 'KRW') return { o: oRaw, exchangeInfo: null };
+  let rate = 0;
+  try { rate = await _getKrwRate(cur); } catch(_){}
+  if (!rate || rate <= 0) { console.warn('[v833] 환율 0 — 원본 외화 그대로 표시'); return { o: oRaw, exchangeInfo: null }; }
+  const o = JSON.parse(JSON.stringify(oRaw));
+  (o.rows || []).forEach(r => { r.price = Math.round((parseFloat(r.price)||0) * rate); });
+  o.productTotal = Math.round((parseFloat(o.productTotal)||0) * rate);
+  o.oceanFreight = Math.round((parseFloat(o.oceanFreight)||0) * rate);
+  o.grandTotal = Math.round((parseFloat(o.grandTotal)||0) * rate);
+  return { o: o, exchangeInfo: { currency: cur, rate: rate, date: new Date().toISOString().slice(0, 10) } };
+}
+
 function orderTotal(o) {
   if (!o || !Array.isArray(o.rows)) return 0;
   let t = 0;
@@ -26928,9 +26976,13 @@ function _printNonPoApproval(approvalId) {
 // 지출결의서·기안서와 동일한 톤 : RENIV CORP. 헤더 + 메타표 + 결어 + 법인 인감
 // 호출처: 발주서 결재 테이블의 품목명 클릭
 // ═══════════════════════════════════════════════════════
-function openPoApprovalDetail(orderId) {
-  const o = (DB.orders || []).find(x => x.id === orderId || Number(x.id) === Number(orderId));
-  if (!o) { showNotif('발주서를 찾을 수 없습니다', 'warning'); return; }
+async function openPoApprovalDetail(orderId) {
+  const oRaw = (DB.orders || []).find(x => x.id === orderId || Number(x.id) === Number(orderId));
+  if (!oRaw) { showNotif('발주서를 찾을 수 없습니다', 'warning'); return; }
+  // v1.9.833: 해외 PO 면 환율 적용 (deep clone, 원본 보존)
+  const _conv = await _convertOverseasOrderToKrw(oRaw);
+  const o = _conv.o;
+  const exchangeInfo = _conv.exchangeInfo;
   // 1) 연결된 결재 레코드 확보 (없으면 즉시 생성)
   let ap = DB.approvals.find(a => a.type === 'po_approval' && (a.refId === o.id || Number(a.refId) === Number(o.id)));
   if (!ap) {
@@ -26985,8 +27037,9 @@ function openPoApprovalDetail(orderId) {
     </tr>`;
   }).join('');
   const subtotal = orderTotal(o);
-  const vatAmt = Math.round(subtotal * 0.1);
-  const totalVat = orderTotalVat(o);
+  // v1.9.833: 해외 PO 면 부가세 없음. 총액 = 공급가액 + 해상운임
+  const vatAmt = oRaw.isOverseas ? 0 : Math.round(subtotal * 0.1);
+  const totalVat = oRaw.isOverseas ? (subtotal + (parseFloat(o.oceanFreight)||0)) : orderTotalVat(o);
 
   // ── 결제 조건 ──
   const prepayPct = parseFloat(o.prepayPercent)||0;
@@ -27103,14 +27156,20 @@ function openPoApprovalDetail(orderId) {
               <td colspan="4" style="padding:8px 12px;border:1px solid #cbd5e1;text-align:right;color:#475569;font-weight:700;background:#f8fafc">공 급 가 액 합 계</td>
               <td style="padding:8px 10px;border:1px solid #cbd5e1;text-align:right;color:#0f172a;font-weight:800;font-variant-numeric:tabular-nums;background:#f8fafc">${fmtWon(subtotal)}</td>
             </tr>
-            <tr>
+            ${!oRaw.isOverseas ? `<tr>
               <td colspan="4" style="padding:8px 12px;border:1px solid #cbd5e1;text-align:right;color:#475569;font-weight:700;background:#f8fafc">부가세 (10%)</td>
               <td style="padding:8px 10px;border:1px solid #cbd5e1;text-align:right;color:#0f172a;font-weight:800;font-variant-numeric:tabular-nums;background:#f8fafc">${fmtWon(vatAmt)}</td>
-            </tr>
+            </tr>` : ((parseFloat(o.oceanFreight)||0) > 0 ? `<tr>
+              <td colspan="4" style="padding:8px 12px;border:1px solid #cbd5e1;text-align:right;color:#475569;font-weight:700;background:#f8fafc">해상 운임</td>
+              <td style="padding:8px 10px;border:1px solid #cbd5e1;text-align:right;color:#0f172a;font-weight:800;font-variant-numeric:tabular-nums;background:#f8fafc">${fmtWon(o.oceanFreight)}</td>
+            </tr>` : '')}
             <tr>
-              <td colspan="4" style="padding:10px 12px;border:1.5px solid #334155;text-align:right;color:#0f172a;font-weight:900;background:#eef2ff;font-size:13px">총  발  주  금  액 (VAT 포함)</td>
+              <td colspan="4" style="padding:10px 12px;border:1.5px solid #334155;text-align:right;color:#0f172a;font-weight:900;background:#eef2ff;font-size:13px">${oRaw.isOverseas ? '총  발  주  금  액 (₩ 환산)' : '총  발  주  금  액 (VAT 포함)'}</td>
               <td style="padding:10px 10px;border:1.5px solid #334155;text-align:right;color:#b91c1c;font-weight:900;font-variant-numeric:tabular-nums;background:#eef2ff;font-size:14px">${fmtWon(totalVat)}</td>
             </tr>
+            ${exchangeInfo ? `<tr>
+              <td colspan="5" style="padding:6px 12px;border:1px solid #cbd5e1;text-align:right;color:#64748b;font-size:11px;background:#fffef0;font-style:italic">💱 환율 적용: 1 ${exchangeInfo.currency} = ${fmtWon(exchangeInfo.rate)} (${exchangeInfo.date} 기준)</td>
+            </tr>` : ''}
           </tfoot>
         </table>
 
@@ -27211,9 +27270,13 @@ function _openApprovalDocInNewTab(docTitle, docNo, innerHtml) {
 }
 
 // 발주 품의서 — 독립 페이지 버전
-function openPoApprovalPage(orderId) {
-  const o = (DB.orders || []).find(x => x.id === orderId || Number(x.id) === Number(orderId));
-  if (!o) { showNotif('발주서를 찾을 수 없습니다', 'warning'); return; }
+async function openPoApprovalPage(orderId) {
+  const oRaw = (DB.orders || []).find(x => x.id === orderId || Number(x.id) === Number(orderId));
+  if (!oRaw) { showNotif('발주서를 찾을 수 없습니다', 'warning'); return; }
+  // v1.9.833: 해외 PO 면 환율 적용 (deep clone, 원본 보존)
+  const _conv = await _convertOverseasOrderToKrw(oRaw);
+  const o = _conv.o;
+  const exchangeInfo = _conv.exchangeInfo;
   // 결재 레코드 없으면 즉시 생성 (openPoApprovalDetail 과 동일 규칙)
   let ap = DB.approvals.find(a => a.type === 'po_approval' && (a.refId === o.id || Number(a.refId) === Number(o.id)));
   if (!ap) {
@@ -27261,8 +27324,9 @@ function openPoApprovalPage(orderId) {
     </tr>`;
   }).join('');
   const subtotal = orderTotal(o);
-  const vatAmt = Math.round(subtotal * 0.1);
-  const totalVat = orderTotalVat(o);
+  // v1.9.833: 해외 PO 면 부가세 없음. 총액 = 공급가액 + 해상운임
+  const vatAmt = oRaw.isOverseas ? 0 : Math.round(subtotal * 0.1);
+  const totalVat = oRaw.isOverseas ? (subtotal + (parseFloat(o.oceanFreight)||0)) : orderTotalVat(o);
 
   const prepayPct = parseFloat(o.prepayPercent)||0;
   const balPct = 100 - prepayPct;
@@ -27353,14 +27417,20 @@ function openPoApprovalPage(orderId) {
               <td colspan="4" style="padding:8px 12px;border:1px solid #cbd5e1;text-align:right;color:#475569;font-weight:700;background:#f8fafc">공 급 가 액 합 계</td>
               <td style="padding:8px 10px;border:1px solid #cbd5e1;text-align:right;color:#0f172a;font-weight:800;font-variant-numeric:tabular-nums;background:#f8fafc">${fmtWon(subtotal)}</td>
             </tr>
-            <tr>
+            ${!oRaw.isOverseas ? `<tr>
               <td colspan="4" style="padding:8px 12px;border:1px solid #cbd5e1;text-align:right;color:#475569;font-weight:700;background:#f8fafc">부가세 (10%)</td>
               <td style="padding:8px 10px;border:1px solid #cbd5e1;text-align:right;color:#0f172a;font-weight:800;font-variant-numeric:tabular-nums;background:#f8fafc">${fmtWon(vatAmt)}</td>
-            </tr>
+            </tr>` : ((parseFloat(o.oceanFreight)||0) > 0 ? `<tr>
+              <td colspan="4" style="padding:8px 12px;border:1px solid #cbd5e1;text-align:right;color:#475569;font-weight:700;background:#f8fafc">해상 운임</td>
+              <td style="padding:8px 10px;border:1px solid #cbd5e1;text-align:right;color:#0f172a;font-weight:800;font-variant-numeric:tabular-nums;background:#f8fafc">${fmtWon(o.oceanFreight)}</td>
+            </tr>` : '')}
             <tr>
-              <td colspan="4" style="padding:10px 12px;border:1.5px solid #334155;text-align:right;color:#0f172a;font-weight:900;background:#eef2ff;font-size:13px">총  발  주  금  액 (VAT 포함)</td>
+              <td colspan="4" style="padding:10px 12px;border:1.5px solid #334155;text-align:right;color:#0f172a;font-weight:900;background:#eef2ff;font-size:13px">${oRaw.isOverseas ? '총  발  주  금  액 (₩ 환산)' : '총  발  주  금  액 (VAT 포함)'}</td>
               <td style="padding:10px 10px;border:1.5px solid #334155;text-align:right;color:#b91c1c;font-weight:900;font-variant-numeric:tabular-nums;background:#eef2ff;font-size:14px">${fmtWon(totalVat)}</td>
             </tr>
+            ${exchangeInfo ? `<tr>
+              <td colspan="5" style="padding:6px 12px;border:1px solid #cbd5e1;text-align:right;color:#64748b;font-size:11px;background:#fffef0;font-style:italic">💱 환율 적용: 1 ${exchangeInfo.currency} = ${fmtWon(exchangeInfo.rate)} (${exchangeInfo.date} 기준)</td>
+            </tr>` : ''}
           </tfoot>
         </table>
         <div style="margin-top:22px">
