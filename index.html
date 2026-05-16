@@ -5174,7 +5174,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.812';
+const ERP_VERSION = 'v1.9.813';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -18790,6 +18790,165 @@ function savePo() {
   try { renderOrderTable(); } catch(_){}
 }
 
+// v1.9.813: 해외 PO 미리보기 (xlsx 양식과 동일 HTML 레이아웃 새 창)
+function previewOverseasPo(orderId) {
+  const o = (DB.orders || []).find(x => x && x.id === orderId);
+  if (!o || !o.isOverseas) { showNotif('해외 PO를 찾을 수 없습니다', 'warning'); return; }
+  const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const cur = o.currency || 'USD';
+  const fmt = n => Number(n||0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const b = o.buyer || {};
+  const s = o.supplier || {};
+  const da = o.deliveryAddr || {};
+  const rows = Array.isArray(o.rows) ? o.rows : [];
+  const productTotal = parseFloat(o.productTotal) || rows.reduce((sum, r) => sum + ((parseFloat(r.qty)||0) * (parseFloat(r.price)||0)), 0);
+  const oceanFreight = parseFloat(o.oceanFreight) || 0;
+  const grandTotal = productTotal + oceanFreight;
+
+  const itemRows = rows.map((r, i) => {
+    const qty = parseFloat(r.qty || r.quantity) || 0;
+    const price = parseFloat(r.price || r.unitPrice) || 0;
+    const amount = qty * price;
+    return `<tr>
+      <td style="text-align:center">${i+1}</td>
+      <td>${esc(r.name || r.description || '-')}</td>
+      <td style="text-align:center">${esc(r.code || r.productCode || '—')}</td>
+      <td style="text-align:center">${esc(r.capacity || '-')}</td>
+      <td style="text-align:right">${fmt(price)}</td>
+      <td style="text-align:right">${qty.toLocaleString()}</td>
+      <td style="text-align:right">${fmt(amount)}</td>
+      <td>${esc(r.remarks || '')}</td>
+    </tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(o.poNumber || 'Purchase Order')}</title>
+<style>
+  @page { size: A4; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Helvetica Neue', Arial, '맑은 고딕', sans-serif; color: #0f172a; margin: 0; padding: 20px; background: #f8fafc; }
+  .sheet { max-width: 900px; margin: 0 auto; background: #fff; padding: 30px 36px; box-shadow: 0 4px 20px rgba(0,0,0,.08); border-radius: 6px; }
+  .top-actions { max-width: 900px; margin: 0 auto 14px; display: flex; justify-content: flex-end; gap: 8px; }
+  .top-actions button { padding: 8px 18px; font-size: 13px; font-weight: 700; border: none; border-radius: 6px; cursor: pointer; }
+  .btn-print { background: #1e3a8a; color: #fff; }
+  .btn-close { background: #e2e8f0; color: #475569; }
+  h1 { font-size: 28px; font-weight: 800; letter-spacing: 1.5px; margin: 0 0 4px; }
+  .meta-row { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 18px; }
+  .po-no { font-size: 14px; font-weight: 700; color: #1e3a8a; }
+  .info-row { display: flex; gap: 16px; font-size: 11px; color: #475569; margin-bottom: 16px; }
+  .info-row span b { color: #0f172a; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .info-block { border: 1px solid #cbd5e1; border-radius: 4px; padding: 10px 12px; }
+  .info-block h3 { margin: 0 0 8px; font-size: 11.5px; font-weight: 800; color: #1e3a8a; letter-spacing: 0.5px; padding-bottom: 6px; border-bottom: 1px solid #e2e8f0; }
+  .info-block .row { display: flex; gap: 8px; padding: 3px 0; font-size: 11px; }
+  .info-block .row .lbl { flex: 0 0 130px; color: #64748b; font-weight: 600; }
+  .info-block .row .val { flex: 1; color: #0f172a; word-break: break-word; }
+  table.items { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 12px; }
+  table.items th { background: #1e3a8a; color: #fff; padding: 8px 6px; font-weight: 700; font-size: 10.5px; border: 1px solid #1e3a8a; }
+  table.items td { border: 1px solid #cbd5e1; padding: 6px 8px; vertical-align: middle; }
+  .totals { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+  .totals table { font-size: 12px; }
+  .totals td { padding: 5px 12px; }
+  .totals .lbl { text-align: right; font-weight: 600; color: #475569; }
+  .totals .val { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 110px; }
+  .totals .grand { font-size: 14px; color: #1e3a8a; border-top: 2px solid #1e3a8a; padding-top: 8px !important; }
+  .signature { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #cbd5e1; }
+  .sig-box { text-align: center; font-size: 11px; color: #475569; }
+  .sig-box .label { font-weight: 700; color: #0f172a; margin-bottom: 30px; }
+  .sig-box .line { border-bottom: 1px solid #94a3b8; height: 1px; margin-bottom: 6px; }
+  .note { font-size: 10.5px; color: #64748b; margin-top: 14px; padding: 8px 12px; background: #f1f5f9; border-radius: 4px; }
+  @media print {
+    body { background: #fff; padding: 0; }
+    .top-actions { display: none; }
+    .sheet { box-shadow: none; border-radius: 0; padding: 0; max-width: none; }
+  }
+</style>
+</head><body>
+<div class="top-actions">
+  <button class="btn-print" onclick="window.print()">🖨 인쇄 / PDF 저장</button>
+  <button class="btn-close" onclick="window.close()">✕ 닫기</button>
+</div>
+<div class="sheet">
+  <div class="meta-row">
+    <h1>PURCHASE ORDER</h1>
+    <div class="po-no">${esc(o.poNumber || '-')}</div>
+  </div>
+  <div class="info-row">
+    <span><b>PO Date:</b> ${esc(o.orderDate || '-')}</span>
+    <span><b>Payment:</b> ${esc(o.payment || '-')}</span>
+    <span><b>Shipping Terms:</b> ${esc(o.shippingTerm || '-')}</span>
+  </div>
+  <div class="grid-2">
+    <div class="info-block">
+      <h3>BUYER / 주문자</h3>
+      <div class="row"><div class="lbl">Company</div><div class="val">${esc(b.company || '-')}</div></div>
+      <div class="row"><div class="lbl">Order Contact</div><div class="val">${esc(b.orderContact || '-')}</div></div>
+      <div class="row"><div class="lbl">Korea Contact</div><div class="val">${esc(b.koreaContactPerson || '-')}</div></div>
+      <div class="row"><div class="lbl">Korea Tel</div><div class="val">${esc(b.koreaTel || '-')}</div></div>
+      <div class="row"><div class="lbl">Korea Mobile</div><div class="val">${esc(b.koreaMobile || '-')}</div></div>
+    </div>
+    <div class="info-block">
+      <h3>SUPPLIER / 공급자</h3>
+      <div class="row"><div class="lbl">Company</div><div class="val">${esc(s.company || '-')}</div></div>
+      <div class="row"><div class="lbl">Contact Person</div><div class="val">${esc(s.contactPerson || '-')}</div></div>
+      <div class="row"><div class="lbl">Product</div><div class="val">${esc(s.product || '-')}</div></div>
+      <div class="row"><div class="lbl">Reference</div><div class="val">${esc(s.reference || '-')}</div></div>
+      <div class="row"><div class="lbl">Capacity</div><div class="val">${esc(s.capacity || '-')}</div></div>
+    </div>
+  </div>
+  <div class="info-block" style="margin-bottom:18px">
+    <h3>DELIVERY ADDRESS / 배송지</h3>
+    <div class="row"><div class="lbl">Company</div><div class="val">${esc(da.company || '-')}</div></div>
+    <div class="row"><div class="lbl">Address</div><div class="val">${esc(da.address || '-')}</div></div>
+    <div class="row"><div class="lbl">Contact Person</div><div class="val">${esc(da.contactPerson || '-')}</div></div>
+    <div class="row"><div class="lbl">Company Tel</div><div class="val">${esc(da.tel || '-')}</div></div>
+    <div class="row"><div class="lbl">Mobile</div><div class="val">${esc(da.mobile || '-')}</div></div>
+  </div>
+  <table class="items">
+    <thead>
+      <tr>
+        <th style="width:38px">No.</th>
+        <th>Item Description<br><span style="font-weight:500;opacity:0.85">품목명</span></th>
+        <th style="width:90px">Product Code<br><span style="font-weight:500;opacity:0.85">제품코드</span></th>
+        <th style="width:70px">Capacity<br><span style="font-weight:500;opacity:0.85">용량</span></th>
+        <th style="width:90px">Unit Price<br><span style="font-weight:500;opacity:0.85">단가 (${esc(cur)})</span></th>
+        <th style="width:70px">Quantity<br><span style="font-weight:500;opacity:0.85">수량</span></th>
+        <th style="width:100px">Amount<br><span style="font-weight:500;opacity:0.85">금액 (${esc(cur)})</span></th>
+        <th>Remarks<br><span style="font-weight:500;opacity:0.85">비고</span></th>
+      </tr>
+    </thead>
+    <tbody>${itemRows || '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:20px">No items</td></tr>'}</tbody>
+  </table>
+  <div class="totals">
+    <table>
+      <tr><td class="lbl">Product Total (제품 합계)</td><td class="val">${esc(cur)} ${fmt(productTotal)}</td></tr>
+      <tr><td class="lbl">Ocean Freight (해상운송료)</td><td class="val">${esc(cur)} ${fmt(oceanFreight)}</td></tr>
+      <tr><td class="lbl grand">TOTAL (Product + Freight)</td><td class="val grand">${esc(cur)} ${fmt(grandTotal)}</td></tr>
+      <tr><td class="lbl">Duties and Taxes (관세·부가세)</td><td class="val" style="color:#0f172a">${esc(o.dutiesAndTaxes || '-')}</td></tr>
+    </table>
+  </div>
+  ${o.note ? `<div class="note">${esc(o.note).replace(/\n/g, '<br>')}</div>` : ''}
+  <div class="signature">
+    <div class="sig-box">
+      <div class="label">Authorized by (Buyer) / 주문자 서명</div>
+      <div class="line"></div>
+      <div>${esc(b.koreaContactPerson || b.orderContact || '')}</div>
+    </div>
+    <div class="sig-box">
+      <div class="label">Confirmed by (Supplier) / 공급자 서명</div>
+      <div class="line"></div>
+      <div>${esc(s.contactPerson || '')}</div>
+    </div>
+  </div>
+</div>
+</body></html>`;
+
+  const w = window.open('', '_blank', 'width=1024,height=768,resizable=yes,scrollbars=yes');
+  if (!w) { showNotif('팝업 차단을 해제해 주세요', 'warning'); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+
 // 삭제
 function deletePoFromEdit() {
   if (typeof requireWrite === 'function' && !requireWrite()) return;
@@ -18935,7 +19094,7 @@ function renderOrderTable() {
     return `<tr style="background:${rowBg}">
       <td style="text-align:center;padding:8px 2px;vertical-align:middle">${typeBadge}</td>
       <td class="lnk" style="text-align:center;font-size:12px;line-height:1.4;word-break:keep-all;padding:8px 6px;vertical-align:middle" ${supplierClickHandler} title="${o.poNumber||o.serial||'PO-'+String(o.id).padStart(3,'0')}">${supplierName}</td>
-      <td style="font-size:12px;line-height:1.45;padding:8px 8px;vertical-align:middle;cursor:pointer" onclick="${isPo?editHandler:`previewOrderByIdx(${dbIdx})`}" title="클릭하면 ${isPo?'해외 PO 수정':'발주서 보기'}"><div style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:keep-all;color:#1e40af" onmouseenter="this.style.textDecoration=\'underline\'" onmouseleave="this.style.textDecoration=\'none\'">${itemList}</div></td>
+      <td style="font-size:12px;line-height:1.45;padding:8px 8px;vertical-align:middle;cursor:pointer" onclick="${isPo?`previewOverseasPo(${o.id})`:`previewOrderByIdx(${dbIdx})`}" title="클릭하면 ${isPo?'해외 PO 미리보기':'발주서 보기'}"><div style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:keep-all;color:#1e40af" onmouseenter="this.style.textDecoration=\'underline\'" onmouseleave="this.style.textDecoration=\'none\'">${itemList}</div></td>
       <td style="text-align:center;font-size:11.5px;padding:8px 2px;vertical-align:middle;white-space:nowrap;color:var(--gray-700)">${o.orderDate||'-'}</td>
       <td style="text-align:center;padding:8px 2px;vertical-align:middle">${inDisplay}</td>
       <td style="text-align:center;font-size:12px;padding:8px 4px;vertical-align:middle;white-space:nowrap;font-weight:600">${amountDisplay}</td>
