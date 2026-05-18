@@ -5211,7 +5211,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.863';
+const ERP_VERSION = 'v1.9.864';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -14046,9 +14046,15 @@ function _fillMissingPoExpenseVendor() {
 // v1.9.852: 해외 PO expense 의 amount 를 KRW 로 영구 환산 (한 번만)
 async function _convertOverseasExpenseToKrw() {
   if (!Array.isArray(DB.expenses)) return 0;
-  const targets = DB.expenses.filter(e =>
-    e && (e.category === 'po_balance' || e.category === 'po_prepay') &&
-    !e.__krwConverted && e.orderId);
+  // v1.9.864: _origAmount 있으면 이미 환산됨 — __krwConverted flag 손실에도 안전
+  const targets = DB.expenses.filter(e => {
+    if (!e) return false;
+    if (e.category !== 'po_balance' && e.category !== 'po_prepay') return false;
+    if (!e.orderId) return false;
+    if (e._origAmount != null) return false;  // 이미 환산됨 (백업 있음)
+    if (e.__krwConverted) return false;
+    return true;
+  });
   if (targets.length === 0) return 0;
   let converted = 0;
   for (const e of targets) {
@@ -14057,12 +14063,21 @@ async function _convertOverseasExpenseToKrw() {
     if (!order.isOverseas) { e.__krwConverted = true; continue; }
     const cur = String(order.currency || 'USD').toUpperCase();
     if (cur === 'KRW') { e.__krwConverted = true; continue; }
+    // v1.9.864: amount 크기 sanity check — 1억 이상이면 이미 KRW (외화 1억은 비현실적)
+    const curAmount = parseFloat(e.amount) || 0;
+    if (curAmount > 100000000) {
+      // 이미 KRW 환산 또는 누적 환산 의심 — 환산 skip + flag 만 set
+      console.warn('[v864] amount ' + curAmount + ' 너무 큼 — 환산 skip (id=' + e.id + ')');
+      e.__krwConverted = true;
+      e._origCurrency = cur;
+      continue;
+    }
     let rate = 0;
     try { rate = await _getKrwRate(cur); } catch(_){}
     if (rate > 0) {
-      e._origAmount = (e._origAmount != null) ? e._origAmount : e.amount;
+      e._origAmount = curAmount;  // 백업
       e._origCurrency = cur;
-      e.amount = Math.round((parseFloat(e.amount) || 0) * rate);
+      e.amount = Math.round(curAmount * rate);
       e.__krwConverted = true;
       converted++;
     }
