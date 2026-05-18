@@ -5211,7 +5211,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.864';
+const ERP_VERSION = 'v1.9.865';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -14044,6 +14044,39 @@ function _fillMissingPoExpenseVendor() {
 }
 
 // v1.9.852: 해외 PO expense 의 amount 를 KRW 로 영구 환산 (한 번만)
+// v1.9.865: 비정상 금액 expense 자동 복구 (1억 이상 = 누적 환산 의심)
+async function _fixOverseasExpenseAmount() {
+  if (!Array.isArray(DB.expenses)) return 0;
+  const targets = DB.expenses.filter(e =>
+    e && (e.category === 'po_balance' || e.category === 'po_prepay') &&
+    e.orderId && Number(e.amount) > 100000000  // 1억 이상 = 비정상
+  );
+  if (targets.length === 0) return 0;
+  let fixed = 0;
+  for (const e of targets) {
+    const o = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
+    if (!o || !o.isOverseas) continue;
+    const cur = String(o.currency || 'USD').toUpperCase();
+    const grandTotal = parseFloat(o.grandTotal) || 0;
+    if (grandTotal <= 0 || grandTotal > 1000000) continue;  // 외화 1M 이상이면 의심
+    let rate = 0;
+    try { rate = await _getKrwRate(cur); } catch(_){}
+    if (rate > 0) {
+      e._origAmount = grandTotal;
+      e._origCurrency = cur;
+      e.amount = Math.round(grandTotal * rate);
+      e.__krwConverted = true;
+      fixed++;
+      console.warn('🔧 [v865] expense ' + e.id + ' amount 복구: ' + grandTotal + ' ' + cur + ' × ' + rate + ' = ₩' + e.amount);
+    }
+  }
+  if (fixed > 0) {
+    console.warn('🔧 [v865] 비정상 amount expense ' + fixed + '건 복구');
+    try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  }
+  return fixed;
+}
+
 async function _convertOverseasExpenseToKrw() {
   if (!Array.isArray(DB.expenses)) return 0;
   // v1.9.864: _origAmount 있으면 이미 환산됨 — __krwConverted flag 손실에도 안전
@@ -23132,6 +23165,14 @@ function renderApprovalPage() {
   try { if (typeof _fillMissingAdExpenseVendor === 'function') _fillMissingAdExpenseVendor(); } catch(_){}
   // v1.9.852: PO expense vendor 자동 채움 + 해외 PO expense KRW 환산 (async, fire-and-forget)
   try { if (typeof _fillMissingPoExpenseVendor === 'function') _fillMissingPoExpenseVendor(); } catch(_){}
+  // v1.9.865: 비정상 amount 복구 먼저 → 그 다음 환산
+  try {
+    if (typeof _fixOverseasExpenseAmount === 'function') {
+      _fixOverseasExpenseAmount().then(n => {
+        if (n > 0) { try { renderApprovalPage(); } catch(_){} }
+      }).catch(e => console.warn('amount 복구 실패:', e));
+    }
+  } catch(_){}
   try {
     if (typeof _convertOverseasExpenseToKrw === 'function') {
       _convertOverseasExpenseToKrw().then(n => {
