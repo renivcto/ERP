@@ -2919,16 +2919,19 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       </div>
       <!-- KPI 카드 3개 (자동/수동 비중 삭제) -->
       <div id="ads-kpi-row" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px"></div>
-      <!-- v1.9.809: 버튼 행 (안내 박스 + 프로젝트 그리드 제거) -->
+      <!-- v1.9.872: 프로젝트 관리 토글 버튼 추가 -->
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:14px">
+        <button type="button" onclick="toggleAdProjectManage()" id="ads-project-manage-btn" style="background:#fff;color:#475569;border:1px solid #cbd5e1;padding:9px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">📂 프로젝트 관리</button>
         <button type="button" onclick="openAdProjectModal()" style="background:#fff;color:#7c3aed;border:1px solid #ddd6fe;padding:9px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">+ 프로젝트 추가</button>
         <button type="button" onclick="openExpenseModalForAd(null)" style="background:#be185d;color:#fff;border:none;padding:9px 18px;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">+ 지출결의서 작성</button>
       </div>
-      <!-- v1.9.824: 광고 프로젝트 카드 그리드 다시 숨김 (광고비 이력 표와 중복 — 사용자 결정) -->
-      <!-- 호환용 빈 컨테이너 유지 (renderAdProjectCards 가 참조해도 안전) -->
-      <div id="ads-projects-section" style="display:none">
-        <div id="ads-projects-grid"></div>
-        <span id="ads-projects-count"></span>
+      <!-- v1.9.872: 광고 프로젝트 카드 영역 (기본 숨김, 토글 버튼으로 표시) -->
+      <div id="ads-projects-section" style="display:none;margin-bottom:14px;padding:14px;background:#fafafa;border:1px solid #e2e8f0;border-radius:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <span style="font-size:13px;font-weight:700;color:#475569">📂 등록된 광고 프로젝트 <span id="ads-projects-count" style="color:#94a3b8;font-weight:500;font-size:11px"></span></span>
+          <span style="font-size:11px;color:#94a3b8">카드 클릭 → 편집, 🗑 클릭 → 삭제 (광고비도 함께 삭제)</span>
+        </div>
+        <div id="ads-projects-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px"></div>
       </div>
       <!-- 필터 + 이력 표 -->
       <div class="card">
@@ -5211,7 +5214,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.871';
+const ERP_VERSION = 'v1.9.872';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -14335,6 +14338,87 @@ function _cleanupZombieAdsCosts() {
     try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
   }
   return removed;
+}
+
+// v1.9.872: 프로젝트 관리 영역 토글
+function toggleAdProjectManage() {
+  const sec = document.getElementById('ads-projects-section');
+  const btn = document.getElementById('ads-project-manage-btn');
+  if (!sec) return;
+  if (sec.style.display === 'none' || !sec.style.display) {
+    sec.style.display = '';
+    if (btn) { btn.style.background = '#eef2ff'; btn.style.color = '#4338ca'; btn.style.borderColor = '#c7d2fe'; }
+    renderAdProjectManageCards();
+  } else {
+    sec.style.display = 'none';
+    if (btn) { btn.style.background = '#fff'; btn.style.color = '#475569'; btn.style.borderColor = '#cbd5e1'; }
+  }
+}
+
+// v1.9.872: 모든 광고 프로젝트 카드 렌더 (tombstone 제외, 삭제/편집 버튼 포함)
+function renderAdProjectManageCards() {
+  const grid = document.getElementById('ads-projects-grid');
+  const cntEl = document.getElementById('ads-projects-count');
+  if (!grid) return;
+  const projects = _getActiveAdProjects();
+  if (cntEl) cntEl.textContent = '(' + projects.length + '개)';
+  if (projects.length === 0) {
+    grid.innerHTML = '<div style="grid-column:1/-1;padding:24px;text-align:center;color:#94a3b8;font-size:12.5px">등록된 광고 프로젝트가 없습니다</div>';
+    return;
+  }
+  projects.sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
+  grid.innerHTML = projects.map(p => {
+    const shopNames = (p.shopIds || []).map(sid => {
+      const s = (DB.shops||[]).find(x => x && String(x.id) === String(sid));
+      return s ? s.name : '';
+    }).filter(Boolean).join(', ');
+    return `<div style="background:#fff;border:1px solid var(--gray-200);border-left:3px solid #7c3aed;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+        <span style="font-size:12.5px;font-weight:700;color:#0f172a;cursor:pointer;flex:1" onclick="openAdProjectModal('${p.id}')">${(p.name||'-').replace(/</g,'&lt;')}</span>
+        <button type="button" onclick="event.stopPropagation(); _quickDeleteAdProject('${p.id}')" title="이 프로젝트 + 연결된 광고비 모두 삭제" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer">🗑</button>
+      </div>
+      <div style="font-size:10.5px;color:#64748b">${p.startDate||'-'} ~ ${p.endDate||'-'}${shopNames?' · '+shopNames:''}</div>
+    </div>`;
+  }).join('');
+}
+
+// v1.9.872: 카드에서 빠른 삭제 — deleteAdProject 와 동일 동작 (cascade)
+function _quickDeleteAdProject(projectId) {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  if (!projectId) return;
+  const proj = (DB.adProjects||[]).find(p => String(p.id) === String(projectId));
+  if (!proj) return;
+  let adsCostCount = 0;
+  const expenseIds = [];
+  (DB.shops||[]).forEach(s => {
+    (s.adsCosts||[]).forEach(a => {
+      if (a && String(a.projectId||'') === String(projectId)) {
+        adsCostCount++;
+        if (a.expenseId != null) expenseIds.push(a.expenseId);
+      }
+    });
+  });
+  const msg = '[' + (proj.name||'-') + '] 프로젝트 삭제?\n\n광고비 ' + adsCostCount + '건' + (expenseIds.length>0?(' + 지출결의서 ' + expenseIds.length + '건'):'') + ' 도 함께 삭제됩니다.';
+  if (!confirm(msg)) return;
+  // 1) 프로젝트 + tombstone
+  const idx = DB.adProjects.findIndex(p => String(p.id) === String(projectId));
+  if (idx >= 0) DB.adProjects.splice(idx, 1);
+  if (!Array.isArray(DB._deletedAdProjectIds)) DB._deletedAdProjectIds = [];
+  DB._deletedAdProjectIds.push({ id: projectId, name: proj.name||'', ts: Date.now() });
+  // 2) 광고비 행 삭제
+  (DB.shops||[]).forEach(s => {
+    if (Array.isArray(s.adsCosts)) s.adsCosts = s.adsCosts.filter(a => String(a.projectId||'') !== String(projectId));
+  });
+  // 3) 지출결의서 + tombstone
+  if (expenseIds.length > 0) {
+    if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
+    expenseIds.forEach(eid => { if (!DB._deletedExpenseIds.includes(eid)) DB._deletedExpenseIds.push(eid); });
+    DB.expenses = (DB.expenses||[]).filter(e => !e || !expenseIds.includes(e.id));
+  }
+  try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  showNotif('🗑 프로젝트 + 광고비 ' + adsCostCount + '건 삭제', 'success');
+  try { renderAdProjectManageCards(); } catch(_){}
+  try { renderAdsPage(); } catch(_){}
 }
 
 function renderAdsPage() {
