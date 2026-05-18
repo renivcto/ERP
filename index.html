@@ -5213,7 +5213,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.874';
+const ERP_VERSION = 'v1.9.875';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26808,7 +26808,13 @@ function saveExpense() {
         if (_prevCat === 'ad') { try { _removeExpenseAdsFromShop(ex.id); } catch(_){} }
         delete ex.adShopId; delete ex.adPlatform; delete ex.adStartDate; delete ex.adEndDate; delete ex.adProjectId;
       }
-      try { saveData(); } catch(_){}
+      // v1.9.875: updatedAt + saveDataNow (revert 차단)
+      ex.updatedAt = Date.now();
+      if (typeof saveDataNow === 'function') {
+        saveDataNow().catch(err => console.warn('expense 수정 saveDataNow 실패:', err));
+      } else {
+        try { saveData(); } catch(_){}
+      }
       closeModal('ap-expense');
       _editingExpenseId = null;
       _apeAttachments = [];
@@ -26854,9 +26860,15 @@ function saveExpense() {
     e.adStartDate = _ad.adStartDate;
     e.adEndDate = _ad.adEndDate;
   }
+  e.updatedAt = Date.now();
   DB.expenses.push(e);
   if (_ad) { try { _syncExpenseAdsToShop(e); } catch(err) { console.warn('광고비 동기화 실패:', err); } }
-  try { saveData(); } catch(_){}
+  // v1.9.875: saveDataNow 즉시 저장 (revert 차단)
+  if (typeof saveDataNow === 'function') {
+    saveDataNow().catch(err => console.warn('expense 신규 saveDataNow 실패:', err));
+  } else {
+    try { saveData(); } catch(_){}
+  }
   slackNotify('pay_request', e);
   closeModal('ap-expense');
   _apeAttachments = [];
