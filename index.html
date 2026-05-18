@@ -5211,7 +5211,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.862';
+const ERP_VERSION = 'v1.9.863';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -24490,7 +24490,7 @@ function toggleOrderTaxInvoice(orderId) {
 }
 
 // v1.9.214: (orderId, category) 보조 키로 id 중복 방어
-function togglePayStatus(expenseId, orderId, category) {
+async function togglePayStatus(expenseId, orderId, category) {
   try { _autoHealExpenseIdCollisions && _autoHealExpenseIdCollisions(expenseId); } catch(_){}
   let e = (typeof _findExpenseByOrderAndCategory === 'function') ? _findExpenseByOrderAndCategory(orderId, category) : null;
   if (!e) e = DB.expenses.find(x => x.id === expenseId);
@@ -24507,16 +24507,19 @@ function togglePayStatus(expenseId, orderId, category) {
     e.paidDate = d;
     slackNotify('pay_done', e);
   }
-  // v1.9.653: updatedAt 명시 — revert 방지
   e.updatedAt = Date.now();
-  // v1.9.639: 즉시 persist (await) — 새로고침 race 방지
+  // v1.9.863: await 로 race condition 차단 — 두 토글 연속 시 첫 저장 완료 대기
+  console.log('💳 [PAY TOGGLE] expense id=' + e.id + ' status=' + e.paidStatus + ' date=' + (e.paidDate||''));
   try {
-    console.log('💳 [PAY TOGGLE] expense id=' + e.id + ' status=' + e.paidStatus + ' date=' + (e.paidDate||''));
     if (typeof saveDataNow === 'function') {
-      saveDataNow().then(() => console.log('✅ [SAVE] toggle ' + e.id + ' OK')).catch(err => { console.error('❌ [SAVE] toggle 실패:', err); try { showNotif('⚠️ 저장 실패: ' + (err.message||err), 'error'); } catch(_){} });
+      await saveDataNow();
+      console.log('✅ [SAVE] toggle ' + e.id + ' OK');
     } else if (typeof _doSaveData === 'function') _doSaveData();
     else saveData();
-  } catch(_){}
+  } catch(err) {
+    console.error('❌ [SAVE] toggle 실패:', err);
+    try { showNotif('⚠️ 저장 실패: ' + (err.message||err), 'error'); } catch(_){}
+  }
   renderApprovalPage();
   updateApprovalBadges();
 }
