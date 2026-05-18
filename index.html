@@ -1836,12 +1836,17 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             <!-- SUPPLIER -->
             <div style="border:1px solid #fde2e7;border-radius:8px;padding:12px 14px;background:#fff7f9">
               <div style="font-size:13px;font-weight:800;color:#9d174d;margin-bottom:10px;letter-spacing:-0.3px">🏭 SUPPLIER</div>
-              <div class="fg" style="margin-bottom:8px"><label>Company</label><input class="fi" id="po-supplier-company" placeholder=""></div>
+              <!-- v1.9.857: 생산업체 select + 자동 채움 -->
+              <div class="fg" style="margin-bottom:8px">
+                <label>Company <span style="font-size:10px;color:#94a3b8">(생산업체에서 선택 또는 직접 입력)</span></label>
+                <select class="fs" id="po-supplier-vendor-select" onchange="fillPoSupplierFromVendor()" style="margin-bottom:4px;width:100%"></select>
+                <input class="fi" id="po-supplier-company" placeholder="">
+              </div>
               <div class="fg" style="margin-bottom:8px"><label>Representative</label><input class="fi" id="po-supplier-representative" placeholder=""></div>
               <div class="fg" style="margin-bottom:8px"><label>Contact Person</label><input class="fi" id="po-supplier-contact" placeholder=""></div>
+              <div class="fg" style="margin-bottom:8px"><label>Tel</label><input class="fi" id="po-supplier-tel" placeholder=""></div>
               <div class="fg" style="margin-bottom:8px"><label>Product</label><input class="fi" id="po-supplier-product" placeholder=""></div>
-              <div class="fg" style="margin-bottom:8px"><label>Reference (URL)</label><input class="fi" id="po-supplier-reference" placeholder="https://..."></div>
-              <div class="fg" style="margin:0"><label>Capacity</label><input class="fi" id="po-supplier-capacity" placeholder=""></div>
+              <div class="fg" style="margin:0"><label>Reference (URL)</label><input class="fi" id="po-supplier-reference" placeholder="https://..."></div>
             </div>
           </div>
 
@@ -5199,7 +5204,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.856';
+const ERP_VERSION = 'v1.9.857';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -18935,9 +18940,11 @@ function openOverseasPoModal(editId) {
     document.getElementById('po-supplier-company').value = s.company || '';
     document.getElementById('po-supplier-representative').value = s.representative || '';
     document.getElementById('po-supplier-contact').value = s.contactPerson || '';
+    if (document.getElementById('po-supplier-tel')) document.getElementById('po-supplier-tel').value = s.tel || '';
     document.getElementById('po-supplier-product').value = s.product || '';
     document.getElementById('po-supplier-reference').value = s.reference || '';
-    document.getElementById('po-supplier-capacity').value = s.capacity || '';
+    // v1.9.857: capacity 필드 삭제됨 — 호환용으로 무시
+    try { _populatePoSupplierSelect(); } catch(_){}
     const da = order.deliveryAddr || {};
     document.getElementById('po-delivery-company').value = da.company || 'RENIV Corp.';
     document.getElementById('po-delivery-contact').value = da.contactPerson || 'Stella Song';
@@ -18984,9 +18991,11 @@ function openOverseasPoModal(editId) {
     document.getElementById('po-supplier-company').value = '';
     document.getElementById('po-supplier-representative').value = '';
     document.getElementById('po-supplier-contact').value = '';
+    if (document.getElementById('po-supplier-tel')) document.getElementById('po-supplier-tel').value = '';
     document.getElementById('po-supplier-product').value = '';
     document.getElementById('po-supplier-reference').value = '';
-    document.getElementById('po-supplier-capacity').value = '';
+    // v1.9.857: 생산업체 select populate
+    try { _populatePoSupplierSelect(); } catch(_){}
     document.getElementById('po-delivery-company').value = 'RENIV Corp.';
     document.getElementById('po-delivery-contact').value = 'Stella Song';
     document.getElementById('po-delivery-address').value = '';
@@ -19240,6 +19249,39 @@ function _syncOverseasPoApprovalExpense(orderId) {
   }
 }
 
+// v1.9.857: 생산업체 select → SUPPLIER 입력 자동 채움
+function fillPoSupplierFromVendor() {
+  const sel = document.getElementById('po-supplier-vendor-select');
+  if (!sel || !sel.value) return;
+  const vid = parseInt(sel.value, 10);
+  const v = (DB.vendors || []).find(x => x && x.id === vid);
+  if (!v) return;
+  const setEl = (id, val) => { const e = document.getElementById(id); if (e) e.value = val || ''; };
+  setEl('po-supplier-company', v.company || '');
+  // representative: 일반 vendor 의 'representative' 또는 첫 담당자 이름
+  let rep = v.representative || '';
+  if (!rep && Array.isArray(v.contacts) && v.contacts[0]) rep = v.contacts[0].name || '';
+  setEl('po-supplier-representative', rep);
+  // contact: v.contact 또는 첫 담당자 이름
+  let contact = v.contact || '';
+  if (!contact && Array.isArray(v.contacts) && v.contacts[0]) contact = v.contacts[0].name || '';
+  setEl('po-supplier-contact', contact);
+  // tel: v.phone 또는 첫 담당자 phone
+  let tel = v.phone || '';
+  if (!tel && Array.isArray(v.contacts) && v.contacts[0]) tel = v.contacts[0].phone || '';
+  setEl('po-supplier-tel', tel);
+  // reference: 빈 칸이면 그대로 (자유 입력)
+}
+
+// v1.9.857: 모달 열 때 생산업체 select 채우기 (type='생산업체')
+function _populatePoSupplierSelect() {
+  const sel = document.getElementById('po-supplier-vendor-select');
+  if (!sel) return;
+  const vendors = (DB.vendors || []).filter(v => v && v.type === '생산업체');
+  sel.innerHTML = '<option value="">— 생산업체 선택 (직접 입력 가능) —</option>' +
+    vendors.map(v => `<option value="${v.id}">${(v.company||'').replace(/</g,'&lt;')}</option>`).join('');
+}
+
 // 저장
 function savePo() {
   if (typeof requireWrite === 'function' && !requireWrite()) return;
@@ -19288,9 +19330,9 @@ function savePo() {
       company: document.getElementById('po-supplier-company').value,
       representative: document.getElementById('po-supplier-representative').value,
       contactPerson: document.getElementById('po-supplier-contact').value,
+      tel: (document.getElementById('po-supplier-tel')||{}).value || '',
       product: document.getElementById('po-supplier-product').value,
-      reference: document.getElementById('po-supplier-reference').value,
-      capacity: document.getElementById('po-supplier-capacity').value
+      reference: document.getElementById('po-supplier-reference').value
     },
     deliveryAddr: {
       company: document.getElementById('po-delivery-company').value,
