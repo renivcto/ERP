@@ -5204,7 +5204,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.857';
+const ERP_VERSION = 'v1.9.859';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -18918,6 +18918,8 @@ function _genPoNumber() {
 // 모달 열기 (편집 모드면 기존 데이터 복원, 신규면 디폴트 채움)
 function openOverseasPoModal(editId) {
   if (typeof requireWrite === 'function' && !requireWrite()) return;
+  // v1.9.859: SUPPLIER select 강제 populate (어느 분기든 항상 채워짐)
+  try { if (typeof _populatePoSupplierSelect === 'function') _populatePoSupplierSelect(); } catch(_){}
   // 초기화
   document.getElementById('po-edit-id').value = editId || '';
   const order = editId ? (DB.orders || []).find(o => o && o.id === editId) : null;
@@ -19273,13 +19275,24 @@ function fillPoSupplierFromVendor() {
   // reference: 빈 칸이면 그대로 (자유 입력)
 }
 
-// v1.9.857: 모달 열 때 생산업체 select 채우기 (type='생산업체')
+// v1.9.858: 모달 열 때 SUPPLIER select 채우기 — 필터 완화 (모든 vendor 표시, type 라벨 prefix)
 function _populatePoSupplierSelect() {
   const sel = document.getElementById('po-supplier-vendor-select');
   if (!sel) return;
-  const vendors = (DB.vendors || []).filter(v => v && v.type === '생산업체');
-  sel.innerHTML = '<option value="">— 생산업체 선택 (직접 입력 가능) —</option>' +
-    vendors.map(v => `<option value="${v.id}">${(v.company||'').replace(/</g,'&lt;')}</option>`).join('');
+  // 생산업체 우선, 나머지도 포함 (모든 vendor 표시)
+  const vendors = (DB.vendors || []).filter(v => v && v.company);
+  // 생산업체 우선 정렬
+  vendors.sort((a, b) => {
+    const at = (a.type === '생산업체') ? 0 : 1;
+    const bt = (b.type === '생산업체') ? 0 : 1;
+    if (at !== bt) return at - bt;
+    return (a.company || '').localeCompare(b.company || '');
+  });
+  sel.innerHTML = '<option value="">— 업체 선택 (직접 입력도 가능) —</option>' +
+    vendors.map(v => {
+      const label = v.type ? '[' + v.type + '] ' + (v.company||'') : (v.company||'');
+      return `<option value="${v.id}">${label.replace(/</g,'&lt;')}</option>`;
+    }).join('');
 }
 
 // 저장
