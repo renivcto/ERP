@@ -5211,7 +5211,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.869';
+const ERP_VERSION = 'v1.9.870';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -14331,16 +14331,8 @@ function _cleanupZombieAdsCosts() {
 }
 
 function renderAdsPage() {
-  // v1.9.869: 삭제 tombstone 매칭 프로젝트 먼저 제거
-  try { _applyAdProjectTombstones(); } catch(_){}
-  // v1.9.866: 중복 광고 프로젝트 자동 정리
-  try { _dedupAdProjects(); } catch(_){}
-  // v1.9.848: 누락된 광고 expense 복원
-  try { _restoreMissingAdExpenses(); } catch(_){}
-  // v1.9.844: 좀비 광고 expense (중복 지출결의서) 자동 정리
-  try { _cleanupZombieAdExpenses(); } catch(_){}
-  // v1.9.839: 페이지 진입 시 좀비 광고비 자동 정리
-  try { _cleanupZombieAdsCosts(); } catch(_){}
+  // v1.9.870: 모든 자동 정리 비활성화 — 사용자 데이터 revert 방지
+  //   (각 함수는 정의 그대로 보존 — 콘솔 수동 호출 가능)
   const kpiRow = document.getElementById('ads-kpi-row');
   const tbody = document.getElementById('ads-page-table');
   if (!kpiRow || !tbody) return;
@@ -23277,35 +23269,12 @@ function resyncOrderExpenses(orderId) {
 
 // ═══════════════════ 결재 페이지 렌더 ═══════════════════
 function renderApprovalPage() {
-  // v1.9.834: 결재 페이지 진입 시 좀비 PO 제거 (삭제됐는데 부활한 것 차단)
-  try { if (typeof applyOrderTombstonesV226 === 'function') applyOrderTombstonesV226(); } catch(_){}
-  // v1.9.869: 삭제 tombstone 매칭 프로젝트 먼저 제거
-  try { if (typeof _applyAdProjectTombstones === 'function') _applyAdProjectTombstones(); } catch(_){}
-  // v1.9.866: 중복 광고 프로젝트 자동 정리
-  try { if (typeof _dedupAdProjects === 'function') _dedupAdProjects(); } catch(_){}
-  // v1.9.848: 누락된 광고 expense 복원
-  try { if (typeof _restoreMissingAdExpenses === 'function') _restoreMissingAdExpenses(); } catch(_){}
-  // v1.9.851: 광고 expense 의 vendor 자동 채움
+  // v1.9.870: 자동 정리 모두 비활성화 — 사용자 데이터 revert 방지
+  //   vendor 채움만 유지 (단순 표시 fix, 사용자 데이터 손실 없음)
   try { if (typeof _fillMissingAdExpenseVendor === 'function') _fillMissingAdExpenseVendor(); } catch(_){}
-  // v1.9.852: PO expense vendor 자동 채움 + 해외 PO expense KRW 환산 (async, fire-and-forget)
   try { if (typeof _fillMissingPoExpenseVendor === 'function') _fillMissingPoExpenseVendor(); } catch(_){}
-  // v1.9.865: 비정상 amount 복구 먼저 → 그 다음 환산
-  try {
-    if (typeof _fixOverseasExpenseAmount === 'function') {
-      _fixOverseasExpenseAmount().then(n => {
-        if (n > 0) { try { renderApprovalPage(); } catch(_){} }
-      }).catch(e => console.warn('amount 복구 실패:', e));
-    }
-  } catch(_){}
-  try {
-    if (typeof _convertOverseasExpenseToKrw === 'function') {
-      _convertOverseasExpenseToKrw().then(n => {
-        if (n > 0) { try { renderApprovalPage(); } catch(_){} }  // 환산 완료 후 재렌더
-      }).catch(e => console.warn('KRW 환산 실패:', e));
-    }
-  } catch(_){}
-  // v1.9.844: 좀비 광고 expense (중복 지출결의서) 자동 정리
-  try { if (typeof _cleanupZombieAdExpenses === 'function') _cleanupZombieAdExpenses(); } catch(_){}
+  // 좀비 PO 제거만 유지 (orders tombstone 은 명시적 삭제만 적용)
+  try { if (typeof applyOrderTombstonesV226 === 'function') applyOrderTombstonesV226(); } catch(_){}
   // 현재 탭 유지
   try { updateApprovalStats(); } catch(_){}
   // v1.9.418: 기간 필터 입력란 기본값 채움 (월/주/일/from/to)
