@@ -5211,7 +5211,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.866';
+const ERP_VERSION = 'v1.9.867';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -14386,13 +14386,51 @@ function renderAdsPage() {
     return orders.reduce((s, o) => s + Number(o.paymentAmount || o.totalPrice || 0), 0);
   }
 
+  // v1.9.867: 기간 NET 데이터 (revenue + cogs + fee) 합산 — NET 마진 계산용
+  function _periodNetData(shopId, startDate, endDate) {
+    const orders = (DB.shopOrders || []).filter(o => {
+      if (!o || !o.orderDate) return false;
+      if (shopId && String(o.shopId) !== String(shopId)) return false;
+      if (o.status === '취소' || o.status === '반품') return false;
+      const od = new Date(o.orderDate);
+      if (startDate && od < new Date(startDate)) return false;
+      if (endDate && od > new Date(endDate + 'T23:59:59')) return false;
+      return true;
+    });
+    const shop = (DB.shops||[]).find(s => s && String(s.id) === String(shopId));
+    let revenue = 0, cogs = 0, fee = 0;
+    orders.forEach(o => {
+      const r = Number(o.paymentAmount || o.totalPrice || 0);
+      revenue += r;
+      // COGS
+      try {
+        if (typeof _mgLookupCogs === 'function') {
+          const c = _mgLookupCogs(o);
+          cogs += (c && typeof c === 'object') ? (Number(c.cogs)||0) : (Number(c)||0);
+        }
+      } catch(_){}
+      // 쇼핑몰 수수료
+      try {
+        const feeRate = shop ? (parseFloat(shop.commissionBase) || parseFloat(shop.fee) || 0) : 0;
+        fee += r * feeRate / 100;
+      } catch(_){}
+    });
+    return { revenue, cogs, fee };
+  }
+
   // KPI 계산
   let totalAds = 0;
   let totalRevenue = 0;
+  // v1.9.867: 프로젝트별 매출 dedup — 같은 프로젝트 광고비 여러 건이면 매출 1번만
+  const _revDedupSet = new Set();
   filtered.forEach(a => {
     totalAds += Number(a.cost || 0);
-    const rev = _periodRevenue(a._shopId, a.startDate || a.date || (a.month + '-01'), a.endDate || a.startDate || a.date || (a.month + '-01'));
-    totalRevenue += rev;
+    const startDate = a.startDate || a.date || (a.month + '-01');
+    const endDate = a.endDate || a.startDate || a.date || (a.month + '-01');
+    const dedupKey = (a.projectId ? 'proj:' + a.projectId : 'single:' + a._shopId + '|' + startDate + '|' + endDate);
+    if (_revDedupSet.has(dedupKey)) return;
+    _revDedupSet.add(dedupKey);
+    totalRevenue += _periodRevenue(a._shopId, startDate, endDate);
   });
   const avgRoas = totalAds > 0 ? (totalRevenue / totalAds * 100) : 0;
   const cntAuto = filtered.filter(a => a.expenseId).length;
@@ -14472,11 +14510,15 @@ function renderAdsPage() {
     const periodStr = (minStart && maxEnd) ? (minStart === maxEnd ? minStart : `${minStart} ~ ${maxEnd}`) : '-';
     // 매출 = 같은 쇼핑몰 + 그룹 기간 합산 (한 번만)
     const shopIds = Array.from(new Set(adsList.map(a => a._shopId)));
-    let revenue = 0;
-    shopIds.forEach(sid => { revenue += _periodRevenue(sid, minStart, maxEnd); });
+    let revenue = 0, totalCogs = 0, totalFee = 0;
+    shopIds.forEach(sid => {
+      const nd = _periodNetData(sid, minStart, maxEnd);
+      revenue += nd.revenue; totalCogs += nd.cogs; totalFee += nd.fee;
+    });
     const roasVal = totalCost > 0 ? (revenue / totalCost * 100) : 0;
     const roasStr = roasVal > 0 ? roasVal.toFixed(0) + '%' : '-';
-    const netMargin = revenue - totalCost;
+    // v1.9.867: NET 마진 = 매출 - 제품원가 - 쇼핑몰 수수료 - 광고비
+    const netMargin = revenue - totalCogs - totalFee - totalCost;
     const netColor = netMargin > 0 ? '#16a34a' : (netMargin < 0 ? '#dc2626' : '#94a3b8');
     const netStr = revenue > 0 ? '₩' + netMargin.toLocaleString() : '-';
     // 쇼핑몰 라벨 (그룹의 첫 항목 기준 또는 다중)
@@ -14516,10 +14558,12 @@ function renderAdsPage() {
     if (a.type === 'monthly') periodStr = a.month || (startDate || '').slice(0, 7);
     else if (a.type === 'daily') periodStr = startDate;
     else periodStr = `${startDate} ~ ${endDate}`;
-    const revenue = _periodRevenue(a._shopId, startDate, endDate);
+    // v1.9.867: NET 마진 = revenue - cogs - fee - ads
+    const nd = _periodNetData(a._shopId, startDate, endDate);
+    const revenue = nd.revenue;
     const roasVal = a.cost > 0 ? (revenue / a.cost * 100) : 0;
     const roasStr = roasVal > 0 ? roasVal.toFixed(0) + '%' : '-';
-    const netMargin = revenue - (parseFloat(a.cost) || 0);
+    const netMargin = revenue - nd.cogs - nd.fee - (parseFloat(a.cost) || 0);
     const netColor = netMargin > 0 ? '#16a34a' : (netMargin < 0 ? '#dc2626' : '#94a3b8');
     const netStr = revenue > 0 ? '₩' + netMargin.toLocaleString() : '-';
     const isAuto = !!a.expenseId;
