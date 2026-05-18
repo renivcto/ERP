@@ -5211,7 +5211,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.870';
+const ERP_VERSION = 'v1.9.871';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12752,7 +12752,7 @@ function openAdsManualModal(editId) {
   const projSel = document.getElementById('ads-manual-project');
   if (projSel) {
     projSel.innerHTML = '<option value="">없음 (단발성)</option>' +
-      (DB.adProjects||[]).filter(p => p).map(p => `<option value="${p.id}">${(p.name||'-').replace(/</g,'&lt;')}</option>`).join('');
+      _getActiveAdProjects().map(p => `<option value="${p.id}">${(p.name||'-').replace(/</g,'&lt;')}</option>`).join('');
   }
   // 제품 multi-select 채우기 (체크박스 리스트)
   _renderAdsItemMultiSelect([]);
@@ -13252,7 +13252,7 @@ function saveAdProject() {
     if (apOverlay && apOverlay.classList.contains('show') && apeSel) {
       const prevVal = editId ? String(editId) : (DB.adProjects[DB.adProjects.length - 1] || {}).id;
       apeSel.innerHTML = '<option value="">없음 (단발성)</option>' +
-        (DB.adProjects || []).map(p => `<option value="${p.id}">${(p.name||'-').replace(/</g,'&lt;')}</option>`).join('');
+        _getActiveAdProjects().map(p => `<option value="${p.id}">${(p.name||'-').replace(/</g,'&lt;')}</option>`).join('');
       if (prevVal) apeSel.value = prevVal;
       // v1.9.783: 제목 자동 갱신
       try { _updateApeTitleFromAd(); } catch(_){}
@@ -14266,6 +14266,13 @@ function _applyAdProjectTombstones() {
     try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
   }
   return removed;
+}
+
+// v1.9.871: tombstone 매칭 프로젝트 제외한 활성 광고 프로젝트만 반환
+function _getActiveAdProjects() {
+  if (!Array.isArray(DB.adProjects)) return [];
+  const tombSet = new Set((DB._deletedAdProjectIds || []).map(t => String(typeof t === 'object' ? t.id : t)));
+  return DB.adProjects.filter(p => p && !tombSet.has(String(p.id)));
 }
 
 // v1.9.866: 동일 이름 광고 프로젝트 중복 자동 정리
@@ -26541,7 +26548,7 @@ function openExpenseModal() {
   // v1.9.777: 광고 프로젝트 select 채우기 (신규)
   if ($('ape-ad-project')) {
     $('ape-ad-project').innerHTML = '<option value="">없음 (단발성)</option>' +
-      (DB.adProjects||[]).filter(p => p).map(p => `<option value="${p.id}">${(p.name||'-').replace(/</g,'&lt;')}</option>`).join('');
+      _getActiveAdProjects().map(p => `<option value="${p.id}">${(p.name||'-').replace(/</g,'&lt;')}</option>`).join('');
     $('ape-ad-project').value = window._preselectedAdProjectId || '';
     window._preselectedAdProjectId = null;
   }
@@ -26636,7 +26643,7 @@ function editExpense(id) {
   // v1.9.777: 광고 프로젝트 select 채우기 + 복원
   if ($('ape-ad-project')) {
     $('ape-ad-project').innerHTML = '<option value="">없음 (단발성)</option>' +
-      (DB.adProjects||[]).filter(p => p).map(p => `<option value="${p.id}">${(p.name||'-').replace(/</g,'&lt;')}</option>`).join('');
+      _getActiveAdProjects().map(p => `<option value="${p.id}">${(p.name||'-').replace(/</g,'&lt;')}</option>`).join('');
     $('ape-ad-project').value = e.adProjectId || '';
   }
   try { onApeCategoryChange(); } catch(_){}
