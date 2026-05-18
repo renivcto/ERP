@@ -5211,7 +5211,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.860';
+const ERP_VERSION = 'v1.9.861';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -19247,14 +19247,21 @@ function _syncOverseasPoApprovalExpense(orderId) {
       note: note,
     };
     DB.expenses.push(exp);
-  } else if (exp.paidStatus !== 'paid') {
-    // 미지급 시만 업데이트
+  } else if (exp.paidStatus === 'paid') {
+    // v1.9.861: 지급완료 expense 는 절대 update 하지 않음 (부활 차단)
+    // amount/dueDate/title 모두 보존
+  } else {
+    // v1.9.861: 미지급 expense 만 update — title/vendor/note 만 변경
+    //   amount 는 이미 KRW 환산되어 있을 수 있어 덮어쓰지 않음 (누적 환산 차단)
     exp.title = `[해외 잔금] ${vendorName}`;
     exp.vendor = vendorName;
-    exp.amount = grandTotal;
-    exp.dueDate = dueDate || exp.dueDate || '';
     exp.note = note;
+    // dueDate 는 비어있을 때만 채움 (사용자 수정값 보존)
+    if (!exp.dueDate) exp.dueDate = dueDate || '';
     exp.updatedAt = Date.now();
+    // amount 는 grandTotal 로 reset + __krwConverted false 로 reset → 재환산
+    exp.amount = grandTotal;
+    exp.__krwConverted = false;
   }
 }
 
