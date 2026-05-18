@@ -5211,7 +5211,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.868';
+const ERP_VERSION = 'v1.9.869';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13290,8 +13290,16 @@ function deleteAdProject() {
   const idx = DB.adProjects.findIndex(p => String(p.id) === String(editId));
   if (idx < 0) { showNotif('프로젝트를 찾을 수 없습니다', 'warning'); return; }
 
-  // 1) 프로젝트 자체 삭제
+  // 1) 프로젝트 자체 삭제 + v1.9.869 tombstone
+  const _removedProj = DB.adProjects[idx];
   DB.adProjects.splice(idx, 1);
+  if (!Array.isArray(DB._deletedAdProjectIds)) DB._deletedAdProjectIds = [];
+  if (_removedProj && _removedProj.id != null) {
+    DB._deletedAdProjectIds.push({ id: _removedProj.id, name: _removedProj.name || '', ts: Date.now() });
+    if (DB._deletedAdProjectIds.length > 200) {
+      DB._deletedAdProjectIds = DB._deletedAdProjectIds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 200);
+    }
+  }
 
   // 2) 연결된 광고비(adsCosts) 행 삭제 — 각 shop 의 adsCosts 배열에서 매칭하는 항목 제거
   (DB.shops || []).forEach(s => {
@@ -14214,6 +14222,8 @@ function _cleanupZombieAdExpenses() {
     });
   });
   const idsToRemove = [];
+  // v1.9.869: 최근 5분 이내 expense 는 dedup 제외 (사용자가 방금 만든 광고비 사라짐 방지)
+  const recentThreshold = Date.now() - 5 * 60 * 1000;
   groupMap.forEach((group) => {
     if (group.length <= 1) return;
     // 광고비 행 연결된 것 우선 keep + 그 다음 최신순
@@ -14224,9 +14234,12 @@ function _cleanupZombieAdExpenses() {
       return (b.createdAt || b.id || 0) - (a.createdAt || a.id || 0);
     });
     for (let i = 1; i < group.length; i++) {
+      const e = group[i];
       // 광고비 행에 매핑된 것은 절대 삭제 X
-      if (linkedExpenseIds.has(group[i].id)) continue;
-      idsToRemove.push(group[i].id);
+      if (linkedExpenseIds.has(e.id)) continue;
+      // v1.9.869: 최근 5분 이내 expense 는 dedup 제외
+      if ((e.createdAt || 0) > recentThreshold) continue;
+      idsToRemove.push(e.id);
     }
   });
   if (idsToRemove.length === 0) return 0;
@@ -14238,6 +14251,21 @@ function _cleanupZombieAdExpenses() {
   console.warn('🪦 [v844] 좀비 광고 expense ' + idsToRemove.length + '건 자동 정리:', idsToRemove);
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
   return idsToRemove.length;
+}
+
+// v1.9.869: tombstone 매칭 광고 프로젝트 자동 제거 (Firestore sync 부활 차단)
+function _applyAdProjectTombstones() {
+  if (!Array.isArray(DB._deletedAdProjectIds) || DB._deletedAdProjectIds.length === 0) return 0;
+  if (!Array.isArray(DB.adProjects) || DB.adProjects.length === 0) return 0;
+  const tombSet = new Set(DB._deletedAdProjectIds.map(t => String(typeof t === 'object' ? t.id : t)));
+  const before = DB.adProjects.length;
+  DB.adProjects = DB.adProjects.filter(p => p && !tombSet.has(String(p.id)));
+  const removed = before - DB.adProjects.length;
+  if (removed > 0) {
+    console.warn('🪦 [v869] tombstone 광고 프로젝트 ' + removed + '건 자동 제거');
+    try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  }
+  return removed;
 }
 
 // v1.9.866: 동일 이름 광고 프로젝트 중복 자동 정리
@@ -14303,7 +14331,9 @@ function _cleanupZombieAdsCosts() {
 }
 
 function renderAdsPage() {
-  // v1.9.866: 중복 광고 프로젝트 자동 정리 먼저
+  // v1.9.869: 삭제 tombstone 매칭 프로젝트 먼저 제거
+  try { _applyAdProjectTombstones(); } catch(_){}
+  // v1.9.866: 중복 광고 프로젝트 자동 정리
   try { _dedupAdProjects(); } catch(_){}
   // v1.9.848: 누락된 광고 expense 복원
   try { _restoreMissingAdExpenses(); } catch(_){}
@@ -23249,6 +23279,8 @@ function resyncOrderExpenses(orderId) {
 function renderApprovalPage() {
   // v1.9.834: 결재 페이지 진입 시 좀비 PO 제거 (삭제됐는데 부활한 것 차단)
   try { if (typeof applyOrderTombstonesV226 === 'function') applyOrderTombstonesV226(); } catch(_){}
+  // v1.9.869: 삭제 tombstone 매칭 프로젝트 먼저 제거
+  try { if (typeof _applyAdProjectTombstones === 'function') _applyAdProjectTombstones(); } catch(_){}
   // v1.9.866: 중복 광고 프로젝트 자동 정리
   try { if (typeof _dedupAdProjects === 'function') _dedupAdProjects(); } catch(_){}
   // v1.9.848: 누락된 광고 expense 복원
