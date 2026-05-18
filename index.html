@@ -5211,7 +5211,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.867';
+const ERP_VERSION = 'v1.9.868';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -23048,6 +23048,8 @@ async function _convertOverseasOrderToKrw(oRaw) {
   try { rate = await _getKrwRate(cur); } catch(_){}
   if (!rate || rate <= 0) { console.warn('[v833] 환율 0 — 원본 외화 그대로 표시'); return { o: oRaw, exchangeInfo: null }; }
   const o = JSON.parse(JSON.stringify(oRaw));
+  // v1.9.868: KRW 환산 완료 flag → orderTotal 이 이중 환산 방지
+  o.__overseasConvertedToKrw = true;
   (o.rows || []).forEach(r => { r.price = Math.round((parseFloat(r.price)||0) * rate); });
   o.productTotal = Math.round((parseFloat(o.productTotal)||0) * rate);
   o.oceanFreight = Math.round((parseFloat(o.oceanFreight)||0) * rate);
@@ -23071,6 +23073,8 @@ function orderTotal(o) {
   if (!o || !Array.isArray(o.rows)) return 0;
   let t = 0;
   o.rows.forEach(r => { t += (parseFloat(r.qty)||0) * (parseFloat(r.price)||0); });
+  // v1.9.868: 이미 KRW 환산된 객체 (_convertOverseasOrderToKrw 통과) 면 환산 skip
+  if (o.__overseasConvertedToKrw) return t;
   // v1.9.854: 해외 PO 면 KRW 환산
   if (o.isOverseas && o.currency && String(o.currency).toUpperCase() !== 'KRW') {
     const rate = _getKrwRateSync(o.currency);
@@ -27735,7 +27739,7 @@ async function openPoApprovalDetail(orderId) {
   if (!body) return;
 
   // ── 기본 데이터 ──
-  const vName = vendorName(o.vendorId);
+  const vName = o.isOverseas ? ((o.supplier && o.supplier.company) || o.poNumber || '🌐 해외 PO') : vendorName(o.vendorId);  // v1.9.868: 해외 PO 분기
   const itemSummary = (o.rows[0]&&o.rows[0].name||'-') + (o.rows.length>1?` 외 ${o.rows.length-1}건`:'');
   const authorName = (ap.authorName || o.authorName || (window._currentUser && window._currentUser.name) || '-').replace(/</g,'&lt;');
   const createdAt = ap.createdAt || o.createdAt || Date.now();
@@ -28024,7 +28028,7 @@ async function openPoApprovalPage(orderId) {
     try { saveData(); } catch(_){}
   }
 
-  const vName = vendorName(o.vendorId);
+  const vName = o.isOverseas ? ((o.supplier && o.supplier.company) || o.poNumber || '🌐 해외 PO') : vendorName(o.vendorId);  // v1.9.868: 해외 PO 분기
   const itemSummary = (o.rows[0]&&o.rows[0].name||'-') + (o.rows.length>1?` 외 ${o.rows.length-1}건`:'');
   const authorName = (ap.authorName || o.authorName || (window._currentUser && window._currentUser.name) || '-').replace(/</g,'&lt;');
   const createdAt = ap.createdAt || o.createdAt || Date.now();
