@@ -1836,9 +1836,16 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             <!-- SUPPLIER -->
             <div style="border:1px solid #fde2e7;border-radius:8px;padding:12px 14px;background:#fff7f9">
               <div style="font-size:13px;font-weight:800;color:#9d174d;margin-bottom:10px;letter-spacing:-0.3px">🏭 SUPPLIER</div>
-              <!-- v1.9.857: 생산업체 select + 자동 채움 -->
+              <!-- v1.9.860: 분류 탭 + vendor select + Company input -->
               <div class="fg" style="margin-bottom:8px">
-                <label>Company <span style="font-size:10px;color:#94a3b8">(생산업체에서 선택 또는 직접 입력)</span></label>
+                <label>Company</label>
+                <div style="display:flex;align-items:center;gap:0;margin-bottom:4px" id="po-supplier-vendor-tabs">
+                  <button type="button" class="pvt active" data-type="전체" onclick="filterPoSupplierVendor('전체',this)" style="font-size:10.5px;padding:4px 0;min-width:48px;text-align:center;border-radius:6px 6px 0 0;border:1px solid var(--gray-300);border-bottom:2px solid var(--sky-500);background:#fff;color:var(--gray-700);cursor:pointer;font-weight:600">전체</button>
+                  <button type="button" class="pvt" data-type="원자재" onclick="filterPoSupplierVendor('원자재',this)" style="font-size:10.5px;padding:4px 0;min-width:48px;text-align:center;border-radius:6px 6px 0 0;border:1px solid var(--gray-200);border-bottom:none;background:var(--gray-50);color:var(--gray-400);cursor:pointer">원자재</button>
+                  <button type="button" class="pvt" data-type="부자재" onclick="filterPoSupplierVendor('부자재',this)" style="font-size:10.5px;padding:4px 0;min-width:48px;text-align:center;border-radius:6px 6px 0 0;border:1px solid var(--gray-200);border-bottom:none;background:var(--gray-50);color:var(--gray-400);cursor:pointer">부자재</button>
+                  <button type="button" class="pvt" data-type="OEM" onclick="filterPoSupplierVendor('OEM',this)" style="font-size:10.5px;padding:4px 0;min-width:48px;text-align:center;border-radius:6px 6px 0 0;border:1px solid var(--gray-200);border-bottom:none;background:var(--gray-50);color:var(--gray-400);cursor:pointer">OEM</button>
+                  <button type="button" class="pvt" data-type="외주가공" onclick="filterPoSupplierVendor('외주가공',this)" style="font-size:10.5px;padding:4px 0;min-width:56px;text-align:center;border-radius:6px 6px 0 0;border:1px solid var(--gray-200);border-bottom:none;background:var(--gray-50);color:var(--gray-400);cursor:pointer">외주가공</button>
+                </div>
                 <select class="fs" id="po-supplier-vendor-select" onchange="fillPoSupplierFromVendor()" style="margin-bottom:4px;width:100%"></select>
                 <input class="fi" id="po-supplier-company" placeholder="">
               </div>
@@ -5204,7 +5211,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.859';
+const ERP_VERSION = 'v1.9.860';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -19275,24 +19282,35 @@ function fillPoSupplierFromVendor() {
   // reference: 빈 칸이면 그대로 (자유 입력)
 }
 
-// v1.9.858: 모달 열 때 SUPPLIER select 채우기 — 필터 완화 (모든 vendor 표시, type 라벨 prefix)
-function _populatePoSupplierSelect() {
+// v1.9.860: SUPPLIER select 채우기 — typeFilter 지원
+function _populatePoSupplierSelect(typeFilter) {
   const sel = document.getElementById('po-supplier-vendor-select');
   if (!sel) return;
-  // 생산업체 우선, 나머지도 포함 (모든 vendor 표시)
-  const vendors = (DB.vendors || []).filter(v => v && v.company);
-  // 생산업체 우선 정렬
-  vendors.sort((a, b) => {
-    const at = (a.type === '생산업체') ? 0 : 1;
-    const bt = (b.type === '생산업체') ? 0 : 1;
-    if (at !== bt) return at - bt;
-    return (a.company || '').localeCompare(b.company || '');
-  });
+  let vendors = (DB.vendors || []).filter(v => v && v.company);
+  if (typeFilter && typeFilter !== '전체') {
+    vendors = vendors.filter(v => v.type === typeFilter);
+  }
+  vendors.sort((a, b) => (a.company || '').localeCompare(b.company || ''));
   sel.innerHTML = '<option value="">— 업체 선택 (직접 입력도 가능) —</option>' +
-    vendors.map(v => {
-      const label = v.type ? '[' + v.type + '] ' + (v.company||'') : (v.company||'');
-      return `<option value="${v.id}">${label.replace(/</g,'&lt;')}</option>`;
-    }).join('');
+    vendors.map(v => `<option value="${v.id}">${(v.company||'').replace(/</g,'&lt;')}</option>`).join('');
+}
+
+// v1.9.860: SUPPLIER 분류 탭 클릭 시 호출
+function filterPoSupplierVendor(type, btn) {
+  const wrap = document.getElementById('po-supplier-vendor-tabs');
+  if (wrap) {
+    wrap.querySelectorAll('.pvt').forEach(t => {
+      if (t === btn) {
+        t.style.background = '#fff'; t.style.color = 'var(--gray-700)'; t.style.fontWeight = '600';
+        t.style.borderBottom = '2px solid var(--sky-500)'; t.style.borderColor = 'var(--gray-300)';
+        t.style.borderBottomColor = 'var(--sky-500)'; t.classList.add('active');
+      } else {
+        t.style.background = 'var(--gray-50)'; t.style.color = 'var(--gray-400)'; t.style.fontWeight = '';
+        t.style.borderBottom = 'none'; t.style.borderColor = 'var(--gray-200)'; t.classList.remove('active');
+      }
+    });
+  }
+  _populatePoSupplierSelect(type);
 }
 
 // 저장
