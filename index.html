@@ -5199,7 +5199,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.853';
+const ERP_VERSION = 'v1.9.854';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -22837,13 +22837,40 @@ async function _convertOverseasOrderToKrw(oRaw) {
   return { o: o, exchangeInfo: { currency: cur, rate: rate, date: new Date().toISOString().slice(0, 10) } };
 }
 
+// v1.9.854: localStorage 캐시에서 환율 sync 조회 (async API 호출 없이)
+function _getKrwRateSync(currency) {
+  if (!currency) return 0;
+  const cur = String(currency).toUpperCase();
+  if (cur === 'KRW') return 1;
+  try {
+    const cached = JSON.parse(localStorage.getItem('_erpKrwRate_' + cur) || 'null');
+    if (cached && cached.rate > 0) return cached.rate;
+  } catch(_){}
+  return 0;
+}
+
 function orderTotal(o) {
   if (!o || !Array.isArray(o.rows)) return 0;
   let t = 0;
   o.rows.forEach(r => { t += (parseFloat(r.qty)||0) * (parseFloat(r.price)||0); });
+  // v1.9.854: 해외 PO 면 KRW 환산
+  if (o.isOverseas && o.currency && String(o.currency).toUpperCase() !== 'KRW') {
+    const rate = _getKrwRateSync(o.currency);
+    if (rate > 0) t = Math.round(t * rate);
+  }
   return t;
 }
-function orderTotalVat(o) { return Math.round(orderTotal(o) * 1.1); }
+function orderTotalVat(o) {
+  // v1.9.854: 해외 PO 는 VAT 없음 — productTotal + oceanFreight (둘 다 환산)
+  if (o && o.isOverseas) {
+    const sub = orderTotal(o);  // 이미 환산됨
+    const freightForeign = parseFloat(o.oceanFreight) || 0;
+    const rate = _getKrwRateSync(o.currency);
+    const freightKrw = (rate > 0) ? Math.round(freightForeign * rate) : freightForeign;
+    return sub + freightKrw;
+  }
+  return Math.round(orderTotal(o) * 1.1);
+}
 function vendorName(id) { const v = getVendor ? getVendor(id) : null; return v && v.company ? v.company : '-'; }
 
 // 발주서 저장 시 approval/expense 자동 생성/동기화
@@ -24243,7 +24270,7 @@ function renderApprovalPoTable() {
     //   1) balPct <= 0: 선급금 100%라 잔금 자체가 없음 → 경과 숨김
     //   2) expBal.paidStatus === 'paid': 잔금 완납 → 경과 숨김
     //   3) prepayPct >= 100 && 선급금 완납: 전체 결제 완료 → 경과 숨김
-    const due = o.balanceDueDate || o.payDate || '';
+    const due = o.balanceDueDate || o.payDate || (o.isOverseas ? (o.deliveryDate || '') : '');  // v1.9.854: 해외 PO 는 deliveryDate fallback
     const balancePaid =
       balPct <= 0 ||
       !!(expBal && expBal.paidStatus === 'paid') ||
