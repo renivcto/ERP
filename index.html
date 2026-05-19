@@ -5213,7 +5213,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.880';
+const ERP_VERSION = 'v1.9.881';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13243,8 +13243,8 @@ async function saveAdProject() {
       DB.adProjects[idx] = { ...DB.adProjects[idx], name, description, startDate, endDate, shopIds, itemIds, updatedAt: Date.now() };
     }
   } else {
-    // v1.9.880: UPSERT — 같은 sig (이름+기간) 이 이미 있으면 update, 없을 때만 push
-    const newSig = [String(name).trim().toLowerCase(), startDate, endDate].join('|');
+    // v1.9.881: UPSERT — 같은 이름 이 이미 있으면 update (날짜 변경 허용)
+    const newSig = String(name).trim().toLowerCase();
     const existIdx = DB.adProjects.findIndex(p => p && _adProjectSig(p) === newSig);
     if (existIdx >= 0) {
       DB.adProjects[existIdx] = { ...DB.adProjects[existIdx], name, description, startDate, endDate, shopIds, itemIds, updatedAt: Date.now() };
@@ -14277,14 +14277,43 @@ function _cleanupZombieAdExpenses() {
   return idsToRemove.length;
 }
 
-// v1.9.880: 광고 프로젝트 시그니처 — 같은 이름+기간 = 같은 프로젝트로 취급
+// v1.9.881: 광고 프로젝트 시그니처 — 이름만 (같은 이름 = 같은 프로젝트, 날짜 변경 허용)
 function _adProjectSig(p) {
   if (!p) return '';
-  const n = String(p.name || '').trim().toLowerCase();
-  const s = String(p.startDate || '');
-  const e = String(p.endDate || '');
-  return [n, s, e].join('|');
+  return String(p.name || '').trim().toLowerCase();
 }
+
+// v1.9.881: 콘솔 유틸 — 모든 같은 이름 프로젝트 dedup (최신 1개 keep, 나머지 sig tombstone)
+window.dedupAllAdProjectsByName = function() {
+  if (!Array.isArray(DB.adProjects)) return 0;
+  const nameMap = new Map();
+  DB.adProjects.forEach(p => {
+    if (!p) return;
+    const sig = _adProjectSig(p);
+    if (!sig) return;
+    if (!nameMap.has(sig)) nameMap.set(sig, []);
+    nameMap.get(sig).push(p);
+  });
+  let removed = 0;
+  nameMap.forEach((group, sig) => {
+    if (group.length < 2) return;
+    // 최신 (createdAt 큰) 1개 keep, 나머지 삭제 (sig 는 등록 안 함 — keep 1개도 같은 sig 라서)
+    group.sort((a,b) => (b.createdAt || 0) - (a.createdAt || 0));
+    const keep = group[0];
+    const remove = group.slice(1);
+    DB.adProjects = DB.adProjects.filter(p => p && !remove.some(r => r.id === p.id));
+    if (!Array.isArray(DB._deletedAdProjectIds)) DB._deletedAdProjectIds = [];
+    remove.forEach(r => { DB._deletedAdProjectIds.push({ id: r.id, name: r.name||'', ts: Date.now() }); });
+    removed += remove.length;
+    console.log('🧹 [v881] "' + sig + '" 중복 ' + remove.length + '건 삭제 (keep:', keep.id, ')');
+  });
+  if (removed > 0) {
+    try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+    try { if (typeof renderAdsPage === 'function') renderAdsPage(); } catch(_){}
+  }
+  console.log('✅ [v881] 총 ' + removed + '건 dedup 완료');
+  return removed;
+};
 
 // v1.9.869+880: tombstone 매칭 광고 프로젝트 자동 제거 (id + sig 둘 다)
 function _applyAdProjectTombstones() {
@@ -23438,6 +23467,8 @@ function resyncOrderExpenses(orderId) {
 
 // ═══════════════════ 결재 페이지 렌더 ═══════════════════
 function renderApprovalPage() {
+  // v1.9.881: 광고 프로젝트 tombstone 도 적용 (전 페이지 일관성)
+  try { if (typeof _applyAdProjectTombstones === 'function') _applyAdProjectTombstones(); } catch(_){}
   // v1.9.880: expense sig tombstone 적용 (중복 부활 차단)
   try {
     if (Array.isArray(DB._deletedExpenseSigs) && DB._deletedExpenseSigs.length > 0 && typeof _expenseSig === 'function') {
