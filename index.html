@@ -5220,7 +5220,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.889';
+const ERP_VERSION = 'v1.9.890';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12911,10 +12911,18 @@ function deleteAdsManual(adId) {
 function _calcAdProjectKPI(project) {
   if (!project) return { totalAds: 0, revenue: 0, roas: 0, adCount: 0, orderCount: 0 };
   let totalAds = 0, adCount = 0;
+  // v1.9.890: orphan adsCost 제외 — 연결 expense 가 category='ad' 가 아니면 합산 X (프로젝트 모달과 일관)
+  const _expMap = new Map();
+  (DB.expenses || []).forEach(e => { if (e && e.id != null) _expMap.set(String(e.id), e); });
   (DB.shops || []).forEach(s => {
     if (!s || !Array.isArray(s.adsCosts)) return;
     s.adsCosts.forEach(a => {
       if (!a || String(a.projectId || '') !== String(project.id)) return;
+      // 자동 동기화 행이면 expense 확인 (수동 행은 expenseId 없음 → 그대로 합산)
+      if (a.expenseId != null) {
+        const exp = _expMap.get(String(a.expenseId));
+        if (exp && exp.category !== 'ad') return;  // orphan — 합산 제외
+      }
       totalAds += Number(a.cost || 0);
       adCount++;
     });
@@ -27262,6 +27270,13 @@ function saveExpense() {
         if (_prevCat === 'ad') { try { _removeExpenseAdsFromShop(ex.id); } catch(_){} }
         delete ex.adShopId; delete ex.adPlatform; delete ex.adStartDate; delete ex.adEndDate; delete ex.adProjectId;
       }
+      // v1.9.890: 수정 후의 sig tombstone 도 해제 (재사용 허용)
+      try {
+        if (typeof _expenseSig === 'function' && Array.isArray(DB._deletedExpenseSigs)) {
+          const newSig = _expenseSig(ex);
+          DB._deletedExpenseSigs = DB._deletedExpenseSigs.filter(x => !x || x.sig !== newSig);
+        }
+      } catch(_){}
       // v1.9.875: updatedAt + saveDataNow (revert 차단)
       ex.updatedAt = Date.now();
       if (typeof saveDataNow === 'function') {
@@ -27317,6 +27332,23 @@ function saveExpense() {
   e.updatedAt = Date.now();
   DB.expenses.push(e);
   if (_ad) { try { _syncExpenseAdsToShop(e); } catch(err) { console.warn('광고비 동기화 실패:', err); } }
+  // v1.9.890: 같은 sig 의 tombstone 자동 제거 — 재추가 허용 (사용자 의도)
+  try {
+    if (typeof _expenseSig === 'function' && Array.isArray(DB._deletedExpenseSigs)) {
+      const newSig = _expenseSig(e);
+      const before = DB._deletedExpenseSigs.length;
+      DB._deletedExpenseSigs = DB._deletedExpenseSigs.filter(x => !x || x.sig !== newSig);
+      const removed = before - DB._deletedExpenseSigs.length;
+      if (removed > 0) console.log('🔓 [v890] sig tombstone 해제: ' + newSig + ' (' + removed + '건)');
+    }
+    // id 도 안전하게 (방어적)
+    if (Array.isArray(DB._deletedExpenseIds)) {
+      DB._deletedExpenseIds = DB._deletedExpenseIds.filter(x => {
+        const xid = (typeof x === 'object' && x) ? x.id : x;
+        return String(xid) !== String(e.id);
+      });
+    }
+  } catch(_){}
   // v1.9.875: saveDataNow 즉시 저장 (revert 차단)
   if (typeof saveDataNow === 'function') {
     saveDataNow().catch(err => console.warn('expense 신규 saveDataNow 실패:', err));
