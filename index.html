@@ -5220,7 +5220,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.894';
+const ERP_VERSION = 'v1.9.895';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -16482,24 +16482,26 @@ async function saveOurCompanyInfo() {
   } catch(e2) { console.error('🏢 [v893] 모달 닫기 오류:', e2); }
   // 3) 저장 (Firestore + localStorage)
   try {
-    // localStorage 즉시 백업 (Firestore 실패해도 데이터 보존)
-    try { localStorage.setItem('reniv_erp_db', JSON.stringify(DB)); } catch(_){}
+    // v1.9.895: 정확한 STORE_KEY 사용 (이전 v893 의 'reniv_erp_db' 는 잘못된 키)
+    try {
+      const _key = (typeof STORE_KEY === 'string') ? STORE_KEY : 'reniv_erp_v8';
+      localStorage.setItem(_key, JSON.stringify(DB));
+      console.log('💾 [v895] localStorage 즉시 백업 완료 - key:', _key);
+    } catch(eLS) { console.warn('💾 [v895] localStorage 백업 실패:', eLS); }
     // shared settings
     try { if (typeof saveSharedSetting === 'function') saveSharedSetting('company_info', DB._companyInfo); } catch(_){}
-    // Firestore
+    // v1.9.895: saveData (debounced + idb + Firestore) 동기 호출 — 즉시 idb/localStorage 안전 저장
+    try { if (typeof saveData === 'function') saveData(); } catch(eSD) { console.warn('saveData 실패:', eSD); }
+    // Firestore 즉시 저장 (백그라운드)
     if (typeof saveDataNow === 'function') {
       saveDataNow()
-        .then(() => { console.log('✅ [v893] saveDataNow 완료'); if (typeof showNotif === 'function') showNotif('✅ 회사 정보가 저장되었습니다', 'success'); })
+        .then(() => { console.log('✅ [v895] saveDataNow Firestore 완료'); if (typeof showNotif === 'function') showNotif('✅ 회사 정보가 저장되었습니다', 'success'); })
         .catch(err => {
-          console.warn('⚠️ [v893] saveDataNow 실패, saveData 폴백:', err);
-          try { if (typeof saveData === 'function') saveData(); } catch(_){}
-          if (typeof showNotif === 'function') showNotif('✅ 회사 정보 저장됨 (로컬)', 'success');
+          console.warn('⚠️ [v895] saveDataNow 실패, 로컬 저장은 완료됨:', err);
+          if (typeof showNotif === 'function') showNotif('✅ 회사 정보 저장됨 (Firestore 동기화 지연)', 'warning');
         });
-    } else if (typeof saveData === 'function') {
-      saveData();
-      if (typeof showNotif === 'function') showNotif('✅ 회사 정보가 저장되었습니다', 'success');
     } else {
-      if (typeof showNotif === 'function') showNotif('⚠️ 저장 함수 없음 — 새로고침 후 사라질 수 있음', 'warning');
+      if (typeof showNotif === 'function') showNotif('✅ 회사 정보가 저장되었습니다 (로컬)', 'success');
     }
   } catch(e3) {
     console.error('🏢 [v893] 저장 단계 오류:', e3);
