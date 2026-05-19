@@ -5213,7 +5213,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.879';
+const ERP_VERSION = 'v1.9.880';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13243,8 +13243,17 @@ async function saveAdProject() {
       DB.adProjects[idx] = { ...DB.adProjects[idx], name, description, startDate, endDate, shopIds, itemIds, updatedAt: Date.now() };
     }
   } else {
-    const newId = 'proj_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
-    DB.adProjects.push({ id: newId, name, description, startDate, endDate, shopIds, itemIds, createdAt: Date.now(), updatedAt: Date.now() });
+    // v1.9.880: UPSERT — 같은 sig (이름+기간) 이 이미 있으면 update, 없을 때만 push
+    const newSig = [String(name).trim().toLowerCase(), startDate, endDate].join('|');
+    const existIdx = DB.adProjects.findIndex(p => p && _adProjectSig(p) === newSig);
+    if (existIdx >= 0) {
+      DB.adProjects[existIdx] = { ...DB.adProjects[existIdx], name, description, startDate, endDate, shopIds, itemIds, updatedAt: Date.now() };
+      document.getElementById('ad-project-edit-id').value = DB.adProjects[existIdx].id;
+      console.log('🔄 [v880] 같은 sig 프로젝트 UPDATE:', DB.adProjects[existIdx].id);
+    } else {
+      const newId = 'proj_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+      DB.adProjects.push({ id: newId, name, description, startDate, endDate, shopIds, itemIds, createdAt: Date.now(), updatedAt: Date.now() });
+    }
   }
   // v1.9.876: await saveDataNow — Firestore 저장 완료까지 대기 (race 차단)
   try {
@@ -14268,16 +14277,31 @@ function _cleanupZombieAdExpenses() {
   return idsToRemove.length;
 }
 
-// v1.9.869: tombstone 매칭 광고 프로젝트 자동 제거 (Firestore sync 부활 차단)
+// v1.9.880: 광고 프로젝트 시그니처 — 같은 이름+기간 = 같은 프로젝트로 취급
+function _adProjectSig(p) {
+  if (!p) return '';
+  const n = String(p.name || '').trim().toLowerCase();
+  const s = String(p.startDate || '');
+  const e = String(p.endDate || '');
+  return [n, s, e].join('|');
+}
+
+// v1.9.869+880: tombstone 매칭 광고 프로젝트 자동 제거 (id + sig 둘 다)
 function _applyAdProjectTombstones() {
-  if (!Array.isArray(DB._deletedAdProjectIds) || DB._deletedAdProjectIds.length === 0) return 0;
   if (!Array.isArray(DB.adProjects) || DB.adProjects.length === 0) return 0;
-  const tombSet = new Set(DB._deletedAdProjectIds.map(t => String(typeof t === 'object' ? t.id : t)));
+  const idSet = new Set((DB._deletedAdProjectIds || []).map(t => String(typeof t === 'object' ? t.id : t)));
+  const sigSet = new Set((DB._deletedAdProjectSigs || []).map(t => (typeof t === 'object' ? t.sig : t)));
+  if (idSet.size === 0 && sigSet.size === 0) return 0;
   const before = DB.adProjects.length;
-  DB.adProjects = DB.adProjects.filter(p => p && !tombSet.has(String(p.id)));
+  DB.adProjects = DB.adProjects.filter(p => {
+    if (!p) return false;
+    if (idSet.has(String(p.id))) return false;
+    if (sigSet.size > 0 && sigSet.has(_adProjectSig(p))) return false;
+    return true;
+  });
   const removed = before - DB.adProjects.length;
   if (removed > 0) {
-    console.warn('🪦 [v869] tombstone 광고 프로젝트 ' + removed + '건 자동 제거');
+    console.warn('🪦 [v880] tombstone(id+sig) 광고 프로젝트 ' + removed + '건 자동 제거');
     try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
   }
   return removed;
@@ -14413,15 +14437,40 @@ function _quickDeleteAdProject(projectId) {
       }
     });
   });
-  // v1.9.878: confirm 제거 — 즉시 삭제 (실수 방지를 위해 알림으로만 안내)
-  // 1) 프로젝트 + tombstone
-  const idx = DB.adProjects.findIndex(p => String(p.id) === String(projectId));
-  if (idx >= 0) DB.adProjects.splice(idx, 1);
+  // v1.9.878: confirm 제거 — 즉시 삭제
+  // v1.9.880: 같은 sig (이름+기간) 매칭 프로젝트 모두 cascade 삭제 + sig tombstone
+  const sig = _adProjectSig(proj);
+  const sigMatches = (DB.adProjects || []).filter(p => p && _adProjectSig(p) === sig);
+  const allProjIds = sigMatches.map(p => p.id);
+  console.log('🗑 [v880] sig 매칭 프로젝트 ' + sigMatches.length + '건 삭제:', sig, allProjIds);
+  // 추가 expense 도 수집 (sig 매칭 모든 프로젝트의 광고비)
+  sigMatches.forEach(spProj => {
+    (DB.shops || []).forEach(s => {
+      (s.adsCosts || []).forEach(a => {
+        if (a && String(a.projectId || '') === String(spProj.id)) {
+          if (a.expenseId != null && !expenseIds.includes(a.expenseId)) {
+            expenseIds.push(a.expenseId);
+          }
+        }
+      });
+    });
+  });
+  // 1) 프로젝트 sig 매칭 모두 + tombstone (id + sig)
+  DB.adProjects = (DB.adProjects || []).filter(p => p && !allProjIds.includes(p.id));
   if (!Array.isArray(DB._deletedAdProjectIds)) DB._deletedAdProjectIds = [];
-  DB._deletedAdProjectIds.push({ id: projectId, name: proj.name||'', ts: Date.now() });
-  // 2) 광고비 행 삭제
+  allProjIds.forEach(pid => { DB._deletedAdProjectIds.push({ id: pid, name: proj.name||'', ts: Date.now() }); });
+  if (!Array.isArray(DB._deletedAdProjectSigs)) DB._deletedAdProjectSigs = [];
+  if (sig && !DB._deletedAdProjectSigs.some(x => x && x.sig === sig)) {
+    DB._deletedAdProjectSigs.push({ sig: sig, name: proj.name||'', ts: Date.now() });
+    if (DB._deletedAdProjectSigs.length > 200) {
+      DB._deletedAdProjectSigs = DB._deletedAdProjectSigs.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 200);
+    }
+  }
+  // 2) 광고비 행 삭제 (sig 매칭 모든 프로젝트)
   (DB.shops||[]).forEach(s => {
-    if (Array.isArray(s.adsCosts)) s.adsCosts = s.adsCosts.filter(a => String(a.projectId||'') !== String(projectId));
+    if (Array.isArray(s.adsCosts)) {
+      s.adsCosts = s.adsCosts.filter(a => !allProjIds.includes(String(a.projectId||'')) && !allProjIds.includes(a.projectId));
+    }
   });
   // 3) 지출결의서 + tombstone
   if (expenseIds.length > 0) {
@@ -14436,8 +14485,23 @@ function _quickDeleteAdProject(projectId) {
 }
 
 function renderAdsPage() {
-  // v1.9.877: tombstone 적용만 유지 (좀비 프로젝트 차단)
+  // v1.9.877+880: tombstone 적용 (id + sig 둘 다 — 부활/중복 차단)
   try { if (typeof _applyAdProjectTombstones === 'function') _applyAdProjectTombstones(); } catch(_){}
+  // v1.9.880: expense sig tombstone 도 로컬 DB 에 적용 (Firestore 머지 외에도)
+  try {
+    if (Array.isArray(DB._deletedExpenseSigs) && DB._deletedExpenseSigs.length > 0 && typeof _expenseSig === 'function') {
+      const expSigSet = new Set(DB._deletedExpenseSigs.map(x => x && x.sig).filter(Boolean));
+      if (expSigSet.size > 0 && Array.isArray(DB.expenses)) {
+        const before = DB.expenses.length;
+        DB.expenses = DB.expenses.filter(e => e && !expSigSet.has(_expenseSig(e)));
+        const removed = before - DB.expenses.length;
+        if (removed > 0) {
+          console.warn('🪦 [v880] 로컬 expense sig 매칭 ' + removed + '건 제거');
+          try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+        }
+      }
+    }
+  } catch(_){}
   const kpiRow = document.getElementById('ads-kpi-row');
   const tbody = document.getElementById('ads-page-table');
   if (!kpiRow || !tbody) return;
@@ -23374,6 +23438,21 @@ function resyncOrderExpenses(orderId) {
 
 // ═══════════════════ 결재 페이지 렌더 ═══════════════════
 function renderApprovalPage() {
+  // v1.9.880: expense sig tombstone 적용 (중복 부활 차단)
+  try {
+    if (Array.isArray(DB._deletedExpenseSigs) && DB._deletedExpenseSigs.length > 0 && typeof _expenseSig === 'function') {
+      const expSigSet = new Set(DB._deletedExpenseSigs.map(x => x && x.sig).filter(Boolean));
+      if (expSigSet.size > 0 && Array.isArray(DB.expenses)) {
+        const before = DB.expenses.length;
+        DB.expenses = DB.expenses.filter(e => e && !expSigSet.has(_expenseSig(e)));
+        const removed = before - DB.expenses.length;
+        if (removed > 0) {
+          console.warn('🪦 [v880] approval 페이지: 로컬 expense sig ' + removed + '건 제거');
+          try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+        }
+      }
+    }
+  } catch(_){}
   // v1.9.870: 자동 정리 모두 비활성화 — 사용자 데이터 revert 방지
   //   vendor 채움만 유지 (단순 표시 fix, 사용자 데이터 손실 없음)
   try { if (typeof _fillMissingAdExpenseVendor === 'function') _fillMissingAdExpenseVendor(); } catch(_){}
@@ -36386,6 +36465,31 @@ function initERPWhenReady() {
           merged.expenses = merged.expenses.filter(e => e && !expSigSet.has(_expenseSig(e)));
           const removed = before - merged.expenses.length;
           if (removed > 0) console.warn(`🪦 [v1.9.879] expense tombstone(sig) 으로 ${removed}건 부활 차단`);
+        }
+        // v1.9.880: adProject sig tombstone 머지 + 필터 (이름+기간 매칭)
+        const fsApSigT = Array.isArray(firestoreDB._deletedAdProjectSigs) ? firestoreDB._deletedAdProjectSigs : [];
+        const lcApSigT = Array.isArray(localDB._deletedAdProjectSigs) ? localDB._deletedAdProjectSigs : [];
+        const apSigByKey = new Map();
+        [...fsApSigT, ...lcApSigT].forEach(x => {
+          if (!x || !x.sig) return;
+          const prev = apSigByKey.get(x.sig);
+          if (!prev || (x.ts || 0) > (prev.ts || 0)) apSigByKey.set(x.sig, x);
+        });
+        merged._deletedAdProjectSigs = Array.from(apSigByKey.values()).sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 200);
+        const apSigSet = new Set(merged._deletedAdProjectSigs.map(x => x.sig));
+        if (Array.isArray(merged.adProjects) && apSigSet.size > 0 && typeof _adProjectSig === 'function') {
+          const before = merged.adProjects.length;
+          merged.adProjects = merged.adProjects.filter(p => p && !apSigSet.has(_adProjectSig(p)));
+          const removed = before - merged.adProjects.length;
+          if (removed > 0) console.warn(`🪦 [v1.9.880] adProject tombstone(sig) 으로 ${removed}건 부활 차단`);
+        }
+        // v1.9.880: adProject id tombstone 도 필터 (Firestore 머지 시점)
+        const apIdSet = new Set((merged._deletedAdProjectIds || []).map(t => String(typeof t === 'object' ? t.id : t)));
+        if (Array.isArray(merged.adProjects) && apIdSet.size > 0) {
+          const before = merged.adProjects.length;
+          merged.adProjects = merged.adProjects.filter(p => p && !apIdSet.has(String(p.id)));
+          const removed = before - merged.adProjects.length;
+          if (removed > 0) console.warn(`🪦 [v1.9.880] adProject tombstone(id) 으로 ${removed}건 부활 차단`);
         }
 
         // feedPost tombstone 머지
