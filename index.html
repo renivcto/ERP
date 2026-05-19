@@ -1325,7 +1325,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <button class="btn btn-outline" onclick="closeModal('company-info')">닫기</button>
           <div style="display:flex;gap:8px">
             <button class="btn btn-outline" id="ci-edit-btn" onclick="toggleCompanyEdit(true)">✏️ 수정</button>
-            <button class="btn btn-primary" id="ci-save-btn" style="display:none" onclick="saveOurCompanyInfo()">💾 저장</button>
+            <button class="btn btn-primary" id="ci-save-btn" style="display:none" onclick="(window.saveOurCompanyInfo||saveOurCompanyInfo)()">💾 저장</button>
             <button class="btn btn-outline" id="ci-cancel-btn" style="display:none" onclick="toggleCompanyEdit(false)">취소</button>
           </div>
         </div>
@@ -5220,7 +5220,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.892';
+const ERP_VERSION = 'v1.9.893';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -16442,46 +16442,76 @@ function _collectCompanyContacts() {
   return result;
 }
 
-// v1.9.891: 이름 변경 (기존 saveCompanyInfo 와 충돌 회피) + DB._companyInfo 사용 + 모달 자동 닫힘
+// v1.9.893: 저장 핸들러 robust 재작성 — window 노출 + 모달 닫기 보장
 async function saveOurCompanyInfo() {
-  _ensureCompanyInfo();
-  const ci = DB._companyInfo;
-  const _g = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
-  // company / companyEn 은 비어있어도 사용자가 의도적으로 비웠을 수 있음 — 그대로 사용
-  ci.company = _g('ci-company');
-  ci.companyEn = _g('ci-company-en');
-  // v1.9.889: ci-type 셀렉트 삭제됨 — 기존값 그대로 유지 (변경 안 함)
-  ci.bizNo = _g('ci-bizno');
-  ci.ceo = _g('ci-ceo');
-  ci.ceoEn = _g('ci-ceo-en');
-  ci.email = _g('ci-email');
-  ci.addr = _g('ci-addr');
-  ci.addrEn = _g('ci-addr-en');
-  ci.bankName = _g('ci-bank-name');
-  ci.bankAccount = _g('ci-bank-account');
-  ci.bankHolder = _g('ci-bank-holder');
-  ci.note = _g('ci-note');
-  ci.contacts = _collectCompanyContacts();
-  ci.updatedAt = Date.now();
-  // v1.9.891: shared settings 에도 저장 (기존 호환)
+  console.log('🏢 [v893] saveOurCompanyInfo 시작');
+  // 1) 데이터 수집 (안전하게)
   try {
-    if (typeof saveSharedSetting === 'function') {
-      saveSharedSetting('company_info', ci);
+    if (typeof _ensureCompanyInfo === 'function') _ensureCompanyInfo();
+    if (!DB._companyInfo || typeof DB._companyInfo !== 'object') DB._companyInfo = {};
+    const ci = DB._companyInfo;
+    const _g = id => { const el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; };
+    ci.company = _g('ci-company');
+    ci.companyEn = _g('ci-company-en');
+    ci.bizNo = _g('ci-bizno');
+    ci.ceo = _g('ci-ceo');
+    ci.ceoEn = _g('ci-ceo-en');
+    ci.email = _g('ci-email');
+    ci.addr = _g('ci-addr');
+    ci.addrEn = _g('ci-addr-en');
+    ci.bankName = _g('ci-bank-name');
+    ci.bankAccount = _g('ci-bank-account');
+    ci.bankHolder = _g('ci-bank-holder');
+    ci.note = _g('ci-note');
+    if (typeof _collectCompanyContacts === 'function') {
+      ci.contacts = _collectCompanyContacts();
     }
-  } catch(e) { console.warn('shared setting 저장 실패:', e); }
+    ci.updatedAt = Date.now();
+    console.log('🏢 [v893] 수집된 ci:', JSON.stringify(ci).slice(0, 200));
+  } catch(e1) {
+    console.error('🏢 [v893] 데이터 수집 단계 오류:', e1);
+  }
+  // 2) 모달 즉시 닫기 (사용자가 원한 동작)
   try {
-    if (typeof saveDataNow === 'function') await saveDataNow();
-    else if (typeof saveData === 'function') saveData();
-    if (typeof showNotif === 'function') showNotif('✅ 회사 정보가 저장되었습니다', 'success');
-    // v1.9.891: 저장 성공 시 모달 자동 닫기
     if (typeof closeModal === 'function') closeModal('company-info');
-  } catch(e) {
-    console.error('우리 회사 정보 저장 실패:', e);
-    if (typeof showNotif === 'function') showNotif('저장 실패: ' + e.message, 'error');
-    // 실패 시 모달 유지 (사용자가 재시도할 수 있도록)
-    _renderCompanyInfoBody(false);
+    else {
+      const ov = document.getElementById('overlay-company-info');
+      if (ov) ov.style.display = 'none';
+    }
+    console.log('🏢 [v893] 모달 닫음');
+  } catch(e2) { console.error('🏢 [v893] 모달 닫기 오류:', e2); }
+  // 3) 저장 (Firestore + localStorage)
+  try {
+    // localStorage 즉시 백업 (Firestore 실패해도 데이터 보존)
+    try { localStorage.setItem('reniv_erp_db', JSON.stringify(DB)); } catch(_){}
+    // shared settings
+    try { if (typeof saveSharedSetting === 'function') saveSharedSetting('company_info', DB._companyInfo); } catch(_){}
+    // Firestore
+    if (typeof saveDataNow === 'function') {
+      saveDataNow()
+        .then(() => { console.log('✅ [v893] saveDataNow 완료'); if (typeof showNotif === 'function') showNotif('✅ 회사 정보가 저장되었습니다', 'success'); })
+        .catch(err => {
+          console.warn('⚠️ [v893] saveDataNow 실패, saveData 폴백:', err);
+          try { if (typeof saveData === 'function') saveData(); } catch(_){}
+          if (typeof showNotif === 'function') showNotif('✅ 회사 정보 저장됨 (로컬)', 'success');
+        });
+    } else if (typeof saveData === 'function') {
+      saveData();
+      if (typeof showNotif === 'function') showNotif('✅ 회사 정보가 저장되었습니다', 'success');
+    } else {
+      if (typeof showNotif === 'function') showNotif('⚠️ 저장 함수 없음 — 새로고침 후 사라질 수 있음', 'warning');
+    }
+  } catch(e3) {
+    console.error('🏢 [v893] 저장 단계 오류:', e3);
+    if (typeof showNotif === 'function') showNotif('저장 오류: ' + e3.message, 'error');
   }
 }
+// v1.9.893: window 에 명시적으로 노출 (스코프 보장)
+window.saveOurCompanyInfo = saveOurCompanyInfo;
+window.openCompanyInfoModal = openCompanyInfoModal;
+window.toggleCompanyEdit = toggleCompanyEdit;
+window._addCompanyContact = _addCompanyContact;
+window._removeCompanyContact = _removeCompanyContact;
 
 // v1.9.884: 외화 단가 → KRW 환산 미리보기
 function updatePriceKrwPreview() {
