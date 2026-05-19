@@ -5213,7 +5213,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.878';
+const ERP_VERSION = 'v1.9.879';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -25146,6 +25146,17 @@ function renderApprovalExpenseTable() {
   }).join('');
 }
 
+// v1.9.879: expense 시그니처 — 중복 부활 차단용
+function _expenseSig(e) {
+  if (!e) return '';
+  const v = String(e.vendor || '').trim();
+  const t = String(e.title || '').trim();
+  const a = String(Math.round(parseFloat(e.amount) || 0));
+  const d = String(e.dueDate || e.adStartDate || '');
+  const c = String(e.category || '');
+  return [c, v, t, a, d].join('|');
+}
+
 function deleteExpense(id) {
   const e = DB.expenses.find(x => x.id === id);
   if (!e) return;
@@ -25164,13 +25175,29 @@ function deleteExpense(id) {
   }
   // v1.9.500: 광고비 expense는 쇼핑몰 adsCosts에서도 제거
   try { if (e && e.category === 'ad') _removeExpenseAdsFromShop(e.id); } catch(_){}
+  // v1.9.879: 시그니처 매칭 중복 모두 찾아서 함께 삭제 + tombstone
+  const sig = _expenseSig(e);
+  const dupes = DB.expenses.filter(x => x && x.id !== e.id && _expenseSig(x) === sig);
+  if (dupes.length > 0) {
+    console.warn('🪦 [v879] 같은 시그니처 중복 expense ' + dupes.length + '건 함께 삭제:', dupes.map(d=>d.id));
+    dupes.forEach(d => { try { if (d.category === 'ad') _removeExpenseAdsFromShop(d.id); } catch(_){} });
+  }
+  const allIdsToTomb = [e.id, ...dupes.map(d => d.id)];
   // v1.9.543 — tombstone 등록 (다른 탭/기기 동기화 시 부활 차단)
   if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
-  DB._deletedExpenseIds.push({ id: e.id, ts: Date.now() });
+  allIdsToTomb.forEach(eid => { DB._deletedExpenseIds.push({ id: eid, ts: Date.now() }); });
   if (DB._deletedExpenseIds.length > 500) {
     DB._deletedExpenseIds = DB._deletedExpenseIds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
   }
-  DB.expenses = DB.expenses.filter(x => x.id !== id);
+  // v1.9.879: 시그니처 tombstone (id 가 달라도 같은 내용이면 차단)
+  if (!Array.isArray(DB._deletedExpenseSigs)) DB._deletedExpenseSigs = [];
+  if (sig && !DB._deletedExpenseSigs.some(x => x && x.sig === sig)) {
+    DB._deletedExpenseSigs.push({ sig: sig, ts: Date.now() });
+    if (DB._deletedExpenseSigs.length > 300) {
+      DB._deletedExpenseSigs = DB._deletedExpenseSigs.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 300);
+    }
+  }
+  DB.expenses = DB.expenses.filter(x => !allIdsToTomb.includes(x.id));
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
   renderApprovalPage();
   try { renderShopList(); } catch(_){}
@@ -36341,7 +36368,24 @@ function initERPWhenReady() {
           const before = merged.expenses.length;
           merged.expenses = merged.expenses.filter(e => e && !expTombSet.has(String(e.id)));
           const removed = before - merged.expenses.length;
-          if (removed > 0) console.warn(`🪦 [v1.9.543] expense tombstone 으로 ${removed}건 부활 차단`);
+          if (removed > 0) console.warn(`🪦 [v1.9.543] expense tombstone(id) 으로 ${removed}건 부활 차단`);
+        }
+        // v1.9.879: 시그니처 tombstone 머지 + 필터
+        const fsSigT = Array.isArray(firestoreDB._deletedExpenseSigs) ? firestoreDB._deletedExpenseSigs : [];
+        const lcSigT = Array.isArray(localDB._deletedExpenseSigs) ? localDB._deletedExpenseSigs : [];
+        const sigByKey = new Map();
+        [...fsSigT, ...lcSigT].forEach(x => {
+          if (!x || !x.sig) return;
+          const prev = sigByKey.get(x.sig);
+          if (!prev || (x.ts || 0) > (prev.ts || 0)) sigByKey.set(x.sig, x);
+        });
+        merged._deletedExpenseSigs = Array.from(sigByKey.values()).sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 300);
+        const expSigSet = new Set(merged._deletedExpenseSigs.map(x => x.sig));
+        if (Array.isArray(merged.expenses) && expSigSet.size > 0 && typeof _expenseSig === 'function') {
+          const before = merged.expenses.length;
+          merged.expenses = merged.expenses.filter(e => e && !expSigSet.has(_expenseSig(e)));
+          const removed = before - merged.expenses.length;
+          if (removed > 0) console.warn(`🪦 [v1.9.879] expense tombstone(sig) 으로 ${removed}건 부활 차단`);
         }
 
         // feedPost tombstone 머지
