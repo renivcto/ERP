@@ -5220,7 +5220,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.893';
+const ERP_VERSION = 'v1.9.894';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29475,7 +29475,37 @@ function processOrderStockIn(rows, date, serial, orderVendorId, orderId) {
         console.log('재고 입고 반영:', item.name, '+', row.qty, '→', DB.items[idx].stock);
       }
     } else {
-      // 품목관리에 없으면 자동 등록 — 단, 발주 업체가 외주가공이면 등록 스킵 (위에서 return됨)
+      // v1.9.894: 품목관리에 없으면 자동 등록 — 단, 다음의 경우 skip:
+      //   1) 발주 업체가 외주가공 (위에서 return됨)
+      //   2) tombstone 매칭 (의도적 삭제) — name 또는 code 매칭 시 차단
+      const nameNorm = String(row.name || '').trim().toLowerCase();
+      const codeNorm = String(row.code || '').trim().toLowerCase();
+      const tombstones = Array.isArray(DB._deletedItemIds) ? DB._deletedItemIds : [];
+      const isTombstoned = tombstones.some(t => {
+        if (!t) return false;
+        const tName = String((typeof t === 'object' ? t.name : '') || '').trim().toLowerCase();
+        const tCode = String((typeof t === 'object' ? t.code : '') || '').trim().toLowerCase();
+        // name 매칭 (가장 신뢰성 높음)
+        if (nameNorm && tName && nameNorm === tName) return true;
+        // code 매칭 (둘 다 비어있지 않을 때만)
+        if (codeNorm && tCode && codeNorm === tCode) return true;
+        return false;
+      });
+      if (isTombstoned) {
+        console.warn('🪦 [v894] 자동 품목 등록 차단 (tombstone 매칭):', row.name, '/', row.code);
+        // 재고 이력만 기록 (수량은 어디 들어왔지만 품목은 생성 안 함 — 추적용)
+        DB.stockHistory.push({
+          id: nextId('stock'),
+          itemId: null,
+          type: 'in',
+          qty: row.qty,
+          price: row.price || 0,
+          date: date,
+          lot: serial || '',
+          note: '발주서 입고 (삭제된 품목 ' + (row.name||'-') + ') - 등록 스킵' + (serial ? ' (' + serial + ')' : '')
+        });
+        return;  // 이 row 만 skip (rows.forEach 안에서)
+      }
       const newItem = {
         id: nextId('item'),
         type: '부자재',
