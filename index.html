@@ -5220,7 +5220,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.891';
+const ERP_VERSION = 'v1.9.892';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6153,6 +6153,7 @@ async function _doSaveDataInner() {
       _deletedApprovalIds: Array.isArray(dbToSave._deletedApprovalIds) ? dbToSave._deletedApprovalIds : [],
       _deletedCommentIds: Array.isArray(dbToSave._deletedCommentIds) ? dbToSave._deletedCommentIds : [],
       _deletedSampleIds: Array.isArray(dbToSave._deletedSampleIds) ? dbToSave._deletedSampleIds : [],  // v1.9.682
+      _deletedItemIds: Array.isArray(dbToSave._deletedItemIds) ? dbToSave._deletedItemIds : [],  // v1.9.892
       _deletedShopIds: Array.isArray(dbToSave._deletedShopIds) ? dbToSave._deletedShopIds : [],  // v1.9.691
       // v1.9.594 — 고객 등급 수동 override (key → 'vip'|'regular'|'member'|'normal')
       customerOverrides: (dbToSave.customerOverrides && typeof dbToSave.customerOverrides === 'object') ? dbToSave.customerOverrides : {},
@@ -6848,6 +6849,7 @@ const DEFAULT_DB = {
   _deletedApprovalIds: [],
   _deletedCommentIds: [],
   _deletedSampleIds: [],  // v1.9.682
+  _deletedItemIds: [],  // v1.9.892 — 품목 삭제 tombstone
   _deletedShopIds: [],  // v1.9.691
   // v1.9.594 — 고객 등급 수동 override (key → tier)
   customerOverrides: {},
@@ -6869,6 +6871,7 @@ let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
     if (!Array.isArray(DB._deletedApprovalIds)) DB._deletedApprovalIds = [];
     if (!Array.isArray(DB._deletedCommentIds)) DB._deletedCommentIds = [];
     if (!Array.isArray(DB._deletedSampleIds)) DB._deletedSampleIds = [];  // v1.9.682
+    if (!Array.isArray(DB._deletedItemIds)) DB._deletedItemIds = [];  // v1.9.892
     if (!Array.isArray(DB._deletedShopIds)) DB._deletedShopIds = [];  // v1.9.691
   } catch(_){}
 })();
@@ -16275,8 +16278,15 @@ function deleteItemFromModal() {
     : `'${item.name}' 품목을 삭제합니까?\n연결된 BOM, 생산, 재고 데이터도 확인하세요.`;
   if (!confirm(confirmMsg)) return;
   if (isFinished) restoreBOMStockForDeletedProduct(id, '완제품 삭제');
+  // v1.9.892: tombstone 등록
+  if (!Array.isArray(DB._deletedItemIds)) DB._deletedItemIds = [];
+  DB._deletedItemIds.push({ id: item.id, name: item.name||'', code: item.code||'', ts: Date.now() });
+  if (DB._deletedItemIds.length > 500) {
+    DB._deletedItemIds = DB._deletedItemIds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
+  }
   DB.items = DB.items.filter(i => parseInt(i.id) !== parseInt(id) && i.id != id);
-  saveData(); closeModal('add-item'); renderItemTable();
+  try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  closeModal('add-item'); renderItemTable();
   if (typeof renderStock === 'function') renderStock();
   updateBadges();
   showNotif(isFinished ? '완제품 삭제 및 BOM 재고가 복구되었습니다' : '품목이 삭제되었습니다','success');
@@ -16828,8 +16838,16 @@ function deleteItem(id) {
     : `'${item.name}' 품목을 삭제합니까?`;
   if (!confirm(confirmMsg)) return;
   if (isFinished) restoreBOMStockForDeletedProduct(parseInt(id), '완제품 삭제');
+  // v1.9.892: tombstone 등록 (Firestore 재동기화 시 부활 차단)
+  if (!Array.isArray(DB._deletedItemIds)) DB._deletedItemIds = [];
+  DB._deletedItemIds.push({ id: item.id, name: item.name||'', code: item.code||'', ts: Date.now() });
+  if (DB._deletedItemIds.length > 500) {
+    DB._deletedItemIds = DB._deletedItemIds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
+  }
   DB.items = (DB.items||[]).filter(i => parseInt(i.id) !== parseInt(id) && i.id != id);
-  saveData(); renderItemTable();
+  // v1.9.892: 즉시 저장 (debounce 대신 saveDataNow)
+  try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  renderItemTable();
   if (typeof renderStock === 'function') renderStock();
   updateBadges();
   showNotif(isFinished ? '완제품 삭제 및 BOM 재고가 복구되었습니다' : '품목이 삭제되었습니다','success');
@@ -36976,6 +36994,24 @@ function initERPWhenReady() {
           merged.samples = merged.samples.filter(s => s && !smTombSet.has(String(s.id)));
           const removed = before - merged.samples.length;
           if (removed > 0) console.warn('🪦 [v1.9.682] sample tombstone 으로 ' + removed + '건 부활 차단');
+        }
+        // v1.9.892: item tombstone 머지 + 필터
+        const fsItT = Array.isArray(firestoreDB._deletedItemIds) ? firestoreDB._deletedItemIds : [];
+        const lcItT = Array.isArray(localDB._deletedItemIds) ? localDB._deletedItemIds : [];
+        const itTByKey = new Map();
+        [...fsItT, ...lcItT].forEach(x => {
+          if (!x || x.id == null) return;
+          const k = String(x.id);
+          const prev = itTByKey.get(k);
+          if (!prev || (x.ts || 0) > (prev.ts || 0)) itTByKey.set(k, x);
+        });
+        merged._deletedItemIds = Array.from(itTByKey.values()).sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
+        const itTombSet = new Set(merged._deletedItemIds.map(x => String(x.id)));
+        if (Array.isArray(merged.items) && itTombSet.size > 0) {
+          const before = merged.items.length;
+          merged.items = merged.items.filter(i => i && !itTombSet.has(String(i.id)));
+          const removed = before - merged.items.length;
+          if (removed > 0) console.warn('🪦 [v1.9.892] item tombstone 으로 ' + removed + '건 부활 차단');
         }
         // v1.9.691: 쇼핑몰 tombstone 머지
         const fsShT = Array.isArray(firestoreDB._deletedShopIds) ? firestoreDB._deletedShopIds : [];
