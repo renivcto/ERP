@@ -5213,7 +5213,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.875';
+const ERP_VERSION = 'v1.9.876';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13220,7 +13220,7 @@ function _updateApeTitleFromAd() {
   } catch(e) { console.warn('_updateApeTitleFromAd 실패:', e); }
 }
 
-function saveAdProject() {
+async function saveAdProject() {
   const editId = document.getElementById('ad-project-edit-id').value;
   const name = document.getElementById('ad-project-name').value.trim();
   if (!name) { showNotif('프로젝트명을 입력해주세요', 'warning'); return; }
@@ -13242,8 +13242,17 @@ function saveAdProject() {
     const newId = 'proj_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
     DB.adProjects.push({ id: newId, name, description, startDate, endDate, shopIds, itemIds, createdAt: Date.now(), updatedAt: Date.now() });
   }
-  // v1.9.827: saveData -> saveDataNow (즉시 저장 - 새로고침 시 사라지는 버그 fix)
-  try { if (typeof saveDataNow === 'function') { saveDataNow(); } else { saveData(); } } catch(_){}
+  // v1.9.876: await saveDataNow — Firestore 저장 완료까지 대기 (race 차단)
+  try {
+    if (typeof saveDataNow === 'function') {
+      await saveDataNow();
+      console.log('✅ [SAVE] adProject ' + (editId || 'new') + ' Firestore 저장 완료');
+    } else {
+      saveData();
+    }
+  } catch(err) {
+    console.error('❌ [SAVE] adProject 저장 실패:', err);
+  }
   closeModal('ad-project-modal');
   showNotif('✅ 프로젝트 ' + (editId ? '수정' : '추가') + ' 완료', 'success');
   try { renderAdsPage(); } catch(_){}
