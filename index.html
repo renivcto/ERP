@@ -5227,7 +5227,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.884';
+const ERP_VERSION = 'v1.9.885';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -15866,9 +15866,18 @@ window.addEventListener('resize', () => {
   } catch(_){}
 });
 
+// v1.9.885: 품목코드 있는 품목만 (발주서에서 자동 생성된 임시 품목 제외)
+function _hasItemCode(i) {
+  if (!i) return false;
+  const code = (i.code != null) ? String(i.code).trim() : '';
+  return code !== '';
+}
+
 function renderItemTable() {
   const fixedTypes = ['원자재','부자재','OEM','외주가공','완제품'];
-  const extraTypes = [...new Set(DB.items.map(i=>i.type))].filter(t => !fixedTypes.includes(t));
+  // v1.9.885: 품목코드 있는 것만 (분류 탭 count + 표 모두 동일 기준)
+  const _validItems = (DB.items || []).filter(_hasItemCode);
+  const extraTypes = [...new Set(_validItems.map(i=>i.type))].filter(t => !fixedTypes.includes(t));
   const types = ['전체', ...fixedTypes, ...extraTypes];
   const chipColors = {
     '전체':   {bg:'#eef6fc', border:'#c4dff2', text:'#3b82a0', activeBg:'#7bb8d6', activeText:'#fff'},
@@ -15884,13 +15893,13 @@ function renderItemTable() {
     const bg = isActive ? (c.activeBg||c.bg) : c.bg;
     const txtColor = isActive ? (c.activeText||c.text) : c.text;
     const border = isActive ? (c.activeBg||c.border) : c.border;
-    return `<div onclick="itemFilter='${t}';window.itemProductLineFilter='전체';renderItemTable()" class="pg-chip${isActive?' active':''}" style="background:${bg};color:${txtColor};border-color:${border};${isActive?'':'border-bottom-color:transparent'}">${t}(${t==='전체'?DB.items.length:(DB.items||[]).filter(i=>i.type===t).length})</div>`;
+    return `<div onclick="itemFilter='${t}';window.itemProductLineFilter='전체';renderItemTable()" class="pg-chip${isActive?' active':''}" style="background:${bg};color:${txtColor};border-color:${border};${isActive?'':'border-bottom-color:transparent'}">${t}(${t==='전체'?_validItems.length:_validItems.filter(i=>i.type===t).length})</div>`;
   }).join('');
 
   // v1.9.314 — 제품 라인 하위 필터 칩 렌더 (현재 분류 탭에 존재하는 라인만)
   const plChipsEl = $('item-product-line-chips');
   if (plChipsEl) {
-    const baseList = DB.items.filter(i => itemFilter==='전체' || i.type===itemFilter);
+    const baseList = _validItems.filter(i => itemFilter==='전체' || i.type===itemFilter);
     const lineCounts = {};
     baseList.forEach(i => {
       const ln = _extractProductLine(i.code);
@@ -15926,7 +15935,7 @@ function renderItemTable() {
   }
 
   const search = ($('item-search') ? $('item-search').value : '').toLowerCase();
-  let filtered = DB.items.filter(i => itemFilter==='전체' || i.type===itemFilter);
+  let filtered = _validItems.filter(i => itemFilter==='전체' || i.type===itemFilter);
   // v1.9.314 — 제품 라인 필터 적용
   if (window.itemProductLineFilter && window.itemProductLineFilter !== '전체') {
     filtered = filtered.filter(i => _extractProductLine(i.code) === window.itemProductLineFilter);
@@ -18758,8 +18767,9 @@ function renderStockTable() {
   const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray',외주가공:'gray'})[t]||'gray';
   const searchQ = ($('stock-search')?.value||'').toLowerCase().trim();
   const archivedList = (DB.archivedItems||[]).map(i => ({...i, _archived:true}));
-  const activeItems = DB.items.filter(i => i.type !== 'OEM' && i.type !== '외주가공');
-  const archivedBase = archivedList.filter(i => i.type !== 'OEM' && i.type !== '외주가공');
+  // v1.9.885: 품목코드 있는 것만 (발주서에서 자동 생성된 임시 품목 제외)
+  const activeItems = DB.items.filter(i => i.type !== 'OEM' && i.type !== '외주가공' && _hasItemCode(i));
+  const archivedBase = archivedList.filter(i => i.type !== 'OEM' && i.type !== '외주가공' && _hasItemCode(i));
   const allItems = [...activeItems, ...archivedBase];
   let filtered;
   if (_stockTypeFilter === '아카이브') {
