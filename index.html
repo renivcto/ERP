@@ -5220,7 +5220,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.896';
+const ERP_VERSION = 'v1.9.897';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -36879,11 +36879,26 @@ function initERPWhenReady() {
           }
         } catch(e) { console.warn('[RECOVERY] ' + k + ' 복구 실패:', e); }
       });
-      // 비배열 메타 필드는 Firestore 것을 우선
-      ['_trelloKey','_trelloToken','_trelloLists','_trelloCards','_trelloLists2','_trelloCards2','_bomMargin','_companyInfo','_processedOrders'].forEach(k => {
+      // 비배열 메타 필드는 Firestore 것을 우선 (v1.9.897: _companyInfo 는 별도 처리)
+      ['_trelloKey','_trelloToken','_trelloLists','_trelloCards','_trelloLists2','_trelloCards2','_bomMargin','_processedOrders'].forEach(k => {
         if (firestoreDB[k] !== undefined) merged[k] = firestoreDB[k];
         else if (localDB[k] !== undefined) merged[k] = localDB[k];
       });
+      // v1.9.897: _companyInfo — updatedAt 타임스탬프 비교로 최신 버전 우선 (사용자 편집 보존)
+      try {
+        const fsCi = (firestoreDB && typeof firestoreDB._companyInfo === 'object' && firestoreDB._companyInfo) ? firestoreDB._companyInfo : null;
+        const lcCi = (localDB && typeof localDB._companyInfo === 'object' && localDB._companyInfo) ? localDB._companyInfo : null;
+        const fsTs = (fsCi && typeof fsCi.updatedAt === 'number') ? fsCi.updatedAt : 0;
+        const lcTs = (lcCi && typeof lcCi.updatedAt === 'number') ? lcCi.updatedAt : 0;
+        if (lcCi && lcTs > fsTs) {
+          merged._companyInfo = lcCi;
+          console.log('🏢 [v897] _companyInfo: localStorage 가 더 최신 (lcTs=' + lcTs + ' > fsTs=' + fsTs + ') → 로컬 우선');
+        } else if (fsCi) {
+          merged._companyInfo = fsCi;
+        } else if (lcCi) {
+          merged._companyInfo = lcCi;
+        }
+      } catch(e) { console.warn('[v897] _companyInfo 머지 실패:', e); }
       // v1.9.247 — appSettings (슬랙 URL / Gemini 키) UNION 병합
       //   값이 있는 쪽을 보존 (실수로 다른 탭/기기에서 빈 값으로 덮어쓰는 사고 방지)
       try {
