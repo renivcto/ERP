@@ -5185,7 +5185,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.886';
+const ERP_VERSION = 'v1.9.887';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13042,16 +13042,56 @@ function openAdProjectModal(editId) {
   openModal('ad-project-modal');
 }
 
+// v1.9.887: adsCost.expenseId 가 광고 expense (category='ad') 가 아니면 잘못된 연결 → 정리
+//   - po_balance / po_prepay / sample 등에 연결된 adsCost 는 좀비 행
+//   - expense 가 아예 없는 경우도 정리 (단, expense tombstone 검사 후)
+function _cleanupOrphanAdsCosts() {
+  if (!Array.isArray(DB.shops)) return 0;
+  if (!Array.isArray(DB.expenses)) DB.expenses = [];
+  const expMap = new Map();
+  DB.expenses.forEach(e => { if (e && e.id != null) expMap.set(String(e.id), e); });
+  let removed = 0;
+  const removedSamples = [];
+  DB.shops.forEach(s => {
+    if (!s || !Array.isArray(s.adsCosts)) return;
+    const before = s.adsCosts.length;
+    s.adsCosts = s.adsCosts.filter(a => {
+      if (!a || a.expenseId == null) return true;  // 수동 광고비는 유지
+      const exp = expMap.get(String(a.expenseId));
+      if (!exp) return true;  // expense 없으면 다른 cleanup 함수가 처리 (여기선 카테고리 검사만)
+      // category='ad' 가 아닌 expense 에 연결된 광고비 행은 좀비 → 제거
+      if (exp.category !== 'ad') {
+        removedSamples.push({ shopId: s.id, expId: a.expenseId, expCat: exp.category, expTitle: exp.title });
+        return false;
+      }
+      return true;
+    });
+    removed += (before - s.adsCosts.length);
+  });
+  if (removed > 0) {
+    console.warn('🧹 [v887] 잘못 연결된 광고비 행 ' + removed + '건 정리:', removedSamples.slice(0, 5));
+    try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  }
+  return removed;
+}
+
 // v1.9.777: 프로젝트의 광고비 이력 렌더
 function _renderProjectCostList(projectId) {
   const list = document.getElementById('ad-project-cost-list');
   const summary = document.getElementById('ad-project-cost-summary');
   if (!list) return;
+  // v1.9.887: 잘못 연결된 광고비 행 자동 정리 (po_balance 등 좀비)
+  try { _cleanupOrphanAdsCosts(); } catch(_){}
   const ads = [];
   (DB.shops || []).forEach(s => {
     if (!s || !Array.isArray(s.adsCosts)) return;
     s.adsCosts.forEach(a => {
       if (a && String(a.projectId || '') === String(projectId)) {
+        // v1.9.887: 표시 단계에서도 광고 카테고리 expense 인지 한번 더 확인 (이중 안전망)
+        if (a.expenseId != null) {
+          const exp = (DB.expenses||[]).find(e => e && String(e.id) === String(a.expenseId));
+          if (exp && exp.category !== 'ad') return;  // 잘못 연결된 행 skip
+        }
         ads.push({ ...a, _shopId: s.id, _shopName: s.name });
       }
     });
@@ -14479,6 +14519,8 @@ function _quickDeleteAdProject(projectId) {
 function renderAdsPage() {
   // v1.9.877+880: tombstone 적용 (id + sig 둘 다 — 부활/중복 차단)
   try { if (typeof _applyAdProjectTombstones === 'function') _applyAdProjectTombstones(); } catch(_){}
+  // v1.9.887: 잘못 연결된 광고비 행 자동 정리 (po_balance 등)
+  try { if (typeof _cleanupOrphanAdsCosts === 'function') _cleanupOrphanAdsCosts(); } catch(_){}
   // v1.9.880: expense sig tombstone 도 로컬 DB 에 적용 (Firestore 머지 외에도)
   try {
     if (Array.isArray(DB._deletedExpenseSigs) && DB._deletedExpenseSigs.length > 0 && typeof _expenseSig === 'function') {
