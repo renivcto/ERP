@@ -5220,7 +5220,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.895';
+const ERP_VERSION = 'v1.9.896';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12921,10 +12921,13 @@ function _calcAdProjectKPI(project) {
     if (!s || !Array.isArray(s.adsCosts)) return;
     s.adsCosts.forEach(a => {
       if (!a || String(a.projectId || '') !== String(project.id)) return;
-      // 자동 동기화 행이면 expense 확인 (수동 행은 expenseId 없음 → 그대로 합산)
+      // v1.9.896: 자동 동기화 행이면 expense 확인 (수동 행은 expenseId 없음 → 그대로 합산)
+      //   - expense 없음 (삭제됨) → orphan, 합산 제외
+      //   - expense 있지만 category !== 'ad' → orphan, 합산 제외
       if (a.expenseId != null) {
         const exp = _expMap.get(String(a.expenseId));
-        if (exp && exp.category !== 'ad') return;  // orphan — 합산 제외
+        if (!exp) return;  // dangling pointer
+        if (exp.category !== 'ad') return;  // 잘못 연결된 카테고리
       }
       totalAds += Number(a.cost || 0);
       adCount++;
@@ -13104,8 +13107,12 @@ function _cleanupOrphanAdsCosts() {
     s.adsCosts = s.adsCosts.filter(a => {
       if (!a || a.expenseId == null) return true;  // 수동 광고비는 유지
       const exp = expMap.get(String(a.expenseId));
-      if (!exp) return true;  // expense 없으면 다른 cleanup 함수가 처리 (여기선 카테고리 검사만)
-      // category='ad' 가 아닌 expense 에 연결된 광고비 행은 좀비 → 제거
+      // v1.9.896: expense 가 없으면 (dangling pointer) → 좀비 행 제거
+      if (!exp) {
+        removedSamples.push({ shopId: s.id, expId: a.expenseId, expCat: '(missing)', expTitle: '(deleted)' });
+        return false;
+      }
+      // category='ad' 가 아닌 expense 에 연결된 광고비 행도 좀비 → 제거
       if (exp.category !== 'ad') {
         removedSamples.push({ shopId: s.id, expId: a.expenseId, expCat: exp.category, expTitle: exp.title });
         return false;
@@ -13133,10 +13140,11 @@ function _renderProjectCostList(projectId) {
     if (!s || !Array.isArray(s.adsCosts)) return;
     s.adsCosts.forEach(a => {
       if (a && String(a.projectId || '') === String(projectId)) {
-        // v1.9.887: 표시 단계에서도 광고 카테고리 expense 인지 한번 더 확인 (이중 안전망)
+        // v1.9.896: 표시 단계 strict 필터 — expense 없거나 non-ad 면 skip
         if (a.expenseId != null) {
           const exp = (DB.expenses||[]).find(e => e && String(e.id) === String(a.expenseId));
-          if (exp && exp.category !== 'ad') return;  // 잘못 연결된 행 skip
+          if (!exp) return;  // dangling pointer (expense 삭제됨)
+          if (exp.category !== 'ad') return;  // 잘못 연결된 카테고리
         }
         ads.push({ ...a, _shopId: s.id, _shopName: s.name });
       }
