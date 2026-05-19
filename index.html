@@ -1299,12 +1299,45 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       </div>
     </div>
 
+    <!-- v1.9.888: 우리 회사 정보 모달 -->
+    <div class="overlay" id="overlay-company-info">
+      <div class="modal" style="width:780px;max-width:95vw">
+        <div class="modal-hdr" style="background:linear-gradient(135deg,#ede9fe,#fce7f3);border-bottom:1px solid #e9d5ff">
+          <span class="modal-ttl" style="display:flex;align-items:center;gap:8px"><span>🏢</span><span>우리 회사 정보</span></span>
+          <button class="modal-x" onclick="closeModal('company-info')">✕</button>
+        </div>
+        <div class="modal-body" style="padding:0">
+          <!-- 회사명 (큰 헤더) -->
+          <div style="padding:18px 24px;background:linear-gradient(135deg,#faf5ff,#fdf2f8);border-bottom:1px solid #f3e8ff;text-align:center">
+            <div id="ci-company-display" style="font-size:24px;font-weight:900;color:#0f172a;letter-spacing:-.5px"></div>
+            <div id="ci-company-en-display" style="font-size:12px;color:#64748b;margin-top:2px;font-style:italic"></div>
+          </div>
+          <!-- 정보 테이블 -->
+          <div style="padding:0">
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              <tbody id="ci-info-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-ft" style="justify-content:space-between">
+          <button class="btn btn-outline" onclick="closeModal('company-info')">닫기</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-outline" id="ci-edit-btn" onclick="toggleCompanyEdit(true)">✏️ 수정</button>
+            <button class="btn btn-primary" id="ci-save-btn" style="display:none" onclick="saveCompanyInfo()">💾 저장</button>
+            <button class="btn btn-outline" id="ci-cancel-btn" style="display:none" onclick="toggleCompanyEdit(false)">취소</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ══════════════ PARTNERS (v1.9.613) — 거래처 hub: 협력사 / 생산업체 / 판매업체 ══════════════ -->
     <div class="page" id="page-partners">
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
         <button id="partners-tab-coop" class="btn partners-tab-btn" onclick="switchPartnersTab('coop')" style="padding:10px 18px;font-weight:700;font-size:14px">🤝 협력사</button>
         <button id="partners-tab-mfr" class="btn partners-tab-btn" onclick="switchPartnersTab('mfr')" style="padding:10px 18px;font-weight:700;font-size:14px">🏭 생산업체</button>
         <button id="partners-tab-seller" class="btn partners-tab-btn" onclick="switchPartnersTab('seller')" style="padding:10px 18px;font-weight:700;font-size:14px">🛒 판매업체</button>
+        <!-- v1.9.888: 우리 회사 정보 버튼 -->
+        <button onclick="openCompanyInfoModal()" style="margin-left:auto;padding:10px 18px;font-weight:700;font-size:13.5px;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;border:none;border-radius:8px;cursor:pointer;box-shadow:0 2px 8px rgba(124,58,237,.25);transition:all .15s" onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 12px rgba(124,58,237,.35)'" onmouseout="this.style.transform='';this.style.boxShadow='0 2px 8px rgba(124,58,237,.25)'">🏢 우리 회사 정보</button>
       </div>
 
       <!-- 협력사 탭 (default) -->
@@ -5185,7 +5218,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.887';
+const ERP_VERSION = 'v1.9.888';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -16237,6 +16270,199 @@ function deleteItemFromModal() {
   if (typeof renderStock === 'function') renderStock();
   updateBadges();
   showNotif(isFinished ? '완제품 삭제 및 BOM 재고가 복구되었습니다' : '품목이 삭제되었습니다','success');
+}
+
+// v1.9.888: 우리 회사 정보 — DB.companyInfo 기본값
+function _ensureCompanyInfo() {
+  if (!DB.companyInfo || typeof DB.companyInfo !== 'object') DB.companyInfo = {};
+  const defaults = {
+    company: '(주)르니브',
+    companyEn: 'RENIV Corp.',
+    type: '완제품',
+    bizNo: '297-81-03973',
+    ceo: '이주연',
+    ceoEn: '',
+    bizDoc: '',  // 사업자등록증 첨부 파일명
+    contacts: [
+      { name: '권다빈', role: '이사', phone: '010-8874-5722' },
+      { name: '회사전화', role: '', phone: '070-8065-3279' }
+    ],
+    email: '',
+    addr: '서울특별시 성동구 성수동2가 301-94 8층 (04786)',
+    addrEn: '8F, 301-94, Seongsu-dong 2-ga, Seongdong-gu, Seoul, Republic of Korea',
+    bankName: '',
+    bankAccount: '',
+    bankHolder: '',
+    quoteFileName: '',
+    attachFileName: '',
+    note: ''
+  };
+  Object.keys(defaults).forEach(k => {
+    if (DB.companyInfo[k] == null) DB.companyInfo[k] = defaults[k];
+  });
+}
+
+function openCompanyInfoModal() {
+  _ensureCompanyInfo();
+  _renderCompanyInfoBody(false);
+  if (typeof openModal === 'function') openModal('company-info');
+}
+
+function _renderCompanyInfoBody(editMode) {
+  const ci = DB.companyInfo;
+  const _esc = s => String(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  // 회사명 (한글/영문)
+  const dispKo = document.getElementById('ci-company-display');
+  const dispEn = document.getElementById('ci-company-en-display');
+  if (dispKo) dispKo.innerHTML = editMode
+    ? `<input id="ci-company" class="fi" style="text-align:center;font-size:22px;font-weight:900;border:1px solid #e2e8f0;padding:4px 12px;width:80%" value="${_esc(ci.company)}">`
+    : _esc(ci.company);
+  if (dispEn) dispEn.innerHTML = editMode
+    ? `<input id="ci-company-en" class="fi" style="text-align:center;font-size:12px;font-style:italic;border:1px solid #e2e8f0;padding:2px 10px;width:60%;margin-top:4px" value="${_esc(ci.companyEn)}">`
+    : (ci.companyEn ? _esc(ci.companyEn) : '');
+
+  // 완제품 공급 품목 자동 추출 (코드 있는 완제품만)
+  const finishedItems = (DB.items || []).filter(i => i && i.type === '완제품' && i.code && String(i.code).trim() !== '');
+  const itemBadges = finishedItems.length > 0
+    ? finishedItems.map(i => `<span style="display:inline-block;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;padding:3px 10px;border-radius:99px;font-size:11.5px;font-weight:600;margin:2px">${_esc(i.name||'-')}</span>`).join('')
+    : `<span style="color:#94a3b8;font-size:12px">등록된 완제품 없음</span>`;
+
+  // 담당자 행 만들기
+  const contacts = Array.isArray(ci.contacts) ? ci.contacts : [];
+  const contactsHtml = editMode
+    ? contacts.map((c, idx) => `<div style="display:flex;gap:6px;margin-bottom:4px;align-items:center">
+        <input class="fi ci-contact-name" style="flex:1;font-size:12.5px;padding:5px 8px" placeholder="이름" value="${_esc(c.name)}">
+        <input class="fi ci-contact-role" style="width:80px;font-size:12.5px;padding:5px 8px" placeholder="직책" value="${_esc(c.role||'')}">
+        <input class="fi ci-contact-phone" style="flex:1;font-size:12.5px;padding:5px 8px" placeholder="전화" value="${_esc(c.phone)}">
+        <button type="button" onclick="_removeCompanyContact(${idx})" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;padding:4px 8px;border-radius:5px;font-size:11px;cursor:pointer">✕</button>
+      </div>`).join('') + `<button type="button" onclick="_addCompanyContact()" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:4px 10px;border-radius:6px;font-size:11.5px;font-weight:700;cursor:pointer;margin-top:4px">+ 담당자 추가</button>`
+    : (contacts.length > 0
+        ? contacts.map(c => `<div style="display:flex;gap:12px;padding:6px 0;border-bottom:1px dashed #f1f5f9;font-size:13px;align-items:center">
+            <span style="font-weight:700;color:#0f172a;min-width:90px">${_esc(c.name)}${c.role?` <span style="color:#64748b;font-size:11px;font-weight:500">${_esc(c.role)}</span>`:''}</span>
+            <span style="color:#475569;font-family:ui-monospace,Menlo,Consolas,monospace">${_esc(c.phone)}</span>
+          </div>`).join('')
+        : '<span style="color:#94a3b8;font-size:12px">담당자 정보 없음</span>');
+
+  // info 행 helper
+  const _row = (label, content, isHigh) => `<tr>
+    <td style="padding:12px 16px;background:#f8fafc;color:#475569;font-weight:700;font-size:12.5px;width:130px;border-bottom:1px solid #f1f5f9;vertical-align:top">${label}</td>
+    <td style="padding:12px 18px;color:#0f172a;border-bottom:1px solid #f1f5f9;line-height:1.65${isHigh?';background:#fefce8':''}">${content}</td>
+  </tr>`;
+
+  const _inp = (id, val, opts) => editMode
+    ? `<input class="fi" id="${id}" style="width:100%;font-size:13px;padding:6px 10px${opts&&opts.mono?';font-family:ui-monospace,Menlo,Consolas,monospace':''}" value="${_esc(val)}">`
+    : (val ? _esc(val) : '<span style="color:#94a3b8">-</span>');
+
+  const _ta = (id, val) => editMode
+    ? `<textarea class="fi" id="${id}" style="width:100%;font-size:13px;padding:6px 10px;min-height:60px;resize:vertical">${_esc(val)}</textarea>`
+    : (val ? _esc(val).replace(/\n/g, '<br>') : '<span style="color:#94a3b8">-</span>');
+
+  const typeBadge = `<span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:3px 12px;border-radius:5px;font-size:11.5px;font-weight:700">${_esc(ci.type||'완제품')}</span>`;
+  const typeContent = editMode
+    ? `<select class="fs" id="ci-type" style="font-size:13px;padding:6px 10px"><option value="원자재">원자재</option><option value="부자재">부자재</option><option value="OEM">OEM</option><option value="외주가공">외주가공</option><option value="완제품">완제품</option><option value="판매업체">판매업체</option></select>`
+    : typeBadge;
+
+  // 은행 정보
+  const bankContent = editMode
+    ? `<div style="display:grid;grid-template-columns:120px 1fr 1fr;gap:6px;align-items:center">
+        <input class="fi" id="ci-bank-name" placeholder="은행명" style="font-size:12.5px;padding:5px 8px" value="${_esc(ci.bankName)}">
+        <input class="fi" id="ci-bank-account" placeholder="계좌번호" style="font-size:12.5px;padding:5px 8px;font-family:ui-monospace,Menlo,Consolas,monospace" value="${_esc(ci.bankAccount)}">
+        <input class="fi" id="ci-bank-holder" placeholder="예금주" style="font-size:12.5px;padding:5px 8px" value="${_esc(ci.bankHolder)}">
+      </div>`
+    : (ci.bankName || ci.bankAccount
+        ? `<div><b>${_esc(ci.bankName)}</b> · <span style="font-family:ui-monospace,Menlo,Consolas,monospace">${_esc(ci.bankAccount)}</span>${ci.bankHolder?` · ${_esc(ci.bankHolder)}`:''}</div>`
+        : '<span style="color:#94a3b8">-</span>');
+
+  const tbody = document.getElementById('ci-info-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = [
+    _row('분류', typeContent),
+    _row('사업자등록번호', _inp('ci-bizno', ci.bizNo, {mono:true})),
+    _row('대표자', _inp('ci-ceo', ci.ceo)),
+    _row('영문 대표자', _inp('ci-ceo-en', ci.ceoEn)),
+    _row('👥 담당자', contactsHtml, true),
+    _row('이메일', _inp('ci-email', ci.email)),
+    _row('주소 (한글)', editMode ? `<textarea class="fi" id="ci-addr" style="width:100%;font-size:13px;padding:6px 10px;min-height:50px;resize:vertical">${_esc(ci.addr)}</textarea>` : (ci.addr || '<span style="color:#94a3b8">-</span>')),
+    _row('주소 (영문)', editMode ? `<textarea class="fi" id="ci-addr-en" style="width:100%;font-size:13px;padding:6px 10px;min-height:50px;resize:vertical;font-style:italic">${_esc(ci.addrEn)}</textarea>` : (ci.addrEn ? `<i style="color:#475569">${_esc(ci.addrEn)}</i>` : '<span style="color:#94a3b8">-</span>')),
+    _row('💳 은행 / 계좌', bankContent),
+    _row('공급 품목 ('+ finishedItems.length +'개)', itemBadges),
+    _row('📝 비고', _ta('ci-note', ci.note))
+  ].join('');
+
+  // 버튼 상태
+  const editBtn = document.getElementById('ci-edit-btn');
+  const saveBtn = document.getElementById('ci-save-btn');
+  const cancelBtn = document.getElementById('ci-cancel-btn');
+  if (editBtn) editBtn.style.display = editMode ? 'none' : '';
+  if (saveBtn) saveBtn.style.display = editMode ? '' : 'none';
+  if (cancelBtn) cancelBtn.style.display = editMode ? '' : 'none';
+
+  if (editMode && document.getElementById('ci-type')) {
+    document.getElementById('ci-type').value = ci.type || '완제품';
+  }
+}
+
+function toggleCompanyEdit(edit) {
+  _renderCompanyInfoBody(!!edit);
+}
+
+function _addCompanyContact() {
+  // 현재 화면 값 수집 후 +1 항목 추가
+  const ci = DB.companyInfo;
+  ci.contacts = _collectCompanyContacts();
+  ci.contacts.push({ name: '', role: '', phone: '' });
+  _renderCompanyInfoBody(true);
+}
+
+function _removeCompanyContact(idx) {
+  const ci = DB.companyInfo;
+  ci.contacts = _collectCompanyContacts();
+  ci.contacts.splice(idx, 1);
+  _renderCompanyInfoBody(true);
+}
+
+function _collectCompanyContacts() {
+  const names = document.querySelectorAll('.ci-contact-name');
+  const roles = document.querySelectorAll('.ci-contact-role');
+  const phones = document.querySelectorAll('.ci-contact-phone');
+  const result = [];
+  for (let i = 0; i < names.length; i++) {
+    const nm = names[i].value.trim();
+    const ph = phones[i] ? phones[i].value.trim() : '';
+    if (!nm && !ph) continue;
+    result.push({ name: nm, role: roles[i] ? roles[i].value.trim() : '', phone: ph });
+  }
+  return result;
+}
+
+async function saveCompanyInfo() {
+  _ensureCompanyInfo();
+  const ci = DB.companyInfo;
+  const _g = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  ci.company = _g('ci-company') || ci.company;
+  ci.companyEn = _g('ci-company-en');
+  ci.type = _g('ci-type') || ci.type;
+  ci.bizNo = _g('ci-bizno');
+  ci.ceo = _g('ci-ceo');
+  ci.ceoEn = _g('ci-ceo-en');
+  ci.email = _g('ci-email');
+  ci.addr = _g('ci-addr');
+  ci.addrEn = _g('ci-addr-en');
+  ci.bankName = _g('ci-bank-name');
+  ci.bankAccount = _g('ci-bank-account');
+  ci.bankHolder = _g('ci-bank-holder');
+  ci.note = _g('ci-note');
+  ci.contacts = _collectCompanyContacts();
+  ci.updatedAt = Date.now();
+  try {
+    if (typeof saveDataNow === 'function') await saveDataNow();
+    else saveData();
+    if (typeof showNotif === 'function') showNotif('✅ 우리 회사 정보 저장 완료', 'success');
+  } catch(e) {
+    console.error('우리 회사 정보 저장 실패:', e);
+    if (typeof showNotif === 'function') showNotif('저장 실패: ' + e.message, 'error');
+  }
+  _renderCompanyInfoBody(false);  // 보기 모드로 복귀
 }
 
 // v1.9.884: 외화 단가 → KRW 환산 미리보기
