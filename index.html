@@ -1303,15 +1303,17 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="overlay" id="overlay-company-info">
       <div class="modal" style="width:780px;max-width:95vw">
         <div class="modal-hdr" style="background:linear-gradient(135deg,#ede9fe,#fce7f3);border-bottom:1px solid #e9d5ff">
-          <span class="modal-ttl" style="display:flex;align-items:center;gap:8px"><span>🏢</span><span>우리 회사 정보</span></span>
+          <span class="modal-ttl" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span>🏢</span>
+            <span>우리 회사 정보</span>
+            <span style="color:#94a3b8;font-weight:500">-</span>
+            <span id="ci-company-display" style="font-weight:800;color:#0f172a"></span>
+            <span id="ci-company-en-display" style="font-size:12.5px;color:#64748b;font-style:italic;font-weight:500"></span>
+          </span>
           <button class="modal-x" onclick="closeModal('company-info')">✕</button>
         </div>
         <div class="modal-body" style="padding:0">
-          <!-- 회사명 (큰 헤더) -->
-          <div style="padding:18px 24px;background:linear-gradient(135deg,#faf5ff,#fdf2f8);border-bottom:1px solid #f3e8ff;text-align:center">
-            <div id="ci-company-display" style="font-size:24px;font-weight:900;color:#0f172a;letter-spacing:-.5px"></div>
-            <div id="ci-company-en-display" style="font-size:12px;color:#64748b;margin-top:2px;font-style:italic"></div>
-          </div>
+          <!-- v1.9.889: 큰 회사명 헤더 삭제 (헤더로 이동) -->
           <!-- 정보 테이블 -->
           <div style="padding:0">
             <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -5218,7 +5220,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.888';
+const ERP_VERSION = 'v1.9.889';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -16311,21 +16313,15 @@ function openCompanyInfoModal() {
 function _renderCompanyInfoBody(editMode) {
   const ci = DB.companyInfo;
   const _esc = s => String(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  // 회사명 (한글/영문)
+  // v1.9.889: 회사명은 모달 헤더에 인라인 표시
   const dispKo = document.getElementById('ci-company-display');
   const dispEn = document.getElementById('ci-company-en-display');
   if (dispKo) dispKo.innerHTML = editMode
-    ? `<input id="ci-company" class="fi" style="text-align:center;font-size:22px;font-weight:900;border:1px solid #e2e8f0;padding:4px 12px;width:80%" value="${_esc(ci.company)}">`
+    ? `<input id="ci-company" class="fi" style="font-size:14px;font-weight:800;border:1px solid #c4b5fd;padding:3px 10px;width:140px;background:#fff" value="${_esc(ci.company)}">`
     : _esc(ci.company);
   if (dispEn) dispEn.innerHTML = editMode
-    ? `<input id="ci-company-en" class="fi" style="text-align:center;font-size:12px;font-style:italic;border:1px solid #e2e8f0;padding:2px 10px;width:60%;margin-top:4px" value="${_esc(ci.companyEn)}">`
+    ? `<input id="ci-company-en" class="fi" style="font-size:12px;font-style:italic;border:1px solid #c4b5fd;padding:3px 10px;width:140px;background:#fff" value="${_esc(ci.companyEn)}">`
     : (ci.companyEn ? _esc(ci.companyEn) : '');
-
-  // 완제품 공급 품목 자동 추출 (코드 있는 완제품만)
-  const finishedItems = (DB.items || []).filter(i => i && i.type === '완제품' && i.code && String(i.code).trim() !== '');
-  const itemBadges = finishedItems.length > 0
-    ? finishedItems.map(i => `<span style="display:inline-block;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;padding:3px 10px;border-radius:99px;font-size:11.5px;font-weight:600;margin:2px">${_esc(i.name||'-')}</span>`).join('')
-    : `<span style="color:#94a3b8;font-size:12px">등록된 완제품 없음</span>`;
 
   // 담당자 행 만들기
   const contacts = Array.isArray(ci.contacts) ? ci.contacts : [];
@@ -16357,11 +16353,7 @@ function _renderCompanyInfoBody(editMode) {
     ? `<textarea class="fi" id="${id}" style="width:100%;font-size:13px;padding:6px 10px;min-height:60px;resize:vertical">${_esc(val)}</textarea>`
     : (val ? _esc(val).replace(/\n/g, '<br>') : '<span style="color:#94a3b8">-</span>');
 
-  const typeBadge = `<span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:3px 12px;border-radius:5px;font-size:11.5px;font-weight:700">${_esc(ci.type||'완제품')}</span>`;
-  const typeContent = editMode
-    ? `<select class="fs" id="ci-type" style="font-size:13px;padding:6px 10px"><option value="원자재">원자재</option><option value="부자재">부자재</option><option value="OEM">OEM</option><option value="외주가공">외주가공</option><option value="완제품">완제품</option><option value="판매업체">판매업체</option></select>`
-    : typeBadge;
-
+  // v1.9.889: 분류/공급품목 행 삭제 (불필요)
   // 은행 정보
   const bankContent = editMode
     ? `<div style="display:grid;grid-template-columns:120px 1fr 1fr;gap:6px;align-items:center">
@@ -16376,7 +16368,6 @@ function _renderCompanyInfoBody(editMode) {
   const tbody = document.getElementById('ci-info-tbody');
   if (!tbody) return;
   tbody.innerHTML = [
-    _row('분류', typeContent),
     _row('사업자등록번호', _inp('ci-bizno', ci.bizNo, {mono:true})),
     _row('대표자', _inp('ci-ceo', ci.ceo)),
     _row('영문 대표자', _inp('ci-ceo-en', ci.ceoEn)),
@@ -16385,7 +16376,6 @@ function _renderCompanyInfoBody(editMode) {
     _row('주소 (한글)', editMode ? `<textarea class="fi" id="ci-addr" style="width:100%;font-size:13px;padding:6px 10px;min-height:50px;resize:vertical">${_esc(ci.addr)}</textarea>` : (ci.addr || '<span style="color:#94a3b8">-</span>')),
     _row('주소 (영문)', editMode ? `<textarea class="fi" id="ci-addr-en" style="width:100%;font-size:13px;padding:6px 10px;min-height:50px;resize:vertical;font-style:italic">${_esc(ci.addrEn)}</textarea>` : (ci.addrEn ? `<i style="color:#475569">${_esc(ci.addrEn)}</i>` : '<span style="color:#94a3b8">-</span>')),
     _row('💳 은행 / 계좌', bankContent),
-    _row('공급 품목 ('+ finishedItems.length +'개)', itemBadges),
     _row('📝 비고', _ta('ci-note', ci.note))
   ].join('');
 
@@ -16397,9 +16387,7 @@ function _renderCompanyInfoBody(editMode) {
   if (saveBtn) saveBtn.style.display = editMode ? '' : 'none';
   if (cancelBtn) cancelBtn.style.display = editMode ? '' : 'none';
 
-  if (editMode && document.getElementById('ci-type')) {
-    document.getElementById('ci-type').value = ci.type || '완제품';
-  }
+  // v1.9.889: ci-type 셀렉트 삭제됨 (분류 행 제거)
 }
 
 function toggleCompanyEdit(edit) {
@@ -16441,7 +16429,7 @@ async function saveCompanyInfo() {
   const _g = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
   ci.company = _g('ci-company') || ci.company;
   ci.companyEn = _g('ci-company-en');
-  ci.type = _g('ci-type') || ci.type;
+  // v1.9.889: ci-type 셀렉트 삭제됨 — 기존값 그대로 유지 (변경 안 함)
   ci.bizNo = _g('ci-bizno');
   ci.ceo = _g('ci-ceo');
   ci.ceoEn = _g('ci-ceo-en');
