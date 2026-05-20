@@ -5220,7 +5220,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.898';
+const ERP_VERSION = 'v1.9.899';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -16377,8 +16377,26 @@ function _ensureCompanyInfo() {
   });
 }
 
-function openCompanyInfoModal() {
+async function openCompanyInfoModal() {
   _ensureCompanyInfo();
+  // v1.9.899: 전용 shared setting 문서에서 최신 회사정보 로드 (DB 머지 타이밍 우회)
+  try {
+    if (typeof loadSharedSetting === 'function') {
+      const shared = await loadSharedSetting('company_info');
+      if (shared && typeof shared === 'object' && !Array.isArray(shared)) {
+        const sharedTs = Number(shared.updatedAt) || 0;
+        const currentTs = Number(DB._companyInfo && DB._companyInfo.updatedAt) || 0;
+        // shared 가 더 최신이거나 같으면 사용 (전용 문서가 신뢰성 높음)
+        if (sharedTs >= currentTs) {
+          DB._companyInfo = Object.assign({}, DB._companyInfo, shared);
+          console.log('🏢 [v899] shared setting 에서 회사정보 로드 (sharedTs=' + sharedTs + ' >= currentTs=' + currentTs + ')');
+        } else {
+          console.log('🏢 [v899] DB._companyInfo 가 더 최신 — shared 무시');
+        }
+      }
+    }
+  } catch(e) { console.warn('🏢 [v899] shared setting 로드 실패:', e); }
+  _ensureCompanyInfo();  // defaults 재보정
   _renderCompanyInfoBody(false);
   if (typeof openModal === 'function') openModal('company-info');
 }
@@ -16399,16 +16417,18 @@ function _renderCompanyInfoBody(editMode) {
   // 담당자 행 만들기
   const contacts = Array.isArray(ci.contacts) ? ci.contacts : [];
   const contactsHtml = editMode
-    ? contacts.map((c, idx) => `<div style="display:flex;gap:6px;margin-bottom:4px;align-items:center">
-        <input class="fi ci-contact-name" style="flex:1;font-size:12.5px;padding:5px 8px" placeholder="이름" value="${_esc(c.name)}">
-        <input class="fi ci-contact-role" style="width:80px;font-size:12.5px;padding:5px 8px" placeholder="직책" value="${_esc(c.role||'')}">
-        <input class="fi ci-contact-phone" style="flex:1;font-size:12.5px;padding:5px 8px" placeholder="전화" value="${_esc(c.phone)}">
-        <button type="button" onclick="_removeCompanyContact(${idx})" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;padding:4px 8px;border-radius:5px;font-size:11px;cursor:pointer">✕</button>
+    ? contacts.map((c, idx) => `<div style="display:flex;gap:6px;margin-bottom:5px;align-items:center;flex-wrap:wrap">
+        <input class="fi ci-contact-name" style="flex:1 1 90px;min-width:80px;font-size:12.5px;padding:5px 8px" placeholder="이름" value="${_esc(c.name)}">
+        <input class="fi ci-contact-role" style="width:70px;flex:0 0 70px;font-size:12.5px;padding:5px 8px" placeholder="직책" value="${_esc(c.role||'')}">
+        <input class="fi ci-contact-phone" style="flex:1 1 120px;min-width:110px;font-size:12.5px;padding:5px 8px" placeholder="전화번호" value="${_esc(c.phone)}">
+        <input class="fi ci-contact-email" style="flex:1 1 150px;min-width:130px;font-size:12.5px;padding:5px 8px" placeholder="이메일" value="${_esc(c.email||'')}">
+        <button type="button" onclick="_removeCompanyContact(${idx})" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;padding:4px 8px;border-radius:5px;font-size:11px;cursor:pointer;flex:0 0 auto">✕</button>
       </div>`).join('') + `<button type="button" onclick="_addCompanyContact()" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:4px 10px;border-radius:6px;font-size:11.5px;font-weight:700;cursor:pointer;margin-top:4px">+ 담당자 추가</button>`
     : (contacts.length > 0
-        ? contacts.map(c => `<div style="display:flex;gap:12px;padding:6px 0;border-bottom:1px dashed #f1f5f9;font-size:13px;align-items:center">
+        ? contacts.map(c => `<div style="display:flex;gap:12px;padding:6px 0;border-bottom:1px dashed #f1f5f9;font-size:13px;align-items:center;flex-wrap:wrap">
             <span style="font-weight:700;color:#0f172a;min-width:90px">${_esc(c.name)}${c.role?` <span style="color:#64748b;font-size:11px;font-weight:500">${_esc(c.role)}</span>`:''}</span>
-            <span style="color:#475569;font-family:ui-monospace,Menlo,Consolas,monospace">${_esc(c.phone)}</span>
+            <span style="color:#475569;font-family:ui-monospace,Menlo,Consolas,monospace;min-width:125px">${_esc(c.phone)}</span>
+            ${c.email ? `<span style="color:#2563eb;font-size:12.5px">✉ ${_esc(c.email)}</span>` : ''}
           </div>`).join('')
         : '<span style="color:#94a3b8;font-size:12px">담당자 정보 없음</span>');
 
@@ -16486,12 +16506,19 @@ function _collectCompanyContacts() {
   const names = document.querySelectorAll('.ci-contact-name');
   const roles = document.querySelectorAll('.ci-contact-role');
   const phones = document.querySelectorAll('.ci-contact-phone');
+  const emails = document.querySelectorAll('.ci-contact-email');
   const result = [];
   for (let i = 0; i < names.length; i++) {
     const nm = names[i].value.trim();
     const ph = phones[i] ? phones[i].value.trim() : '';
-    if (!nm && !ph) continue;
-    result.push({ name: nm, role: roles[i] ? roles[i].value.trim() : '', phone: ph });
+    const em = emails[i] ? emails[i].value.trim() : '';
+    if (!nm && !ph && !em) continue;
+    result.push({
+      name: nm,
+      role: roles[i] ? roles[i].value.trim() : '',
+      phone: ph,
+      email: em  // v1.9.899: 담당자별 이메일
+    });
   }
   return result;
 }
@@ -16542,8 +16569,13 @@ async function saveOurCompanyInfo() {
       localStorage.setItem(_key, JSON.stringify(DB));
       console.log('💾 [v895] localStorage 즉시 백업 완료 - key:', _key);
     } catch(eLS) { console.warn('💾 [v895] localStorage 백업 실패:', eLS); }
-    // shared settings
-    try { if (typeof saveSharedSetting === 'function') saveSharedSetting('company_info', DB._companyInfo); } catch(_){}
+    // v1.9.899: shared settings 전용 문서에 await 저장 (저장 완료 보장 — 새로고침 시 손실 방지)
+    try {
+      if (typeof saveSharedSetting === 'function') {
+        await saveSharedSetting('company_info', DB._companyInfo);
+        console.log('🏢 [v899] saveSharedSetting(company_info) 완료');
+      }
+    } catch(eSS) { console.warn('🏢 [v899] saveSharedSetting 실패:', eSS); }
     // v1.9.895: saveData (debounced + idb + Firestore) 동기 호출 — 즉시 idb/localStorage 안전 저장
     try { if (typeof saveData === 'function') saveData(); } catch(eSD) { console.warn('saveData 실패:', eSD); }
     // Firestore 즉시 저장 (백그라운드)
