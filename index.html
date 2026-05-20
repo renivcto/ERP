@@ -5220,7 +5220,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.897';
+const ERP_VERSION = 'v1.9.898';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13091,7 +13091,37 @@ function openAdProjectModal(editId) {
   openModal('ad-project-modal');
 }
 
-// v1.9.887: adsCost.expenseId 가 광고 expense (category='ad') 가 아니면 잘못된 연결 → 정리
+// v1.9.898: 진단 유틸 — 프로젝트의 모든 adsCost 행 dump
+window.diagnoseAdsCosts = function(projectNameOrId) {
+  const proj = (DB.adProjects||[]).find(p => p && (String(p.id) === String(projectNameOrId) || (p.name||'').toLowerCase().includes(String(projectNameOrId).toLowerCase())));
+  if (!proj) { console.warn('프로젝트 못 찾음:', projectNameOrId); return; }
+  console.log('🔍 프로젝트:', proj.name, 'id:', proj.id);
+  let total = 0, count = 0;
+  (DB.shops||[]).forEach(s => {
+    if (!s || !Array.isArray(s.adsCosts)) return;
+    s.adsCosts.forEach((a, idx) => {
+      if (!a || String(a.projectId || '') !== String(proj.id)) return;
+      const exp = a.expenseId != null ? (DB.expenses||[]).find(e => e && String(e.id) === String(a.expenseId)) : null;
+      console.log('  #' + count + ' shop:', s.name, 'cost:', a.cost, 'expenseId:', a.expenseId, 'expCat:', exp ? exp.category : '(no expense)', 'expTitle:', exp ? exp.title : '-', 'memo:', a.memo || '-');
+      total += Number(a.cost || 0);
+      count++;
+    });
+  });
+  console.log('🔍 합계:', count, '건 ₩' + total.toLocaleString());
+  return { count, total };
+};
+
+// v1.9.898: 강제 cleanup 실행 + 결과 출력
+window.forceCleanupOrphanAds = function() {
+  if (typeof _cleanupOrphanAdsCosts !== 'function') { console.warn('_cleanupOrphanAdsCosts 함수 없음'); return; }
+  console.log('🧹 강제 cleanup 시작...');
+  const removed = _cleanupOrphanAdsCosts();
+  console.log('🧹 cleanup 완료, 제거된 행:', removed);
+  try { if (typeof renderAdsPage === 'function') renderAdsPage(); } catch(_){}
+  return removed;
+};
+
+// v1.9.887+898: adsCost.expenseId 가 광고 expense (category='ad') 가 아니면 잘못된 연결 → 정리
 //   - po_balance / po_prepay / sample 등에 연결된 adsCost 는 좀비 행
 //   - expense 가 아예 없는 경우도 정리 (단, expense tombstone 검사 후)
 function _cleanupOrphanAdsCosts() {
@@ -13105,7 +13135,17 @@ function _cleanupOrphanAdsCosts() {
     if (!s || !Array.isArray(s.adsCosts)) return;
     const before = s.adsCosts.length;
     s.adsCosts = s.adsCosts.filter(a => {
-      if (!a || a.expenseId == null) return true;  // 수동 광고비는 유지
+      if (!a) return false;
+      // v1.9.898: 수동 행이지만 memo 가 자동 sync 잔재 패턴이면 제거
+      //   "[잔금 ...%]" / "[선급금 ...%]" / "[지출결의서 #N]" 으로 시작 → 한때 자동 sync 였던 행
+      if (a.expenseId == null) {
+        const memo = String(a.memo || '').trim();
+        if (memo.startsWith('[잔금') || memo.startsWith('[선급금') || memo.match(/^\[지출결의서\s*#/)) {
+          removedSamples.push({ shopId: s.id, expId: null, memo: memo, reason: 'auto-sync 잔재 패턴' });
+          return false;
+        }
+        return true;  // 일반 수동 광고비는 유지
+      }
       const exp = expMap.get(String(a.expenseId));
       // v1.9.896: expense 가 없으면 (dangling pointer) → 좀비 행 제거
       if (!exp) {
@@ -13117,12 +13157,18 @@ function _cleanupOrphanAdsCosts() {
         removedSamples.push({ shopId: s.id, expId: a.expenseId, expCat: exp.category, expTitle: exp.title });
         return false;
       }
+      // v1.9.898: 추가 — expense 의 title 이 [잔금 / [선급금 으로 시작하면 잘못 연결 (실제로 po_balance/prepay 였던 흔적)
+      const expTitle = String(exp.title || '').trim();
+      if (expTitle.startsWith('[잔금') || expTitle.startsWith('[선급금')) {
+        removedSamples.push({ shopId: s.id, expId: a.expenseId, expCat: exp.category, expTitle: expTitle, reason: 'expense title 패턴 (po_balance/prepay)' });
+        return false;
+      }
       return true;
     });
     removed += (before - s.adsCosts.length);
   });
   if (removed > 0) {
-    console.warn('🧹 [v887] 잘못 연결된 광고비 행 ' + removed + '건 정리:', removedSamples.slice(0, 5));
+    console.warn('🧹 [v898] 잘못 연결된 광고비 행 ' + removed + '건 정리:', removedSamples.slice(0, 10));
     try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
   }
   return removed;
