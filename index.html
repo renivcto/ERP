@@ -5223,7 +5223,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.903';
+const ERP_VERSION = 'v1.9.904';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13182,19 +13182,16 @@ function _renderProjectCostList(projectId) {
   const list = document.getElementById('ad-project-cost-list');
   const summary = document.getElementById('ad-project-cost-summary');
   if (!list) return;
-  // v1.9.887: 잘못 연결된 광고비 행 자동 정리 (po_balance 등 좀비)
-  try { _cleanupOrphanAdsCosts(); } catch(_){}
+  // v1.9.904: 모달 렌더는 비파괴 — _cleanupOrphanAdsCosts() 호출 제거
+  //   (모달 열기만으로 데이터가 삭제되던 버그. 새 광고비 저장 직후 Firestore 동기화 중
+  //    DB.expenses 가 일시적으로 불완전할 때 멀쩡한 광고비가 고아로 오인돼 삭제됨)
+  //   strict 표시 필터도 제거 — 광고비 관리 페이지와 동일하게 projectId 매칭 행 전부 표시.
+  //   (좀비 행 정리는 광고비 관리 페이지 renderAdsPage 의 cleanup 이 계속 담당)
   const ads = [];
   (DB.shops || []).forEach(s => {
     if (!s || !Array.isArray(s.adsCosts)) return;
     s.adsCosts.forEach(a => {
       if (a && String(a.projectId || '') === String(projectId)) {
-        // v1.9.896: 표시 단계 strict 필터 — expense 없거나 non-ad 면 skip
-        if (a.expenseId != null) {
-          const exp = (DB.expenses||[]).find(e => e && String(e.id) === String(a.expenseId));
-          if (!exp) return;  // dangling pointer (expense 삭제됨)
-          if (exp.category !== 'ad') return;  // 잘못 연결된 카테고리
-        }
         ads.push({ ...a, _shopId: s.id, _shopName: s.name });
       }
     });
