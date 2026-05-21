@@ -5224,7 +5224,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.912';
+const ERP_VERSION = 'v1.9.913';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26079,7 +26079,7 @@ function renderApprovalNonPoTable() {
     // v1.9.911: 대표이사 결재 단계 (ceoApproval==='requested' 이면 대표이사 결재 대기)
     const _ceoReq = a.ceoApproval === 'requested' && a.status !== 'approved';
     const statusCell = a.status === 'approved'
-      ? `<span class="badge" style="background:#dcfce7;color:#166534;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700">✅ 완료</span>`
+      ? `<span class="badge" style="background:#dcfce7;color:#166534;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700">✅ 완료</span>` + (a.editedAfterApproval ? '<div style="margin-top:4px"><span style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:700;white-space:nowrap">✏️ 완료 후 수정</span></div>' : '')
       : _ceoReq
         ? `<span class="badge" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700">👔 대표이사 결재중</span>`
         : `<span class="badge" style="background:${urgent?'#fecdd3':'#fef3c7'};color:${urgent?'#9f1239':'#92400e'};border:1px solid ${urgent?'#fda4af':'#fde68a'};padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700;${urgent?'animation:apPulseBadge .9s infinite':''}">${urgent?'🚨 응급 · ':''}대기</span>`;
@@ -26132,10 +26132,10 @@ function renderApprovalNonPoTable() {
       <td style="text-align:center;padding:6px 4px">
         <div style="display:inline-flex;gap:4px;align-items:stretch;justify-content:center">
           <button class="btn btn-sm" title="의견" style="position:relative;background:#eef2ff;color:#6366f1;border:1px solid #e0e7ff;padding:4px 9px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.03);line-height:1;display:inline-flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;overflow:visible" onclick="openNonPoApprovalDetail(${a.id})"><span style="font-size:12px;line-height:1">💬</span><span style="line-height:1">의견</span>${cmtBadgeNonPo}</button>
-          ${a.status!=='approved'?`<div style="display:flex;flex-direction:column;gap:3px">
+          <div style="display:flex;flex-direction:column;gap:3px">
             <button class="btn btn-sm" title="수정" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;padding:2px 7px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;line-height:1" onclick="editNonPo(${a.id})">✏️</button>
             <button class="btn btn-sm" title="삭제" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;padding:2px 7px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;line-height:1" onclick="deleteNonPo(${a.id})">🗑️</button>
-          </div>`:''}
+          </div>
         </div>
       </td>
     </tr>`;
@@ -26229,7 +26229,10 @@ async function deleteNonPo(id) {
     try { _fixApprovalIdCollisions(); renderApprovalPage(); } catch(_){}
     return;
   }
-  if (!confirm('이 결재 요청을 삭제하시겠습니까?\n\n• ' + (a.title||'-'))) return;
+  const _delMsg = (a.status === 'approved')
+    ? '⚠️ 이미 결재 완료된 건입니다.\n그래도 삭제하시겠습니까?\n\n• ' + (a.title||'-')
+    : '이 결재 요청을 삭제하시겠습니까?\n\n• ' + (a.title||'-');
+  if (!confirm(_delMsg)) return;
   // v1.9.643: tombstone 등록 (다른 탭/기기 동기화 시 부활 차단)
   if (!Array.isArray(DB._deletedApprovalIds)) DB._deletedApprovalIds = [];
   DB._deletedApprovalIds.push({ id: _idStr, ts: Date.now() });
@@ -27038,6 +27041,8 @@ async function saveNonPoApproval() {
       console.log('💾 [APN SAVE EDIT] id=' + a.id + ' attachments=' + a.attachments.length + ' →', a.attachments.map(x=>(x&&x.name)||'?'));
       // v1.9.307: 기안서일 때만 phase 저장, 그 외 분류는 phase 제거
       a.phase = (a.category === '기안서') ? _apnGetPhase() : '';
+      // v1.9.913: 결재 완료 건을 수정하면 '완료 후 수정' 표시
+      if (a.status === 'approved') { a.editedAfterApproval = true; a.editedAfterApprovalAt = Date.now(); }
       // v1.9.714: 머지 보호 + 즉시 저장
       a.updatedAt = Date.now();
       try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
