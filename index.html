@@ -5224,7 +5224,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.915';
+const ERP_VERSION = 'v1.9.916';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26055,29 +26055,38 @@ window.forceDeleteExpense = function(id) {
 };
 
 // ══════════ 발주서 외 결재 테이블 ══════════
-// v1.9.914: 일반 결재(non_po_approval) 전용 경량 백업 — 메인 DB 저장 실패(용량/권한) 시 복구용
+// v1.9.916: 일반 결재(non_po_approval) 전용 백업 — IndexedDB 주 저장(용량 제한 거의 없음)
+//   localStorage 가 꽉 차도 결재가 유실되지 않도록. 백업은 (기존 ∪ 현재) - tombstone union.
 function _backupNonPoApprovals() {
   try {
-    const list = (DB.approvals||[]).filter(a => a && a.type === 'non_po_approval');
-    try {
-      localStorage.setItem('reniv_nonpo_backup', JSON.stringify({ ts: Date.now(), list: list }));
-    } catch(quotaErr) {
-      // 용량 초과 → 첨부 바이너리 제거 후 재시도 (결재 레코드 자체는 보존)
-      const lite = list.map(a => {
-        const c = Object.assign({}, a);
-        if (Array.isArray(c.attachments)) {
-          c.attachments = c.attachments.map(at => ({ name: (at&&at.name)||'', type: (at&&at.type)||'', size: (at&&at.size)||0, _stripped: true }));
-        }
-        return c;
-      });
-      try { localStorage.setItem('reniv_nonpo_backup', JSON.stringify({ ts: Date.now(), list: lite })); } catch(_){}
+    const cur = (DB.approvals||[]).filter(a => a && a.type === 'non_po_approval' && a.id != null);
+    const tomb = new Set((DB._deletedApprovalIds||[]).map(t => String(t && t.id)).filter(Boolean));
+    const _write = function(existing) {
+      try {
+        const byId = new Map();
+        (existing||[]).forEach(a => { if (a && a.id != null && a.type === 'non_po_approval') byId.set(String(a.id), a); });
+        cur.forEach(a => { byId.set(String(a.id), a); });  // 현재 레코드 우선(최신)
+        const merged = Array.from(byId.values()).filter(a => !tomb.has(String(a.id)));  // 삭제건 제외
+        const payload = JSON.stringify({ ts: Date.now(), list: merged });
+        try { if (typeof idbSet === 'function') idbSet('reniv_nonpo_backup', payload); } catch(_){}
+        try { localStorage.setItem('reniv_nonpo_backup', payload); } catch(_){}
+      } catch(e) { console.warn('_backupNonPoApprovals write:', e); }
+    };
+    // 기존 IDB 백업을 읽어 union — 레이스로 DB.approvals 가 비어도 백업이 줄지 않음
+    if (typeof idbGet === 'function') {
+      idbGet('reniv_nonpo_backup').then(raw => {
+        let ex = [];
+        try { if (raw) { const p = JSON.parse(raw); ex = (p && Array.isArray(p.list)) ? p.list : []; } } catch(_){}
+        _write(ex);
+      }).catch(() => _write([]));
+    } else {
+      _write([]);
     }
   } catch(e) { console.warn('_backupNonPoApprovals:', e); }
 }
-// v1.9.914: 백업에서 누락된 일반 결재 복구 (삭제 tombstone 된 건은 제외)
-function _restoreNonPoApprovalsFromBackup() {
+// 백업 payload 를 DB.approvals 에 적용 (누락분만 추가, 삭제 tombstone 제외)
+function _applyNonPoBackup(raw) {
   try {
-    const raw = localStorage.getItem('reniv_nonpo_backup');
     if (!raw) return 0;
     let parsed; try { parsed = JSON.parse(raw); } catch(_) { return 0; }
     const list = (parsed && Array.isArray(parsed.list)) ? parsed.list : (Array.isArray(parsed) ? parsed : []);
@@ -26085,21 +26094,40 @@ function _restoreNonPoApprovalsFromBackup() {
     if (!Array.isArray(DB.approvals)) DB.approvals = [];
     const have = new Set(DB.approvals.filter(a => a && a.id != null).map(a => String(a.id)));
     const tomb = new Set((DB._deletedApprovalIds||[]).map(t => String(t && t.id)).filter(Boolean));
-    let restored = 0;
+    let r = 0;
     list.forEach(a => {
       if (!a || a.id == null || a.type !== 'non_po_approval') return;
       if (have.has(String(a.id))) return;
       if (tomb.has(String(a.id))) return;
       DB.approvals.push(a);
       have.add(String(a.id));
-      restored++;
+      r++;
     });
+    return r;
+  } catch(e) { console.warn('_applyNonPoBackup:', e); return 0; }
+}
+// v1.9.916: 백업에서 누락된 일반 결재 복구 — localStorage(sync) → IndexedDB(async)
+let _nonpoRestoring = false;
+async function _restoreNonPoApprovalsFromBackup() {
+  if (_nonpoRestoring) return 0;
+  _nonpoRestoring = true;
+  let restored = 0;
+  try {
+    try { restored += _applyNonPoBackup(localStorage.getItem('reniv_nonpo_backup')); } catch(_){}
+    try {
+      if (typeof idbGet === 'function') {
+        const raw = await idbGet('reniv_nonpo_backup');
+        restored += _applyNonPoBackup(raw);
+      }
+    } catch(_){}
     if (restored > 0) {
       console.warn('🛟 [NONPO BACKUP] 일반 결재 ' + restored + '건 복구');
       try { if (typeof saveData === 'function') saveData(); } catch(_){}
+      try { renderApprovalPage(); } catch(_){}
     }
-    return restored;
-  } catch(e) { console.warn('_restoreNonPoApprovalsFromBackup:', e); return 0; }
+  } catch(e) { console.warn('_restoreNonPoApprovalsFromBackup:', e); }
+  finally { _nonpoRestoring = false; }
+  return restored;
 }
 function renderApprovalNonPoTable() {
   try { _restoreNonPoApprovalsFromBackup(); } catch(_){}
