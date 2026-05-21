@@ -5224,7 +5224,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.910';
+const ERP_VERSION = 'v1.9.911';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26076,12 +26076,18 @@ function renderApprovalNonPoTable() {
   }
   tb.innerHTML = list.map(a => {
     const urgent = a.priority === 'urgent' && a.status !== 'approved';
+    // v1.9.911: 대표이사 결재 단계 (ceoApproval==='requested' 이면 대표이사 결재 대기)
+    const _ceoReq = a.ceoApproval === 'requested' && a.status !== 'approved';
     const statusCell = a.status === 'approved'
       ? `<span class="badge" style="background:#dcfce7;color:#166534;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700">✅ 완료</span>`
-      : `<span class="badge" style="background:${urgent?'#fecdd3':'#fef3c7'};color:${urgent?'#9f1239':'#92400e'};border:1px solid ${urgent?'#fda4af':'#fde68a'};padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700;${urgent?'animation:apPulseBadge .9s infinite':''}">${urgent?'🚨 응급 · ':''}대기</span>`;
+      : _ceoReq
+        ? `<span class="badge" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700">👔 대표이사 결재중</span>`
+        : `<span class="badge" style="background:${urgent?'#fecdd3':'#fef3c7'};color:${urgent?'#9f1239':'#92400e'};border:1px solid ${urgent?'#fda4af':'#fde68a'};padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700;${urgent?'animation:apPulseBadge .9s infinite':''}">${urgent?'🚨 응급 · ':''}대기</span>`;
     const apBtn = a.status === 'approved'
       ? `<span class="badge" style="background:#dcfce7;color:#166534;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700">✅ 결재 완료</span>`
-      : `<button class="btn btn-sm" onclick="approveNonPo(${a.id})" style="background:${urgent?'#fecdd3':'#fef9c3'};color:${urgent?'#9f1239':'#854d0e'};border:1px solid ${urgent?'#fda4af':'#fcd34d'};padding:4px 10px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04);white-space:nowrap;${urgent?'animation:apBlink .9s infinite;':''}">🖋️ 결재 요청</button>`;
+      : _ceoReq
+        ? `<button class="btn btn-sm" onclick="approveNonPo(${a.id})" title="대표이사 결재 단계 — 클릭하여 처리" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:4px 10px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04);white-space:nowrap;animation:apBlink .9s infinite">👔 대표이사 결재요청</button>`
+        : `<button class="btn btn-sm" onclick="approveNonPo(${a.id})" style="background:${urgent?'#fecdd3':'#fef9c3'};color:${urgent?'#9f1239':'#854d0e'};border:1px solid ${urgent?'#fda4af':'#fcd34d'};padding:4px 10px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04);white-space:nowrap;${urgent?'animation:apBlink .9s infinite;':''}">🖋️ 결재 요청</button>`;
     const date = a.createdAt ? new Date(a.createdAt).toISOString().slice(0,10) : '';
     // v1.9.731: 첨부 — 모든 파일을 개별 버튼으로 (세로 스택)
     const attachArr = Array.isArray(a.attachments) ? a.attachments : [];
@@ -26136,23 +26142,82 @@ function renderApprovalNonPoTable() {
   }).join('');
 }
 
+// v1.9.911: 일반 결재 처리 모달 — 본부장 전결 / 대표이사 결재 단계 선택
 function approveNonPo(id) {
-  // v1.9.317: 타입 체크 — ID 충돌 방지
   const a = DB.approvals.find(x => x.id === id && x.type === 'non_po_approval');
   if (!a) {
     alert('⚠️ 결재 대상을 찾을 수 없습니다. 데이터 정합성 문제일 수 있습니다. 새로고침 후 다시 시도해주세요.');
     try { _fixApprovalIdCollisions(); renderApprovalPage(); } catch(_){}
     return;
   }
-  if (!confirm(`"${a.title}" 결재를 완료 처리하시겠습니까?`)) return;
+  _closeNonPoApproveModal();
+  const ceo = a.ceoApproval === 'requested';
+  const title = String(a.title || '-').replace(/</g,'&lt;');
+  const ov = document.createElement('div');
+  ov.id = 'nonpo-approve-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99985;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick = function(ev){ if (ev.target === ov) _closeNonPoApproveModal(); };
+  const btnSty = 'width:100%;border-radius:9px;padding:11px 14px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:9px;margin-top:8px;box-sizing:border-box';
+  let opts;
+  if (ceo) {
+    opts = '<div style="font-size:12px;color:#64748b;margin-bottom:2px">현재 <b style="color:#4338ca">대표이사 결재 대기</b> 상태입니다.</div>'
+      + '<button onclick="_nonPoApproveDone(' + a.id + ')" style="' + btnSty + ';background:#dcfce7;color:#15803d;border:1px solid #86efac">✅ 대표이사 결재 완료</button>'
+      + '<button onclick="_nonPoClearCeo(' + a.id + ')" style="' + btnSty + ';background:#fef9c3;color:#854d0e;border:1px solid #fcd34d">↩ 본부장 전결로 되돌리기</button>';
+  } else {
+    opts = '<div style="font-size:12px;color:#64748b;margin-bottom:2px">이 건을 어떻게 처리할까요?</div>'
+      + '<button onclick="_nonPoApproveDone(' + a.id + ')" style="' + btnSty + ';background:#dcfce7;color:#15803d;border:1px solid #86efac">✅ 본부장 전결 완료</button>'
+      + '<button onclick="_nonPoSetCeo(' + a.id + ')" style="' + btnSty + ';background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe">👔 대표이사 결재 요청</button>';
+  }
+  ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:380px;max-width:94vw;box-shadow:0 18px 50px rgba(0,0,0,.32);overflow:hidden">'
+    + '<div style="padding:14px 18px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between">'
+    + '<span style="font-size:14px;font-weight:800;color:#0f172a">🖋️ 결재 처리</span>'
+    + '<button onclick="_closeNonPoApproveModal()" style="background:#f1f5f9;border:none;width:25px;height:25px;border-radius:7px;cursor:pointer;font-size:13px;color:#64748b">✕</button>'
+    + '</div>'
+    + '<div style="padding:15px 18px">'
+    + '<div style="font-size:12.5px;font-weight:700;color:#334155;margin-bottom:10px">' + title + '</div>'
+    + opts
+    + '<button onclick="_closeNonPoApproveModal()" style="' + btnSty + ';background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;justify-content:center">취소</button>'
+    + '</div></div>';
+  document.body.appendChild(ov);
+}
+function _closeNonPoApproveModal() {
+  const ov = document.getElementById('nonpo-approve-overlay');
+  if (ov) ov.remove();
+}
+function _nonPoApproveDone(id) {
+  const a = DB.approvals.find(x => x.id === id && x.type === 'non_po_approval');
+  if (!a) return;
   a.status = 'approved';
   a.approvedAt = Date.now();
   a.updatedAt = Date.now();  // v1.9.772: EDIT RECOVERY 보호
   try { saveData(); } catch(_){}
-  slackNotify('approval_done', a);
+  try { slackNotify('approval_done', a); } catch(_){}
+  _closeNonPoApproveModal();
   renderApprovalPage();
   updateApprovalBadges();
   showNotif('✅ 결재 완료', 'success');
+}
+function _nonPoSetCeo(id) {
+  const a = DB.approvals.find(x => x.id === id && x.type === 'non_po_approval');
+  if (!a) return;
+  a.ceoApproval = 'requested';
+  a.updatedAt = Date.now();
+  try { saveData(); } catch(_){}
+  _closeNonPoApproveModal();
+  renderApprovalPage();
+  updateApprovalBadges();
+  showNotif('👔 대표이사 결재 요청으로 변경했습니다', 'info');
+}
+function _nonPoClearCeo(id) {
+  const a = DB.approvals.find(x => x.id === id && x.type === 'non_po_approval');
+  if (!a) return;
+  a.ceoApproval = '';
+  a.updatedAt = Date.now();
+  try { saveData(); } catch(_){}
+  _closeNonPoApproveModal();
+  renderApprovalPage();
+  updateApprovalBadges();
+  showNotif('↩ 본부장 전결로 되돌렸습니다', 'info');
 }
 
 async function deleteNonPo(id) {
