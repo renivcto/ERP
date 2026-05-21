@@ -5224,7 +5224,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.908';
+const ERP_VERSION = 'v1.9.909';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -21659,10 +21659,16 @@ function _updateClosingStatusBadge() {
   const stat = ssEl ? ssEl.value : '';
   if (stat !== '입고완료') { badge.style.display = 'none'; return; }
   const n = Array.isArray(_orderClosingDocs) ? _orderClosingDocs.length : 0;
+  const _bOid = window._currentEditOrderId;
+  const _bOrd = (_bOid != null) ? (DB.orders||[]).find(o => o && String(o.id) === String(_bOid)) : null;
+  const _bNone = !!(_bOrd && _bOrd.closingNone);
   badge.style.display = '';
   if (n > 0) {
     badge.textContent = '✅ 마감서 완료 ' + n;
     badge.style.background = '#dcfce7'; badge.style.color = '#15803d'; badge.style.border = '1px solid #86efac';
+  } else if (_bNone) {
+    badge.textContent = '➖ 마감서 없음';
+    badge.style.background = '#f1f5f9'; badge.style.color = '#64748b'; badge.style.border = '1px solid #cbd5e1';
   } else {
     badge.textContent = '⏳ 마감서 대기';
     badge.style.background = '#fef9c3'; badge.style.color = '#a16207'; badge.style.border = '1px solid #fde047';
@@ -21715,7 +21721,15 @@ function _closingModalRender() {
   const ord = (DB.orders||[]).find(o => o && String(o.id) === String(_closingModalOrderId));
   const docs = (ord && Array.isArray(ord.closingDocs)) ? ord.closingDocs.filter(Boolean) : [];
   if (!docs.length) {
-    wrap.innerHTML = '<div style="padding:16px;text-align:center;color:#94a3b8;font-size:11.5px;background:#f8fafc;border:1px dashed #e2e8f0;border-radius:8px">아직 마감서가 없습니다. 위에서 파일을 추가하세요.</div>';
+    const _none = !!(ord && ord.closingNone);
+    const _noteVal = (ord && ord.closingNoneNote) ? String(ord.closingNoneNote).replace(/&/g,'&amp;').replace(/</g,'&lt;') : '';
+    wrap.innerHTML = '<div style="padding:16px;text-align:center;color:#94a3b8;font-size:11.5px;background:#f8fafc;border:1px dashed #e2e8f0;border-radius:8px">아직 마감서가 없습니다. 위에서 파일을 추가하세요.</div>'
+      + '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px">'
+      + '<label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:#475569;cursor:pointer">'
+      + '<input type="checkbox" id="closing-none-chk"' + (_none ? ' checked' : '') + ' onchange="toggleClosingNone()" style="width:15px;height:15px;cursor:pointer">'
+      + '<span>없음 — 마감서 불필요 (소액·해외 발주 등)</span></label>'
+      + (_none ? '<textarea id="closing-none-note" placeholder="사유 (선택 입력)" onblur="saveClosingNoneNote()" style="width:100%;margin-top:8px;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12px;resize:vertical;min-height:46px;box-sizing:border-box;font-family:inherit">' + _noteVal + '</textarea>' : '')
+      + '</div>';
     return;
   }
   wrap.innerHTML = docs.map(function(d, i){
@@ -21733,6 +21747,26 @@ function _closingModalRender() {
       + '</div></div>';
   }).join('');
 }
+// v1.9.909: 마감서 '없음' (불필요) 체크 토글 + 선택 사유 메모
+function toggleClosingNone() {
+  const chk = document.getElementById('closing-none-chk');
+  const ord = (DB.orders||[]).find(o => o && String(o.id) === String(_closingModalOrderId));
+  if (!ord) return;
+  ord.closingNone = !!(chk && chk.checked);
+  try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  _closingModalRender();
+  try { renderApprovalExpenseTable(); } catch(_){}
+  try { renderOrderClosingDocsList(); } catch(_){}
+}
+function saveClosingNoneNote() {
+  const ta = document.getElementById('closing-none-note');
+  const ord = (DB.orders||[]).find(o => o && String(o.id) === String(_closingModalOrderId));
+  if (!ord || !ta) return;
+  const v = ta.value || '';
+  if ((ord.closingNoneNote || '') === v) return;
+  ord.closingNoneNote = v;
+  try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+}
 function handleClosingModalUpload(input) {
   const files = input.files;
   if (!files || !files.length) return;
@@ -21746,6 +21780,7 @@ function handleClosingModalUpload(input) {
     const reader = new FileReader();
     reader.onload = function(ev){
       ord.closingDocs.push({ name: f.name, data: ev.target.result, type: f.type, size: f.size, addedAt: Date.now() });
+      ord.closingNone = false;
       added++; pending--;
       if (pending <= 0) _closingModalCommit(added);
     };
@@ -25922,8 +25957,10 @@ function renderApprovalExpenseTable() {
       const _cdOrd = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
       if (_cdOrd) {
         const _cdN = (Array.isArray(_cdOrd.closingDocs) ? _cdOrd.closingDocs.filter(Boolean) : []).length;
-        const _cdSty = _cdN > 0 ? 'background:#dcfce7;color:#15803d;border:1px solid #86efac' : 'background:#fef9c3;color:#a16207;border:1px solid #fde047';
-        const _cdTxt = _cdN > 0 ? ('✅ 완료 ' + _cdN) : '⏳ 대기';
+        let _cdSty, _cdTxt;
+        if (_cdN > 0) { _cdSty = 'background:#dcfce7;color:#15803d;border:1px solid #86efac'; _cdTxt = '✅ 완료 ' + _cdN; }
+        else if (_cdOrd.closingNone) { _cdSty = 'background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1'; _cdTxt = '➖ 없음'; }
+        else { _cdSty = 'background:#fef9c3;color:#a16207;border:1px solid #fde047'; _cdTxt = '⏳ 대기'; }
         closingCell = '<button class="btn btn-sm" onclick="openClosingDocsModal(' + JSON.stringify(_cdOrd.id) + ')" title="마감서 파일 보기·추가" style="' + PAY_BTN_STYLE + ';' + _cdSty + '">' + _cdTxt + '</button>';
       } else {
         closingCell = '<span style="color:#cbd5e1;font-size:11px" title="연결된 발주서 없음">-</span>';
