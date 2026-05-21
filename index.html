@@ -2359,6 +2359,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div id="insight-top-tabs" style="display:flex;gap:2px;margin-bottom:0;border-bottom:2px solid var(--gray-200)">
         <button id="ins-top-tab-newprod" onclick="setInsightTopTab('newprod')" class="ins-top-tab" style="padding:8px 16px;border:1px solid #0f172a;background:#0f172a;font-size:13px;font-weight:700;cursor:pointer;color:#fff;border-radius:7px;line-height:1.2;transition:all .12s">🌱 신제품 개발</button>
         <button id="ins-top-tab-board" onclick="setInsightTopTab('board')" class="ins-top-tab" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">💡 인사이트 보드</button>
+        <button id="ins-top-tab-portfolio" onclick="setInsightTopTab('portfolio')" class="ins-top-tab" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">📦 제품 포트폴리오</button>
       </div>
       <!-- Sub: 인사이트 보드 -->
       <div id="insight-sub-board" style="display:none;margin-top:14px">
@@ -2384,6 +2385,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         </div>
         <div id="np-kanban" style="display:flex;flex-direction:column;gap:20px;min-height:400px"></div>
       </div>
+      <!-- Sub: 제품 포트폴리오 (v1.9.900) -->
+      <div id="insight-sub-portfolio" style="display:none;margin-top:14px"></div>
     </div>
 
     <!-- ══════════════ USERS ══════════════ -->
@@ -5220,7 +5223,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.899';
+const ERP_VERSION = 'v1.9.900';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -33208,27 +33211,856 @@ const NP_DEFAULT_REGULATORY = [
 function setInsightTopTab(tab) {
   const boardBtn = document.getElementById('ins-top-tab-board');
   const newprodBtn = document.getElementById('ins-top-tab-newprod');
+  const portfolioBtn = document.getElementById('ins-top-tab-portfolio');
   const boardSub = document.getElementById('insight-sub-board');
   const newprodSub = document.getElementById('insight-sub-newprod');
+  const portfolioSub = document.getElementById('insight-sub-portfolio');
   if (!boardBtn || !newprodBtn || !boardSub || !newprodSub) return;
   // v1.9.690 거래처 정보 스타일
   const _setIns = (btn, active) => {
+    if (!btn) return;
     btn.style.background = active ? '#0f172a' : '#f1f5f9';
     btn.style.color = active ? '#fff' : '#475569';
     btn.style.border = active ? '1px solid #0f172a' : '1px solid #e2e8f0';
     btn.style.fontWeight = active ? '700' : '600';
   };
   if (tab === 'newprod') {
-    _setIns(newprodBtn, true);
-    _setIns(boardBtn, false);
+    _setIns(newprodBtn, true); _setIns(boardBtn, false); _setIns(portfolioBtn, false);
     boardSub.style.display = 'none'; newprodSub.style.display = '';
+    if (portfolioSub) portfolioSub.style.display = 'none';
     renderNewProductKanban();
+  } else if (tab === 'portfolio') {
+    _setIns(newprodBtn, false); _setIns(boardBtn, false); _setIns(portfolioBtn, true);
+    boardSub.style.display = 'none'; newprodSub.style.display = 'none';
+    if (portfolioSub) portfolioSub.style.display = '';
+    _ensureProductMap();
+    renderProductMap();
+    if (typeof _pmLoad === 'function') {
+      _pmLoad().then(function(changed){ if (changed) renderProductMap(); }).catch(function(){});
+    }
   } else {
-    _setIns(newprodBtn, false);
-    _setIns(boardBtn, true);
+    _setIns(newprodBtn, false); _setIns(boardBtn, true); _setIns(portfolioBtn, false);
     newprodSub.style.display = 'none'; boardSub.style.display = '';
+    if (portfolioSub) portfolioSub.style.display = 'none';
     renderInsightPage();
   }
+}
+
+// ═══════════════════════════════════════════════════════
+// 📦 제품 포트폴리오 (Product Portfolio Map) — v1.9.900
+// ═══════════════════════════════════════════════════════
+const _PM_STATUS = {
+  dev:          { label:'개발중',  color:'#b45309', bg:'#fef3c7' },
+  launched:     { label:'출시',    color:'#15803d', bg:'#dcfce7' },
+  renewal:      { label:'리뉴얼',  color:'#6d28d9', bg:'#ede9fe' },
+  discontinued: { label:'단종',    color:'#64748b', bg:'#e2e8f0' }
+};
+const _PM_PALETTE = ['#3b82f6','#f59e0b','#10b981','#ec4899','#8b5cf6','#06b6d4','#ef4444','#eab308','#14b8a6','#f97316'];
+
+let _pmDragId = null;
+let _pmEditingProductId = null;
+let _pmModalPhoto = '';
+let _pmCommentEdit = null;
+let _pmReplyOpenFor = null;
+
+function _pmDefaultData() {
+  return {
+    skinConcerns: ['기미잡티','탄력','모공'],
+    productTypes: ['클렌징','각질/필링','토너/에센스','세럼','크림'],
+    channels: [
+      { id:'ch_online', name:'온라인', color:'#3b82f6' },
+      { id:'ch_hs',     name:'홈쇼핑', color:'#f59e0b' },
+      { id:'ch_ph',     name:'약국',   color:'#10b981' }
+    ],
+    products: [],
+    updatedAt: 0
+  };
+}
+
+function _ensureProductMap() {
+  if (!window._productMapData || typeof window._productMapData !== 'object') {
+    window._productMapData = _pmDefaultData();
+  }
+  const d = window._productMapData;
+  const def = _pmDefaultData();
+  if (!Array.isArray(d.skinConcerns) || d.skinConcerns.length === 0) d.skinConcerns = def.skinConcerns;
+  if (!Array.isArray(d.productTypes) || d.productTypes.length === 0) d.productTypes = def.productTypes;
+  if (!Array.isArray(d.channels) || d.channels.length === 0) d.channels = def.channels;
+  if (!Array.isArray(d.products)) d.products = [];
+  if (typeof d.updatedAt !== 'number') d.updatedAt = 0;
+  d.products.forEach(function(p){ if (!Array.isArray(p.comments)) p.comments = []; });
+  return d;
+}
+
+function _pmGenId(prefix) {
+  return (prefix||'pm') + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8);
+}
+
+function _pmCurrentUser() {
+  const u = window._currentUser || {};
+  return {
+    name: (u.displayName || u.name || u.email || '스텔라'),
+    email: (u.email || ''),
+    isAdmin: !!u.isAdmin
+  };
+}
+
+function _pmFindChannel(name) {
+  const d = _ensureProductMap();
+  return d.channels.find(function(c){ return c.name === name; }) || null;
+}
+
+function _pmFmtPrice(v) {
+  const n = Number(v) || 0;
+  if (!n) return '<span style="color:#94a3b8;font-weight:600">가격 미정</span>';
+  return '₩' + n.toLocaleString();
+}
+
+function _pmFmtTime(ts) {
+  if (!ts) return '';
+  const dt = new Date(ts);
+  if (isNaN(dt.getTime())) return '';
+  const p2 = function(n){ return (n<10?'0':'') + n; };
+  return dt.getFullYear() + '.' + p2(dt.getMonth()+1) + '.' + p2(dt.getDate()) + ' ' + p2(dt.getHours()) + ':' + p2(dt.getMinutes());
+}
+
+// ── 저장 (localStorage 동기 + Firestore 백그라운드) ──
+function _pmSave(opts) {
+  opts = opts || {};
+  try {
+    _ensureProductMap();
+    if (!opts.noTouch) window._productMapData.updatedAt = Date.now();
+    const json = JSON.stringify(window._productMapData);
+    // 1) localStorage 동기 백업 (최우선)
+    try { localStorage.setItem('reniv_shared_product_map', json); }
+    catch(e) { console.warn('🗺️ productMap localStorage 저장 실패:', e); }
+    // 2) Firestore 백그라운드 저장
+    if (window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
+      try {
+        const ref = window._firestoreDoc(window._firebaseDb, 'settings', 'product_map');
+        window._firestoreSetDoc(ref, { value: json }, { merge:true })
+          .then(function(){ if (!opts.silent) console.log('🗺️ [v900] productMap Firestore 저장 완료'); })
+          .catch(function(e){ console.warn('🗺️ productMap Firestore 저장 실패:', e); });
+      } catch(e) { console.warn('🗺️ productMap Firestore 호출 실패:', e); }
+    }
+    if (json.length > 850000) {
+      console.warn('🗺️ productMap 데이터 크기 ' + Math.round(json.length/1024) + 'KB — 사진이 많아지면 분리 저장 검토 필요');
+    }
+  } catch(e) { console.warn('🗺️ _pmSave 오류:', e); }
+}
+
+// ── 로드 (Firestore / localStorage updatedAt 비교) ──
+async function _pmLoad() {
+  _ensureProductMap();
+  let fsData = null, lcData = null;
+  try {
+    if (window._firestoreGetDoc && window._firestoreDoc && window._firebaseDb) {
+      const ref = window._firestoreDoc(window._firebaseDb, 'settings', 'product_map');
+      const snap = await window._firestoreGetDoc(ref);
+      if (snap && snap.exists()) {
+        const v = snap.data().value;
+        fsData = (typeof v === 'string') ? JSON.parse(v) : v;
+      }
+    }
+  } catch(e) { console.warn('🗺️ productMap Firestore 로드 실패:', e); }
+  try {
+    const s = localStorage.getItem('reniv_shared_product_map');
+    if (s) lcData = JSON.parse(s);
+  } catch(e) {}
+  const curTs = Number(window._productMapData.updatedAt) || 0;
+  const fsTs = (fsData && Number(fsData.updatedAt)) || 0;
+  const lcTs = (lcData && Number(lcData.updatedAt)) || 0;
+  let best = null, bestTs = curTs;
+  if (fsData && fsTs > bestTs) { best = fsData; bestTs = fsTs; }
+  if (lcData && lcTs > bestTs) { best = lcData; bestTs = lcTs; }
+  let changed = false;
+  if (best) {
+    window._productMapData = best;
+    _ensureProductMap();
+    changed = true;
+    console.log('🗺️ [v900] productMap 최신본 로드 (updatedAt=' + bestTs + ')');
+  }
+  // localStorage 가 Firestore 보다 최신 → Firestore 재동기화 (새로고침 손실 방지)
+  if (lcData && lcTs > fsTs) {
+    try { _pmSave({ noTouch:true, silent:true }); } catch(e) {}
+  }
+  return changed;
+}
+
+// ── 스타일 1회 주입 ──
+function _pmInjectStyles() {
+  if (document.getElementById('pm-style-tag')) return;
+  const s = document.createElement('style');
+  s.id = 'pm-style-tag';
+  s.textContent = '.pm-colhead:hover .pm-colhead-actions{display:flex!important}'
+    + '.pm-rowhead:hover .pm-rowhead-actions{display:flex!important}'
+    + '.pm-card:hover{box-shadow:0 5px 14px rgba(0,0,0,.14)!important;transform:translateY(-1px)}'
+    + '.pm-cell-add{opacity:0;transition:opacity .12s}'
+    + '.pm-cell:hover .pm-cell-add{opacity:1}'
+    + '.pm-mini-btn{background:#fff;border:1px solid #cbd5e1;border-radius:6px;font-size:10.5px;padding:3px 7px;cursor:pointer;color:#475569;line-height:1.2}'
+    + '.pm-mini-btn:hover{background:#f1f5f9}'
+    + '.pm-card{transition:box-shadow .12s,transform .12s}';
+  document.head.appendChild(s);
+}
+
+// ── 그리드 렌더 ──
+function renderProductMap() {
+  const host = document.getElementById('insight-sub-portfolio');
+  if (!host) return;
+  _pmInjectStyles();
+  const d = _ensureProductMap();
+  const cols = d.skinConcerns.length;
+  let chL = '';
+  d.channels.forEach(function(c){
+    chL += '<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#475569"><span style="width:10px;height:10px;border-radius:3px;background:' + c.color + '"></span>' + _esc(c.name) + '</span>';
+  });
+  let stL = '';
+  ['dev','launched','renewal','discontinued'].forEach(function(k){
+    const s = _PM_STATUS[k];
+    stL += '<span style="font-size:9.5px;font-weight:800;color:' + s.color + ';background:' + s.bg + ';padding:2px 7px;border-radius:5px">' + s.label + '</span>';
+  });
+  let h = '';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px">'
+    + '<div style="display:flex;align-items:center;gap:13px;flex-wrap:wrap">'
+    + '<span style="font-size:13px;font-weight:700;color:var(--gray-600)">' + d.products.length + '개 제품</span>'
+    + '<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">' + chL + '</div>'
+    + '<span style="width:1px;height:14px;background:#e2e8f0"></span>'
+    + '<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">' + stL + '</div>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px">'
+    + '<button onclick="openPmChannelModal()" style="padding:7px 14px;background:#fff;color:#475569;border:1px solid #cbd5e1;border-radius:7px;font-size:12.5px;font-weight:600;cursor:pointer">🎨 유통 채널</button>'
+    + '<button onclick="openPmProductModal()" style="padding:7px 18px;background:#0f172a;color:#fff;border:1px solid #0f172a;border-radius:7px;font-size:12.5px;font-weight:700;cursor:pointer">＋ 제품 추가</button>'
+    + '</div></div>';
+  h += '<div style="font-size:11px;color:#94a3b8;margin-bottom:8px">💡 카드를 드래그해 다른 칸으로 이동 · 빈 칸에 마우스를 올리면 제품 추가 · 행/열 제목에 마우스를 올리면 편집</div>';
+  h += '<div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px;background:#fff">';
+  h += '<div style="display:grid;grid-template-columns:160px repeat(' + cols + ',minmax(210px,1fr)) 52px;align-items:stretch">';
+  // 헤더 행
+  h += '<div style="padding:10px 12px;background:#f1f5f9;font-size:10px;font-weight:700;color:#94a3b8;display:flex;align-items:flex-end;border-bottom:2px solid #e2e8f0;border-right:1px solid #e2e8f0">제품타입 ＼ 피부고민</div>';
+  d.skinConcerns.forEach(function(sc, ci){
+    h += '<div class="pm-colhead" style="padding:9px 8px;background:#f8fafc;border-bottom:2px solid #e2e8f0;border-right:1px solid #eef2f6;text-align:center">'
+      + '<div style="font-size:13px;font-weight:800;color:#0f172a">' + _esc(sc) + '</div>'
+      + '<div class="pm-colhead-actions" style="display:none;gap:3px;justify-content:center;margin-top:4px">'
+      + '<button class="pm-mini-btn" onclick="pmRenameColumn(' + ci + ')">✏️</button>'
+      + '<button class="pm-mini-btn" onclick="pmDeleteColumn(' + ci + ')">🗑</button>'
+      + '</div></div>';
+  });
+  h += '<div style="padding:8px;background:#f8fafc;border-bottom:2px solid #e2e8f0;display:flex;align-items:center;justify-content:center">'
+    + '<button class="pm-mini-btn" onclick="pmAddColumn()" title="피부 고민 추가" style="font-size:15px;padding:5px 9px;font-weight:800">＋</button></div>';
+  // 본문 행
+  d.productTypes.forEach(function(pt, ri){
+    h += '<div class="pm-rowhead" style="padding:10px 12px;background:#f8fafc;border-bottom:1px solid #eef2f6;border-right:1px solid #e2e8f0;display:flex;flex-direction:column;justify-content:center;gap:5px">'
+      + '<div style="font-size:12.5px;font-weight:800;color:#0f172a">' + _esc(pt) + '</div>'
+      + '<div class="pm-rowhead-actions" style="display:none;gap:3px">'
+      + '<button class="pm-mini-btn" onclick="pmRenameRow(' + ri + ')">✏️</button>'
+      + '<button class="pm-mini-btn" onclick="pmDeleteRow(' + ri + ')">🗑</button>'
+      + '</div></div>';
+    d.skinConcerns.forEach(function(sc, ci){
+      const items = d.products.filter(function(p){ return p.productType === pt && p.skinConcern === sc; });
+      let cards = '';
+      items.forEach(function(p){ cards += _pmProductCard(p); });
+      h += '<div class="pm-cell" ondragover="_pmDragOver(event)" ondragleave="_pmDragLeave(event)" ondrop="_pmDrop(event,' + ri + ',' + ci + ')" style="padding:8px;border-bottom:1px solid #f1f5f9;border-right:1px solid #f1f5f9;min-height:96px;display:flex;flex-direction:column;gap:7px">'
+        + cards
+        + '<button class="pm-cell-add" onclick="openPmProductModal(null,' + ri + ',' + ci + ')" style="margin-top:auto;background:none;border:1px dashed #cbd5e1;border-radius:7px;color:#94a3b8;font-size:11px;padding:5px;cursor:pointer;font-weight:600">＋ 제품</button>'
+        + '</div>';
+    });
+    h += '<div style="border-bottom:1px solid #f1f5f9;background:#fcfdfe"></div>';
+  });
+  h += '</div></div>';
+  h += '<div style="margin-top:8px"><button onclick="pmAddRow()" style="padding:8px 16px;background:#eef2ff;color:#4338ca;border:1px dashed #c7d2fe;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer">＋ 제품 타입(행) 추가</button></div>';
+  host.innerHTML = h;
+}
+
+function _pmProductCard(p) {
+  const ch = _pmFindChannel(p.channel);
+  const col = ch ? ch.color : '#cbd5e1';
+  const st = _PM_STATUS[p.status] || _PM_STATUS.dev;
+  const photo = p.photo
+    ? '<img src="' + escapeHtml(p.photo) + '" style="width:46px;height:46px;border-radius:7px;object-fit:cover;flex:0 0 auto;background:#f1f5f9">'
+    : '<div style="width:46px;height:46px;border-radius:7px;background:#eef2f6;display:flex;align-items:center;justify-content:center;font-size:18px;flex:0 0 auto">🧴</div>';
+  const cmtCnt = (Array.isArray(p.comments) && p.comments.length) ? p.comments.length : 0;
+  return '<div draggable="true" ondragstart="_pmDragStart(event,\'' + p.id + '\')" ondragend="_pmDragEnd(event)" onclick="openPmDetail(\'' + p.id + '\')" class="pm-card" '
+    + 'style="position:relative;display:flex;gap:8px;padding:8px;background:#fff;border:1px solid #e2e8f0;border-left:4px solid ' + col + ';border-radius:9px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06)">'
+    + photo
+    + '<div style="flex:1;min-width:0">'
+    + '<div style="font-size:12.5px;font-weight:800;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:34px">' + _esc(p.name||'(이름 없음)') + '</div>'
+    + '<div style="display:flex;align-items:center;gap:4px;margin-top:3px"><span style="width:8px;height:8px;border-radius:2px;background:' + col + '"></span><span style="font-size:10.5px;color:#64748b">' + _esc(p.channel||'-') + '</span></div>'
+    + '<div style="display:flex;align-items:center;gap:6px;margin-top:2px"><span style="font-size:12px;font-weight:800;color:#0f172a">' + _pmFmtPrice(p.price) + '</span>'
+    + (cmtCnt ? '<span style="font-size:10px;color:#94a3b8">💬' + cmtCnt + '</span>' : '')
+    + '</div></div>'
+    + '<span style="position:absolute;top:6px;right:6px;font-size:9px;font-weight:800;color:' + st.color + ';background:' + st.bg + ';padding:2px 6px;border-radius:5px">' + st.label + '</span>'
+    + '</div>';
+}
+
+// ── 오버레이 ──
+function _pmShowOverlay(html, widthPx) {
+  _pmCloseOverlay();
+  const ov = document.createElement('div');
+  ov.id = 'pm-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99990;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:32px 16px';
+  ov.onclick = function(e){ if (e.target === ov) _pmCloseOverlay(); };
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:14px;width:100%;max-width:' + (widthPx||560) + 'px;box-shadow:0 20px 60px rgba(0,0,0,.3)';
+  box.innerHTML = html;
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+}
+function _pmCloseOverlay() {
+  const ex = document.getElementById('pm-overlay');
+  if (ex) ex.remove();
+}
+
+// ── 제품 추가/편집 모달 ──
+function openPmProductModal(pid, rowIdx, colIdx) {
+  const d = _ensureProductMap();
+  let p = null;
+  if (pid) p = d.products.find(function(x){ return x.id === pid; }) || null;
+  _pmEditingProductId = p ? p.id : null;
+  _pmModalPhoto = p ? (p.photo||'') : '';
+  const presetType = (p ? p.productType : (rowIdx!=null ? d.productTypes[rowIdx] : '')) || (d.productTypes[0]||'');
+  const presetConcern = (p ? p.skinConcern : (colIdx!=null ? d.skinConcerns[colIdx] : '')) || (d.skinConcerns[0]||'');
+  const presetChannel = p ? (p.channel||'') : (d.channels[0] ? d.channels[0].name : '');
+  const presetStatus = p ? (p.status||'dev') : 'dev';
+  const opt = function(arr, sel){ return arr.map(function(v){ return '<option value="' + escapeHtml(v) + '"' + (v===sel?' selected':'') + '>' + _esc(v) + '</option>'; }).join(''); };
+  const chOpt = d.channels.map(function(c){ return '<option value="' + escapeHtml(c.name) + '"' + (c.name===presetChannel?' selected':'') + '>' + _esc(c.name) + '</option>'; }).join('');
+  const stOpt = Object.keys(_PM_STATUS).map(function(k){ return '<option value="' + k + '"' + (k===presetStatus?' selected':'') + '>' + _PM_STATUS[k].label + '</option>'; }).join('');
+  const photoInner = _pmModalPhoto ? '<img src="' + escapeHtml(_pmModalPhoto) + '" style="width:100%;height:100%;object-fit:cover">' : '<span style="font-size:32px">🧴</span>';
+  const lbl = 'font-size:11.5px;font-weight:700;color:#475569;margin-bottom:4px;display:block';
+  const inp = 'width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;font-size:13px;box-sizing:border-box;font-family:inherit';
+  let h = '';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #eef2f6">'
+    + '<div style="font-size:16px;font-weight:800;color:#0f172a">' + (p?'제품 수정':'제품 추가') + '</div>'
+    + '<button onclick="_pmCloseProductModal()" style="background:none;border:0;font-size:20px;cursor:pointer;color:#94a3b8">✕</button></div>';
+  h += '<div style="padding:20px">';
+  h += '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px">';
+  h += '<div style="flex:0 0 auto"><label style="' + lbl + '">제품 사진</label>'
+    + '<div id="pm-photo-preview" style="width:120px;height:120px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;display:flex;align-items:center;justify-content:center;overflow:hidden">' + photoInner + '</div>'
+    + '<input type="file" id="pm-photo-input" accept="image/*" style="display:none" onchange="_pmHandlePhoto(this)">'
+    + '<div style="display:flex;gap:5px;margin-top:6px">'
+    + '<button type="button" onclick="document.getElementById(\'pm-photo-input\').click()" style="flex:1;padding:5px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">사진 선택</button>'
+    + '<button type="button" id="pm-photo-remove" onclick="_pmRemovePhoto()" style="' + (_pmModalPhoto?'':'display:none;') + 'padding:5px 8px;background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">제거</button>'
+    + '</div></div>';
+  h += '<div style="flex:1;min-width:210px">'
+    + '<label style="' + lbl + '">제품명 *</label>'
+    + '<input id="pm-f-name" style="' + inp + '" placeholder="제품명을 입력하세요" value="' + (p?escapeHtml(p.name||''):'') + '">'
+    + '<div style="display:flex;gap:8px;margin-top:10px">'
+    + '<div style="flex:1"><label style="' + lbl + '">피부 고민 (열)</label><select id="pm-f-concern" style="' + inp + '">' + opt(d.skinConcerns, presetConcern) + '</select></div>'
+    + '<div style="flex:1"><label style="' + lbl + '">제품 타입 (행)</label><select id="pm-f-type" style="' + inp + '">' + opt(d.productTypes, presetType) + '</select></div>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;margin-top:10px">'
+    + '<div style="flex:1"><label style="' + lbl + '">주력 유통 채널</label><select id="pm-f-channel" style="' + inp + '">' + chOpt + '</select></div>'
+    + '<div style="flex:1"><label style="' + lbl + '">제품 상태</label><select id="pm-f-status" style="' + inp + '">' + stOpt + '</select></div>'
+    + '</div></div>';
+  h += '</div>';
+  h += '<div style="margin-bottom:12px"><label style="' + lbl + '">판매가 (원)</label><input id="pm-f-price" type="number" min="0" style="' + inp + '" placeholder="0" value="' + (p&&p.price?Number(p.price):'') + '"></div>';
+  h += '<div style="margin-bottom:12px"><label style="' + lbl + '">제품 기능</label><textarea id="pm-f-func" rows="2" style="' + inp + '" placeholder="제품의 핵심 기능">' + (p?_esc(p.func||''):'') + '</textarea></div>';
+  h += '<div style="display:flex;gap:8px;margin-bottom:12px">'
+    + '<div style="flex:1"><label style="' + lbl + '">메인 성분</label><textarea id="pm-f-mainIng" rows="2" style="' + inp + '">' + (p?_esc(p.mainIng||''):'') + '</textarea></div>'
+    + '<div style="flex:1"><label style="' + lbl + '">보조 성분</label><textarea id="pm-f-subIng" rows="2" style="' + inp + '">' + (p?_esc(p.subIng||''):'') + '</textarea></div>'
+    + '</div>';
+  h += '<div style="margin-bottom:12px"><label style="' + lbl + '">판매 전략</label><textarea id="pm-f-strategy" rows="2" style="' + inp + '">' + (p?_esc(p.strategy||''):'') + '</textarea></div>';
+  h += '<div style="margin-bottom:16px"><label style="' + lbl + '">비고</label><textarea id="pm-f-note" rows="2" style="' + inp + '">' + (p?_esc(p.note||''):'') + '</textarea></div>';
+  h += '<div style="display:flex;gap:8px">'
+    + '<button onclick="savePmProduct()" style="flex:2;padding:11px;background:#0f172a;color:#fff;border:0;border-radius:9px;font-size:13.5px;font-weight:800;cursor:pointer">저장</button>'
+    + '<button onclick="_pmCloseProductModal()" style="flex:1;padding:11px;background:#fff;color:#64748b;border:1px solid #cbd5e1;border-radius:9px;font-size:13.5px;font-weight:700;cursor:pointer">취소</button>'
+    + '</div>';
+  h += '</div>';
+  _pmShowOverlay(h, 600);
+}
+
+function _pmCompressImage(file, cb) {
+  try {
+    const reader = new FileReader();
+    reader.onload = function(e){
+      const img = new Image();
+      img.onload = function(){
+        try {
+          let w = img.width, h = img.height;
+          const maxDim = 300;
+          if (w >= h && w > maxDim) { h = Math.round(h*maxDim/w); w = maxDim; }
+          else if (h > w && h > maxDim) { w = Math.round(w*maxDim/h); h = maxDim; }
+          const cv = document.createElement('canvas');
+          cv.width = w; cv.height = h;
+          const ctx = cv.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0,0,w,h);
+          ctx.drawImage(img, 0, 0, w, h);
+          cb(cv.toDataURL('image/jpeg', 0.6));
+        } catch(err) { console.warn('이미지 압축 실패:', err); cb(e.target.result); }
+      };
+      img.onerror = function(){ showNotif('이미지를 읽을 수 없습니다', 'warning'); };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  } catch(e) { console.warn('FileReader 오류:', e); showNotif('사진 처리 실패', 'warning'); }
+}
+
+function _pmHandlePhoto(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  if (!/^image\//.test(f.type)) { showNotif('이미지 파일만 등록할 수 있습니다', 'warning'); return; }
+  _pmCompressImage(f, function(dataUrl){
+    _pmModalPhoto = dataUrl;
+    const prev = document.getElementById('pm-photo-preview');
+    if (prev) prev.innerHTML = '<img src="' + escapeHtml(dataUrl) + '" style="width:100%;height:100%;object-fit:cover">';
+    const rm = document.getElementById('pm-photo-remove');
+    if (rm) rm.style.display = '';
+  });
+  input.value = '';
+}
+
+function _pmRemovePhoto() {
+  _pmModalPhoto = '';
+  const prev = document.getElementById('pm-photo-preview');
+  if (prev) prev.innerHTML = '<span style="font-size:32px">🧴</span>';
+  const rm = document.getElementById('pm-photo-remove');
+  if (rm) rm.style.display = 'none';
+}
+
+function savePmProduct() {
+  const d = _ensureProductMap();
+  const nameEl = document.getElementById('pm-f-name');
+  const name = nameEl ? nameEl.value : '';
+  if (!name || !name.trim()) { showNotif('제품명을 입력하세요', 'warning'); return; }
+  const get = function(id){ const el = document.getElementById(id); return el ? el.value : ''; };
+  let p;
+  if (_pmEditingProductId) {
+    p = d.products.find(function(x){ return x.id === _pmEditingProductId; });
+    if (!p) { p = { id:_pmGenId('pm'), comments:[] }; d.products.push(p); }
+  } else {
+    p = { id:_pmGenId('pm'), comments:[] };
+    d.products.push(p);
+  }
+  p.name = name.trim();
+  p.skinConcern = get('pm-f-concern');
+  p.productType = get('pm-f-type');
+  p.channel = get('pm-f-channel');
+  p.status = get('pm-f-status') || 'dev';
+  p.price = Number(get('pm-f-price')) || 0;
+  p.func = (get('pm-f-func')||'').trim();
+  p.mainIng = (get('pm-f-mainIng')||'').trim();
+  p.subIng = (get('pm-f-subIng')||'').trim();
+  p.strategy = (get('pm-f-strategy')||'').trim();
+  p.note = (get('pm-f-note')||'').trim();
+  p.photo = _pmModalPhoto || '';
+  if (!Array.isArray(p.comments)) p.comments = [];
+  p.updatedAt = Date.now();
+  _pmSave();
+  const wasEdit = !!_pmEditingProductId;
+  const savedId = p.id;
+  _pmEditingProductId = null;
+  _pmModalPhoto = '';
+  _pmCloseOverlay();
+  renderProductMap();
+  showNotif('제품이 저장되었습니다', 'success');
+  if (wasEdit) openPmDetail(savedId);
+}
+
+function _pmCloseProductModal() {
+  const wasEdit = _pmEditingProductId;
+  _pmEditingProductId = null;
+  _pmModalPhoto = '';
+  _pmCloseOverlay();
+  if (wasEdit) openPmDetail(wasEdit);
+}
+
+function deletePmProduct(pid) {
+  const d = _ensureProductMap();
+  const p = d.products.find(function(x){ return x.id === pid; });
+  if (!p) return;
+  if (!confirm('"' + (p.name||'이 제품') + '" 제품을 삭제할까요?')) return;
+  d.products = d.products.filter(function(x){ return x.id !== pid; });
+  _pmSave();
+  _pmCloseOverlay();
+  renderProductMap();
+  showNotif('제품이 삭제되었습니다', 'success');
+}
+
+// ── 제품 상세 팝업 ──
+function openPmDetail(pid) {
+  const d = _ensureProductMap();
+  const p = d.products.find(function(x){ return x.id === pid; });
+  if (!p) { showNotif('제품을 찾을 수 없습니다', 'warning'); return; }
+  if (!Array.isArray(p.comments)) p.comments = [];
+  const ch = _pmFindChannel(p.channel);
+  const col = ch ? ch.color : '#cbd5e1';
+  const st = _PM_STATUS[p.status] || _PM_STATUS.dev;
+  const photo = p.photo
+    ? '<img src="' + escapeHtml(p.photo) + '" style="width:100%;height:100%;object-fit:cover">'
+    : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:48px;background:#eef2f6">🧴</div>';
+  const fld = function(label, val){
+    const has = (val != null && String(val).trim() !== '');
+    const v = has ? '<div style="font-size:13px;color:#0f172a;line-height:1.55;white-space:pre-wrap;word-break:break-word">' + _esc(String(val)) + '</div>'
+                  : '<div style="font-size:13px;color:#cbd5e1">-</div>';
+    return '<div style="margin-bottom:13px"><div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:3px">' + label + '</div>' + v + '</div>';
+  };
+  const priceStr = (Number(p.price)||0) ? ('₩' + Number(p.price).toLocaleString()) : '<span style="font-size:14px;color:#94a3b8">가격 미정</span>';
+  let h = '';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #eef2f6">'
+    + '<div style="font-size:16px;font-weight:800;color:#0f172a">제품 상세</div>'
+    + '<button onclick="_pmCloseOverlay()" style="background:none;border:0;font-size:20px;cursor:pointer;color:#94a3b8">✕</button></div>';
+  h += '<div style="padding:20px">';
+  h += '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px">'
+    + '<div style="width:140px;height:140px;border-radius:12px;overflow:hidden;flex:0 0 auto;border:1px solid #e2e8f0">' + photo + '</div>'
+    + '<div style="flex:1;min-width:200px">'
+    + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+    + '<span style="font-size:18px;font-weight:800;color:#0f172a">' + _esc(p.name||'(이름 없음)') + '</span>'
+    + '<span style="font-size:10.5px;font-weight:800;color:' + st.color + ';background:' + st.bg + ';padding:3px 8px;border-radius:6px">' + st.label + '</span>'
+    + '</div>'
+    + '<div style="display:flex;align-items:center;gap:6px;margin-top:8px"><span style="width:11px;height:11px;border-radius:3px;background:' + col + '"></span><span style="font-size:13px;color:#475569;font-weight:600">' + _esc(p.channel||'-') + '</span></div>'
+    + '<div style="font-size:20px;font-weight:800;color:#0f172a;margin-top:8px">' + priceStr + '</div>'
+    + '<div style="font-size:11.5px;color:#94a3b8;margin-top:6px">' + _esc(p.skinConcern||'-') + ' · ' + _esc(p.productType||'-') + '</div>'
+    + '</div></div>';
+  h += fld('제품 기능', p.func);
+  h += fld('메인 성분', p.mainIng);
+  h += fld('보조 성분', p.subIng);
+  h += fld('판매 전략', p.strategy);
+  h += fld('비고', p.note);
+  h += '<div style="display:flex;gap:8px;margin:6px 0 18px">'
+    + '<button onclick="openPmProductModal(\'' + p.id + '\')" style="flex:1;padding:9px;background:#0f172a;color:#fff;border:0;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✏️ 수정</button>'
+    + '<button onclick="deletePmProduct(\'' + p.id + '\')" style="flex:1;padding:9px;background:#fff;color:#dc2626;border:1px solid #fecaca;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">🗑 삭제</button>'
+    + '</div>';
+  h += _pmRenderComments(p);
+  h += '</div>';
+  _pmShowOverlay(h, 560);
+}
+
+function _pmRenderComments(p) {
+  const me = _pmCurrentUser();
+  const cs = Array.isArray(p.comments) ? p.comments : [];
+  let h = '<div style="border-top:1px solid #eef2f6;padding-top:14px">';
+  h += '<div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:10px">💬 댓글 ' + cs.length + '</div>';
+  if (cs.length === 0) {
+    h += '<div style="font-size:12px;color:#94a3b8;padding:4px 0 8px">아직 댓글이 없습니다. 첫 댓글을 남겨보세요.</div>';
+  }
+  cs.forEach(function(c){
+    h += _pmRenderOneComment(p, c, me, false);
+    const rs = Array.isArray(c.replies) ? c.replies : [];
+    rs.forEach(function(r){ h += _pmRenderOneComment(p, r, me, true); });
+    if (_pmReplyOpenFor === c.id) {
+      h += '<div style="margin:2px 0 12px 30px;display:flex;gap:6px">'
+        + '<textarea id="pm-reply-input" rows="1" placeholder="답글 입력..." style="flex:1;border:1px solid #cbd5e1;border-radius:7px;padding:6px 8px;font-size:12.5px;resize:vertical;font-family:inherit;box-sizing:border-box"></textarea>'
+        + '<button onclick="addPmReply(\'' + p.id + '\',\'' + c.id + '\')" style="padding:6px 12px;background:#0f172a;color:#fff;border:0;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">등록</button>'
+        + '</div>';
+    }
+  });
+  h += '<div style="display:flex;gap:6px;margin-top:10px">'
+    + '<textarea id="pm-comment-input" rows="2" placeholder="댓글을 입력하세요..." style="flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:8px;font-size:12.5px;resize:vertical;font-family:inherit;box-sizing:border-box"></textarea>'
+    + '<button onclick="addPmComment(\'' + p.id + '\')" style="padding:8px 14px;background:#0f172a;color:#fff;border:0;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer">등록</button>'
+    + '</div>';
+  h += '</div>';
+  return h;
+}
+
+function _pmRenderOneComment(p, c, me, isReply) {
+  const canEdit = (!me.email) || (c.authorEmail === me.email) || me.isAdmin;
+  const editing = (_pmCommentEdit === c.id);
+  const indent = isReply ? 'margin-left:30px;' : '';
+  const bg = isReply ? '#f8fafc' : '#fff';
+  let h = '<div style="' + indent + 'padding:8px 10px;background:' + bg + ';border:1px solid #eef2f6;border-radius:9px;margin-bottom:6px">';
+  h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">'
+    + (isReply ? '<span style="color:#cbd5e1;font-size:12px">↳</span>' : '')
+    + '<span style="font-size:12px;font-weight:800;color:#0f172a">' + _esc(c.authorName||'익명') + '</span>'
+    + '<span style="font-size:10.5px;color:#94a3b8">' + _pmFmtTime(c.ts) + (c.edited?' (수정됨)':'') + '</span>'
+    + '</div>';
+  if (editing) {
+    h += '<textarea id="pm-edit-input" rows="2" style="width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:6px;font-size:12.5px;resize:vertical;font-family:inherit;box-sizing:border-box">' + _esc(c.text||'') + '</textarea>'
+      + '<div style="display:flex;gap:6px;margin-top:4px">'
+      + '<button onclick="pmSaveEditComment(\'' + p.id + '\',\'' + c.id + '\')" style="padding:4px 10px;background:#0f172a;color:#fff;border:0;border-radius:6px;font-size:11.5px;font-weight:700;cursor:pointer">저장</button>'
+      + '<button onclick="pmCancelEdit(\'' + p.id + '\')" style="padding:4px 10px;background:#fff;color:#64748b;border:1px solid #cbd5e1;border-radius:6px;font-size:11.5px;cursor:pointer">취소</button>'
+      + '</div>';
+  } else {
+    h += '<div style="font-size:12.5px;color:#1e293b;line-height:1.5;white-space:pre-wrap;word-break:break-word">' + _esc(c.text||'') + '</div>';
+    h += '<div style="display:flex;gap:10px;margin-top:5px">';
+    if (!isReply) h += '<span onclick="pmToggleReply(\'' + p.id + '\',\'' + c.id + '\')" style="font-size:11px;color:#3b82f6;cursor:pointer;font-weight:600">답글</span>';
+    if (canEdit) {
+      h += '<span onclick="pmStartEditComment(\'' + p.id + '\',\'' + c.id + '\')" style="font-size:11px;color:#64748b;cursor:pointer">수정</span>';
+      h += '<span onclick="deletePmComment(\'' + p.id + '\',\'' + c.id + '\')" style="font-size:11px;color:#dc2626;cursor:pointer">삭제</span>';
+    }
+    h += '</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+function _pmFindComment(p, id) {
+  const cs = Array.isArray(p.comments) ? p.comments : [];
+  for (let i=0;i<cs.length;i++) {
+    if (cs[i].id === id) return { kind:'comment', comment:cs[i], list:cs, idx:i };
+    const rs = Array.isArray(cs[i].replies) ? cs[i].replies : [];
+    for (let j=0;j<rs.length;j++) {
+      if (rs[j].id === id) return { kind:'reply', comment:rs[j], list:rs, idx:j, parent:cs[i] };
+    }
+  }
+  return null;
+}
+
+function addPmComment(pid) {
+  const ta = document.getElementById('pm-comment-input');
+  if (!ta) return;
+  const txt = ta.value.trim();
+  if (!txt) { showNotif('댓글을 입력하세요', 'warning'); return; }
+  const d = _ensureProductMap();
+  const p = d.products.find(function(x){ return x.id === pid; });
+  if (!p) return;
+  if (!Array.isArray(p.comments)) p.comments = [];
+  const me = _pmCurrentUser();
+  p.comments.push({ id:_pmGenId('c'), text:txt, authorName:me.name, authorEmail:me.email, ts:Date.now(), replies:[] });
+  p.updatedAt = Date.now();
+  _pmSave();
+  openPmDetail(pid);
+}
+
+function addPmReply(pid, cid) {
+  const ta = document.getElementById('pm-reply-input');
+  if (!ta) return;
+  const txt = ta.value.trim();
+  if (!txt) { showNotif('답글을 입력하세요', 'warning'); return; }
+  const d = _ensureProductMap();
+  const p = d.products.find(function(x){ return x.id === pid; });
+  if (!p) return;
+  const c = (p.comments||[]).find(function(x){ return x.id === cid; });
+  if (!c) return;
+  if (!Array.isArray(c.replies)) c.replies = [];
+  const me = _pmCurrentUser();
+  c.replies.push({ id:_pmGenId('r'), text:txt, authorName:me.name, authorEmail:me.email, ts:Date.now() });
+  _pmReplyOpenFor = null;
+  p.updatedAt = Date.now();
+  _pmSave();
+  openPmDetail(pid);
+}
+
+function pmToggleReply(pid, cid) {
+  _pmReplyOpenFor = (_pmReplyOpenFor === cid) ? null : cid;
+  _pmCommentEdit = null;
+  openPmDetail(pid);
+}
+
+function pmStartEditComment(pid, id) {
+  _pmCommentEdit = id;
+  _pmReplyOpenFor = null;
+  openPmDetail(pid);
+}
+
+function pmCancelEdit(pid) {
+  _pmCommentEdit = null;
+  openPmDetail(pid);
+}
+
+function pmSaveEditComment(pid, id) {
+  const ta = document.getElementById('pm-edit-input');
+  if (!ta) return;
+  const txt = ta.value.trim();
+  if (!txt) { showNotif('내용을 입력하세요', 'warning'); return; }
+  const d = _ensureProductMap();
+  const p = d.products.find(function(x){ return x.id === pid; });
+  if (!p) return;
+  const f = _pmFindComment(p, id);
+  if (!f) return;
+  f.comment.text = txt;
+  f.comment.edited = true;
+  f.comment.editedTs = Date.now();
+  _pmCommentEdit = null;
+  p.updatedAt = Date.now();
+  _pmSave();
+  openPmDetail(pid);
+}
+
+function deletePmComment(pid, id) {
+  const d = _ensureProductMap();
+  const p = d.products.find(function(x){ return x.id === pid; });
+  if (!p) return;
+  const f = _pmFindComment(p, id);
+  if (!f) return;
+  const hasReplies = f.kind === 'comment' && Array.isArray(f.comment.replies) && f.comment.replies.length > 0;
+  const msg = (f.kind === 'reply') ? '답글을 삭제할까요?' : ('댓글을 삭제할까요?' + (hasReplies ? '\n(답글도 함께 삭제됩니다)' : ''));
+  if (!confirm(msg)) return;
+  f.list.splice(f.idx, 1);
+  p.updatedAt = Date.now();
+  _pmSave();
+  openPmDetail(pid);
+}
+
+// ── 드래그 이동 ──
+function _pmDragStart(ev, id) {
+  _pmDragId = id;
+  try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', id); } catch(e) {}
+}
+function _pmDragEnd(ev) {
+  _pmDragId = null;
+  const cells = document.querySelectorAll('.pm-cell');
+  for (let i=0;i<cells.length;i++) cells[i].style.background = '';
+}
+function _pmDragOver(ev) {
+  ev.preventDefault();
+  try { ev.dataTransfer.dropEffect = 'move'; } catch(e) {}
+  if (ev.currentTarget) ev.currentTarget.style.background = '#eff6ff';
+}
+function _pmDragLeave(ev) {
+  if (ev.currentTarget) ev.currentTarget.style.background = '';
+}
+function _pmDrop(ev, ri, ci) {
+  ev.preventDefault();
+  if (ev.currentTarget) ev.currentTarget.style.background = '';
+  let id = _pmDragId;
+  if (!id) { try { id = ev.dataTransfer.getData('text/plain'); } catch(e) {} }
+  if (!id) return;
+  const d = _ensureProductMap();
+  const p = d.products.find(function(x){ return x.id === id; });
+  if (!p) return;
+  const newType = d.productTypes[ri];
+  const newConcern = d.skinConcerns[ci];
+  if (!newType || !newConcern) return;
+  if (p.productType === newType && p.skinConcern === newConcern) return;
+  p.productType = newType;
+  p.skinConcern = newConcern;
+  p.updatedAt = Date.now();
+  _pmSave();
+  renderProductMap();
+  showNotif('제품을 이동했습니다', 'success');
+}
+
+// ── 열(피부 고민) 편집 ──
+function pmAddColumn() {
+  const name = (prompt('추가할 피부 고민(열) 이름을 입력하세요') || '').trim();
+  if (!name) return;
+  const d = _ensureProductMap();
+  if (d.skinConcerns.indexOf(name) !== -1) { showNotif('이미 있는 항목입니다', 'warning'); return; }
+  d.skinConcerns.push(name);
+  _pmSave();
+  renderProductMap();
+}
+function pmRenameColumn(idx) {
+  const d = _ensureProductMap();
+  const old = d.skinConcerns[idx];
+  if (old == null) return;
+  const name = (prompt('피부 고민 이름 변경', old) || '').trim();
+  if (!name || name === old) return;
+  if (d.skinConcerns.indexOf(name) !== -1) { showNotif('이미 있는 항목입니다', 'warning'); return; }
+  d.skinConcerns[idx] = name;
+  d.products.forEach(function(p){ if (p.skinConcern === old) p.skinConcern = name; });
+  _pmSave();
+  renderProductMap();
+}
+function pmDeleteColumn(idx) {
+  const d = _ensureProductMap();
+  if (d.skinConcerns.length <= 1) { showNotif('최소 1개 열은 있어야 합니다', 'warning'); return; }
+  const name = d.skinConcerns[idx];
+  if (name == null) return;
+  const cnt = d.products.filter(function(p){ return p.skinConcern === name; }).length;
+  if (!confirm('"' + name + '" 열을 삭제할까요?' + (cnt ? ('\n이 열의 제품 ' + cnt + '건도 함께 삭제됩니다.') : ''))) return;
+  d.skinConcerns.splice(idx, 1);
+  d.products = d.products.filter(function(p){ return p.skinConcern !== name; });
+  _pmSave();
+  renderProductMap();
+}
+
+// ── 행(제품 타입) 편집 ──
+function pmAddRow() {
+  const name = (prompt('추가할 제품 타입(행) 이름을 입력하세요') || '').trim();
+  if (!name) return;
+  const d = _ensureProductMap();
+  if (d.productTypes.indexOf(name) !== -1) { showNotif('이미 있는 항목입니다', 'warning'); return; }
+  d.productTypes.push(name);
+  _pmSave();
+  renderProductMap();
+}
+function pmRenameRow(idx) {
+  const d = _ensureProductMap();
+  const old = d.productTypes[idx];
+  if (old == null) return;
+  const name = (prompt('제품 타입 이름 변경', old) || '').trim();
+  if (!name || name === old) return;
+  if (d.productTypes.indexOf(name) !== -1) { showNotif('이미 있는 항목입니다', 'warning'); return; }
+  d.productTypes[idx] = name;
+  d.products.forEach(function(p){ if (p.productType === old) p.productType = name; });
+  _pmSave();
+  renderProductMap();
+}
+function pmDeleteRow(idx) {
+  const d = _ensureProductMap();
+  if (d.productTypes.length <= 1) { showNotif('최소 1개 행은 있어야 합니다', 'warning'); return; }
+  const name = d.productTypes[idx];
+  if (name == null) return;
+  const cnt = d.products.filter(function(p){ return p.productType === name; }).length;
+  if (!confirm('"' + name + '" 행을 삭제할까요?' + (cnt ? ('\n이 행의 제품 ' + cnt + '건도 함께 삭제됩니다.') : ''))) return;
+  d.productTypes.splice(idx, 1);
+  d.products = d.products.filter(function(p){ return p.productType !== name; });
+  _pmSave();
+  renderProductMap();
+}
+
+// ── 유통 채널 관리 ──
+function openPmChannelModal() {
+  const d = _ensureProductMap();
+  let rows = '';
+  d.channels.forEach(function(c){
+    rows += '<div class="pm-ch-row" data-cid="' + escapeHtml(c.id||'') + '" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
+      + '<input type="color" class="pm-ch-color" value="' + escapeHtml(c.color||'#3b82f6') + '" style="width:42px;height:34px;border:1px solid #cbd5e1;border-radius:7px;padding:2px;cursor:pointer">'
+      + '<input class="pm-ch-name" value="' + escapeHtml(c.name||'') + '" placeholder="채널명" style="flex:1;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:13px;box-sizing:border-box">'
+      + '<button onclick="this.closest(\'.pm-ch-row\').remove()" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;border-radius:6px;padding:6px 9px;font-size:12px;cursor:pointer">✕</button>'
+      + '</div>';
+  });
+  let h = '';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #eef2f6">'
+    + '<div style="font-size:16px;font-weight:800;color:#0f172a">🎨 유통 채널 관리</div>'
+    + '<button onclick="_pmCloseOverlay()" style="background:none;border:0;font-size:20px;cursor:pointer;color:#94a3b8">✕</button></div>';
+  h += '<div style="padding:20px">';
+  h += '<div style="font-size:12px;color:#64748b;margin-bottom:12px">제품 카드의 좌측 색상 막대로 표시될 주력 유통 채널입니다. 색상 칸을 클릭해 변경하세요.</div>';
+  h += '<div id="pm-ch-list">' + rows + '</div>';
+  h += '<button onclick="pmAddChannelRow()" style="width:100%;padding:8px;background:#eef2ff;color:#4338ca;border:1px dashed #c7d2fe;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;margin-top:4px">＋ 채널 추가</button>';
+  h += '<div style="display:flex;gap:8px;margin-top:16px">'
+    + '<button onclick="savePmChannels()" style="flex:2;padding:11px;background:#0f172a;color:#fff;border:0;border-radius:9px;font-size:13.5px;font-weight:800;cursor:pointer">저장</button>'
+    + '<button onclick="_pmCloseOverlay()" style="flex:1;padding:11px;background:#fff;color:#64748b;border:1px solid #cbd5e1;border-radius:9px;font-size:13.5px;font-weight:700;cursor:pointer">취소</button>'
+    + '</div>';
+  h += '</div>';
+  _pmShowOverlay(h, 460);
+}
+
+function pmAddChannelRow() {
+  const list = document.getElementById('pm-ch-list');
+  if (!list) return;
+  const color = _PM_PALETTE[list.querySelectorAll('.pm-ch-row').length % _PM_PALETTE.length];
+  const div = document.createElement('div');
+  div.className = 'pm-ch-row';
+  div.setAttribute('data-cid', '');
+  div.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px';
+  div.innerHTML = '<input type="color" class="pm-ch-color" value="' + color + '" style="width:42px;height:34px;border:1px solid #cbd5e1;border-radius:7px;padding:2px;cursor:pointer">'
+    + '<input class="pm-ch-name" placeholder="채널명" style="flex:1;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:13px;box-sizing:border-box">'
+    + '<button onclick="this.closest(\'.pm-ch-row\').remove()" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;border-radius:6px;padding:6px 9px;font-size:12px;cursor:pointer">✕</button>';
+  list.appendChild(div);
+}
+
+function savePmChannels() {
+  const d = _ensureProductMap();
+  const rows = document.querySelectorAll('#pm-ch-list .pm-ch-row');
+  const oldById = {};
+  d.channels.forEach(function(c){ if (c.id) oldById[c.id] = c.name; });
+  const next = [];
+  const seen = {};
+  for (let i=0;i<rows.length;i++) {
+    const nmEl = rows[i].querySelector('.pm-ch-name');
+    const colEl = rows[i].querySelector('.pm-ch-color');
+    const nm = nmEl ? nmEl.value.trim() : '';
+    const col = colEl ? (colEl.value || '#3b82f6') : '#3b82f6';
+    if (!nm) continue;
+    if (seen[nm]) { showNotif('중복된 채널명이 있습니다: ' + nm, 'warning'); return; }
+    seen[nm] = 1;
+    let cid = rows[i].getAttribute('data-cid') || '';
+    if (!cid) cid = _pmGenId('ch');
+    next.push({ id:cid, name:nm, color:col });
+  }
+  if (next.length === 0) { showNotif('최소 1개 채널이 필요합니다', 'warning'); return; }
+  next.forEach(function(c){
+    const oldName = oldById[c.id];
+    if (oldName && oldName !== c.name) {
+      d.products.forEach(function(p){ if (p.channel === oldName) p.channel = c.name; });
+    }
+  });
+  d.channels = next;
+  _pmSave();
+  _pmCloseOverlay();
+  renderProductMap();
+  showNotif('유통 채널이 저장되었습니다', 'success');
 }
 
 // ── 모달 내부 탭 ──
