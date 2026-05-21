@@ -5223,7 +5223,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.902';
+const ERP_VERSION = 'v1.9.903';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -24939,10 +24939,20 @@ function updateApprovalStats() {
     const urgentOrders = pendingOrders.filter(o => !!o.urgent).length;
     const urgentPending = urgentApprovals + urgentOrders;
 
-    // 2) 지출 결의 대기: paid 아닌 expense 카운트 + 응급(urgent 플래그)
+    // 2) 지출 결의 대기: paid 아닌 expense 카운트 + 응급(urgent 플래그 OR 지급예정일 경과)
+    // v1.9.903: 응급 카운트를 아래 표의 강조 기준(blinkAttention = urgent || isOverdue)과 일치시킴
     const unpaidExpenses = (DB.expenses||[]).filter(e => e && e.paidStatus !== 'paid');
     const payPending = unpaidExpenses.length;
-    const urgentPay = unpaidExpenses.filter(e => !!e.urgent).length;
+    const _payTodayMid = new Date(new Date().toISOString().slice(0,10));
+    const urgentPay = unpaidExpenses.filter(e => {
+      if (e.urgent) return true;
+      const due = e.dueDate || '';
+      if (due) {
+        const dl = Math.floor((new Date(due) - _payTodayMid) / 86400000);
+        if (dl < 0) return true;
+      }
+      return false;
+    }).length;
 
     // 3) 발주 잔금: 지급 예정(미지급) po_balance 금액 합
     const balanceDue = (DB.expenses||[])
