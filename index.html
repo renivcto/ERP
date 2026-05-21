@@ -2316,7 +2316,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
                 <th style="text-align:center">지급예정일</th>
                 <th style="text-align:center">📑 마감서</th>
                 <th style="text-align:center">지급</th>
-                <th style="text-align:center">증빙</th>
+                <th style="text-align:center">증빙<br><span style="font-size:9px;font-weight:400;color:#94a3b8">(본부장 확인)</span></th>
                 <th style="text-align:center">💬 의견</th>
               </tr></thead>
               <tbody id="ap-exp-table"></tbody>
@@ -5224,7 +5224,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.907';
+const ERP_VERSION = 'v1.9.908';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -25697,7 +25697,9 @@ function confirmPayDate(expenseId, orderId, category) {
 function toggleExpenseTaxInvoice(expenseId) {
   const e = DB.expenses.find(x => x.id === expenseId);
   if (!e) return;
-  e.taxInvoice = (e.taxInvoice === '수령완료') ? '미수령' : '수령완료';
+  // v1.9.908: 증빙 3단계 순환 — 미수령 → 요청 → 수령완료 → 미수령
+  const cur = e.taxInvoice || '미수령';
+  e.taxInvoice = (cur === '미수령') ? '요청' : (cur === '요청') ? '수령완료' : '미수령';
   try { saveData(); } catch(_){}
   renderApprovalPage();
 }
@@ -25852,28 +25854,14 @@ function renderApprovalExpenseTable() {
     const payBtn = paid
       ? `<button class="btn btn-sm" onclick="togglePayStatus(${e.id},${e.orderId||'null'},'${e.category||''}')" title="클릭하여 지급 요청 상태로 되돌리기" style="background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;${PAY_BTN_STYLE}">✅ 지급완료${e.paidDate?' · '+e.paidDate:''}</button>`
       : `<button class="btn btn-sm" onclick="openPayDatePicker(${e.id},${e.orderId||'null'},'${e.category||''}')" title="${isOverdue?'⚠️ 지급 예정일 경과 — 클릭하여 지급일 선택':'클릭하여 지급일 선택'}" style="background:${blinkAttention?'#ffe4e6':'#fff4e6'};color:${blinkAttention?'#be123c':'#c2410c'};border:1px solid ${blinkAttention?'#fecdd3':'#fed7aa'};${PAY_BTN_STYLE};${blinkAttention?'animation:apBlink .9s infinite;':''}">💳 지급 요청${blinkAttention?(isOverdue?' ⚠️':' 🚨'):''}</button>`;
-    // v1.9.308: 증빙 셀 — 지급 방법(payMethod)에 따라 표시 다르게
-    //   · 법인카드 → 📇 카드전표 (자동) — 회색 파스텔, 클릭하면 수동 미확인으로 토글 가능
-    //   · 계좌이체/미지정 → 🧾 세금계산서 수령/미수령
-    //   · 현금 → 🧾 현금영수증 발행/미발행
+    // v1.9.908: 증빙 셀 — 3단계 순환 (미수령 노랑 / 요청 핑크 / 수령 연두). 클릭 시 다음 상태로
     const tax = e.taxInvoice || '미수령';
-    const pm = e.payMethod || '';
-    let taxBtn;
-    // v1.9.855: 미지급 상태에서도 증빙 토글 버튼 표시 (paid 분기 제거)
-    if (pm === '법인카드') {
-      taxBtn = (tax === '수령완료')
-        ? `<button class="btn btn-sm" onclick="toggleExpenseTaxInvoice(${e.id})" title="클릭하여 카드전표 미확인으로 변경" style="background:#f5f3ff;color:#7c3aed;border:1px solid #e9d5ff;padding:3px 8px;border-radius:6px;font-size:10.5px;font-weight:400;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-align:center;min-width:54px;line-height:1">카드전표</button>`
-        : `<button class="btn btn-sm" onclick="toggleExpenseTaxInvoice(${e.id})" title="클릭하여 카드전표 확인 완료" style="background:#fefce8;color:#b45309;border:1px solid #fde68a;padding:3px 8px;border-radius:6px;font-size:10.5px;font-weight:400;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-align:center;min-width:54px;line-height:1">미확인</button>`;
-    } else if (pm === '현금') {
-      taxBtn = (tax === '수령완료')
-        ? `<button class="btn btn-sm" onclick="toggleExpenseTaxInvoice(${e.id})" title="클릭하여 현금영수증 미발행으로 변경" style="background:#ecfdf5;color:#047857;border:1px solid #bbf7d0;padding:3px 8px;border-radius:6px;font-size:10.5px;font-weight:400;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-align:center;min-width:54px;line-height:1">발행</button>`
-        : `<button class="btn btn-sm" onclick="toggleExpenseTaxInvoice(${e.id})" title="클릭하여 현금영수증 발행 완료" style="background:#fefce8;color:#b45309;border:1px solid #fde68a;padding:3px 8px;border-radius:6px;font-size:10.5px;font-weight:400;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-align:center;min-width:54px;line-height:1">미발행</button>`;
-    } else {
-      // 계좌이체 / 미지정 / 기타 — 기존 세금계산서 로직
-      taxBtn = (tax === '수령완료')
-        ? `<button class="btn btn-sm" onclick="toggleExpenseTaxInvoice(${e.id})" title="클릭하여 세금계산서 미수령으로 변경" style="background:#ecfdf5;color:#047857;border:1px solid #bbf7d0;padding:3px 8px;border-radius:6px;font-size:10.5px;font-weight:400;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-align:center;min-width:54px;line-height:1">수령</button>`
-        : `<button class="btn btn-sm" onclick="toggleExpenseTaxInvoice(${e.id})" title="클릭하여 세금계산서 수령 완료" style="background:#fefce8;color:#b45309;border:1px solid #fde68a;padding:3px 8px;border-radius:6px;font-size:10.5px;font-weight:400;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-align:center;min-width:54px;line-height:1">미수령</button>`;
-    }
+    const _txSty = 'padding:3px 8px;border-radius:6px;font-size:10.5px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-align:center;min-width:54px;line-height:1';
+    let _txClr, _txLabel;
+    if (tax === '수령완료') { _txClr = 'background:#dcfce7;color:#15803d;border:1px solid #86efac'; _txLabel = '수령'; }
+    else if (tax === '요청') { _txClr = 'background:#fce7f3;color:#be185d;border:1px solid #f9a8d4'; _txLabel = '요청'; }
+    else { _txClr = 'background:#fef9c3;color:#a16207;border:1px solid #fde047'; _txLabel = '미수령'; }
+    const taxBtn = `<button class="btn btn-sm" onclick="toggleExpenseTaxInvoice(${e.id})" title="클릭하여 다음 단계로 변경 (미수령 → 요청 → 수령)" style="${_txClr};${_txSty}">${_txLabel}</button>`;
     let dueCell = '<span style="color:var(--gray-400);font-size:11px">-</span>';
     if (due) {
       // v1.9.672: 지급완료시 검정+일반체, 미지급시 색상 + 굵게
