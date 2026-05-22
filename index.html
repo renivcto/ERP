@@ -867,6 +867,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="nav-item" onclick="go('sales');switchSalesTab('orders')"><span class="ico">📦</span>주문 관리</div>
       <div class="nav-item" onclick="go('sales');switchSalesTab('margin')"><span class="ico">💰</span>마진 분석</div>
       <div class="nav-item" onclick="go('sales');switchSalesTab('shops')"><span class="ico">🏪</span>쇼핑몰 관리</div>
+      <div class="nav-item" onclick="go('sales');switchSalesTab('channel')"><span class="ico">🧮</span>유통채널 수익계산</div>
       <div class="nav-item" onclick="go('ads')"><span class="ico">📢</span>광고비 관리</div>
     </div>
     <div class="nav-item" onclick="clickNavItem('customer','customer-sub')" id="nav-customer"><span class="ico" style="display:inline-flex;align-items:center;justify-content:center;color:#fff"><svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>고객 관리</div>
@@ -2630,6 +2631,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div class="sales-subnav-item" onclick="switchSalesTab('orders')">📦 주문 관리</div>
           <div class="sales-subnav-item" onclick="switchSalesTab('margin')">💰 마진 분석</div>
           <div class="sales-subnav-item" onclick="switchSalesTab('shops')">🏪 쇼핑몰 관리</div>
+          <div class="sales-subnav-item" onclick="switchSalesTab('channel')">🧮 유통채널 수익계산</div>
         </div>
         <!-- 우측 기간 필터 영역 — 활성 탭에 맞는 prefix 만 표시 -->
         <div id="sales-period-area" style="display:flex;align-items:center;gap:6px;flex-shrink:0">
@@ -2808,6 +2810,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       </div>
 
       <!-- 쇼핑몰 관리 -->
+      <div id="sales-panel-channel" style="display:none"></div>
       <div id="sales-panel-shops" style="display:none">
         <!-- ▶ 쇼핑몰 목록 (기본 화면) -->
         <div id="shop-list-view">
@@ -5224,7 +5227,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.918';
+const ERP_VERSION = 'v1.9.919';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10326,12 +10329,12 @@ function renderSalesPage() {
 }
 
 function switchSalesTab(tab) {
-  ['dashboard','orders','margin','shops'].forEach(t => {
+  ['dashboard','orders','margin','shops','channel'].forEach(t => {
     const panel = $('sales-panel-'+t);
     if (panel) panel.style.display = t === tab ? '' : 'none';
   });
   document.querySelectorAll('.sales-subnav-item').forEach((el,i) => {
-    const tabs = ['dashboard','orders','margin','shops'];
+    const tabs = ['dashboard','orders','margin','shops','channel'];
     el.classList.toggle('active', tabs[i] === tab);
   });
   // v1.9.381: 상단 toolbar 의 기간 필터 — 활성 탭에 해당하는 것만 표시 (쇼핑몰 관리 탭에선 모두 숨김)
@@ -10347,6 +10350,343 @@ function switchSalesTab(tab) {
     const dt = $('shop-detail'); if (dt) dt.style.display = 'none';
     renderShopList();
   }
+  if (tab === 'channel') { try { renderChannelProfit(); } catch(e) { console.warn('renderChannelProfit:', e); } }
+}
+
+// ═══════════ v1.9.919: 유통채널 수익계산 (홈쇼핑 / 약국 판매) ═══════════
+let _cpData = null;
+let _cpCurrentSub = 'homeshopping';
+let _cpModalCh = 'homeshopping';
+let _cpEditId = null;
+function _cpDefault() { return { updatedAt: 0, rows: [] }; }
+function _cpGenId() {
+  let id = Date.now();
+  const ex = new Set((_cpData && _cpData.rows ? _cpData.rows : []).map(r => String(r && r.id)));
+  while (ex.has(String(id))) id++;
+  return id;
+}
+function _cpWon(n) { return '₩' + (Math.round(Number(n)||0)).toLocaleString(); }
+function _cpPct(n) { return (Math.round((Number(n)||0)*10)/10) + '%'; }
+function _cpEsc(s) { return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function _cpNum(id) { const el = document.getElementById(id); return el ? (parseFloat(String(el.value).replace(/,/g,''))||0) : 0; }
+
+// 수익 계산 엔진
+function _cpCalc(r) {
+  const targetCost = Number(r.targetCost)||0;
+  const hsRevenue = targetCost * (Number(r.achieveRate)||0) / 100;       // 홈쇼핑 매출
+  const actualRevenue = hsRevenue * (Number(r.convRate)||0) / 100;       // 실제매출
+  const sp = Number(r.sellPrice)||0;
+  const orderQty = sp > 0 ? hsRevenue / sp : 0;
+  const soldQty  = sp > 0 ? actualRevenue / sp : 0;
+  const specialFee = Number(r.specialFee)||0, guestFee = Number(r.guestFee)||0, insertFee = Number(r.insertFee)||0;
+  const specialVat = specialFee * 0.1;
+  const guestVat = guestFee * 0.1;
+  const insertVat = (r.insertVat !== '' && r.insertVat != null) ? (Number(r.insertVat)||0) : insertFee * 0.1;
+  const hsComm = actualRevenue * (Number(r.hsCommPct)||0) / 100;          // 홈쇼핑 수수료(부가세 포함)
+  const vendorComm = actualRevenue * (Number(r.vendorCommPct)||0) / 100;  // 밴더 수수료(부가세 포함)
+  const cogs = soldQty * (Number(r.cogsUnit)||0);                         // 제품원가
+  const cogsVat = cogs * 0.1;
+  const settlement = actualRevenue - specialFee - specialVat - guestFee - guestVat - insertFee - insertVat - hsComm - vendorComm - cogs - cogsVat;
+  const profitRate = actualRevenue > 0 ? (settlement / actualRevenue * 100) : 0;
+  return { hsRevenue, actualRevenue, orderQty, soldQty, specialFee, specialVat, guestFee, guestVat, insertFee, insertVat, hsComm, vendorComm, cogs, cogsVat, settlement, profitRate };
+}
+
+// ── 저장 / 로드 (IndexedDB 주 저장 + localStorage 보조 + updatedAt 비교) ──
+function _cpSave() {
+  if (!_cpData) _cpData = _cpDefault();
+  _cpData.updatedAt = Date.now();
+  const payload = JSON.stringify(_cpData);
+  try { if (typeof idbSet === 'function') idbSet('reniv_channel_profit', payload); } catch(_){}
+  try { localStorage.setItem('reniv_channel_profit', payload); } catch(_){}
+}
+async function _cpLoad() {
+  const cand = [];
+  try { const ls = localStorage.getItem('reniv_channel_profit'); if (ls) { const p = JSON.parse(ls); if (p && Array.isArray(p.rows)) cand.push(p); } } catch(_){}
+  try {
+    if (typeof idbGet === 'function') {
+      const raw = await idbGet('reniv_channel_profit');
+      if (raw) { const p = JSON.parse(raw); if (p && Array.isArray(p.rows)) cand.push(p); }
+    }
+  } catch(_){}
+  cand.sort((a,b) => (Number(b.updatedAt)||0) - (Number(a.updatedAt)||0));
+  _cpData = cand[0] || _cpDefault();
+}
+
+// ── 렌더 ──
+function renderChannelProfit() {
+  const host = document.getElementById('sales-panel-channel');
+  if (!host) return;
+  if (!_cpData) {
+    host.innerHTML = '<div style="padding:48px;text-align:center;color:#94a3b8;font-size:13px">불러오는 중…</div>';
+    _cpLoad().then(() => _cpRender()).catch(() => { _cpData = _cpDefault(); _cpRender(); });
+    return;
+  }
+  _cpRender();
+}
+function switchChannelSubTab(sub) { _cpCurrentSub = sub; _cpRender(); }
+function _cpRender() {
+  const host = document.getElementById('sales-panel-channel');
+  if (!host) return;
+  if (!_cpData) _cpData = _cpDefault();
+  const subs = [ {k:'homeshopping',label:'📺 홈쇼핑 판매'}, {k:'pharmacy',label:'💊 약국 판매'} ];
+  let h = '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px">';
+  h += '<div style="display:inline-flex;gap:3px;background:#f1f5f9;border-radius:9px;padding:3px">';
+  subs.forEach(s => {
+    const on = _cpCurrentSub === s.k;
+    h += '<button onclick="switchChannelSubTab(\'' + s.k + '\')" style="padding:8px 18px;border:none;border-radius:7px;font-size:13px;font-weight:' + (on?'700':'500') + ';cursor:pointer;background:' + (on?'#fff':'transparent') + ';color:' + (on?'#0369a1':'#64748b') + ';box-shadow:' + (on?'0 1px 3px rgba(0,0,0,.12)':'none') + ';transition:all .12s">' + s.label + '</button>';
+  });
+  h += '</div>';
+  h += '<button onclick="openCpModal(null)" style="padding:9px 18px;background:#0f172a;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">＋ 행 추가</button>';
+  h += '</div>';
+  h += '<div style="font-size:11.5px;color:#94a3b8;margin-bottom:8px">💡 채널·회차 제목을 클릭하면 전체 내역을 팝업으로 볼 수 있습니다.</div>';
+  h += '<div id="cp-table-wrap"></div>';
+  host.innerHTML = h;
+  _cpRenderTable();
+}
+function _cpRenderTable() {
+  const wrap = document.getElementById('cp-table-wrap');
+  if (!wrap) return;
+  const rows = (_cpData.rows||[]).filter(r => r && (r.channelType||'homeshopping') === _cpCurrentSub);
+  rows.sort((a,b) => String(b.broadcastDate||'').localeCompare(String(a.broadcastDate||'')) || (Number(b.id)||0)-(Number(a.id)||0));
+  if (!rows.length) {
+    wrap.innerHTML = '<div style="padding:44px;text-align:center;color:#94a3b8;font-size:13px;background:#f8fafc;border:1px dashed #e2e8f0;border-radius:12px">등록된 행이 없습니다. <b>＋ 행 추가</b> 버튼으로 시작하세요.</div>';
+    return;
+  }
+  const TH = (t,extra) => '<th style="padding:9px 8px;font-size:11px;font-weight:700;color:#475569;white-space:nowrap;border-bottom:2px solid #e2e8f0;' + (extra||'') + '">' + t + '</th>';
+  let h = '<div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px;background:#fff">';
+  h += '<table style="border-collapse:collapse;white-space:nowrap;font-size:12px;min-width:100%"><thead><tr>';
+  h += TH('정산금','background:#fffbeb;border-bottom-color:#fde68a');
+  h += TH('수익율','background:#fffbeb;border-bottom-color:#fde68a');
+  h += TH('채널·회차') + TH('방송일') + TH('구좌 목표 비용') + TH('달성률') + TH('홈쇼핑 매출') + TH('전환율') + TH('실제매출') + TH('판매가') + TH('주문수량') + TH('판매수량') + TH('특약금') + TH('게스트비') + TH('인서트비') + TH('홈쇼핑 수수료') + TH('밴더 수수료') + TH('제품원가') + TH('관리');
+  h += '</tr></thead><tbody>';
+  rows.forEach(r => {
+    const c = _cpCalc(r);
+    const posS = c.settlement >= 0, posR = c.profitRate >= 0;
+    const TD = (v,extra) => '<td style="padding:8px;text-align:center;border-bottom:1px solid #f1f5f9;' + (extra||'') + '">' + v + '</td>';
+    const sub = (base,vat,lbl) => _cpWon(base) + '<div style="font-size:9.5px;color:#94a3b8;margin-top:1px">' + (lbl||'부가세') + ' ' + _cpWon(vat) + '</div>';
+    h += '<tr>';
+    h += '<td style="padding:8px;text-align:center;border-bottom:1px solid #f1f5f9;background:#fffbeb;font-weight:800;color:' + (posS?'#15803d':'#dc2626') + '">' + _cpWon(c.settlement) + '</td>';
+    h += '<td style="padding:8px;text-align:center;border-bottom:1px solid #f1f5f9;background:#fffbeb;font-weight:800;color:' + (posR?'#15803d':'#dc2626') + '">' + _cpPct(c.profitRate) + '</td>';
+    h += TD('<span onclick="openCpDetail(' + r.id + ')" style="color:#0369a1;font-weight:700;cursor:pointer;text-decoration:underline">' + _cpEsc(r.name||'(이름 없음)') + '</span>');
+    h += TD(_cpEsc(r.broadcastDate||'-'));
+    h += TD(_cpWon(r.targetCost));
+    h += TD(_cpPct(r.achieveRate));
+    h += TD(_cpWon(c.hsRevenue));
+    h += TD(_cpPct(r.convRate));
+    h += TD('<b>' + _cpWon(c.actualRevenue) + '</b>');
+    h += TD(_cpWon(r.sellPrice));
+    h += TD(Math.round(c.orderQty).toLocaleString() + '개');
+    h += TD(Math.round(c.soldQty).toLocaleString() + '개');
+    h += TD(sub(c.specialFee, c.specialVat));
+    h += TD(sub(c.guestFee, c.guestVat));
+    h += TD(sub(c.insertFee, c.insertVat));
+    h += TD(_cpWon(c.hsComm) + '<div style="font-size:9.5px;color:#94a3b8;margin-top:1px">부가세 포함</div>');
+    h += TD(_cpWon(c.vendorComm) + '<div style="font-size:9.5px;color:#94a3b8;margin-top:1px">부가세 포함</div>');
+    h += TD(sub(c.cogs, c.cogsVat));
+    h += TD('<div style="display:flex;gap:4px;justify-content:center"><button onclick="openCpModal(' + r.id + ')" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;padding:3px 8px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer">✏️</button><button onclick="deleteCpRow(' + r.id + ')" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;padding:3px 8px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer">🗑️</button></div>');
+    h += '</tr>';
+  });
+  h += '</tbody></table></div>';
+  wrap.innerHTML = h;
+}
+
+// ── 행 추가/수정 모달 ──
+function openCpModal(id) {
+  closeCpModal();
+  _cpEditId = id;
+  const r = (id != null && _cpData) ? (_cpData.rows||[]).find(x => x && String(x.id) === String(id)) : null;
+  _cpModalCh = r ? (r.channelType||'homeshopping') : _cpCurrentSub;
+  const g = (f,d) => (r && r[f] != null && r[f] !== '') ? r[f] : (d==null?'':d);
+  const items = (DB.items||[]).filter(i => i && i.name);
+  let prodOpts = '<option value="">(제품 선택 안 함 — COGS 직접 입력)</option>';
+  items.forEach(i => {
+    prodOpts += '<option value="' + i.id + '"' + (r && String(r.productId)===String(i.id) ? ' selected':'') + '>' + _cpEsc(i.name) + (i.code?(' ('+_cpEsc(i.code)+')'):'') + '</option>';
+  });
+  const fld = (label, id2, val, unit, opts) => {
+    opts = opts || {};
+    return '<div>'
+      + '<label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">' + label + '</label>'
+      + '<div style="display:flex;align-items:center;gap:0;border:1px solid #cbd5e1;border-radius:7px;overflow:hidden">'
+      + '<input id="' + id2 + '" ' + (opts.type==='date'?'type="date"':'type="' + (opts.type||'text') + '"') + ' value="' + _cpEsc(val) + '" '
+      + 'oninput="_cpModalLive()" '
+      + 'placeholder="' + (unit==='원'?'0':(unit==='%'?'0':'')) + '" '
+      + 'style="flex:1;border:none;padding:7px 9px;font-size:12.5px;outline:none;min-width:0">'
+      + (unit ? '<span style="padding:0 10px;font-size:11.5px;color:#94a3b8;background:#f8fafc;align-self:stretch;display:flex;align-items:center;border-left:1px solid #e2e8f0">' + unit + '</span>' : '')
+      + '</div></div>';
+  };
+  const chLabel = _cpModalCh === 'pharmacy' ? '💊 약국 판매' : '📺 홈쇼핑 판매';
+  const ov = document.createElement('div');
+  ov.id = 'cp-modal-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99988;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:32px 16px';
+  ov.onclick = function(ev){ if (ev.target === ov) closeCpModal(); };
+  ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:680px;max-width:96vw;box-shadow:0 18px 50px rgba(0,0,0,.3);overflow:hidden">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;padding:15px 20px;background:linear-gradient(135deg,#e0f2fe,#bae6fd)">'
+    + '<div style="font-size:15px;font-weight:800;color:#0c4a6e">🧮 ' + chLabel + ' — ' + (id!=null?'행 수정':'행 추가') + '</div>'
+    + '<button onclick="closeCpModal()" style="background:rgba(255,255,255,.5);border:none;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:14px;color:#0c4a6e">✕</button>'
+    + '</div>'
+    + '<div style="padding:18px 20px;max-height:62vh;overflow-y:auto">'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">'
+    + fld('채널·회차명', 'cp-m-name', g('name'), '', {})
+    + fld('방송날짜', 'cp-m-date', g('broadcastDate'), '', {type:'date'})
+    + '<div style="grid-column:1/3"><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">제품 선택 (BOM 원가 자동)</label>'
+    + '<select id="cp-m-product" onchange="_cpModalProductChange()" style="width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px">' + prodOpts + '</select></div>'
+    + fld('COGS 단가 (개당 원가, BOM 자동·수정가능)', 'cp-m-cogsUnit', g('cogsUnit',0), '원', {type:'number'})
+    + fld('구좌 목표 비용', 'cp-m-targetCost', g('targetCost',0), '원', {type:'number'})
+    + fld('달성률', 'cp-m-achieveRate', g('achieveRate',0), '%', {type:'number'})
+    + fld('전환율', 'cp-m-convRate', g('convRate',70), '%', {type:'number'})
+    + fld('판매가', 'cp-m-sellPrice', g('sellPrice',0), '원', {type:'number'})
+    + fld('특약금', 'cp-m-specialFee', g('specialFee',0), '원', {type:'number'})
+    + fld('게스트 비용', 'cp-m-guestFee', g('guestFee',0), '원', {type:'number'})
+    + fld('인서트 비용', 'cp-m-insertFee', g('insertFee',0), '원', {type:'number'})
+    + fld('인서트 부가세 (자동·수정가능)', 'cp-m-insertVat', g('insertVat',''), '원', {type:'number'})
+    + fld('홈쇼핑 수수료', 'cp-m-hsCommPct', g('hsCommPct',12), '%', {type:'number'})
+    + fld('밴더 수수료', 'cp-m-vendorCommPct', g('vendorCommPct',4), '%', {type:'number'})
+    + fld('비고', 'cp-m-note', g('note'), '', {})
+    + '</div>'
+    + '<div id="cp-m-live" style="margin-top:14px;background:#fffbeb;border:1px solid #fde68a;border-radius:9px;padding:11px 14px;display:flex;gap:24px;align-items:center;flex-wrap:wrap"></div>'
+    + '</div>'
+    + '<div style="padding:13px 20px;border-top:1px solid #f1f5f9;display:flex;justify-content:flex-end;gap:8px">'
+    + '<button onclick="closeCpModal()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">취소</button>'
+    + '<button onclick="saveCpRow()" style="background:#0f172a;color:#fff;border:none;padding:9px 22px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">저장</button>'
+    + '</div></div>';
+  document.body.appendChild(ov);
+  // 인서트 비용 입력 시 부가세 자동 채움(비어있을 때만)
+  const insF = document.getElementById('cp-m-insertFee');
+  if (insF) insF.addEventListener('input', function(){
+    const vatEl = document.getElementById('cp-m-insertVat');
+    if (vatEl && (vatEl.value === '' || vatEl.dataset.auto === '1')) {
+      vatEl.value = Math.round((parseFloat(insF.value)||0) * 0.1);
+      vatEl.dataset.auto = '1';
+    }
+  });
+  const insV = document.getElementById('cp-m-insertVat');
+  if (insV) insV.addEventListener('input', function(){ insV.dataset.auto = ''; });
+  _cpModalLive();
+}
+function closeCpModal() { const ov = document.getElementById('cp-modal-overlay'); if (ov) ov.remove(); }
+function _cpModalProductChange() {
+  const sel = document.getElementById('cp-m-product');
+  if (!sel) return;
+  const itm = (DB.items||[]).find(i => i && String(i.id) === String(sel.value));
+  if (itm) {
+    const unit = parseFloat(itm.bomCost) || parseFloat(itm.cogs) || parseFloat(itm.price) || 0;
+    const cog = document.getElementById('cp-m-cogsUnit');
+    if (cog) cog.value = unit;
+  }
+  _cpModalLive();
+}
+function _cpReadModal() {
+  const sel = document.getElementById('cp-m-product');
+  return {
+    name: (document.getElementById('cp-m-name')||{}).value || '',
+    broadcastDate: (document.getElementById('cp-m-date')||{}).value || '',
+    productId: sel ? sel.value : '',
+    cogsUnit: _cpNum('cp-m-cogsUnit'),
+    targetCost: _cpNum('cp-m-targetCost'),
+    achieveRate: _cpNum('cp-m-achieveRate'),
+    convRate: _cpNum('cp-m-convRate'),
+    sellPrice: _cpNum('cp-m-sellPrice'),
+    specialFee: _cpNum('cp-m-specialFee'),
+    guestFee: _cpNum('cp-m-guestFee'),
+    insertFee: _cpNum('cp-m-insertFee'),
+    insertVat: (document.getElementById('cp-m-insertVat')||{}).value || '',
+    hsCommPct: _cpNum('cp-m-hsCommPct'),
+    vendorCommPct: _cpNum('cp-m-vendorCommPct'),
+    note: (document.getElementById('cp-m-note')||{}).value || ''
+  };
+}
+function _cpModalLive() {
+  const box = document.getElementById('cp-m-live');
+  if (!box) return;
+  const c = _cpCalc(_cpReadModal());
+  box.innerHTML = '<div><span style="font-size:11px;color:#92400e;font-weight:700">정산금</span> '
+    + '<b style="font-size:16px;color:' + (c.settlement>=0?'#15803d':'#dc2626') + '">' + _cpWon(c.settlement) + '</b></div>'
+    + '<div><span style="font-size:11px;color:#92400e;font-weight:700">수익율</span> '
+    + '<b style="font-size:16px;color:' + (c.profitRate>=0?'#15803d':'#dc2626') + '">' + _cpPct(c.profitRate) + '</b></div>'
+    + '<div style="font-size:11px;color:#a16207">홈쇼핑매출 ' + _cpWon(c.hsRevenue) + ' · 실제매출 ' + _cpWon(c.actualRevenue) + '</div>';
+}
+function saveCpRow() {
+  if (!_cpData) _cpData = _cpDefault();
+  const d = _cpReadModal();
+  if (!d.name.trim()) { showNotif('채널·회차명을 입력하세요', 'warning'); return; }
+  if (_cpEditId != null) {
+    const r = (_cpData.rows||[]).find(x => x && String(x.id) === String(_cpEditId));
+    if (r) { Object.assign(r, d); r.updatedAt = Date.now(); }
+  } else {
+    _cpData.rows.push(Object.assign({ id: _cpGenId(), channelType: _cpModalCh, updatedAt: Date.now() }, d));
+  }
+  _cpSave();
+  closeCpModal();
+  _cpRender();
+  showNotif('✅ 저장 완료', 'success');
+}
+function deleteCpRow(id) {
+  if (!_cpData) return;
+  const r = (_cpData.rows||[]).find(x => x && String(x.id) === String(id));
+  if (!r) return;
+  if (!confirm('[' + (r.name||'-') + '] 행을 삭제하시겠습니까?')) return;
+  _cpData.rows = (_cpData.rows||[]).filter(x => x && String(x.id) !== String(id));
+  _cpSave();
+  _cpRender();
+  showNotif('🗑 삭제 완료', 'success');
+}
+
+// ── 상세 팝업 (제목 클릭) ──
+function closeCpDetail() { const ov = document.getElementById('cp-detail-overlay'); if (ov) ov.remove(); }
+function openCpDetail(id) {
+  closeCpDetail();
+  const r = (_cpData && _cpData.rows ? _cpData.rows : []).find(x => x && String(x.id) === String(id));
+  if (!r) { showNotif('행을 찾을 수 없습니다', 'warning'); return; }
+  const c = _cpCalc(r);
+  const prod = (DB.items||[]).find(i => i && String(i.id) === String(r.productId));
+  const ov = document.createElement('div');
+  ov.id = 'cp-detail-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99989;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:32px 16px';
+  ov.onclick = function(ev){ if (ev.target === ov) closeCpDetail(); };
+  const line = (lbl,val,opts) => {
+    opts = opts || {};
+    return '<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f1f5f9;'
+      + (opts.hi?'background:#fffbeb;font-weight:800;padding:9px 10px;border-radius:7px;border-bottom:none;margin:4px 0':'') + '">'
+      + '<span style="font-size:12px;color:' + (opts.hi?'#92400e':'#64748b') + ';font-weight:' + (opts.hi?'800':'600') + '">' + lbl + '</span>'
+      + '<span style="font-size:' + (opts.hi?'14px':'12.5px') + ';color:' + (opts.color||(opts.hi?'#0f172a':'#0f172a')) + ';font-weight:' + (opts.hi?'800':'700') + '">' + val + '</span></div>';
+  };
+  const sect = (t) => '<div style="font-size:11.5px;font-weight:800;color:#0369a1;margin:14px 0 4px">' + t + '</div>';
+  ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:480px;max-width:96vw;box-shadow:0 18px 50px rgba(0,0,0,.3);overflow:hidden">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;padding:15px 20px;background:linear-gradient(135deg,#e0f2fe,#bae6fd)">'
+    + '<div><div style="font-size:15px;font-weight:800;color:#0c4a6e">' + _cpEsc(r.name||'-') + '</div>'
+    + '<div style="font-size:11.5px;color:#0369a1;margin-top:2px">' + ((r.channelType==='pharmacy')?'💊 약국 판매':'📺 홈쇼핑 판매') + ' · 방송일 ' + _cpEsc(r.broadcastDate||'-') + '</div></div>'
+    + '<button onclick="closeCpDetail()" style="background:rgba(255,255,255,.5);border:none;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:14px;color:#0c4a6e">✕</button>'
+    + '</div>'
+    + '<div style="padding:16px 20px;max-height:68vh;overflow-y:auto">'
+    + line('정산금 (부가세 포함)', _cpWon(c.settlement), {hi:true, color:(c.settlement>=0?'#15803d':'#dc2626')})
+    + line('수익율', _cpPct(c.profitRate), {hi:true, color:(c.profitRate>=0?'#15803d':'#dc2626')})
+    + sect('매출')
+    + line('구좌 목표 비용', _cpWon(r.targetCost))
+    + line('달성률', _cpPct(r.achieveRate))
+    + line('홈쇼핑 매출', _cpWon(c.hsRevenue))
+    + line('전환율', _cpPct(r.convRate))
+    + line('실제매출', _cpWon(c.actualRevenue))
+    + line('판매가', _cpWon(r.sellPrice))
+    + line('주문 수량', Math.round(c.orderQty).toLocaleString() + '개')
+    + line('판매 수량', Math.round(c.soldQty).toLocaleString() + '개')
+    + sect('지출')
+    + line('특약금', _cpWon(c.specialFee))
+    + line('특약 부가세', _cpWon(c.specialVat))
+    + line('게스트 비용', _cpWon(c.guestFee))
+    + line('게스트비 부가세', _cpWon(c.guestVat))
+    + line('인서트 비용', _cpWon(c.insertFee))
+    + line('인서트비 부가세', _cpWon(c.insertVat))
+    + line('홈쇼핑 수수료 (' + _cpPct(r.hsCommPct) + ', 부가세 포함)', _cpWon(c.hsComm))
+    + line('밴더 수수료 (' + _cpPct(r.vendorCommPct) + ', 부가세 포함)', _cpWon(c.vendorComm))
+    + line('제품원가' + (prod?(' — '+_cpEsc(prod.name)):''), _cpWon(c.cogs))
+    + line('제품원가 부가세', _cpWon(c.cogsVat))
+    + (r.note ? (sect('비고') + '<div style="font-size:12px;color:#475569;padding:4px 0">' + _cpEsc(r.note) + '</div>') : '')
+    + '</div>'
+    + '<div style="padding:13px 20px;border-top:1px solid #f1f5f9;display:flex;justify-content:flex-end;gap:8px">'
+    + '<button onclick="closeCpDetail();openCpModal(' + r.id + ')" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✏️ 수정</button>'
+    + '<button onclick="closeCpDetail()" style="background:#0f172a;color:#fff;border:none;padding:9px 20px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">닫기</button>'
+    + '</div></div>';
+  document.body.appendChild(ov);
 }
 
 // 주문 관리 — 쇼핑몰 탭
