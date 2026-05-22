@@ -5266,7 +5266,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.928';
+const ERP_VERSION = 'v1.9.929';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -5309,6 +5309,32 @@ window.addEventListener('beforeunload', (e) => {
 let _saveTimer = null;
 let _isSaving = false;
 let _firestoreDataLoaded = false;  // Firestore 초기 로드 완료 전까지 Firestore 쓰기 방지
+
+// v1.9.929: 발주서 PDF/도장 Firestore 중복 업로드(flood) 방지.
+//   같은 내용은 한 번만 업로드 — 'reniv_fs_uploaded' 에 발주서별 내용지문 기록.
+//   기존엔 매 저장마다 모든 발주서 PDF 를 재업로드 → resource-exhausted.
+function _fsUpFp(data) {
+  try { return String(data.length) + ':' + String(data).slice(-24); } catch(_) { return ''; }
+}
+function _fsUpMap() {
+  try { return JSON.parse(localStorage.getItem('reniv_fs_uploaded') || '{}') || {}; } catch(_) { return {}; }
+}
+function _fsUpTryUpload(key, data, doUpload) {
+  try {
+    if (!data || typeof data !== 'string' || data.length <= 10 || data === '__idb__') return;
+    window._fsUpInFlight = window._fsUpInFlight || {};
+    const fp = _fsUpFp(data);
+    if (_fsUpMap()[key] === fp) return;        // 이미 같은 내용 백업 완료 → 재업로드 안 함
+    if (window._fsUpInFlight[key]) return;     // 업로드 진행 중 → 중복 방지
+    window._fsUpInFlight[key] = true;
+    Promise.resolve(doUpload(data)).then(ok => {
+      delete window._fsUpInFlight[key];
+      if (ok === true) {
+        try { const m = _fsUpMap(); m[key] = fp; localStorage.setItem('reniv_fs_uploaded', JSON.stringify(m)); } catch(_) {}
+      }
+    }).catch(() => { delete window._fsUpInFlight[key]; });
+  } catch(_) {}
+}
 
 // v1.9.928: BOM 전용 저장소 — 메인 DB 와 별개로 BOM 만 작은 전용 키에 저장.
 //   BOM 데이터는 작아서 localStorage 용량초과의 영향을 받지 않음 → 손실 방지.
@@ -5833,12 +5859,12 @@ async function _doSaveDataInner() {
     if (o.pdfData && o.pdfData.length > 10) {
       idbSet('order_pdf_' + o.id, o.pdfData);
       // v1.9.608: Firestore 에도 백업 (IDB 손실 시 복구용, 900KB 이하)
-      try { _saveSharedOrderPdf(o.id, 'pdf', o.pdfData, o.pdfName); } catch(_){}
+      _fsUpTryUpload('order_' + o.id + '_pdf', o.pdfData, (d) => _saveSharedOrderPdf(o.id, 'pdf', d, o.pdfName));
       dbToSave.orders[i].pdfData = '__idb__';
     }
     if (o.stampData && o.stampData.length > 10) {
       idbSet('order_stamp_' + o.id, o.stampData);
-      try { _saveSharedOrderPdf(o.id, 'stamp', o.stampData, o.stampName); } catch(_){}
+      _fsUpTryUpload('order_' + o.id + '_stamp', o.stampData, (d) => _saveSharedOrderPdf(o.id, 'stamp', d, o.stampName));
       dbToSave.orders[i].stampData = '__idb__';
     }
     // v1.9.787: 마감자료 (다중 첨부) IDB 오프로드 + Firestore 백업
@@ -5847,7 +5873,7 @@ async function _doSaveDataInner() {
         if (!doc) return doc;
         if (doc.data && typeof doc.data === 'string' && doc.data !== '__idb__' && doc.data.length > 100) {
           try { idbSet('order_closing_' + o.id + '_' + di, doc.data); } catch(e) { console.warn('IDB save closing doc 실패:', e); }
-          try { _saveSharedOrderClosing(o.id, di, doc.data, doc.name||''); } catch(_){}
+          _fsUpTryUpload('order_' + o.id + '_closing_' + di, doc.data, (d) => _saveSharedOrderClosing(o.id, di, d, doc.name||''));
           return { ...doc, data: '__idb__' };
         }
         return doc;
@@ -37863,19 +37889,20 @@ async function _loadSharedFeedImage(postId, idx) {
 //   kind: 'pdf' (원본) | 'stamp' (결재 날인본)
 //   Firestore 1MB 문서 한계 → dataUrl 이 ~900KB 이하일 때만 저장 (큰 PDF 는 IDB 만 가능)
 async function _saveSharedOrderPdf(orderId, kind, dataUrl, fileName) {
-  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return;
-  if (!dataUrl || dataUrl === '__idb__' || dataUrl === '__stored__') return;
-  if (typeof dataUrl !== 'string') return;
+  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return false;
+  if (!dataUrl || dataUrl === '__idb__' || dataUrl === '__stored__') return false;
+  if (typeof dataUrl !== 'string') return false;
   if (dataUrl.length > 900000) {
     console.log('📦 [' + kind + '] order ' + orderId + ' 너무 큼 (' + dataUrl.length + ' bytes), Firestore 백업 안 함 (IDB 만)');
-    return;
+    return true;
   }
   try {
     const docId = 'order_' + orderId + '_' + kind;
     const ref = window._firestoreDoc(window._firebaseDb, 'orderPdfs', docId);
     await window._firestoreSetDoc(ref, { data: dataUrl, name: fileName||'', kind: kind, ts: Date.now() });
     console.log('✅ [' + kind + '] order ' + orderId + ' Firestore 백업 (' + dataUrl.length + ' bytes)');
-  } catch(e) { console.warn(kind + ' Firestore 저장 실패:', e); }
+    return true;
+  } catch(e) { console.warn(kind + ' Firestore 저장 실패:', e); return false; }
 }
 
 async function _loadSharedOrderPdf(orderId, kind) {
@@ -37891,19 +37918,20 @@ async function _loadSharedOrderPdf(orderId, kind) {
 
 // v1.9.787: 발주서 마감자료 (다중 첨부) Firestore 백업/로드
 async function _saveSharedOrderClosing(orderId, idx, dataUrl, fileName) {
-  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return;
-  if (!dataUrl || dataUrl === '__idb__' || dataUrl === '__stored__') return;
-  if (typeof dataUrl !== 'string') return;
+  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return false;
+  if (!dataUrl || dataUrl === '__idb__' || dataUrl === '__stored__') return false;
+  if (typeof dataUrl !== 'string') return false;
   if (dataUrl.length > 900000) {
     console.log('📦 [closing] order ' + orderId + '#' + idx + ' 너무 큼 (' + dataUrl.length + ' bytes), Firestore 백업 안 함 (IDB 만)');
-    return;
+    return true;
   }
   try {
     const docId = 'order_' + orderId + '_closing_' + idx;
     const ref = window._firestoreDoc(window._firebaseDb, 'orderPdfs', docId);
     await window._firestoreSetDoc(ref, { data: dataUrl, name: fileName||'', kind: 'closing', idx: idx, ts: Date.now() });
     console.log('✅ [closing] order ' + orderId + '#' + idx + ' Firestore 백업 (' + dataUrl.length + ' bytes)');
-  } catch(e) { console.warn('closing Firestore 저장 실패:', e); }
+    return true;
+  } catch(e) { console.warn('closing Firestore 저장 실패:', e); return false; }
 }
 
 async function _loadSharedOrderClosing(orderId, idx) {
