@@ -5266,7 +5266,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.931';
+const ERP_VERSION = 'v1.9.932';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -5568,7 +5568,7 @@ function _restoreOrderDraft(draft) {
 //   - 시간별 스냅샷: 최근 12시간만 유지 (이전 48 → 12)
 //   - QuotaExceededError 자가 치유: 오래된 스냅샷 점진 삭제 후 재시도
 //   - 스냅샷 실패해도 메인 백업/saveData 흐름은 그대로 진행
-const _SNAP_KEEP = 12;       // 보유 스냅샷 개수 (시간 단위 = 12시간)
+const _SNAP_KEEP = 4;        // v1.9.932: 12→4 (localStorage 용량 절약 — 스냅샷 1개 ~100KB)
 const _SNAP_LIST_KEY = 'reniv_orders_snapshots_list';
 
 function _pruneOrphanSnapshots() {
@@ -5742,11 +5742,20 @@ async function saveDataNow() {
     } catch(be) {}
     // 🛡️ v1.9.625 — 거래처(cooperators / sellers) 독립 백업
     try {
-      localStorage.setItem('reniv_cooperators_backup', JSON.stringify(DB.cooperators || []));
-      localStorage.setItem('reniv_cooperators_backup_ts', String(Date.now()));
-      localStorage.setItem('reniv_sellers_backup', JSON.stringify(DB.sellers || []));
-      localStorage.setItem('reniv_sellers_backup_ts', String(Date.now()));
-      console.log('🛡️ partners backup —', (DB.cooperators||[]).length, '협력사 +', (DB.sellers||[]).length, '판매업체');
+      // v1.9.932: partners 백업을 localStorage → IndexedDB 로 이전.
+      //   localStorage 용량초과(QuotaExceededError)로 백업이 실패하던 문제 해결.
+      if (typeof idbSet === 'function') {
+        idbSet('reniv_cooperators_backup', JSON.stringify(DB.cooperators || []));
+        idbSet('reniv_sellers_backup', JSON.stringify(DB.sellers || []));
+      }
+      // 과거 localStorage 백업 키 제거 — 공간 회수
+      try {
+        localStorage.removeItem('reniv_cooperators_backup');
+        localStorage.removeItem('reniv_cooperators_backup_ts');
+        localStorage.removeItem('reniv_sellers_backup');
+        localStorage.removeItem('reniv_sellers_backup_ts');
+      } catch(_){}
+      console.log('🛡️ partners backup (IDB) —', (DB.cooperators||[]).length, '협력사 +', (DB.sellers||[]).length, '판매업체');
     } catch(be) { console.warn('partners backup 실패:', be); }
     // 🛡️ v1.9.194 — 발주서(orders) 독립 백업 + 시간별 스냅샷
     try { _backupOrdersNow('saveDataNow'); } catch(be) { console.warn('orders 백업 실패:', be); }
