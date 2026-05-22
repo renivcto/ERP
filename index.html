@@ -5224,7 +5224,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.917';
+const ERP_VERSION = 'v1.9.918';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26055,18 +26055,40 @@ window.forceDeleteExpense = function(id) {
 };
 
 // ══════════ 발주서 외 결재 테이블 ══════════
+// v1.9.918: 결재 tombstone 판정 — tombstone.ts(삭제시각)가 결재.createdAt(생성시각)보다
+//   같거나 나중일 때만 '진짜 삭제'. 새 결재가 옛 삭제 ID 와 우연히 겹쳐도(createdAt > ts)
+//   삭제로 오인하지 않음 → ID 충돌로 인한 데이터 손실 방지.
+function _approvalTombMap(list) {
+  const m = new Map();
+  (list||[]).forEach(x => {
+    if (!x || x.id == null) return;
+    const k = String(x.id);
+    const ts = Number(x.ts) || 0;
+    const prev = m.get(k);
+    if (prev === undefined || ts > prev) m.set(k, ts);
+  });
+  return m;
+}
+function _isApprovalTombstoned(approval, tombMap) {
+  if (!approval || approval.id == null || !tombMap) return false;
+  const ts = tombMap.get(String(approval.id));
+  if (ts === undefined) return false;
+  const created = Number(approval.createdAt) || 0;
+  if (created > 0 && ts > 0 && created > ts) return false; // ID 우연 충돌 — 삭제 아님
+  return true;
+}
 // v1.9.916: 일반 결재(non_po_approval) 전용 백업 — IndexedDB 주 저장(용량 제한 거의 없음)
 //   localStorage 가 꽉 차도 결재가 유실되지 않도록. 백업은 (기존 ∪ 현재) - tombstone union.
 function _backupNonPoApprovals() {
   try {
     const cur = (DB.approvals||[]).filter(a => a && a.type === 'non_po_approval' && a.id != null);
-    const tomb = new Set((DB._deletedApprovalIds||[]).map(t => String(t && t.id)).filter(Boolean));
+    const tombMap = _approvalTombMap(DB._deletedApprovalIds);
     const _write = function(existing) {
       try {
         const byId = new Map();
         (existing||[]).forEach(a => { if (a && a.id != null && a.type === 'non_po_approval') byId.set(String(a.id), a); });
         cur.forEach(a => { byId.set(String(a.id), a); });  // 현재 레코드 우선(최신)
-        const merged = Array.from(byId.values()).filter(a => !tomb.has(String(a.id)));  // 삭제건 제외
+        const merged = Array.from(byId.values()).filter(a => !_isApprovalTombstoned(a, tombMap));  // 진짜 삭제건만 제외
         const payload = JSON.stringify({ ts: Date.now(), list: merged });
         try { if (typeof idbSet === 'function') idbSet('reniv_nonpo_backup', payload); } catch(_){}
         try { localStorage.setItem('reniv_nonpo_backup', payload); } catch(_){}
@@ -26093,12 +26115,12 @@ function _applyNonPoBackup(raw) {
     if (!list.length) return 0;
     if (!Array.isArray(DB.approvals)) DB.approvals = [];
     const have = new Set(DB.approvals.filter(a => a && a.id != null).map(a => String(a.id)));
-    const tomb = new Set((DB._deletedApprovalIds||[]).map(t => String(t && t.id)).filter(Boolean));
+    const tombMap = _approvalTombMap(DB._deletedApprovalIds);
     let r = 0;
     list.forEach(a => {
       if (!a || a.id == null || a.type !== 'non_po_approval') return;
       if (have.has(String(a.id))) return;
-      if (tomb.has(String(a.id))) return;
+      if (_isApprovalTombstoned(a, tombMap)) return;
       DB.approvals.push(a);
       have.add(String(a.id));
       r++;
@@ -27143,14 +27165,16 @@ async function saveNonPoApproval() {
   // v1.9.307: 기안서일 때만 phase('planning'|'execution'|''), 그 외엔 빈 문자열
   const _apnCat = $('apn-category').value || '기타';
   const _now = Date.now();
-  // v1.9.717: ID tombstone 충돌 방지 — nextId 가 tombstone 에 있으면 bump
-  let _newApId = nextId('approval');
+  // v1.9.918: 충돌 없는 ID — 타임스탬프 기반. nextId('approval') 카운터가 어긋나
+  //   (카운터 15 인데 실제 수백 건) tombstone/기존 ID 와 겹쳐 새로고침 시 사라지던 근본 버그 수정.
+  //   13자리 타임스탬프 ID 는 옛 소수점대 ID·tombstone 과 절대 겹치지 않음.
+  let _newApId = Date.now();
   try {
+    const _existIds = new Set((DB.approvals||[]).map(x => (x && x.id != null) ? String(x.id) : '').filter(Boolean));
     const _tombSet = new Set((DB._deletedApprovalIds||[]).map(t => String(t && t.id)).filter(x => x));
     let _safety = 0;
-    while (_tombSet.has(String(_newApId)) && _safety < 1000) {
-      console.warn('🪦 [v1.9.717] approval ID ' + _newApId + ' 가 tombstone 에 있음 → bump');
-      _newApId = nextId('approval');
+    while ((_existIds.has(String(_newApId)) || _tombSet.has(String(_newApId))) && _safety < 100000) {
+      _newApId++;
       _safety++;
     }
   } catch(_){}
@@ -38368,10 +38392,11 @@ function initERPWhenReady() {
           if (!prev || (x.ts || 0) > (prev.ts || 0)) apTByKey.set(k, x);
         });
         merged._deletedApprovalIds = Array.from(apTByKey.values()).sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
-        const apTombSet = new Set(merged._deletedApprovalIds.map(x => String(x.id)));
-        if (Array.isArray(merged.approvals) && apTombSet.size > 0) {
+        // v1.9.918: tombstone.ts < 결재.createdAt 이면 ID 우연 충돌 → 부활 차단 안 함(데이터 손실 방지)
+        const apTombMap = _approvalTombMap(merged._deletedApprovalIds);
+        if (Array.isArray(merged.approvals) && apTombMap.size > 0) {
           const before = merged.approvals.length;
-          merged.approvals = merged.approvals.filter(a => a && !apTombSet.has(String(a.id)));
+          merged.approvals = merged.approvals.filter(a => a && !_isApprovalTombstoned(a, apTombMap));
           const removed = before - merged.approvals.length;
           if (removed > 0) console.warn('🪦 [v1.9.643] approval tombstone 으로 ' + removed + '건 부활 차단');
         }
