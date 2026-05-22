@@ -5266,7 +5266,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.929';
+const ERP_VERSION = 'v1.9.930';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6199,8 +6199,52 @@ async function _doSaveDataInner() {
                 try { _backupOrdersNow('count_guard_merge_' + key); } catch(_){}
                 try { showNotif('⚠️ 다른 기기와 데이터 차이 감지 — ' + key + ' 자동 병합 (' + merged.length + '건)', 'info'); } catch(_){}
               } else {
-                // 그 외는 경고만 (덮어쓰기 강행)
-                console.warn('⚠️ [COUNT-GUARD] ' + key + ' 서버가 더 많지만 덮어쓰기 진행 (병합 대상 아님)');
+                // v1.9.930: orders/shopOrders 외 키도 서버 전용 레코드를 보존(자동 병합).
+                //   기존엔 덮어쓰기 강행 → 다른 사용자가 저장한 expenses 등이 사라짐.
+                //   tombstone(의도적 삭제)된 레코드는 복원하지 않음.
+                const _tombArrName = ({
+                  items:'_deletedItemIds', samples:'_deletedSampleIds', approvals:'_deletedApprovalIds',
+                  expenses:'_deletedExpenseIds', approvalComments:'_deletedCommentIds', feedPosts:'_deletedFeedPostIds'
+                })[key];
+                if (_tombArrName) {
+                  let _keepIds = onlyOnServer.slice();
+                  try {
+                    if (Array.isArray(DB[_tombArrName])) {
+                      const _tIds = new Set(DB[_tombArrName].map(x => String(x && typeof x === 'object' ? x.id : x)));
+                      _keepIds = _keepIds.filter(id => !_tIds.has(String(id)));
+                    }
+                    if (key === 'expenses' && Array.isArray(DB._deletedExpenseSigs) && typeof _expenseSig === 'function') {
+                      const _sigSet = new Set(DB._deletedExpenseSigs.map(x => x && x.sig).filter(Boolean));
+                      if (_sigSet.size > 0) {
+                        const _srvById = new Map(srvArr.map(o => [o && o.id, o]));
+                        _keepIds = _keepIds.filter(id => {
+                          const o = _srvById.get(id);
+                          if (!o) return true;
+                          try { const s = _expenseSig(o); if (s && _sigSet.has(s)) return false; } catch(_){}
+                          return true;
+                        });
+                      }
+                    }
+                  } catch(tgErr2) { console.warn('[COUNT-GUARD] ' + key + ' tombstone 필터 실패:', tgErr2); }
+                  if (_keepIds.length > 0) {
+                    const _merged = [...val];
+                    const _mIds = new Set(_merged.map(o => o && o.id));
+                    const _keepSet = new Set(_keepIds.map(String));
+                    srvArr.forEach(so => {
+                      if (!so) return;
+                      if (!_keepSet.has(String(so.id))) return;
+                      if (!_mIds.has(so.id)) _merged.push(so);
+                    });
+                    console.log('🔀 [COUNT-GUARD] ' + key + ' 자동 병합: ' + val.length + ' + 서버전용 ' + _keepIds.length + ' = ' + _merged.length);
+                    try { if (DB && Array.isArray(DB[key])) DB[key] = _merged; } catch(_){}
+                    payload.data = JSON.stringify(_merged);
+                    try { showNotif('⚠️ 다른 사용자/기기 데이터 차이 감지 — ' + key + ' 자동 병합 (' + _merged.length + '건)', 'info'); } catch(_){}
+                  } else {
+                    console.warn('⚠️ [COUNT-GUARD] ' + key + ' 서버 전용 레코드가 모두 tombstone — 덮어쓰기 진행');
+                  }
+                } else {
+                  console.warn('⚠️ [COUNT-GUARD] ' + key + ' 서버가 더 많지만 덮어쓰기 진행 (tombstone 미지원 키)');
+                }
               }
             }
           }
@@ -15347,7 +15391,7 @@ function renderAdsPage() {
     const netStr = revenue > 0 ? '₩' + netMargin.toLocaleString() : '-';
     const isAuto = !!a.expenseId;
     const editBtn = isAuto
-      ? `<button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 8px" onclick="_openLinkedExpense(${a.expenseId})">지출결의서</button>`
+      ? `<button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 8px" onclick="_openLinkedExpense(${a.expenseId})">지출결의서</button><button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 6px;margin-left:3px;color:var(--red-500)" onclick="_deleteAdExpenseRow(${a.expenseId})">삭제</button>`
       : `<button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 6px" onclick="openAdsManualModal('${a.id}')">수정</button><button class="btn btn-outline btn-sm" style="font-size:10.5px;padding:2px 6px;margin-left:3px;color:var(--red-500)" onclick="deleteAdsManual('${a.id}')">삭제</button>`;
     let itemsLabel = '';
     if (Array.isArray(a.itemIds) && a.itemIds.length > 0) {
@@ -15357,7 +15401,12 @@ function renderAdsPage() {
       });
       itemsLabel = `<div style="font-size:10px;color:#94a3b8;margin-top:2px">📦 ${itemNames.join(', ')}</div>`;
     }
-    const projectLabel = '<span style="color:#cbd5e1;font-size:11px">-</span>';
+    let projectLabel = '<span style="color:#cbd5e1;font-size:11px">-</span>';
+    if (isAuto) {
+      const _le = (DB.expenses||[]).find(x => x && String(x.id) === String(a.expenseId));
+      const _lt = (_le && _le.title) ? String(_le.title).trim() : '';
+      if (_lt) projectLabel = '<span style="font-size:11px;color:#64748b" title="단발성 지출결의서">📄 ' + (typeof escapeHtml==='function'?escapeHtml(_lt):_lt) + '</span>';
+    }
     return `<tr>
       <td style="font-weight:600;color:#0f172a;white-space:nowrap">${a._shopName}${itemsLabel}</td>
       <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${projectLabel}</td>
@@ -15435,6 +15484,32 @@ function renderShopAdsList(shopId) {
 
 // v1.9.500/819/829: adsCosts 행 → 연결된 지출결의서 열기 (광고 프로젝트 모달 먼저 닫기 — z-index 충돌 회피)
 //   v829: expense 못 찾으면 광고비 직접 수정 (inline) — sync 깨진 케이스 복구
+// v1.9.930: 광고비 이력의 단발성(지출결의서 연동) 행 삭제 — 지출결의서가 있으면
+//   지출결의서를 삭제(연동 광고비도 함께 제거), 없으면 고아 광고비 행만 제거.
+function _deleteAdExpenseRow(expenseId) {
+  const exp = (DB.expenses||[]).find(x => x && String(x.id) === String(expenseId));
+  if (exp) {
+    if (typeof deleteExpense === 'function') deleteExpense(exp.id);
+  } else {
+    if (!confirm('연결된 지출결의서가 없는 광고비 항목입니다. 이 광고비 항목을 삭제하시겠습니까?')) return;
+    let removed = 0;
+    (DB.shops||[]).forEach(s => {
+      if (s && Array.isArray(s.adsCosts)) {
+        const _b = s.adsCosts.length;
+        s.adsCosts = s.adsCosts.filter(a => String(a && a.expenseId) !== String(expenseId));
+        removed += _b - s.adsCosts.length;
+      }
+    });
+    if (removed > 0) {
+      try { (typeof saveDataNow === 'function' ? saveDataNow() : saveData()); } catch(_){}
+      try { showNotif('광고비 항목이 삭제되었습니다', 'success'); } catch(_){}
+    } else {
+      try { showNotif('삭제할 항목을 찾지 못했습니다', 'warning'); } catch(_){}
+    }
+  }
+  try { if (typeof renderAdsPage === 'function') renderAdsPage(); } catch(_){}
+}
+
 function _openLinkedExpense(expenseId) {
   if (expenseId == null) { showNotif('연결된 지출결의서를 찾을 수 없습니다', 'warning'); return; }
   const e = (DB.expenses||[]).find(x => String(x.id) === String(expenseId));
