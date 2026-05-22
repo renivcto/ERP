@@ -5266,7 +5266,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.934';
+const ERP_VERSION = 'v1.9.935';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -15123,6 +15123,33 @@ function _quickDeleteAdProject(projectId) {
   try { renderAdsPage(); } catch(_){}
 }
 
+// v1.9.935: 지출결의서(광고비) → shop.adsCosts 미러 재동기화.
+//   광고비 이력은 shop.adsCosts 에서 읽는데, 이 미러가 새로고침 머지 때 사라지는 일이 있음.
+//   expenses 가 단일 진실이므로, 매 렌더 시 미러를 expenses 로부터 재생성한다.
+function _resyncAdExpensesToShops() {
+  if (typeof _syncExpenseAdsToShop !== 'function') return;
+  const countAuto = () => {
+    let n = 0;
+    (DB.shops||[]).forEach(s => { if (s && Array.isArray(s.adsCosts)) s.adsCosts.forEach(a => { if (a && a.autoSynced) n++; }); });
+    return n;
+  };
+  const beforeN = countAuto();
+  const adExps = (DB.expenses||[]).filter(e => e && e.category === 'ad' && e.adShopId);
+  const validIds = new Set(adExps.map(e => String(e.id)));
+  // 유효 광고비 지출결의서 → 미러 upsert
+  adExps.forEach(e => { try { _syncExpenseAdsToShop(e); } catch(_){} });
+  // 지출결의서가 사라진 자동(auto) 미러 항목 제거 (수동 입력 항목은 보존)
+  (DB.shops||[]).forEach(s => {
+    if (s && Array.isArray(s.adsCosts)) {
+      s.adsCosts = s.adsCosts.filter(a => !a || !a.autoSynced || a.expenseId == null || validIds.has(String(a.expenseId)));
+    }
+  });
+  // 미러가 유실됐다 복원됐으면(개수 변화) 1회 저장해 영구 반영
+  if (beforeN !== countAuto()) {
+    try { (typeof saveDataNow === 'function' ? saveDataNow() : saveData()); } catch(_){}
+  }
+}
+
 function renderAdsPage() {
   // v1.9.877+880: tombstone 적용 (id + sig 둘 다 — 부활/중복 차단)
   try { if (typeof _applyAdProjectTombstones === 'function') _applyAdProjectTombstones(); } catch(_){}
@@ -15147,6 +15174,8 @@ function renderAdsPage() {
   const tbody = document.getElementById('ads-page-table');
   if (!kpiRow || !tbody) return;
 
+  // v1.9.935: 광고비 지출결의서 미러를 expenses 로부터 재생성 (새로고침 유실 복원)
+  try { _resyncAdExpensesToShops(); } catch(_){}
   // 모든 shop.adsCosts 를 통합 (각 항목에 shopId, shopName 추가)
   const allAds = [];
   (DB.shops || []).forEach(s => {
