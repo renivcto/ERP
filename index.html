@@ -5266,7 +5266,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.925';
+const ERP_VERSION = 'v1.9.926';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -5535,7 +5535,25 @@ function _pruneOrphanSnapshots() {
 function _backupOrdersNow(tag) {
   try {
     const orders = DB.orders || [];
-    const payload = JSON.stringify(orders);
+    // v1.9.926: 백업 페이로드에서 대용량 바이너리(pdf·도장·마감첨부) 제거.
+    //   이 파일들은 이미 IndexedDB(order_pdf_/order_stamp_/order_closing_)에
+    //   따로 저장됨. 기존엔 원본째로 stringify → reniv_orders_backup 이 수 MB →
+    //   QuotaExceededError 로 백업 실패 + localStorage 고갈.
+    const _liteOrders = orders.map(function(o){
+      const c = Object.assign({}, o);
+      if (typeof c.pdfData === 'string' && c.pdfData.length > 10 && c.pdfData !== '__idb__') c.pdfData = '__idb__';
+      if (typeof c.stampData === 'string' && c.stampData.length > 10 && c.stampData !== '__idb__') c.stampData = '__idb__';
+      if (Array.isArray(c.closingDocs)) {
+        c.closingDocs = c.closingDocs.map(function(d){
+          if (d && typeof d.data === 'string' && d.data.length > 100 && d.data !== '__idb__') {
+            return Object.assign({}, d, { data: '__idb__' });
+          }
+          return d;
+        });
+      }
+      return c;
+    });
+    const payload = JSON.stringify(_liteOrders);
     // 1) 메인 백업 (필수, 실패하면 throw)
     localStorage.setItem('reniv_orders_backup', payload);
     localStorage.setItem('reniv_orders_backup_ts', String(Date.now()));
@@ -38891,9 +38909,24 @@ function initERPWhenReady() {
       merged._nextId.task   = Math.max(merged._nextId.task||0,   maxOf(merged.tasks||[],'id') + 1);
       merged._nextId.qc     = Math.max(merged._nextId.qc||0,    maxOf(merged.qcs||[],'id') + 1);
       console.log('🔢 _nextId 복원:', JSON.stringify(merged._nextId));
-      // boms, sites, _processedOrders: Firestore 우선 → localStorage fallback
-      if (firestoreDB.boms && Object.keys(firestoreDB.boms).length > 0) merged.boms = firestoreDB.boms;
-      else if (localDB.boms && Object.keys(localDB.boms).length > 0) merged.boms = localDB.boms;
+      // v1.9.926: boms 병합 — 제품별 union (한쪽이 비어도 다른 쪽 보존).
+      //   기존엔 Firestore 가 비어있지 않으면 통째로 채택 → 로컬에서 새로 등록한
+      //   BOM 이 전부 사라지는 버그. 수정: 제품별로 합치되, 로컬에 BOM 행이
+      //   있으면 로컬 우선(이 PC 가 최신 작업본), 없으면 Firestore 유지.
+      {
+        const _fsB = (firestoreDB.boms && typeof firestoreDB.boms === 'object') ? firestoreDB.boms : {};
+        const _lcB = (localDB.boms && typeof localDB.boms === 'object') ? localDB.boms : {};
+        const _uB = {};
+        const _bKeys = {};
+        for (const _k in _fsB) _bKeys[_k] = 1;
+        for (const _k in _lcB) _bKeys[_k] = 1;
+        for (const _k in _bKeys) {
+          const _lArr = Array.isArray(_lcB[_k]) ? _lcB[_k] : [];
+          const _fArr = Array.isArray(_fsB[_k]) ? _fsB[_k] : [];
+          _uB[_k] = _lArr.length ? _lArr : _fArr;
+        }
+        merged.boms = _uB;
+      }
       // v1.9.601 — 3-way 머지: Firestore + localStorage 메인 + 별도 백업
       //   별도 백업이 가장 최신 → fsCO/lcCO 와 union (모든 키 유지)
       try {
