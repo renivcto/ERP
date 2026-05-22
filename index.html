@@ -5266,7 +5266,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.927';
+const ERP_VERSION = 'v1.9.928';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -5310,9 +5310,39 @@ let _saveTimer = null;
 let _isSaving = false;
 let _firestoreDataLoaded = false;  // Firestore 초기 로드 완료 전까지 Firestore 쓰기 방지
 
+// v1.9.928: BOM 전용 저장소 — 메인 DB 와 별개로 BOM 만 작은 전용 키에 저장.
+//   BOM 데이터는 작아서 localStorage 용량초과의 영향을 받지 않음 → 손실 방지.
+function _saveBomsRobust() {
+  try {
+    const cur = (typeof DB !== 'undefined' && DB && DB.boms && typeof DB.boms === 'object') ? DB.boms : null;
+    if (!cur) return;
+    // 기존 전용 저장소와 병합 — 비어있지 않은 BOM 은 절대 잃지 않음(grow-only).
+    let prev = {};
+    try {
+      const raw = localStorage.getItem('reniv_boms_store');
+      if (raw) { const p = JSON.parse(raw); prev = (p && p.boms && typeof p.boms === 'object') ? p.boms : ((p && typeof p === 'object') ? p : {}); }
+    } catch(_) {}
+    const out = {};
+    [prev, cur].forEach(srcB => {
+      if (srcB && typeof srcB === 'object') {
+        for (const k in srcB) {
+          if (Array.isArray(srcB[k]) && srcB[k].length) out[k] = srcB[k];
+        }
+      }
+    });
+    if (!Object.keys(out).length) return;
+    const payload = JSON.stringify({ boms: out, ts: Date.now() });
+    try { localStorage.setItem('reniv_boms_store', payload); } catch(_) {}
+    try { if (typeof idbSet === 'function') idbSet('reniv_boms_store', payload); } catch(_) {}
+  } catch(_) {}
+}
+
 function saveData() {
   // v1.9.194 — 즉시 orders 백업 (디바운스 전에 선제 백업)
   try { _backupOrdersNow('saveData_pre'); } catch(_){}
+  // v1.9.928: BOM 을 전용 키(reniv_boms_store)에도 즉시 저장 — 메인 DB 가
+  //   용량초과로 저장 실패해도 BOM 은 살아남게 함 (BOM 손실 방지)
+  try { _saveBomsRobust(); } catch(_){}
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
     _doSaveData().then(() => {
@@ -38933,6 +38963,34 @@ function initERPWhenReady() {
         }
         merged.boms = _uB;
       }
+      // v1.9.928: BOM 전용 저장소(reniv_boms_store) + 구조 백업(reniv_boms_rescue)
+      //   에서 누락된 BOM 을 채워 넣음 — 메인 DB 가 용량초과/머지로 흔들려도
+      //   BOM 이 사라지지 않게 하는 최종 안전장치.
+      try {
+        if (!merged.boms || typeof merged.boms !== 'object') merged.boms = {};
+        const _readBomsKey = (key, wrapped) => {
+          try {
+            const raw = localStorage.getItem(key);
+            if (!raw) return {};
+            const p = JSON.parse(raw);
+            if (wrapped && p && p.boms && typeof p.boms === 'object') return p.boms;
+            return (p && typeof p === 'object') ? p : {};
+          } catch(_) { return {}; }
+        };
+        // 전용 저장소: 가장 신뢰 — 비어있지 않은 제품은 이 값으로 채택
+        const _storeB = _readBomsKey('reniv_boms_store', true);
+        for (const _k in _storeB) {
+          if (Array.isArray(_storeB[_k]) && _storeB[_k].length) merged.boms[_k] = _storeB[_k];
+        }
+        // 구조 백업: 아직도 비어있는 제품만 보충
+        const _rescueB = _readBomsKey('reniv_boms_rescue', false);
+        for (const _k in _rescueB) {
+          if (Array.isArray(_rescueB[_k]) && _rescueB[_k].length
+              && !(Array.isArray(merged.boms[_k]) && merged.boms[_k].length)) {
+            merged.boms[_k] = _rescueB[_k];
+          }
+        }
+      } catch(_) {}
       // v1.9.601 — 3-way 머지: Firestore + localStorage 메인 + 별도 백업
       //   별도 백업이 가장 최신 → fsCO/lcCO 와 union (모든 키 유지)
       try {
