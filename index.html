@@ -5266,7 +5266,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.935';
+const ERP_VERSION = 'v1.9.936';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -5338,6 +5338,25 @@ function _fsUpTryUpload(key, data, doUpload) {
 
 // v1.9.928: BOM 전용 저장소 — 메인 DB 와 별개로 BOM 만 작은 전용 키에 저장.
 //   BOM 데이터는 작아서 localStorage 용량초과의 영향을 받지 않음 → 손실 방지.
+// v1.9.936: 신제품(newProducts)·인사이트(insights) 전용 백업.
+//   메인 DB 손상/머지 사고로 사라지지 않도록 별도 키에 보관(localStorage + IDB).
+//   비어있지 않을 때만 기록 → 빈 상태가 좋은 백업을 덮어쓰지 않음.
+function _backupNpIns() {
+  try {
+    if (typeof DB === 'undefined' || !DB) return;
+    if (Array.isArray(DB.newProducts) && DB.newProducts.length) {
+      const _p = JSON.stringify(DB.newProducts);
+      try { localStorage.setItem('reniv_newProducts_backup', _p); } catch(_){}
+      try { if (typeof idbSet === 'function') idbSet('reniv_newProducts_backup', _p); } catch(_){}
+    }
+    if (Array.isArray(DB.insights) && DB.insights.length) {
+      const _q = JSON.stringify(DB.insights);
+      try { localStorage.setItem('reniv_insights_backup', _q); } catch(_){}
+      try { if (typeof idbSet === 'function') idbSet('reniv_insights_backup', _q); } catch(_){}
+    }
+  } catch(_){}
+}
+
 function _saveBomsRobust() {
   try {
     const cur = (typeof DB !== 'undefined' && DB && DB.boms && typeof DB.boms === 'object') ? DB.boms : null;
@@ -5369,6 +5388,8 @@ function saveData() {
   // v1.9.928: BOM 을 전용 키(reniv_boms_store)에도 즉시 저장 — 메인 DB 가
   //   용량초과로 저장 실패해도 BOM 은 살아남게 함 (BOM 손실 방지)
   try { _saveBomsRobust(); } catch(_){}
+  // v1.9.936: 신제품·인사이트도 전용 백업
+  try { _backupNpIns(); } catch(_){}
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
     _doSaveData().then(() => {
@@ -39178,23 +39199,38 @@ function initERPWhenReady() {
       } else {
         merged.accounts = [];
       }
-      // v1.9.97 — insights도 동일 패턴: 문서 존재 시 Firestore 신뢰, 없으면 localStorage fallback
-      if (firestoreDB._insightsDocExists === true) {
-        merged.insights = Array.isArray(firestoreDB.insights) ? firestoreDB.insights : [];
-        console.log('✅ insights: Firestore 문서에서 로드 —', merged.insights.length, '건');
-      } else if (Array.isArray(localDB.insights) && localDB.insights.length > 0) {
-        merged.insights = localDB.insights;
-        console.log('⚠️ insights: Firestore 문서 없음 → localStorage 사용 —', merged.insights.length, '건');
-      } else {
-        merged.insights = [];
+      // v1.9.936: insights — 빈 Firestore 문서가 localStorage 를 덮어쓰지 않도록 union.
+      //   (기존: Firestore 문서가 존재하면 빈 배열이어도 무조건 채택 → 데이터 영구 소실)
+      {
+        const _fsI = (firestoreDB._insightsDocExists === true && Array.isArray(firestoreDB.insights)) ? firestoreDB.insights : [];
+        const _lcI = Array.isArray(localDB.insights) ? localDB.insights : [];
+        if (_fsI.length && _lcI.length) {
+          const _sI = {}; const _uI = [];
+          _fsI.concat(_lcI).forEach(r => { if (r && r.id != null && !_sI[r.id]) { _sI[r.id] = 1; _uI.push(r); } });
+          merged.insights = _uI;
+        } else {
+          merged.insights = _fsI.length ? _fsI : _lcI;
+        }
+        if (!merged.insights.length) {
+          try { const _bI = JSON.parse(localStorage.getItem('reniv_insights_backup') || '[]'); if (Array.isArray(_bI) && _bI.length) { merged.insights = _bI; console.warn('🛟 insights 전용 백업에서 복구 —', _bI.length, '건'); } } catch(_){}
+        }
+        console.log('insights 병합 —', merged.insights.length, '건');
       }
-      // v1.9.111 — newProducts 동일 패턴
-      if (firestoreDB._newProductsDocExists === true) {
-        merged.newProducts = Array.isArray(firestoreDB.newProducts) ? firestoreDB.newProducts : [];
-      } else if (Array.isArray(localDB.newProducts) && localDB.newProducts.length > 0) {
-        merged.newProducts = localDB.newProducts;
-      } else {
-        merged.newProducts = [];
+      // v1.9.936: newProducts — 빈 Firestore 문서가 localStorage 를 덮어쓰지 않도록 union.
+      {
+        const _fsN = (firestoreDB._newProductsDocExists === true && Array.isArray(firestoreDB.newProducts)) ? firestoreDB.newProducts : [];
+        const _lcN = Array.isArray(localDB.newProducts) ? localDB.newProducts : [];
+        if (_fsN.length && _lcN.length) {
+          const _sN = {}; const _uN = [];
+          _fsN.concat(_lcN).forEach(r => { if (r && r.id != null && !_sN[r.id]) { _sN[r.id] = 1; _uN.push(r); } });
+          merged.newProducts = _uN;
+        } else {
+          merged.newProducts = _fsN.length ? _fsN : _lcN;
+        }
+        if (!merged.newProducts.length) {
+          try { const _bN = JSON.parse(localStorage.getItem('reniv_newProducts_backup') || '[]'); if (Array.isArray(_bN) && _bN.length) { merged.newProducts = _bN; console.warn('🛟 newProducts 전용 백업에서 복구 —', _bN.length, '건'); } } catch(_){}
+        }
+        console.log('newProducts 병합 —', merged.newProducts.length, '건');
       }
       // v1.9.205: 결재 그룹웨어 컬렉션 2차 복구 — 메인 병합 후에도 비어있다면 전용 localStorage 백업에서 복구
       try {
