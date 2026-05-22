@@ -1,10 +1,15 @@
 // =============================================================================
-// Reniv ERP — Firestore Security Rules (v2.0, 2026-04)
+// Reniv ERP — Firestore Security Rules (v2.3, 2026-05)
 // =============================================================================
 // 게시 방법:
-//   1) Firebase Console → Firestore Database → 규칙 탭에서 직접 붙여넣기
+//   1) Firebase Console -> Firestore Database -> 규칙 탭에서 직접 붙여넣기 -> 게시
 //   또는
 //   2) firebase deploy --only firestore:rules
+// =============================================================================
+// v2.3 변경점:
+//   - 바이너리 백업 컬렉션 6종 규칙 (v2.1 에서 추가) 유지
+//   - 화이트리스트 관리자 이메일의 '본인 문서 자가복구' update 규칙 추가
+//     (uid 변경/사고로 본인 문서가 '승인대기'·'삭제됨' 이 돼도 락아웃 방지)
 // =============================================================================
 
 rules_version = '2';
@@ -69,6 +74,13 @@ service cloud.firestore {
         (request.auth.uid == uid
           && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['lastLogin']))
+        // v2.3: 화이트리스트 관리자 이메일은 본인 문서를 정상 관리자로 자가복구 가능
+        //   (uid 변경/사고로 본인 문서가 '승인대기'·'삭제됨' 이 돼도 락아웃 방지.
+        //    결과 문서가 반드시 활성 관리자여야 하므로 권한 강등/삭제엔 쓸 수 없음)
+        || (isWhitelistedAdminEmail()
+          && request.auth.uid == uid
+          && request.resource.data.isAdmin == true
+          && request.resource.data.status == '활성')
         // 관리자는 모든 필드 변경 가능 (단, 자기 자신의 isAdmin 해제는 금지 — 락아웃 방지)
         || (isAdmin() && !(request.auth.uid == uid
              && resource.data.isAdmin == true
@@ -101,6 +113,21 @@ service cloud.firestore {
       allow read:  if isAdmin();
       allow write: if isAdmin();
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // 바이너리 백업 컬렉션 (PDF·이미지·첨부) — v2.1 추가 (2026-05)
+    //   index.html 의 _saveSharedOrderPdf / _saveSharedOrderClosing /
+    //   _saveSharedVendorQuote / _saveSharedVendorAttach / approvalAttachments /
+    //   feedImages / itemImages 가 쓰는 컬렉션.
+    //   규칙이 없으면 아래 catch-all(if false)에 걸려
+    //   'Missing or insufficient permissions' 오류 발생.
+    // ─────────────────────────────────────────────────────────────
+    match /orderPdfs/{docId}           { allow read: if isActive(); allow write: if canWrite(); }
+    match /vendorQuotes/{docId}        { allow read: if isActive(); allow write: if canWrite(); }
+    match /vendorAttachments/{docId}   { allow read: if isActive(); allow write: if canWrite(); }
+    match /approvalAttachments/{docId} { allow read: if isActive(); allow write: if canWrite(); }
+    match /feedImages/{docId}          { allow read: if isActive(); allow write: if canWrite(); }
+    match /itemImages/{docId}          { allow read: if isActive(); allow write: if canWrite(); }
 
     // ─────────────────────────────────────────────────────────────
     // 그 외 모든 경로 — 명시적 거부 (안전장치)

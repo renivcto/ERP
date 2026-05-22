@@ -79,6 +79,43 @@
           window._currentUser = userData;
         } else {
           const data = userSnap.data();
+          // v1.9.924: 화이트리스트 관리자(reniv.cto@gmail.com) 계정 자가복구 + 중복 정리.
+          //   배경: Firebase Auth uid 가 바뀌면(계정 재생성 등) 현재 uid 의 users
+          //   문서가 '승인대기'/이름없음/'삭제됨' 으로 남아, 관리자 본인이 사용자
+          //   목록에서 사라지거나 로그인이 막히는 사고가 반복됨.
+          //   처리1: 화이트리스트 이메일이면 현재 uid 문서를 항상 정상 관리자
+          //          (status='활성', isAdmin=true, 이름 채움)로 강제 복구.
+          //   처리2: 같은 이메일의 다른(과거 uid) 문서는 '삭제됨'으로 정리해
+          //          목록에 중복/유령('-') 행이 안 보이게 함.
+          if (_isWhitelistedAdmin(user.email)) {
+            if (data.status !== '활성' || data.isAdmin !== true || !data.name) {
+              const _heal = {
+                uid: user.uid,
+                name: data.name || user.displayName || '관리자',
+                email: user.email,
+                role: data.role || 'CTO',
+                status: '활성',
+                permission: 'write',
+                isAdmin: true,
+              };
+              try { await setDoc(userRef, _heal, { merge: true }); }
+              catch(e) { console.warn('관리자 자가복구 실패:', e); }
+              Object.assign(data, _heal);
+            }
+            try {
+              const _allSnap = await getDocs(collection(db, 'users'));
+              const _email = String(user.email || '').toLowerCase();
+              for (const _d of _allSnap.docs) {
+                if (_d.id === user.uid) continue;
+                const _dd = _d.data() || {};
+                if (_email && String(_dd.email || '').toLowerCase() === _email
+                    && _dd.status !== '삭제됨') {
+                  try { await setDoc(doc(db, 'users', _d.id), { status: '삭제됨' }, { merge: true }); }
+                  catch(_) {}
+                }
+              }
+            } catch(e) { console.warn('중복 계정 정리 실패:', e); }
+          }
           // 삭제된 사용자는 즉시 로그아웃
           if (data.status === '삭제됨') {
             alert('삭제된 계정입니다. 관리자에게 문의하세요.');
@@ -5229,7 +5266,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.923';
+const ERP_VERSION = 'v1.9.924';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
