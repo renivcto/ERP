@@ -5266,7 +5266,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.930';
+const ERP_VERSION = 'v1.9.931';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -15403,7 +15403,7 @@ function renderAdsPage() {
     }
     let projectLabel = '<span style="color:#cbd5e1;font-size:11px">-</span>';
     if (isAuto) {
-      const _le = (DB.expenses||[]).find(x => x && String(x.id) === String(a.expenseId));
+      const _le = (typeof _findAdExpense === 'function') ? _findAdExpense(a.expenseId) : (DB.expenses||[]).find(x => x && String(x.id) === String(a.expenseId));
       const _lt = (_le && _le.title) ? String(_le.title).trim() : '';
       if (_lt) projectLabel = '<span style="font-size:11px;color:#64748b" title="단발성 지출결의서">📄 ' + (typeof escapeHtml==='function'?escapeHtml(_lt):_lt) + '</span>';
     }
@@ -15486,8 +15486,17 @@ function renderShopAdsList(shopId) {
 //   v829: expense 못 찾으면 광고비 직접 수정 (inline) — sync 깨진 케이스 복구
 // v1.9.930: 광고비 이력의 단발성(지출결의서 연동) 행 삭제 — 지출결의서가 있으면
 //   지출결의서를 삭제(연동 광고비도 함께 제거), 없으면 고아 광고비 행만 제거.
+// v1.9.931: 광고비 행이 가리키는 지출결의서를 찾을 때, id 충돌이 있으면
+//   분류=ad(광고비)인 것을 우선 선택 (발주 선급금 등 엉뚱한 건이 잡히는 것 방지).
+function _findAdExpense(expenseId) {
+  const list = (typeof DB !== 'undefined' && Array.isArray(DB.expenses)) ? DB.expenses : [];
+  return list.find(x => x && String(x.id) === String(expenseId) && x.category === 'ad')
+      || list.find(x => x && String(x.id) === String(expenseId))
+      || null;
+}
+
 function _deleteAdExpenseRow(expenseId) {
-  const exp = (DB.expenses||[]).find(x => x && String(x.id) === String(expenseId));
+  const exp = _findAdExpense(expenseId);
   if (exp) {
     if (typeof deleteExpense === 'function') deleteExpense(exp.id);
   } else {
@@ -15512,7 +15521,7 @@ function _deleteAdExpenseRow(expenseId) {
 
 function _openLinkedExpense(expenseId) {
   if (expenseId == null) { showNotif('연결된 지출결의서를 찾을 수 없습니다', 'warning'); return; }
-  const e = (DB.expenses||[]).find(x => String(x.id) === String(expenseId));
+  const e = (typeof _findAdExpense === 'function') ? _findAdExpense(expenseId) : (DB.expenses||[]).find(x => String(x.id) === String(expenseId));
   if (!e) {
     // v829: 지출결의서 없을 때 광고비 행 직접 수정 (cost/기간 prompt)
     if (typeof _editAdsCostInline === 'function') { _editAdsCostInline(expenseId); return; }
@@ -39047,6 +39056,13 @@ function initERPWhenReady() {
       merged._nextId.order  = Math.max(merged._nextId.order||0,  maxOf(merged.orders||[],'id') + 1);
       merged._nextId.task   = Math.max(merged._nextId.task||0,   maxOf(merged.tasks||[],'id') + 1);
       merged._nextId.qc     = Math.max(merged._nextId.qc||0,    maxOf(merged.qcs||[],'id') + 1);
+      // v1.9.931: expense/approval/sample/comment/feedPost 카운터도 데이터 최댓값+1 보장.
+      //   (누락돼 있어 카운터가 낮게 고정 → 신규 expense 가 기존 id 와 충돌하던 버그)
+      merged._nextId.expense  = Math.max(merged._nextId.expense||0,  maxOf(merged.expenses||[],'id') + 1);
+      merged._nextId.approval = Math.max(merged._nextId.approval||0, maxOf(merged.approvals||[],'id') + 1);
+      merged._nextId.sample   = Math.max(merged._nextId.sample||0,   maxOf(merged.samples||[],'id') + 1);
+      merged._nextId.comment  = Math.max(merged._nextId.comment||0,  maxOf(merged.approvalComments||[],'id') + 1);
+      merged._nextId.feedPost = Math.max(merged._nextId.feedPost||0, maxOf(merged.feedPosts||[],'id') + 1);
       console.log('🔢 _nextId 복원:', JSON.stringify(merged._nextId));
       // v1.9.926: boms 병합 — 제품별 union (한쪽이 비어도 다른 쪽 보존).
       //   기존엔 Firestore 가 비어있지 않으면 통째로 채택 → 로컬에서 새로 등록한
