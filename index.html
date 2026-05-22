@@ -5266,7 +5266,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.926';
+const ERP_VERSION = 'v1.9.927';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -31111,6 +31111,12 @@ function printDoc() {
 // USERS
 // ═══════════════════════════════════════════════════════
 function renderUserTable() {
+  // v1.9.927: '사용자 관리'는 관리자 전용 — 멤버는 안내문만 표시
+  if (!(window._currentUser && window._currentUser.isAdmin)) {
+    if (typeof _renderUsersAdminOnlyNotice === 'function') _renderUsersAdminOnlyNotice();
+    return;
+  }
+  { const _uHead = document.getElementById('user-table-head'); if (_uHead) _uHead.style.display = ''; }
   // v1.9.921: Firestore 사용자 목록을 한 번이라도 불러왔으면 그 캐시를 사용.
   //   (로컬 DB.users 로 덮어써서 현재 관리자 본인 행이 사라지던 깜빡임 버그 수정)
   if (window._cachedFirestoreUsers && window._cachedFirestoreUsers.length && typeof _renderUserTableFromList === 'function') {
@@ -39329,7 +39335,24 @@ function initERPWhenReady() {
 }
 
 // ─── 사용자 관리 페이지 — Firestore 연동 ────────────────
+// v1.9.927: 비관리자(멤버)에게 '사용자 관리' 진입 시 안내문만 표시
+function _renderUsersAdminOnlyNotice() {
+  const _h = document.getElementById('user-table-head');
+  const _b = document.getElementById('user-table');
+  const _a = document.getElementById('add-user-btn');
+  if (_a) _a.style.display = 'none';
+  if (_h) _h.style.display = 'none';
+  if (_b) _b.innerHTML = '<tr><td colspan="8" style="padding:48px 20px;text-align:center;color:var(--gray-500);line-height:1.7">'
+    + '<div style="font-size:34px;margin-bottom:10px">\u{1F512}</div>'
+    + '<div style="font-size:15px;font-weight:700;color:var(--gray-700);margin-bottom:6px">관리자 전용 페이지입니다</div>'
+    + '<div style="font-size:13px">사용자 관리(승인·권한 변경)는 관리자만 이용할 수 있습니다.<br>문의는 관리자(reniv.cto@gmail.com)에게 연락해 주세요.</div>'
+    + '</td></tr>';
+}
+
 async function renderUserTableFirestore() {
+  // v1.9.927: '사용자 관리'는 관리자 전용 — 멤버는 안내문만 표시
+  if (!(window._currentUser && window._currentUser.isAdmin)) { _renderUsersAdminOnlyNotice(); return; }
+  { const _uHead = document.getElementById('user-table-head'); if (_uHead) _uHead.style.display = ''; }
   // 사용자 추가 버튼 - 관리자만 표시
   const addUserBtn = document.getElementById('add-user-btn');
   if (addUserBtn) addUserBtn.style.display = (window._currentUser && window._currentUser.isAdmin) ? '' : 'none';
