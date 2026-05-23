@@ -5268,7 +5268,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.946';
+const ERP_VERSION = 'v1.9.947';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10582,8 +10582,13 @@ function _cpCalc(r) {
   const vendorComm = actualRevenue * (Number(r.vendorCommPct)||0) / 100;  // 밴더 수수료(부가세 포함)
   const cogs = soldQty * (Number(r.cogsUnit)||0);                         // 제품원가
   const cogsVat = cogs * 0.1;
-  const settlement = actualRevenue - specialFee - specialVat - guestFee - guestVat - insertFee - insertVat - hsComm - vendorComm - cogs - cogsVat;
-  const profitRate = actualRevenue > 0 ? (settlement / actualRevenue * 100) : 0;
+  // v1.9.947: 순이익 = 부가세 제외(공급가) 기준. 매출·수수료는 부가세 포함값이라 ÷1.1 로
+  //   공급가 환산, 특약금·게스트비·인서트비·제품원가는 이미 공급가(부가세 별도) 입력값.
+  const netRevenue    = actualRevenue / 1.1;   // 실제매출 공급가
+  const netHsComm     = hsComm / 1.1;          // 홈쇼핑수수료 공급가
+  const netVendorComm = vendorComm / 1.1;      // 밴더수수료 공급가
+  const settlement = netRevenue - specialFee - guestFee - insertFee - netHsComm - netVendorComm - cogs;
+  const profitRate = netRevenue > 0 ? (settlement / netRevenue * 100) : 0;
   return { hsRevenue, actualRevenue, orderQty, soldQty, specialFee, specialVat, guestFee, guestVat, insertFee, insertVat, hsComm, vendorComm, cogs, cogsVat, settlement, profitRate };
 }
 
@@ -10651,8 +10656,8 @@ function _cpRenderTable() {
   const TH = (t,extra) => '<th style="padding:9px 8px;font-size:11px;font-weight:700;color:#475569;white-space:nowrap;border-bottom:2px solid #e2e8f0;position:sticky;top:0;z-index:2;background:#f8fafc;' + (extra||'') + '">' + t + '</th>';
   let h = '<div style="overflow:auto;max-height:70vh;border:1px solid #e2e8f0;border-radius:12px;background:#fff">';
   h += '<table style="border-collapse:collapse;white-space:nowrap;font-size:12px;min-width:100%"><thead><tr>';
-  h += TH('수익금<span style="cursor:help;color:#0ea5e9;font-weight:700;font-size:10px;margin-left:1px;vertical-align:super" title="수익금 = 실제매출(부가세 포함) - 모든 지출(각 부가세 포함)&#10;&#10;= 실제매출&#10;  - 특약금 - 특약 부가세&#10;  - 게스트비 - 게스트비 부가세&#10;  - 인서트비 - 인서트비 부가세&#10;  - 홈쇼핑수수료(부가세 포함)&#10;  - 밴더수수료(부가세 포함)&#10;  - 제품원가 - 제품원가 부가세">ⓘ</span><div style="font-size:9px;color:#b45309;font-weight:600;margin-top:1px">부가세 포함</div>','background:#fffbeb;border-bottom-color:#fde68a;position:sticky;left:0;z-index:4;width:120px;min-width:120px;max-width:120px');
-  h += TH('수익율<div style="font-size:9px;color:#b45309;font-weight:600;margin-top:1px">부가세 포함</div>','background:#fffbeb;border-bottom-color:#fde68a;position:sticky;left:120px;z-index:4;width:68px;min-width:68px;max-width:68px');
+  h += TH('순이익<span style="cursor:help;color:#0ea5e9;font-weight:700;font-size:10px;margin-left:1px;vertical-align:super" title="순이익 = 부가세 제외(공급가) 기준 순이익&#10;&#10;= 실제매출 ÷ 1.1 (공급가)&#10;  - 특약금&#10;  - 게스트비&#10;  - 인서트비&#10;  - 홈쇼핑수수료 ÷ 1.1 (공급가)&#10;  - 밴더수수료 ÷ 1.1 (공급가)&#10;  - 제품원가&#10;&#10;※ 특약금·게스트비·인서트비·제품원가는 이미 공급가(부가세 별도) 입력값">ⓘ</span><div style="font-size:9px;color:#b45309;font-weight:600;margin-top:1px">부가세 제외</div>','background:#fffbeb;border-bottom-color:#fde68a;position:sticky;left:0;z-index:4;width:120px;min-width:120px;max-width:120px');
+  h += TH('수익률<div style="font-size:9px;color:#b45309;font-weight:600;margin-top:1px">부가세 제외</div>','background:#fffbeb;border-bottom-color:#fde68a;position:sticky;left:120px;z-index:4;width:68px;min-width:68px;max-width:68px');
   h += TH('회차','position:sticky;left:188px;z-index:4;width:56px;min-width:56px;max-width:56px') + TH('채널','position:sticky;left:244px;z-index:4;width:180px;min-width:180px;max-width:180px') + TH('구좌 목표 비용') + TH('홈쇼핑 방송 주문') + TH('실제매출','background:#e0f2fe') + TH('판매가') + TH('방송 주문') + TH('실제 판매','background:#e0f2fe') + TH('특약금') + TH('게스트비') + TH('인서트비') + TH('홈쇼핑 수수료') + TH('밴더 수수료') + TH('제품원가') + TH('관리');
   h += '</tr></thead><tbody>';
   rows.forEach(r => {
@@ -10793,9 +10798,9 @@ function _cpModalLive() {
   const box = document.getElementById('cp-m-live');
   if (!box) return;
   const c = _cpCalc(_cpReadModal());
-  box.innerHTML = '<div><span style="font-size:11px;color:#92400e;font-weight:700">수익금</span> '
+  box.innerHTML = '<div><span style="font-size:11px;color:#92400e;font-weight:700">순이익</span> '
     + '<b style="font-size:16px;color:' + (c.settlement>=0?'#15803d':'#dc2626') + '">' + _cpWon(c.settlement) + '</b></div>'
-    + '<div><span style="font-size:11px;color:#92400e;font-weight:700">수익율</span> '
+    + '<div><span style="font-size:11px;color:#92400e;font-weight:700">수익률</span> '
     + '<b style="font-size:16px;color:' + (c.profitRate>=0?'#15803d':'#dc2626') + '">' + _cpPct(c.profitRate) + '</b></div>'
     + '<div style="font-size:11px;color:#a16207">홈쇼핑매출 ' + _cpWon(c.hsRevenue) + ' · 실제매출 ' + _cpWon(c.actualRevenue) + '</div>';
 }
@@ -10852,8 +10857,8 @@ function openCpDetail(id) {
     + '<button onclick="closeCpDetail()" style="background:rgba(255,255,255,.5);border:none;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:14px;color:#0c4a6e">✕</button>'
     + '</div>'
     + '<div style="padding:16px 20px;max-height:68vh;overflow-y:auto">'
-    + line('수익금 (부가세 포함)', _cpWon(c.settlement), {hi:true, color:(c.settlement>=0?'#15803d':'#dc2626')})
-    + line('수익율', _cpPct(c.profitRate), {hi:true, color:(c.profitRate>=0?'#15803d':'#dc2626')})
+    + line('순이익 (부가세 제외)', _cpWon(c.settlement), {hi:true, color:(c.settlement>=0?'#15803d':'#dc2626')})
+    + line('수익률', _cpPct(c.profitRate), {hi:true, color:(c.profitRate>=0?'#15803d':'#dc2626')})
     + sect('매출')
     + line('구좌 목표 비용', _cpWon(r.targetCost))
     + line('달성률', _cpPct(r.achieveRate))
