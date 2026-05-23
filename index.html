@@ -5266,7 +5266,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.939';
+const ERP_VERSION = 'v1.9.940';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6243,17 +6243,15 @@ async function _doSaveDataInner() {
                       const _tIds = new Set(DB[_tombArrName].map(x => String(x && typeof x === 'object' ? x.id : x)));
                       _keepIds = _keepIds.filter(id => !_tIds.has(String(id)));
                     }
-                    if (key === 'expenses' && Array.isArray(DB._deletedExpenseSigs) && typeof _expenseSig === 'function') {
-                      const _sigSet = new Set(DB._deletedExpenseSigs.map(x => x && x.sig).filter(Boolean));
-                      if (_sigSet.size > 0) {
-                        const _srvById = new Map(srvArr.map(o => [o && o.id, o]));
-                        _keepIds = _keepIds.filter(id => {
-                          const o = _srvById.get(id);
-                          if (!o) return true;
-                          try { const s = _expenseSig(o); if (s && _sigSet.has(s)) return false; } catch(_){}
-                          return true;
-                        });
-                      }
+                    if (key === 'expenses' && Array.isArray(DB._deletedExpenseSigs) && DB._deletedExpenseSigs.length > 0 && typeof _isExpenseSigTombstoned === 'function') {
+                      // v1.9.940: 서버 전용 레코드도 삭제시점 이후 생성건이면 보존 (새 입력 보호)
+                      const _srvById = new Map(srvArr.map(o => [o && o.id, o]));
+                      _keepIds = _keepIds.filter(id => {
+                        const o = _srvById.get(id);
+                        if (!o) return true;
+                        try { if (_isExpenseSigTombstoned(o)) return false; } catch(_){}
+                        return true;
+                      });
                     }
                   } catch(tgErr2) { console.warn('[COUNT-GUARD] ' + key + ' tombstone 필터 실패:', tgErr2); }
                   if (_keepIds.length > 0) {
@@ -15176,16 +15174,14 @@ function renderAdsPage() {
   try { if (typeof _cleanupOrphanAdsCosts === 'function') _cleanupOrphanAdsCosts(); } catch(_){}
   // v1.9.880: expense sig tombstone 도 로컬 DB 에 적용 (Firestore 머지 외에도)
   try {
-    if (Array.isArray(DB._deletedExpenseSigs) && DB._deletedExpenseSigs.length > 0 && typeof _expenseSig === 'function') {
-      const expSigSet = new Set(DB._deletedExpenseSigs.map(x => x && x.sig).filter(Boolean));
-      if (expSigSet.size > 0 && Array.isArray(DB.expenses)) {
-        const before = DB.expenses.length;
-        DB.expenses = DB.expenses.filter(e => e && !expSigSet.has(_expenseSig(e)));
-        const removed = before - DB.expenses.length;
-        if (removed > 0) {
-          console.warn('🪦 [v880] 로컬 expense sig 매칭 ' + removed + '건 제거');
-          try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
-        }
+    if (Array.isArray(DB._deletedExpenseSigs) && DB._deletedExpenseSigs.length > 0 && typeof _isExpenseSigTombstoned === 'function' && Array.isArray(DB.expenses)) {
+      // v1.9.940: 삭제시점 이후 생성된 건은 보존 (새 입력 보호)
+      const before = DB.expenses.length;
+      DB.expenses = DB.expenses.filter(e => e && !_isExpenseSigTombstoned(e));
+      const removed = before - DB.expenses.length;
+      if (removed > 0) {
+        console.warn('🪦 [v940] 로컬 expense sig 매칭 ' + removed + '건 제거 (삭제시점 이전 생성건만)');
+        try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
       }
     }
   } catch(_){}
@@ -24771,16 +24767,14 @@ function renderApprovalPage() {
   try { if (typeof _applyAdProjectTombstones === 'function') _applyAdProjectTombstones(); } catch(_){}
   // v1.9.880: expense sig tombstone 적용 (중복 부활 차단)
   try {
-    if (Array.isArray(DB._deletedExpenseSigs) && DB._deletedExpenseSigs.length > 0 && typeof _expenseSig === 'function') {
-      const expSigSet = new Set(DB._deletedExpenseSigs.map(x => x && x.sig).filter(Boolean));
-      if (expSigSet.size > 0 && Array.isArray(DB.expenses)) {
-        const before = DB.expenses.length;
-        DB.expenses = DB.expenses.filter(e => e && !expSigSet.has(_expenseSig(e)));
-        const removed = before - DB.expenses.length;
-        if (removed > 0) {
-          console.warn('🪦 [v880] approval 페이지: 로컬 expense sig ' + removed + '건 제거');
-          try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
-        }
+    if (Array.isArray(DB._deletedExpenseSigs) && DB._deletedExpenseSigs.length > 0 && typeof _isExpenseSigTombstoned === 'function' && Array.isArray(DB.expenses)) {
+      // v1.9.940: 삭제시점 이후 생성된 건은 보존 (새 입력 보호)
+      const before = DB.expenses.length;
+      DB.expenses = DB.expenses.filter(e => e && !_isExpenseSigTombstoned(e));
+      const removed = before - DB.expenses.length;
+      if (removed > 0) {
+        console.warn('🪦 [v940] approval 페이지: 로컬 expense sig ' + removed + '건 제거 (삭제시점 이전 생성건만)');
+        try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
       }
     }
   } catch(_){}
@@ -26585,6 +26579,24 @@ function _expenseSig(e) {
   const d = String(e.dueDate || e.adStartDate || '');
   const c = String(e.category || '');
   return [c, v, t, a, d].join('|');
+}
+
+// v1.9.940: sig tombstone 으로 expense 를 거를 때, 삭제(tombstone) 시점(ts)보다
+//   나중에 createdAt 으로 생성된 건은 "사용자가 새로 의도적으로 입력한 건" 이므로 보존.
+//   → 과거에 지운 것과 우연히 내용(업체/제목/금액/날짜)이 같은 새 입력이
+//     새로고침/머지 때 조용히 사라지는 버그를 막음 (특히 단발성 광고비).
+function _isExpenseSigTombstoned(e) {
+  if (!e || !Array.isArray(DB._deletedExpenseSigs) || !DB._deletedExpenseSigs.length) return false;
+  if (typeof _expenseSig !== 'function') return false;
+  const sig = _expenseSig(e);
+  if (!sig) return false;
+  let ts = null;
+  for (let i = 0; i < DB._deletedExpenseSigs.length; i++) {
+    const x = DB._deletedExpenseSigs[i];
+    if (x && x.sig === sig) { const t = Number(x.ts) || 0; if (ts == null || t > ts) ts = t; }
+  }
+  if (ts == null) return false;            // 해당 sig tombstone 없음 → 보존
+  return (Number(e.createdAt) || 0) <= ts; // 삭제 시점 이후 생성건이면 false(보존)
 }
 
 function deleteExpense(id) {
@@ -38944,12 +38956,24 @@ function initERPWhenReady() {
           if (!prev || (x.ts || 0) > (prev.ts || 0)) sigByKey.set(x.sig, x);
         });
         merged._deletedExpenseSigs = Array.from(sigByKey.values()).sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 300);
-        const expSigSet = new Set(merged._deletedExpenseSigs.map(x => x.sig));
-        if (Array.isArray(merged.expenses) && expSigSet.size > 0 && typeof _expenseSig === 'function') {
+        // v1.9.940: sig -> 삭제시점(ts) Map. 삭제 이후 생성된 expense 는 보존.
+        const expSigTsMap = new Map();
+        merged._deletedExpenseSigs.forEach(x => {
+          if (!x || !x.sig) return;
+          const prev = expSigTsMap.get(x.sig);
+          const t = Number(x.ts) || 0;
+          if (prev == null || t > prev) expSigTsMap.set(x.sig, t);
+        });
+        if (Array.isArray(merged.expenses) && expSigTsMap.size > 0 && typeof _expenseSig === 'function') {
           const before = merged.expenses.length;
-          merged.expenses = merged.expenses.filter(e => e && !expSigSet.has(_expenseSig(e)));
+          merged.expenses = merged.expenses.filter(e => {
+            if (!e) return false;
+            const ts = expSigTsMap.get(_expenseSig(e));
+            if (ts == null) return true;                       // tombstone 없음 → 보존
+            return (Number(e.createdAt) || 0) > ts;            // 삭제 이후 생성건 → 보존
+          });
           const removed = before - merged.expenses.length;
-          if (removed > 0) console.warn(`🪦 [v1.9.879] expense tombstone(sig) 으로 ${removed}건 부활 차단`);
+          if (removed > 0) console.warn(`🪦 [v1.9.940] expense tombstone(sig) 으로 ${removed}건 부활 차단 (삭제시점 이전 생성건만)`);
         }
         // v1.9.880: adProject sig tombstone 머지 + 필터 (이름+기간 매칭)
         const fsApSigT = Array.isArray(firestoreDB._deletedAdProjectSigs) ? firestoreDB._deletedAdProjectSigs : [];
