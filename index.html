@@ -5266,7 +5266,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.940';
+const ERP_VERSION = 'v1.9.941';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28405,6 +28405,22 @@ function editExpense(id) {
   renderApeAttachList();
 }
 
+// v1.9.941: 충돌 없는 expense id 발급 — 이미 쓰이는 id 또는 삭제(tombstone)된 id 면 건너뜀.
+//   nextId 카운터가 어떤 사고로 낮아져도 새 expense 가 옛 id 를 재사용하지 않게 함.
+//   (id 재사용 시: 머지 때 tombstone 으로 삭제되거나, 서버의 옛 레코드에 가려져 사라짐)
+function _freshExpenseId() {
+  const used = new Set();
+  (DB.expenses || []).forEach(e => { if (e && e.id != null) used.add(String(e.id)); });
+  (DB._deletedExpenseIds || []).forEach(x => {
+    const v = (x && typeof x === 'object') ? x.id : x;
+    if (v != null) used.add(String(v));
+  });
+  let id = nextId('expense');
+  let guard = 0;
+  while (used.has(String(id)) && guard < 200000) { id = nextId('expense'); guard++; }
+  return id;
+}
+
 function saveExpense() {
   const title = $('ape-title').value.trim();
   if (!title) { showNotif('제목을 입력하세요', 'warning'); return; }
@@ -28492,7 +28508,7 @@ function saveExpense() {
   // v1.9.308: 지급 방법 저장. 법인카드면 카드전표 자동 수령 처리(taxInvoice='수령완료')
   const _newPm = ($('ape-paymethod') && $('ape-paymethod').value) || '계좌이체';
   const e = {
-    id: nextId('expense'),
+    id: _freshExpenseId(),
     approvalId: null,
     orderId: null,
     category: _category,
@@ -38939,12 +38955,28 @@ function initERPWhenReady() {
           if (!prev || (x.ts || 0) > (prev.ts || 0)) expTByKey.set(k, x);
         });
         merged._deletedExpenseIds = Array.from(expTByKey.values()).sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
-        const expTombSet = new Set(merged._deletedExpenseIds.map(x => String(x.id)));
-        if (Array.isArray(merged.expenses) && expTombSet.size > 0) {
+        // v1.9.941: id -> 삭제시점(ts) Map. 삭제시점보다 나중에 생성(createdAt)된 expense 는
+        //   id 가 우연히 겹쳐도 "사용자가 새로 입력한 다른 건" 이므로 보존.
+        //   (단발성 광고비가 새로고침 때 조용히 사라지던 버그 근본 수정)
+        const expTombTsMap = new Map();
+        merged._deletedExpenseIds.forEach(x => {
+          if (!x || x.id == null) return;
+          const k = String(x.id);
+          const t = Number(x.ts) || 0;
+          const prev = expTombTsMap.get(k);
+          if (prev == null || t > prev) expTombTsMap.set(k, t);
+        });
+        if (Array.isArray(merged.expenses) && expTombTsMap.size > 0) {
           const before = merged.expenses.length;
-          merged.expenses = merged.expenses.filter(e => e && !expTombSet.has(String(e.id)));
+          merged.expenses = merged.expenses.filter(e => {
+            if (!e) return false;
+            const k = String(e.id);
+            if (!expTombTsMap.has(k)) return true;          // tombstone 없음 → 보존
+            const ts = expTombTsMap.get(k);
+            return (Number(e.createdAt) || 0) > ts;         // 삭제 이후 생성건 → 보존
+          });
           const removed = before - merged.expenses.length;
-          if (removed > 0) console.warn(`🪦 [v1.9.543] expense tombstone(id) 으로 ${removed}건 부활 차단`);
+          if (removed > 0) console.warn(`🪦 [v1.9.941] expense tombstone(id) 으로 ${removed}건 부활 차단 (삭제시점 이전 생성건만)`);
         }
         // v1.9.879: 시그니처 tombstone 머지 + 필터
         const fsSigT = Array.isArray(firestoreDB._deletedExpenseSigs) ? firestoreDB._deletedExpenseSigs : [];
