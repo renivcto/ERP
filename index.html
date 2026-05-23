@@ -5268,7 +5268,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.944';
+const ERP_VERSION = 'v1.9.945';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7063,6 +7063,15 @@ let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
     if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
     if (!Array.isArray(DB._deletedFeedPostIds)) DB._deletedFeedPostIds = [];
     if (!Array.isArray(DB._deletedApprovalIds)) DB._deletedApprovalIds = [];
+    // v1.9.945: 전용 백업(reniv_deleted_approval_ids)에서 결재 tombstone 복원 —
+    //   메인 DB 가 머지로 잃어버려도 삭제 상태가 유지되도록.
+    try {
+      const _lsAp = JSON.parse(localStorage.getItem('reniv_deleted_approval_ids')||'[]') || [];
+      if (Array.isArray(_lsAp) && _lsAp.length > 0) {
+        const _seenAp = new Set(DB._deletedApprovalIds.map(x => String(x && x.id)));
+        _lsAp.forEach(x => { if (x && x.id != null && !_seenAp.has(String(x.id))) { DB._deletedApprovalIds.push(x); _seenAp.add(String(x.id)); } });
+      }
+    } catch(_){}
     if (!Array.isArray(DB._deletedCommentIds)) DB._deletedCommentIds = [];
     if (!Array.isArray(DB._deletedSampleIds)) DB._deletedSampleIds = [];  // v1.9.682
     if (!Array.isArray(DB._deletedItemIds)) DB._deletedItemIds = [];  // v1.9.892
@@ -16802,6 +16811,12 @@ function _dedupApprovals() {
     if (DB._deletedApprovalIds.length > 500) {
       DB._deletedApprovalIds = DB._deletedApprovalIds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
     }
+    // v1.9.945: 전용 localStorage 백업에도 기록
+    try {
+      const _apStash = JSON.parse(localStorage.getItem('reniv_deleted_approval_ids')||'[]');
+      removeIds.forEach(rid => { _apStash.push({ id: String(rid), ts: _now }); });
+      localStorage.setItem('reniv_deleted_approval_ids', JSON.stringify(_apStash.slice(-500)));
+    } catch(_){}
     const removeSet = new Set(removeIds.map(String));
     DB.approvals = DB.approvals.filter(a => a && !removeSet.has(String(a.id)));
     console.warn('🧹 [v1.9.733] 일반 결재 중복 ' + removeIds.length + '건 정리 + tombstone 등록 — IDs:', removeIds);
@@ -26742,8 +26757,13 @@ function _isApprovalTombstoned(approval, tombMap) {
   if (!approval || approval.id == null || !tombMap) return false;
   const ts = tombMap.get(String(approval.id));
   if (ts === undefined) return false;
+  // v1.9.945: 13자리 타임스탬프 ID(>=1e12)는 우연 재사용이 불가능(신규 ID 생성기가
+  //   tombstone ID 를 건너뜀) → tombstone 이 있으면 무조건 삭제로 간주. 이게 빠져서
+  //   삭제한 결재가 새로고침마다 부활하던 근본 버그. 옛 소수점대 ID 만 createdAt 비교로 보호.
+  const idNum = Number(approval.id);
+  if (Number.isFinite(idNum) && idNum >= 1e12) return true;
   const created = Number(approval.createdAt) || 0;
-  if (created > 0 && ts > 0 && created > ts) return false; // ID 우연 충돌 — 삭제 아님
+  if (created > 0 && ts > 0 && created > ts) return false; // (구 ID) ID 우연 충돌 — 삭제 아님
   return true;
 }
 // v1.9.916: 일반 결재(non_po_approval) 전용 백업 — IndexedDB 주 저장(용량 제한 거의 없음)
@@ -27008,6 +27028,12 @@ async function deleteNonPo(id) {
   if (DB._deletedApprovalIds.length > 500) {
     DB._deletedApprovalIds = DB._deletedApprovalIds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
   }
+  // v1.9.945: 전용 localStorage 백업 — 메인 DB 머지로 tombstone 이 사라져도 살아남는 안전망
+  try {
+    const _apStash = JSON.parse(localStorage.getItem('reniv_deleted_approval_ids')||'[]');
+    _apStash.push({ id: _idStr, ts: Date.now() });
+    localStorage.setItem('reniv_deleted_approval_ids', JSON.stringify(_apStash.slice(-500)));
+  } catch(_){}
   // 매칭되는 모든 것을 제거 (혹시 모를 중복까지 한 번에 청소)
   DB.approvals = (DB.approvals||[]).filter(x => !(x && String(x.id) === _idStr && x.type === 'non_po_approval'));
   DB.approvalComments = (DB.approvalComments||[]).filter(c => c && String(c.approvalId) !== _idStr);
@@ -38831,6 +38857,27 @@ function initERPWhenReady() {
           if (Array.isArray(localDB.samples)) localDB.samples = localDB.samples.filter(s => s && !_smTombSetEarly.has(String(s.id)));
         }
       } catch(e) { console.warn('[v1.9.693] tombstone 사전 필터 실패:', e); }
+      // v1.9.945: 일반 결재(approval) tombstone 사전 차단 — SYNC RECOVERY 가 tombstone 을
+      //   무시하고 삭제된 결재를 다시 끌어오는(부활) 버그 차단. 양쪽 입력에서 미리 제거.
+      try {
+        const _fsAT = Array.isArray(firestoreDB._deletedApprovalIds) ? firestoreDB._deletedApprovalIds : [];
+        const _lcAT = Array.isArray(localDB._deletedApprovalIds) ? localDB._deletedApprovalIds : [];
+        let _lsAT = [];
+        try { _lsAT = JSON.parse(localStorage.getItem('reniv_deleted_approval_ids')||'[]') || []; } catch(_){}
+        const _apTombEarly = (typeof _approvalTombMap === 'function') ? _approvalTombMap([..._fsAT, ..._lcAT, ..._lsAT]) : new Map();
+        if (_apTombEarly.size > 0 && typeof _isApprovalTombstoned === 'function') {
+          if (Array.isArray(firestoreDB.approvals)) {
+            const _bf = firestoreDB.approvals.length;
+            firestoreDB.approvals = firestoreDB.approvals.filter(a => a && !_isApprovalTombstoned(a, _apTombEarly));
+            if (firestoreDB.approvals.length !== _bf) console.warn('🪦 [v1.9.945 PRE] firestoreDB.approvals tombstone 사전 차단:', _bf - firestoreDB.approvals.length, '건');
+          }
+          if (Array.isArray(localDB.approvals)) {
+            const _bl = localDB.approvals.length;
+            localDB.approvals = localDB.approvals.filter(a => a && !_isApprovalTombstoned(a, _apTombEarly));
+            if (localDB.approvals.length !== _bl) console.warn('🪦 [v1.9.945 PRE] localDB.approvals tombstone 사전 차단:', _bl - localDB.approvals.length, '건');
+          }
+        }
+      } catch(e) { console.warn('[v1.9.945] approval tombstone 사전 필터 실패:', e); }
       // v1.9.205: samples/approvals/expenses/approvalComments 추가 — 이전에는 병합 루프에 없어서 새로고침 시 DEFAULT_DB의 빈 배열로 덮어씌워져 데이터 손실 발생
       ['vendors','items','orders','productions','stockHistory','quotes','tasks','users','shops','shopOrders','cs','archivedItems','partSpecs','samples','approvals','expenses','approvalComments','feedPosts','cooperators','sellers','adProjects'].forEach(k => {
         if (Array.isArray(firestoreDB[k])) {
@@ -39119,8 +39166,11 @@ function initERPWhenReady() {
         // v1.9.643: 일반 결재 tombstone 머지
         const fsApT = Array.isArray(firestoreDB._deletedApprovalIds) ? firestoreDB._deletedApprovalIds : [];
         const lcApT = Array.isArray(localDB._deletedApprovalIds) ? localDB._deletedApprovalIds : [];
+        // v1.9.945: 별도 localStorage 백업도 합산 (메인 _deletedApprovalIds 가 머지로 날아가도 살아남음)
+        let lsApT = [];
+        try { lsApT = JSON.parse(localStorage.getItem('reniv_deleted_approval_ids')||'[]') || []; } catch(_){}
         const apTByKey = new Map();
-        [...fsApT, ...lcApT].forEach(x => {
+        [...fsApT, ...lcApT, ...lsApT].forEach(x => {
           if (!x || x.id == null) return;
           const k = String(x.id);
           const prev = apTByKey.get(k);
