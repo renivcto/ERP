@@ -5268,7 +5268,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.954';
+const ERP_VERSION = 'v1.9.955';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -5311,6 +5311,7 @@ window.addEventListener('beforeunload', (e) => {
 let _saveTimer = null;
 let _isSaving = false;
 let _firestoreDataLoaded = false;  // Firestore 초기 로드 완료 전까지 Firestore 쓰기 방지
+let _dbFromDefault = false;  // v1.9.955: 로컬저장소가 비어 DB가 빈 기본데이터(DEFAULT_DB)인 상태 — true면 Firestore 쓰기 금지(데이터 손상 방지)
 
 // v1.9.929: 발주서 PDF/도장 Firestore 중복 업로드(flood) 방지.
 //   같은 내용은 한 번만 업로드 — 'reniv_fs_uploaded' 에 발주서별 내용지문 기록.
@@ -5355,6 +5356,12 @@ function _backupNpIns() {
       const _q = JSON.stringify(DB.insights);
       try { localStorage.setItem('reniv_insights_backup', _q); } catch(_){}
       try { if (typeof idbSet === 'function') idbSet('reniv_insights_backup', _q); } catch(_){}
+    }
+    // v1.9.955: 외부 계정(accounts) 전용 백업 — 비어있지 않을 때만 기록
+    if (Array.isArray(DB.accounts) && DB.accounts.length) {
+      const _a = JSON.stringify(DB.accounts);
+      try { localStorage.setItem('reniv_accounts_backup', _a); } catch(_){}
+      try { if (typeof idbSet === 'function') idbSet('reniv_accounts_backup', _a); } catch(_){}
     }
   } catch(_){}
 }
@@ -6121,8 +6128,13 @@ async function _doSaveDataInner() {
   // v1.9.772: skip 대신 pending queue 등록 → Firestore 로드 완료 시 자동 재시도
   //   원인: fast-path 시점에 사용자가 작업 (매핑/도장/결재완료 등) 하면 Firestore 안 들어가
   //         → 새로고침 시 Firestore 원본이 localStorage 변경을 덮어씌어 작업 사라짐
-  if (!_firestoreDataLoaded) {
-    console.warn('⚠️ Firestore 초기 로드 미완료 — localStorage만 저장됨 + pending queue 등록 (shopOrders:', (dbToSave.shopOrders||[]).length, ')');
+  if (!_firestoreDataLoaded || _dbFromDefault) {
+    if (_dbFromDefault) {
+      console.error('🛑 [v955] DB가 빈 기본데이터 상태 — Firestore 저장 차단(실제 데이터 보호). localStorage 에만 저장됨.');
+      try { showNotif('⚠️ 데이터를 아직 불러오지 못해 클라우드 저장을 보류합니다 — 새로고침 해주세요', 'warning'); } catch(_){}
+    } else {
+      console.warn('⚠️ Firestore 초기 로드 미완료 — localStorage만 저장됨 + pending queue 등록 (shopOrders:', (dbToSave.shopOrders||[]).length, ')');
+    }
     window._pendingSaveAfterFsLoad = true;
     return;
   }
@@ -6178,6 +6190,13 @@ async function _doSaveDataInner() {
           const srvArr = JSON.parse(srvSnap.data().data);
           const srvLen = Array.isArray(srvArr) ? srvArr.length : 0;
           const locLen = Array.isArray(val) ? val.length : 0;
+          // v1.9.955: 로컬 컬렉션이 통째로 비었는데 서버엔 데이터가 있으면 = 비정상 상태 →
+          //   그 컬렉션은 Firestore 저장을 건너뛰어 서버의 실제 데이터를 보호한다.
+          if (locLen === 0 && srvLen > 0) {
+            console.error('🛑 [SAFE-GUARD v955] ' + key + ': 로컬 0건 vs 서버 ' + srvLen + '건 — Firestore 덮어쓰기 차단(건너뜀)');
+            try { showNotif('⚠️ ' + key + ' 비정상(0건) 감지 — 클라우드 데이터 보호 위해 저장 건너뜀', 'warning'); } catch(_){}
+            continue;
+          }
           // 서버가 로컬보다 많을 때만 경고 (동일하면 정상 덮어쓰기)
           if (srvLen > locLen + 0) {
             const srvIds = new Set(srvArr.map(o=>o&&o.id));
@@ -7053,7 +7072,14 @@ const DEFAULT_DB = {
   _nextId: {vendor:8, item:24, prod:5, stock:6, quote:3, order:8, task:8, qc:3, approval:1, expense:1, comment:1, sample:1, feedPost:1, feedComment:1}
 };
 
-let DB = loadData() || JSON.parse(JSON.stringify(DEFAULT_DB));
+// v1.9.955: loadData()가 null(로컬저장소 비어있음/손상)이면 DB는 빈 기본데이터.
+//   이 상태로 Firestore에 저장하면 실제 데이터가 통째로 사라짐 → _dbFromDefault 로 표시해 쓰기 차단.
+let DB = loadData();
+if (DB == null) {
+  _dbFromDefault = true;
+  console.error('🛑 [v955] 로컬 저장소 비어있음 — 기본데이터로 시작. Firestore 로드 성공 전까지 Firestore 쓰기를 차단합니다.');
+  DB = JSON.parse(JSON.stringify(DEFAULT_DB));
+}
 
 // v1.9.228 — 기존 저장소에 tombstone 필드 없으면 초기화
 (function migrateDeletedOrderSigsV228() {
@@ -38823,6 +38849,10 @@ function initERPWhenReady() {
       console.error('🛡️ Firestore 로드 에러 → localStorage 데이터만 사용 (Firestore 덮어쓰기 방지!)');
       _loadDiagMsg = '⚠️ Firestore 에러→localStorage 사용';
       _firestoreDataLoaded = true;
+      // v1.9.955: 로컬도 비어 DB가 빈 기본데이터면 그대로 쓰면 Firestore 손상 → 사용자 경고
+      if (_dbFromDefault) {
+        try { alert('⚠️ 데이터를 불러오지 못했습니다. 지금 보이는 건 빈 기본값입니다 — 입력·수정하지 마시고 페이지를 새로고침해 주세요. (클라우드 저장은 자동 차단되어 있습니다)'); } catch(_){}
+      }
       if (!DB.shops) DB.shops = [];
       if (!DB.shopOrders) DB.shopOrders = [];
       if (!DB.cs) DB.cs = [];
@@ -39383,6 +39413,17 @@ function initERPWhenReady() {
       } else {
         merged.accounts = [];
       }
+      // v1.9.955: accounts 가 비었으면 전용 백업(reniv_accounts_backup)에서 복구
+      if (Array.isArray(merged.accounts) && merged.accounts.length === 0) {
+        try {
+          const _ba = JSON.parse(localStorage.getItem('reniv_accounts_backup') || '[]');
+          if (Array.isArray(_ba) && _ba.length > 0) {
+            merged.accounts = _ba;
+            _needsResaveToFirestore = true;
+            console.warn('🛟 [v955] accounts 가 비어 전용 백업에서 복구 —', _ba.length, '건');
+          }
+        } catch(_){}
+      }
       // v1.9.936: insights — 빈 Firestore 문서가 localStorage 를 덮어쓰지 않도록 union.
       //   (기존: Firestore 문서가 존재하면 빈 배열이어도 무조건 채택 → 데이터 영구 소실)
       {
@@ -39526,6 +39567,7 @@ function initERPWhenReady() {
         }
       } catch (e) { console.warn('v1.9.311 post-merge enforce skipped:', e); }
       try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
+      _dbFromDefault = false;  // v1.9.955: Firestore 머지 성공 → 실제 데이터 확보 → 쓰기 차단 해제
       _firestoreDataLoaded = true;  // ✅ Firestore 쓰기 허용
       console.log('✅ Firestore 데이터 로드 완료 — Firestore 쓰기 활성화');
       // v1.9.772: fast-path 시점에 사용자가 작업했던 변경 사항을 자동 재저장
@@ -39601,6 +39643,7 @@ function initERPWhenReady() {
             console.log('✅ [RECOVERY] shopOrders 독립 백업에서 복구!', backupData.length, '건 (백업시각:', new Date(parseInt(backupTs)).toLocaleString(), ')');
             _loadDiagMsg = '🔄 백업에서 복구 ' + backupData.length + '건';
             // 복구 후 Firestore에도 저장 (다음 세션을 위해)
+            _dbFromDefault = false;  // v1.9.955: 백업에서 복구 → 실제 데이터 확보
             _firestoreDataLoaded = true;
             _doSaveData().catch(e => console.warn('복구 데이터 Firestore 저장 실패:', e));
           } else {
