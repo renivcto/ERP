@@ -5268,7 +5268,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.955';
+const ERP_VERSION = 'v1.9.956';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -22581,7 +22581,7 @@ function uploadStampForOrder(orderId, inputEl) {
 function syncApprovalFromOrderStamp(orderId) {
   const o = DB.orders.find(x => x.id === orderId);
   if (!o) return;
-  let ap = DB.approvals.find(a => a.type === 'po_approval' && a.refId === orderId);
+  let ap = DB.approvals.find(a => a.type === 'po_approval' && String(a.refId) === String(orderId));
   const shouldApprove = !!(o.stampData || o.stampName || o.stampNotRequired);
   if (!ap) {
     // 결재 레코드가 아직 없다면(구버전 데이터) 새로 만들어 상태 맞추기
@@ -24721,7 +24721,7 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
   if (!o) return;
 
   // 1) 결재(발주서 결재) 동기화
-  let ap = DB.approvals.find(a => a.type === 'po_approval' && a.refId === orderId);
+  let ap = DB.approvals.find(a => a.type === 'po_approval' && String(a.refId) === String(orderId));
   const apAmount = orderTotalVat(o);
   // v1.9.206: 날인 PDF(stampData/stampName) 또는 날인 불필요 플래그가 있으면 결재 완료로 자동 인식
   const hasStampProof = !!(o.stampData || o.stampName || o.stampNotRequired);
@@ -24770,7 +24770,7 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
   const balance = total - prepay;
 
   // 선입금 expense
-  let expPre = DB.expenses.find(e => e.category === 'po_prepay' && e.orderId === orderId);
+  let expPre = DB.expenses.find(e => e.category === 'po_prepay' && String(e.orderId) === String(orderId));
   if (pct > 0 && prepay > 0) {
     if (!expPre) {
       expPre = {
@@ -24810,7 +24810,7 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
   }
 
   // 잔금 expense
-  let expBal = DB.expenses.find(e => e.category === 'po_balance' && e.orderId === orderId);
+  let expBal = DB.expenses.find(e => e.category === 'po_balance' && String(e.orderId) === String(orderId));
   // v1.9.323: 잔금 표시용 1 소수점 반올림
   const balPctDisp = Math.round((100 - pct) * 10) / 10;
   if (balance > 0) {
@@ -26228,7 +26228,7 @@ function uploadStampAndApprove(orderId, inputEl) {
     // 결재 상태도 approved로 (syncApprovalFromOrderStamp 사용 — 기존 ap가 있으면 approved로 전이)
     try { syncApprovalFromOrderStamp(orderId); } catch(_){}
     // ap에 manualApprove 표시 (사용자가 명시적으로 승인한 것이므로)
-    const ap = DB.approvals.find(a => a.type === 'po_approval' && a.refId === orderId);
+    const ap = DB.approvals.find(a => a.type === 'po_approval' && String(a.refId) === String(orderId));
     if (ap) { ap.manualApprove = true; }
     try { saveData(); } catch(_){}
     try { renderApprovalPage(); } catch(_){}
@@ -26243,7 +26243,7 @@ function approveOrderFromTable(orderId) {
   const o = DB.orders.find(x => x.id === orderId);
   if (!o) return;
   if (!confirm(`발주서 #${orderId} (${vendorName(o.vendorId)})을(를) 결재 완료로 처리하시겠습니까?\n\n→ 결재 완료 PDF가 필요한 경우에는 발주서 편집 화면에서 날인 PDF를 첨부해 주세요.`)) return;
-  let ap = DB.approvals.find(a => a.type === 'po_approval' && a.refId === orderId);
+  let ap = DB.approvals.find(a => a.type === 'po_approval' && String(a.refId) === String(orderId));
   if (!ap) {
     ap = { id: nextId('approval'), type:'po_approval', refId: orderId, title:`[발주서] ${vendorName(o.vendorId)}`, amount: orderTotalVat(o), status:'pending', priority: o.urgent?'urgent':'normal', createdAt: Date.now(), approvedAt:0 };
     DB.approvals.push(ap);
@@ -30306,7 +30306,7 @@ function _fixApprovalIdCollisions() {
 }
 
 function openApprovalDetailByOrder(orderId) {
-  let ap = DB.approvals.find(a => a.type === 'po_approval' && a.refId === orderId);
+  let ap = DB.approvals.find(a => a.type === 'po_approval' && String(a.refId) === String(orderId));
   if (!ap) {
     // legacy 발주서는 결재 레코드가 없을 수 있음 — 생성
     const o = DB.orders.find(x => x.id === orderId);
