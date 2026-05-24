@@ -5268,7 +5268,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.957';
+const ERP_VERSION = 'v1.9.958';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7383,7 +7383,24 @@ function dedupAllExpensesV216() {
     });
   });
   if (removed > 0) {
+    const _removedExp = [...toRemoveRefs];
     DB.expenses = DB.expenses.filter(e => !toRemoveRefs.has(e));
+    // v1.9.958: 제거한 중복 지출결의서 id 를 tombstone 에 등록 — 이게 빠지면 저장 시
+    //   COUNT-GUARD 가 '서버에만 있는 레코드'로 보고 다시 끌어와 정리가 무효화된다.
+    //   단, 남은 expenses 에 같은 id 가 있으면(=유지된 레코드) tombstone 하지 않는다.
+    try {
+      if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
+      const _liveIds = new Set(DB.expenses.map(e => (e && e.id != null) ? String(e.id) : '').filter(Boolean));
+      const _dedTs = Date.now();
+      _removedExp.forEach(e => {
+        if (e && e.id != null && !_liveIds.has(String(e.id))) {
+          DB._deletedExpenseIds.push({ id: e.id, ts: _dedTs });
+        }
+      });
+      if (DB._deletedExpenseIds.length > 500) {
+        DB._deletedExpenseIds = DB._deletedExpenseIds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
+      }
+    } catch(_){}
   }
   return removed;
 }
