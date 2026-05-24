@@ -5268,7 +5268,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.951';
+const ERP_VERSION = 'v1.9.952';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10749,15 +10749,33 @@ function openCpModal(id) {
     + '</div></div>';
   document.body.appendChild(ov);
   // v1.9.949: 인서트 부가세 입력칸 제거 (순이익이 부가세 제외 기준이라 불필요)
+  // v1.9.952: 수정 모달 — 선택된 제품에 BOM 이 있으면 현재 BOM 합계로 COGS 단가 동기화
+  try {
+    const _prodSel0 = document.getElementById('cp-m-product');
+    if (_prodSel0 && _prodSel0.value) {
+      const _bc0 = _cpBomCost(_prodSel0.value);
+      if (_bc0 > 0) { const _cog0 = document.getElementById('cp-m-cogsUnit'); if (_cog0) _cog0.value = _bc0; }
+    }
+  } catch(_){}
   _cpModalLive();
 }
 function closeCpModal() { const ov = document.getElementById('cp-modal-overlay'); if (ov) ov.remove(); }
+// v1.9.952: 제품의 현재 BOM 합계 원가 — DB.boms 에서 실시간 계산(캐시 X)
+function _cpBomCost(productId) {
+  const bom = (DB.boms && DB.boms[productId]) || [];
+  if (!bom.length) return 0;
+  return Math.round(bom.reduce(function(s, r) {
+    const it = (typeof getItem === 'function') ? getItem(r.itemId) : null;
+    return s + ((it && it.price) || 0) * (r.qty || 0);
+  }, 0));
+}
 function _cpModalProductChange() {
   const sel = document.getElementById('cp-m-product');
   if (!sel) return;
   const itm = (DB.items||[]).find(i => i && String(i.id) === String(sel.value));
   if (itm) {
-    const unit = parseFloat(itm.bomCost) || parseFloat(itm.cogs) || parseFloat(itm.price) || 0;
+    // v1.9.952: BOM 이 있으면 현재 BOM 합계를 실시간 계산해 사용 (BOM 수정 즉시 반영)
+    const unit = _cpBomCost(itm.id) || parseFloat(itm.bomCost) || parseFloat(itm.cogs) || parseFloat(itm.price) || 0;
     const cog = document.getElementById('cp-m-cogsUnit');
     if (cog) cog.value = unit;
   }
