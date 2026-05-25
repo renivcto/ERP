@@ -5281,7 +5281,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.970';
+const ERP_VERSION = 'v1.9.971';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12573,6 +12573,20 @@ function openMappingForOrder(orderId) {
 // v1.9.367: 매출 대시보드 — 실제 계산 + 쇼핑몰별 차트 + TOP 3
 // ─────────────────────────────────────────────────────────
 function renderSalesDashboard() {
+  // v1.9.971: Firestore 머지 완료 전(fast-path)에는 localStorage 데이터가 불완전할 수 있어
+  //   총매출 등이 잠깐 틀린 값으로 보였다 바뀌는 문제 → 머지 완료 전엔 '동기화 중' 표시.
+  //   머지 완료(_firestoreDataLoaded=true) 후 자동 재렌더 시 정확한 값으로 갱신된다.
+  if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) {
+    ['sd-total-rev','sd-net-rev','sd-net-margin','sd-margin-rate'].forEach(function(id){
+      var el = document.getElementById(id);
+      if (el) el.textContent = '동기화 중…';
+    });
+    var _sdT3 = document.getElementById('sd-top3');
+    if (_sdT3) _sdT3.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;font-size:12.5px">데이터 동기화 중…</div>';
+    var _sdSvg = document.getElementById('sd-shop-svg-host');
+    if (_sdSvg) _sdSvg.innerHTML = '<div style="text-align:center;padding:110px 0;color:#94a3b8;font-size:13px">데이터 동기화 중…</div>';
+    return;
+  }
   if (typeof _mgComputePeriod !== 'function') return;
   // v1.9.379: 기간 필터 적용 — 월별/주별/일별/기간별/전체
   if (typeof _periodInit === 'function') _periodInit('sd');
