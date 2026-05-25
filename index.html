@@ -5281,7 +5281,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.965';
+const ERP_VERSION = 'v1.9.966';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10772,42 +10772,59 @@ function _cpCalcPharmacy(r) {
     netRevenue:netRevenue, netProfit:netProfit, profitRate:profitRate, fee1Pct:fee1Pct, fee2Pct:fee2Pct };
 }
 
+var _CP_PHARM_INFO = {
+  ph_name: ['제품명', '이 행에 연결된 완제품입니다.\n제품명을 클릭하면 전체 내역을 팝업으로 볼 수 있습니다.'],
+  ph_revenue: ['매출 (부가세 포함)', '약국 공급 매출액입니다. (부가세 포함)\n\n매출 = 공급가 × 판매수량'],
+  ph_netProfit: ['순이익 (부가세 제외)', '부가세를 제외한 순이익입니다.\n\n순이익 = 매출÷1.1 − 바로팜1차÷1.1 − 바로팜2차÷1.1 − 고정비 − 총원가 − 예상배송비÷1.1\n\n※ 매출·수수료·배송비는 부가세 포함값이라 ÷1.1로 부가세를 빼고, 고정비·총원가는 이미 부가세 제외 금액입니다.'],
+  ph_profitRate: ['수익율 (부가세 제외)', '부가세 제외 기준 수익율입니다.\n\n수익율 = 순이익 ÷ (매출÷1.1) × 100'],
+  ph_salePrice: ['실제 판매가 (부가세 포함)', '완제품의 실제 판매가입니다. (부가세 포함)\n완제품을 선택하면 자동 입력되며 수정할 수 있습니다.'],
+  ph_qty: ['판매수량', '약국에 판매한 수량입니다. (입력값)'],
+  ph_supplyPrice: ['공급가 (부가세 포함)', '약국에 공급하는 단가입니다. (부가세 포함)\n\n공급가 = 실제 판매가 × 공급율'],
+  ph_fee1: ['바로팜 1차 수수료 (부가세 포함)', '바로팜 1차 수수료입니다. (부가세 포함)\n\n바로팜 1차 수수료 = 매출 × 1차 수수료%'],
+  ph_fee2: ['바로팜 2차 수수료 (부가세 포함)', '바로팜 2차 수수료입니다. (부가세 포함)\n\n바로팜 2차 수수료 = 매출 × 2차 수수료%'],
+  ph_fixedCost: ['고정비 (부가세 제외)', '입력한 고정비입니다. (부가세 제외 금액)'],
+  ph_cogs: ['제품원가 COGS', '제품 1개당 원가입니다. COGS이므로 부가세 제외 금액입니다.\n완제품의 BOM 합계 원가를 자동으로 가져오며, 수정할 수 있습니다.'],
+  ph_totalCost: ['총원가 (부가세 제외)', '판매수량 전체의 제조원가입니다. (부가세 제외)\n\n총원가 = 제품원가 COGS × 판매수량'],
+  ph_shipping: ['예상 배송비 (부가세 포함)', '입력한 예상 배송비 총액입니다. (부가세 포함)\n순이익 계산 시 ÷1.1로 부가세를 빼고 차감합니다.']
+};
+
 function _cpRenderPharmacyTable(wrap) {
-  const rows = (_cpData.rows||[]).filter(r => r && (r.channelType||'homeshopping') === 'pharmacy');
-  rows.sort((a,b) => (Number(b.updatedAt)||0)-(Number(a.updatedAt)||0) || (Number(b.id)||0)-(Number(a.id)||0));
+  var rows = (_cpData.rows||[]).filter(function(r){ return r && (r.channelType||'homeshopping') === 'pharmacy'; });
+  rows.sort(function(a,b){ return (Number(b.updatedAt)||0)-(Number(a.updatedAt)||0) || (Number(b.id)||0)-(Number(a.id)||0); });
   if (!rows.length) {
     wrap.innerHTML = '<div style="padding:44px;text-align:center;color:#94a3b8;font-size:13px;background:#f8fafc;border:1px dashed #e2e8f0;border-radius:12px">등록된 행이 없습니다. <b>＋ 행 추가</b> 버튼으로 시작하세요.</div>';
     return;
   }
-  const TH = (t, sub, extra) => {
-    const sc = sub ? (sub.indexOf('제외') >= 0 ? '#b45309' : '#0369a1') : '';
-    return '<th style="padding:9px 8px;font-size:11px;font-weight:700;color:#475569;white-space:nowrap;border-bottom:2px solid #e2e8f0;position:sticky;top:0;z-index:2;background:#f8fafc;' + (extra||'') + '">' + t
+  var INFO = function(key){ return '<span onclick="_cpInfo(event,\'' + key + '\')" style="cursor:pointer;color:#0ea5e9;font-weight:800;font-size:10px;margin-left:2px;vertical-align:super" title="클릭하면 설명·계산식">ⓘ</span>'; };
+  var TH = function(t, key, sub, extra){
+    var sc = sub ? (sub.indexOf('제외') >= 0 ? '#b45309' : '#0369a1') : '';
+    return '<th style="padding:9px 8px;font-size:11px;font-weight:700;color:#475569;white-space:nowrap;text-align:center;border-bottom:2px solid #e2e8f0;position:sticky;top:0;z-index:2;background:#f8fafc;' + (extra||'') + '">' + t + (key?INFO(key):'')
       + (sub ? ('<div style="font-size:9px;font-weight:600;margin-top:1px;color:' + sc + '">' + sub + '</div>') : '') + '</th>';
   };
-  let h = '<div style="overflow:auto;max-height:70vh;border:1px solid #e2e8f0;border-radius:12px;background:#fff">';
+  var h = '<div style="overflow:auto;max-height:70vh;border:1px solid #e2e8f0;border-radius:12px;background:#fff">';
   h += '<table style="border-collapse:collapse;white-space:nowrap;font-size:12px;min-width:100%"><thead><tr>';
-  h += TH('제품명', '', 'text-align:left;position:sticky;left:0;z-index:4;background:#f8fafc;width:172px;min-width:172px');
-  h += TH('매출', '부가세 포함', 'background:#e0f2fe');
-  h += TH('순이익', '부가세 제외', 'background:#fffbeb;border-bottom-color:#fde68a');
-  h += TH('수익율', '부가세 제외', 'background:#fffbeb;border-bottom-color:#fde68a');
-  h += TH('실제 판매가', '부가세 포함');
-  h += TH('판매수량', '');
-  h += TH('공급가', '부가세 포함');
-  h += TH('바로팜 1차 수수료', '부가세 포함');
-  h += TH('바로팜 2차 수수료', '부가세 포함');
-  h += TH('고정비', '부가세 제외');
-  h += TH('제품원가 COGS', '');
-  h += TH('총원가', '부가세 제외');
-  h += TH('예상 배송비', '부가세 포함');
-  h += TH('관리', '');
+  h += TH('제품명', 'ph_name', '', 'position:sticky;left:0;z-index:4;background:#f8fafc;width:172px;min-width:172px');
+  h += TH('매출', 'ph_revenue', '부가세 포함', 'background:#e0f2fe');
+  h += TH('순이익', 'ph_netProfit', '부가세 제외', 'background:#fffbeb;border-bottom-color:#fde68a');
+  h += TH('수익율', 'ph_profitRate', '부가세 제외', 'background:#fffbeb;border-bottom-color:#fde68a');
+  h += TH('실제 판매가', 'ph_salePrice', '부가세 포함', '');
+  h += TH('판매수량', 'ph_qty', '', '');
+  h += TH('공급가', 'ph_supplyPrice', '부가세 포함', '');
+  h += TH('바로팜 1차 수수료', 'ph_fee1', '부가세 포함', '');
+  h += TH('바로팜 2차 수수료', 'ph_fee2', '부가세 포함', '');
+  h += TH('고정비', 'ph_fixedCost', '부가세 제외', '');
+  h += TH('제품원가 COGS', 'ph_cogs', '', '');
+  h += TH('총원가', 'ph_totalCost', '부가세 제외', '');
+  h += TH('예상 배송비', 'ph_shipping', '부가세 포함', '');
+  h += TH('관리', '', '', '');
   h += '</tr></thead><tbody>';
-  rows.forEach(r => {
-    const c = _cpCalcPharmacy(r);
-    const prod = (DB.items||[]).find(i => i && String(i.id) === String(r.productId));
-    const nm = (prod && prod.name) || r.name || '(제품 미선택)';
-    const TD = (v, extra) => '<td style="padding:8px;text-align:center;border-bottom:1px solid #f1f5f9;' + (extra||'') + '">' + v + '</td>';
+  rows.forEach(function(r){
+    var c = _cpCalcPharmacy(r);
+    var prod = (DB.items||[]).find(function(i){ return i && String(i.id) === String(r.productId); });
+    var nm = (prod && prod.name) || r.name || '(제품 미선택)';
+    var TD = function(v, extra){ return '<td style="padding:8px;text-align:center;border-bottom:1px solid #f1f5f9;' + (extra||'') + '">' + v + '</td>'; };
     h += '<tr>';
-    h += '<td style="padding:8px 10px;text-align:left;border-bottom:1px solid #f1f5f9;position:sticky;left:0;z-index:3;background:#fff;width:172px;min-width:172px"><span onclick="openCpDetail(' + r.id + ')" style="color:#9d174d;font-weight:700;cursor:pointer;text-decoration:underline">' + _cpEsc(nm) + '</span></td>';
+    h += '<td style="padding:8px 10px;text-align:center;border-bottom:1px solid #f1f5f9;position:sticky;left:0;z-index:3;background:#fff;width:172px;min-width:172px"><span onclick="openCpDetail(' + r.id + ')" style="color:#9d174d;font-weight:700;cursor:pointer;text-decoration:underline">' + _cpEsc(nm) + '</span></td>';
     h += TD('<b>' + _cpWon(c.revenue) + '</b>', 'background:#e0f2fe');
     h += TD('<b style="color:' + (c.netProfit>=0?'#15803d':'#dc2626') + '">' + _cpWon(c.netProfit) + '</b>', 'background:#fffbeb;font-weight:800');
     h += TD('<b style="color:' + (c.profitRate>=0?'#15803d':'#dc2626') + '">' + _cpPct(c.profitRate) + '</b>', 'background:#fffbeb;font-weight:800');
@@ -10824,7 +10841,6 @@ function _cpRenderPharmacyTable(wrap) {
     h += '</tr>';
   });
   h += '</tbody></table></div>';
-  h += '<div style="font-size:10.5px;color:#94a3b8;margin-top:8px;line-height:1.7">· 공급가 = 실제 판매가 × 공급율 &nbsp; · &nbsp; 매출 = 공급가 × 판매수량 (부가세 포함)<br>· 순이익(부가세 제외) = 매출÷1.1 − 바로팜1차÷1.1 − 바로팜2차÷1.1 − 고정비 − 총원가 − 예상배송비÷1.1<br>· 수익율 = 순이익 ÷ (매출÷1.1) × 100</div>';
   wrap.innerHTML = h;
 }
 
@@ -10990,7 +11006,7 @@ var _CP_EXPORT_INFO = {
 function _cpInfoClose() { var p = document.getElementById('cp-info-pop'); if (p) p.remove(); }
 function _cpInfo(ev, key) {
   if (ev && ev.stopPropagation) ev.stopPropagation();
-  var info = _CP_EXPORT_INFO[key];
+  var info = _CP_EXPORT_INFO[key] || _CP_PHARM_INFO[key];
   if (!info) return;
   _cpInfoClose();
   var ov = document.createElement('div');
