@@ -5281,7 +5281,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.969';
+const ERP_VERSION = 'v1.9.970';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10627,7 +10627,7 @@ function _cpCalc(r) {
   const targetCost = Number(r.targetCost)||0;
   const hsRevenue = targetCost * (Number(r.achieveRate)||0) / 100;       // 홈쇼핑 매출
   const actualRevenue = hsRevenue * (Number(r.convRate)||0) / 100;       // 실제매출
-  const sp = Number(r.sellPrice)||0;
+  const sp = _cpLivePrice(r);
   const orderQty = sp > 0 ? hsRevenue / sp : 0;
   const soldQty  = sp > 0 ? actualRevenue / sp : 0;
   const specialFee = Number(r.specialFee)||0, guestFee = Number(r.guestFee)||0, insertFee = Number(r.insertFee)||0;
@@ -10730,7 +10730,7 @@ function _cpRenderTable() {
     h += TD(_cpWon(r.targetCost));
     h += TD(_cpWon(c.hsRevenue) + '<div style="font-size:10px;color:#e11d48;font-weight:600;margin-top:1px">달성률 ' + _cpPct(r.achieveRate) + '</div>');
     h += TD('<b>' + _cpWon(c.actualRevenue) + '</b><div style="font-size:10px;color:#0369a1;margin-top:1px">전환율 ' + _cpPct(r.convRate) + '</div>', 'background:#e0f2fe');
-    h += TD(_cpWon(r.sellPrice));
+    h += TD(_cpWon(_cpLivePrice(r)));
     h += TD(Math.round(c.orderQty).toLocaleString() + '개');
     h += TD(Math.round(c.soldQty).toLocaleString() + '개', 'background:#e0f2fe');
     h += TD(sub(c.specialFee, c.specialVat));
@@ -10750,7 +10750,7 @@ function _cpRenderTable() {
 // ═══════════ v1.9.962: 약국 판매 수익계산 (바로팜 채널) ═══════════
 function _cpCalcPharmacy(r) {
   r = r || {};
-  const salePrice = Number(r.salePrice)||0;
+  const salePrice = _cpLivePrice(r);
   const supplyRate = Number(r.supplyRate)||0;
   const qty = Number(r.qty)||0;
   const fixedCost = Number(r.fixedCost)||0;
@@ -10828,7 +10828,7 @@ function _cpRenderPharmacyTable(wrap) {
     h += TD('<b style="color:' + (c.netProfit>=0?'#15803d':'#dc2626') + '">' + _cpWon(c.netProfit) + '</b>', 'background:#fffbeb;font-weight:800');
     h += TD('<b style="color:' + (c.profitRate>=0?'#15803d':'#dc2626') + '">' + _cpPct(c.profitRate) + '</b>', 'background:#fffbeb;font-weight:800');
     h += TD('<b>' + (Math.round(Number(r.qty)||0)).toLocaleString() + '개</b>');
-    h += TD(_cpWon(r.salePrice));
+    h += TD(_cpWon(_cpLivePrice(r)));
     h += TD(_cpWon(c.supplyPrice) + '<div style="font-size:9px;color:#94a3b8;margin-top:1px">공급율 ' + _cpPct(r.supplyRate) + '</div>');
     h += TD(_cpWon(c.fee1) + '<div style="font-size:9px;color:#94a3b8;margin-top:1px">' + _cpPct(c.fee1Pct) + '</div>');
     h += TD(_cpWon(c.fee2) + '<div style="font-size:9px;color:#94a3b8;margin-top:1px">' + _cpPct(c.fee2Pct) + '</div>');
@@ -10897,6 +10897,8 @@ function _cpOpenModalPharmacy(id, r) {
     if (_ps && _ps.value) {
       const _bc = _cpBomCost(_ps.value);
       if (_bc > 0) { const _uc = document.getElementById('cp-ph-unitCost'); if (_uc) _uc.value = _bc; }
+      const _itm = (DB.items||[]).find(function(x){ return x && String(x.id) === String(_ps.value); });
+      if (_itm && _itm.actualSalePrice != null && _itm.actualSalePrice !== '') { const _spx = document.getElementById('cp-ph-salePrice'); if (_spx) _spx.value = _itm.actualSalePrice; }
     }
   } catch(_){}
   _cpModalLive();
@@ -10974,7 +10976,7 @@ function _cpOpenDetailPharmacy(r) {
     + line('순이익 (부가세 제외)', _cpWon(c.netProfit), {hi:true, color:(c.netProfit>=0?'#15803d':'#dc2626')})
     + line('수익율 (부가세 제외)', _cpPct(c.profitRate), {hi:true, color:(c.profitRate>=0?'#15803d':'#dc2626')})
     + sect('매출')
-    + line('실제 판매가 (부가세 포함)', _cpWon(r.salePrice))
+    + line('실제 판매가 (부가세 포함)', _cpWon(_cpLivePrice(r)))
     + line('공급율', _cpPct(r.supplyRate))
     + line('공급가 (부가세 포함)', _cpWon(c.supplyPrice))
     + line('판매 수량', (Math.round(Number(r.qty)||0)).toLocaleString() + '개')
@@ -11022,7 +11024,7 @@ function _cpInfo(ev, key) {
 
 function _cpCalcExport(r) {
   r = r || {};
-  var krwPrice = Number(r.krwPrice)||0;
+  var krwPrice = _cpLivePrice(r);
   var supplyRate = Number(r.supplyRate)||0;
   var qty = Number(r.qty)||0;
   var unitCost = _cpLiveCost(r);
@@ -11077,7 +11079,7 @@ function _cpRenderExportTable(wrap) {
     h += TD('<b style="color:' + (c.netProfit>=0?'#15803d':'#dc2626') + '">' + _cpWon(c.netProfit) + '</b>', 'background:#fffbeb;font-weight:800');
     h += TD('<b style="color:' + (c.ros>=0?'#15803d':'#dc2626') + '">' + _cpPct(c.ros) + '</b>', 'background:#fffbeb;font-weight:800');
     h += TD('<b style="color:' + (c.contribution>=0?'#1d4ed8':'#dc2626') + '">' + _cpWon(c.contribution) + '</b>', 'background:#eff6ff;font-weight:700');
-    h += TD(_cpWon(r.krwPrice));
+    h += TD(_cpWon(_cpLivePrice(r)));
     h += TD(_cpWon(c.supplyPrice) + '<div style="font-size:9px;color:#94a3b8;margin-top:1px">' + _cpPct(r.supplyRate) + '</div>');
     h += TD((Math.round(Number(r.qty)||0)).toLocaleString() + '개');
     h += TD('<b>' + _cpWon(c.revenue) + '</b>');
@@ -11151,6 +11153,8 @@ function _cpOpenModalExport(id, r) {
     if (_ps && _ps.value) {
       var _bc = _cpBomCost(_ps.value);
       if (_bc > 0) { var _uc = document.getElementById('cp-ex-unitCost'); if (_uc) _uc.value = _bc; }
+      var _itm = (DB.items||[]).find(function(x){ return x && String(x.id) === String(_ps.value); });
+      if (_itm && _itm.actualSalePrice != null && _itm.actualSalePrice !== '') { var _kpx = document.getElementById('cp-ex-krwPrice'); if (_kpx) _kpx.value = _itm.actualSalePrice; }
     }
   } catch(_){}
   _cpModalLive();
@@ -11230,7 +11234,7 @@ function _cpOpenDetailExport(r) {
     + line('수익률 (ROS)', _cpPct(c.ros), {hi:true, color:(c.ros>=0?'#15803d':'#dc2626')})
     + line('Contribution (광고비 차감 전 이익)', _cpWon(c.contribution), {hi:true, color:(c.contribution>=0?'#1d4ed8':'#dc2626')})
     + sect('매출')
-    + line('한국 판매가', _cpWon(r.krwPrice))
+    + line('한국 판매가', _cpWon(_cpLivePrice(r)))
     + line('수출 공급가 (' + _cpPct(r.supplyRate) + ')', _cpWon(c.supplyPrice))
     + line('수출 수량', (Math.round(Number(r.qty)||0)).toLocaleString() + '개')
     + line('매출', _cpWon(c.revenue))
@@ -11319,6 +11323,8 @@ function openCpModal(id) {
     if (_prodSel0 && _prodSel0.value) {
       const _bc0 = _cpBomCost(_prodSel0.value);
       if (_bc0 > 0) { const _cog0 = document.getElementById('cp-m-cogsUnit'); if (_cog0) _cog0.value = _bc0; }
+      const _itm0 = (DB.items||[]).find(function(x){ return x && String(x.id) === String(_prodSel0.value); });
+      if (_itm0 && _itm0.actualSalePrice != null && _itm0.actualSalePrice !== '') { const _sp0 = document.getElementById('cp-m-sellPrice'); if (_sp0) _sp0.value = _itm0.actualSalePrice; }
     }
   } catch(_){}
   _cpModalLive();
@@ -11344,6 +11350,20 @@ function _cpLiveCost(r) {
   return Number(saved) || 0;
 }
 
+// v1.9.970: 실제 판매가 — 연결된 완제품에 actualSalePrice 가 있으면 품목정보의
+//   현재 값을 사용(변경 즉시 반영), 없으면 저장된 입력값.
+//   (홈쇼핑=sellPrice, 약국=salePrice, 수출=krwPrice)
+function _cpLivePrice(r) {
+  if (r && r.productId) {
+    var it = (DB.items||[]).find(function(x){ return x && String(x.id) === String(r.productId); });
+    if (it && it.actualSalePrice != null && it.actualSalePrice !== '') return Number(it.actualSalePrice) || 0;
+  }
+  if (!r) return 0;
+  var saved = (r.salePrice != null && r.salePrice !== '') ? r.salePrice
+            : ((r.krwPrice != null && r.krwPrice !== '') ? r.krwPrice : r.sellPrice);
+  return Number(saved) || 0;
+}
+
 function _cpModalProductChange() {
   const sel = document.getElementById('cp-m-product');
   if (!sel) return;
@@ -11353,6 +11373,8 @@ function _cpModalProductChange() {
     const unit = _cpBomCost(itm.id) || parseFloat(itm.bomCost) || parseFloat(itm.cogs) || parseFloat(itm.price) || 0;
     const cog = document.getElementById('cp-m-cogsUnit');
     if (cog) cog.value = unit;
+    const _spel = document.getElementById('cp-m-sellPrice');
+    if (_spel && itm.actualSalePrice != null && itm.actualSalePrice !== '') _spel.value = itm.actualSalePrice;
   }
   _cpModalLive();
 }
@@ -11453,7 +11475,7 @@ function openCpDetail(id) {
     + line('홈쇼핑 방송 주문', _cpWon(c.hsRevenue))
     + line('전환율', _cpPct(r.convRate))
     + line('실제매출', _cpWon(c.actualRevenue))
-    + line('판매가', _cpWon(r.sellPrice))
+    + line('판매가', _cpWon(_cpLivePrice(r)))
     + line('방송 주문', Math.round(c.orderQty).toLocaleString() + '개')
     + line('실제 판매', Math.round(c.soldQty).toLocaleString() + '개')
     + sect('지출')
