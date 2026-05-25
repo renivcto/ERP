@@ -5281,7 +5281,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.962';
+const ERP_VERSION = 'v1.9.963';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -17279,7 +17279,7 @@ function populateItemVendorSelect() {
 function deleteItemFromModal() {
   const id = editingId['add-item'];
   if (!id) return;
-  const item = DB.items.find(i => i.id === id);
+  const item = DB.items.find(i => String(i.id) === String(id));
   if (!item) return;
   const isFinished = item.type === '완제품';
   const confirmMsg = isFinished
@@ -20021,7 +20021,7 @@ let _stockEditId = null;
 
 function openStockEditModal(id) {
   if (!requireWrite()) return;
-  const item = DB.items.find(i => i.id === id);
+  const item = DB.items.find(i => String(i.id) === String(id));
   if (!item) return;
   _stockEditId = id;
   const nameEl = $('stock-edit-item-name');
@@ -20035,7 +20035,7 @@ function openStockEditModal(id) {
 
 async function saveStockEdit() {
   const id = _stockEditId;
-  const item = DB.items.find(i => i.id === id);
+  const item = DB.items.find(i => String(i.id) === String(id));
   if (!item) return;
   const newQty = parseInt($('stock-edit-qty').value) || 0;
   const note = $('stock-edit-note').value.trim() || '재고 수동 수정';
@@ -20081,7 +20081,7 @@ async function saveStockEdit() {
 
 function deleteStockItem() {
   const id = _stockEditId;
-  const item = DB.items.find(i => i.id === id);
+  const item = DB.items.find(i => String(i.id) === String(id));
   if (!item) return;
   const isFinished = item.type === '완제품';
   const confirmMsg = isFinished
@@ -20089,8 +20089,14 @@ function deleteStockItem() {
     : `'${item.name}' 품목을 삭제합니까?\n연결된 BOM, 생산, 재고 데이터도 확인하세요.`;
   if (!confirm(confirmMsg)) return;
   if (isFinished) restoreBOMStockForDeletedProduct(id, '완제품 삭제');
-  DB.items = DB.items.filter(i => i.id !== id);
-  DB.stockHistory = DB.stockHistory.filter(h => h.itemId !== id);
+  // v1.9.963: tombstone 등록 — 발주서 자동등록 등으로 부활하는 것 차단
+  if (!Array.isArray(DB._deletedItemIds)) DB._deletedItemIds = [];
+  DB._deletedItemIds.push({ id: item.id, name: item.name||'', code: item.code||'', ts: Date.now() });
+  if (DB._deletedItemIds.length > 500) {
+    DB._deletedItemIds = DB._deletedItemIds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
+  }
+  DB.items = DB.items.filter(i => String(i.id) !== String(id));
+  DB.stockHistory = DB.stockHistory.filter(h => String(h.itemId) !== String(id));
   saveData();
   closeModal('stock-edit-modal');
   renderStock();
