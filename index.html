@@ -5268,7 +5268,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.958';
+const ERP_VERSION = 'v1.9.959';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -22012,18 +22012,88 @@ function quickStockIn(orderId) {
   if (idx < 0) { showNotif('발주서를 찾을 수 없습니다', 'warning'); return; }
   const o = DB.orders[idx];
   if (o.stockStatus === '입고완료') { showNotif('이미 입고완료 처리된 발주서입니다', 'info'); return; }
-  if (!confirm(`[${o.serial||'발주서'}] 입고완료 처리하시겠습니까?\n재고가 자동으로 반영됩니다.`)) return;
+  // v1.9.959: 즉시 처리 대신 — 품목별 실제 입고수량 입력 모달을 띄움
+  openStockInQtyModal(orderId);
+}
 
+// v1.9.959: 입고완료 처리 — 품목별 실제 입고수량 입력 모달
+function openStockInQtyModal(orderId) {
+  const o = (DB.orders||[]).find(x => x && x.id === orderId);
+  if (!o) { showNotif('발주서를 찾을 수 없습니다', 'warning'); return; }
+  if (o.stockStatus === '입고완료') { showNotif('이미 입고완료 처리된 발주서입니다', 'info'); return; }
+  const rows = Array.isArray(o.rows) ? o.rows : [];
+  const _esc = (s) => (typeof escapeHtml === 'function') ? escapeHtml(String(s==null?'':s)) : String(s==null?'':s);
+  const _old = document.getElementById('stockin-qty-modal');
+  if (_old) _old.remove();
+  let bodyRows = '';
+  rows.forEach((r, i) => {
+    if (!r || !r.name) return;
+    const oq = Number(r.qty) || 0;
+    const init = (r.receivedQty != null) ? (Number(r.receivedQty)||0) : oq;
+    bodyRows += '<tr style="border-bottom:1px solid #f1f5f9">'
+      + '<td style="padding:8px 9px;font-size:12.5px">' + _esc(r.name) + '</td>'
+      + '<td style="padding:8px 9px;text-align:center;font-size:12.5px;color:#64748b">' + oq.toLocaleString() + '</td>'
+      + '<td style="padding:6px 9px;text-align:center"><input type="number" class="siq-input" data-row="' + i + '" value="' + init + '" min="0" style="width:100px;padding:6px 8px;border:1.5px solid #cbd5e1;border-radius:6px;font-size:13px;text-align:right"></td>'
+      + '</tr>';
+  });
+  if (!bodyRows) bodyRows = '<tr><td colspan="3" style="padding:18px;text-align:center;color:#94a3b8">품목이 없습니다</td></tr>';
+  const _vn = (typeof vendorName === 'function') ? vendorName(o.vendorId) : '';
+  const ov = document.createElement('div');
+  ov.id = 'stockin-qty-modal';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99990;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick = function(ev){ if (ev.target === ov) ov.remove(); };
+  ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:560px;max-width:95vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.3);overflow:hidden">'
+    + '<div style="padding:15px 20px;background:linear-gradient(135deg,#dcfce7,#eff6ff);border-bottom:1px solid #bbf7d0;display:flex;align-items:center;justify-content:space-between">'
+    + '<span style="font-size:15px;font-weight:800;color:#15803d">📥 입고 처리 — 실제 입고수량 입력</span>'
+    + '<button onclick="document.getElementById(\'stockin-qty-modal\').remove()" style="background:rgba(255,255,255,.6);border:none;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:14px;color:#0f172a">✕</button>'
+    + '</div>'
+    + '<div style="padding:14px 20px;overflow-y:auto">'
+    + '<div style="font-size:12px;color:#475569;font-weight:600;margin-bottom:6px">' + _esc(o.serial||'발주서') + (_vn ? ' · ' + _esc(_vn) : '') + '</div>'
+    + '<div style="font-size:11.5px;color:#475569;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:7px 10px;margin-bottom:10px;line-height:1.5">실제로 받은 수량으로 입고수량을 수정하세요. 입력한 수량이 재고에 반영됩니다. 받지 못한 품목은 0으로 두세요.</div>'
+    + '<table style="width:100%;border-collapse:collapse">'
+    + '<thead><tr style="border-bottom:2px solid #e2e8f0">'
+    + '<th style="padding:7px 9px;text-align:left;font-size:11px;color:#475569">품목</th>'
+    + '<th style="padding:7px 9px;text-align:center;font-size:11px;color:#475569;width:92px">발주수량</th>'
+    + '<th style="padding:7px 9px;text-align:center;font-size:11px;color:#475569;width:124px">입고수량</th>'
+    + '</tr></thead><tbody>' + bodyRows + '</tbody></table>'
+    + '</div>'
+    + '<div style="padding:13px 20px;border-top:1px solid #f1f5f9;display:flex;justify-content:flex-end;gap:8px">'
+    + '<button onclick="document.getElementById(\'stockin-qty-modal\').remove()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">취소</button>'
+    + '<button onclick="confirmStockInQty(' + orderId + ')" style="background:#16a34a;color:#fff;border:none;padding:9px 20px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✅ 입고완료 처리</button>'
+    + '</div></div>';
+  document.body.appendChild(ov);
+}
+
+// v1.9.959: 입력한 입고수량으로 재고 반영 + 발주서 입고완료 처리
+function confirmStockInQty(orderId) {
+  const idx = DB.orders.findIndex(o => o && o.id === orderId);
+  if (idx < 0) { showNotif('발주서를 찾을 수 없습니다', 'warning'); return; }
+  const o = DB.orders[idx];
+  const _m = document.getElementById('stockin-qty-modal');
+  if (o.stockStatus === '입고완료') { showNotif('이미 입고완료 처리된 발주서입니다', 'info'); if (_m) _m.remove(); return; }
+  const rows = Array.isArray(o.rows) ? o.rows : [];
+  const inputs = _m ? _m.querySelectorAll('.siq-input') : [];
+  const receivedRows = [];
+  inputs.forEach(inp => {
+    const ri = parseInt(inp.dataset.row, 10);
+    const r = rows[ri];
+    if (!r) return;
+    const recv = Math.max(0, parseFloat(inp.value) || 0);
+    r.receivedQty = recv;
+    receivedRows.push(Object.assign({}, r, { qty: recv }));
+  });
   o.stockStatus = '입고완료';
   o.status = '완료';
+  o.updatedAt = Date.now();  // v1.9.405 머지 보호
   DB.orders[idx] = o;
-
-  processOrderStockIn(o.rows, o.inDate || today(), o.serial || '', o.vendorId, o.id);
-  completeRelatedProductions(o.rows, o.serial || '');
-  saveData();
-  renderOrderTable();
-  renderProdTable();
-  updateBadges();
+  try { processOrderStockIn(receivedRows, o.inDate || today(), o.serial || '', o.vendorId, o.id); } catch(e) { console.error('입고 재고반영 실패:', e); }
+  try { completeRelatedProductions(o.rows, o.serial || ''); } catch(_){}
+  try { saveData(); } catch(_){}
+  if (_m) _m.remove();
+  try { renderOrderTable(); } catch(_){}
+  try { renderProdTable(); } catch(_){}
+  try { updateBadges(); } catch(_){}
+  showNotif('✅ 입고완료 처리되었습니다', 'success');
 }
 
 function ensureOrderRows() {
