@@ -5281,7 +5281,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.964';
+const ERP_VERSION = 'v1.9.965';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10685,7 +10685,7 @@ function _cpRender() {
   const host = document.getElementById('sales-panel-channel');
   if (!host) return;
   if (!_cpData) _cpData = _cpDefault();
-  const subs = [ {k:'homeshopping',label:'📺 홈쇼핑 판매'}, {k:'pharmacy',label:'💊 약국 판매'} ];
+  const subs = [ {k:'homeshopping',label:'📺 홈쇼핑 판매'}, {k:'pharmacy',label:'💊 약국 판매'}, {k:'export',label:'🇨🇳 중국 수출'} ];
   let h = '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px">';
   h += '<div style="display:inline-flex;gap:3px;background:#f1f5f9;border-radius:9px;padding:3px">';
   subs.forEach(s => {
@@ -10704,6 +10704,7 @@ function _cpRenderTable() {
   const wrap = document.getElementById('cp-table-wrap');
   if (!wrap) return;
   if (_cpCurrentSub === 'pharmacy') { _cpRenderPharmacyTable(wrap); return; }
+  if (_cpCurrentSub === 'export') { _cpRenderExportTable(wrap); return; }
   const rows = (_cpData.rows||[]).filter(r => r && (r.channelType||'homeshopping') === _cpCurrentSub);
   rows.sort((a,b) => String(b.broadcastDate||'').localeCompare(String(a.broadcastDate||'')) || (Number(b.id)||0)-(Number(a.id)||0));
   if (!rows.length) {
@@ -10979,12 +10980,270 @@ function _cpOpenDetailPharmacy(r) {
   document.body.appendChild(ov);
 }
 
+// ═══════════ v1.9.965: 중국 수출 수익계산 ═══════════
+var _CP_EXPORT_INFO = {
+  netProfit: ['순이익', '수출 순이익 (부가세 없음)\n\n순이익 = 매출 − 총 제조원가 − 예상 물류비 − 분담 광고비\n\n= Contribution(광고비 차감 전 이익) − 분담 광고비'],
+  ros: ['수익률 (ROS)', 'ROS = Return on Sales — 매출 대비 순이익률\n\nROS = 순이익 ÷ 매출 × 100'],
+  contribution: ['Contribution', 'Contribution = 광고비 차감 전 이익\n\n= 매출 − 총 제조원가 − 예상 물류비\n\n※ 분담 광고비를 빼기 전 단계의 이익입니다. 여기서 분담 광고비를 빼면 순이익이 됩니다.'],
+  costRate: ['원가율', '한국 판매가 대비 제품원가(COGS) 비율\n\n원가율 = 제품원가 COGS ÷ 한국 판매가 × 100']
+};
+function _cpInfoClose() { var p = document.getElementById('cp-info-pop'); if (p) p.remove(); }
+function _cpInfo(ev, key) {
+  if (ev && ev.stopPropagation) ev.stopPropagation();
+  var info = _CP_EXPORT_INFO[key];
+  if (!info) return;
+  _cpInfoClose();
+  var ov = document.createElement('div');
+  ov.id = 'cp-info-pop';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:99996;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick = function(){ ov.remove(); };
+  ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:12px;width:390px;max-width:94vw;box-shadow:0 16px 44px rgba(0,0,0,.3);overflow:hidden">'
+    + '<div style="padding:12px 16px;background:#0f172a;color:#fff;font-size:13px;font-weight:800">ⓘ ' + info[0] + '</div>'
+    + '<div style="padding:15px 17px;font-size:12.5px;color:#334155;line-height:1.85;white-space:pre-wrap">' + info[1] + '</div>'
+    + '<div style="padding:10px 16px;text-align:right;border-top:1px solid #f1f5f9"><button onclick="_cpInfoClose()" style="background:#0f172a;color:#fff;border:none;padding:7px 17px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">확인</button></div>'
+    + '</div>';
+  document.body.appendChild(ov);
+}
+
+function _cpCalcExport(r) {
+  r = r || {};
+  var krwPrice = Number(r.krwPrice)||0;
+  var supplyRate = Number(r.supplyRate)||0;
+  var qty = Number(r.qty)||0;
+  var unitCost = Number(r.unitCost)||0;
+  var adCost = Number(r.adCost)||0;
+  var logiCost = Number(r.logiCost)||0;
+  var supplyPrice = krwPrice * supplyRate / 100;        // 수출 공급가격
+  var revenue = supplyPrice * qty;                      // 매출
+  var totalCogs = unitCost * qty;                       // 총 제조원가
+  var contribution = revenue - totalCogs - logiCost;    // 광고비 차감 전 이익
+  var netProfit = contribution - adCost;                // 순이익
+  var ros = revenue > 0 ? (netProfit / revenue * 100) : 0;          // 수익률(ROS)
+  var costRate = krwPrice > 0 ? (unitCost / krwPrice * 100) : 0;    // 원가율
+  return { supplyPrice:supplyPrice, revenue:revenue, totalCogs:totalCogs, contribution:contribution,
+    netProfit:netProfit, ros:ros, costRate:costRate };
+}
+
+var _CP_INCOTERMS = ['EXW (EX WORKS)','FCA','FOB','CFR','CIF','CPT','CIP','DAP','DPU','DDP'];
+
+function _cpRenderExportTable(wrap) {
+  var rows = (_cpData.rows||[]).filter(function(r){ return r && (r.channelType||'homeshopping') === 'export'; });
+  rows.sort(function(a,b){ return (Number(b.updatedAt)||0)-(Number(a.updatedAt)||0) || (Number(b.id)||0)-(Number(a.id)||0); });
+  if (!rows.length) {
+    wrap.innerHTML = '<div style="padding:44px;text-align:center;color:#94a3b8;font-size:13px;background:#f8fafc;border:1px dashed #e2e8f0;border-radius:12px">등록된 행이 없습니다. <b>＋ 행 추가</b> 버튼으로 시작하세요.</div>';
+    return;
+  }
+  var INFO = function(key){ return '<span onclick="_cpInfo(event,\'' + key + '\')" style="cursor:pointer;color:#0ea5e9;font-weight:800;font-size:10px;margin-left:2px;vertical-align:super" title="클릭하면 계산식 설명">ⓘ</span>'; };
+  var TH = function(t, extra){ return '<th style="padding:9px 8px;font-size:11px;font-weight:700;color:#475569;white-space:nowrap;border-bottom:2px solid #e2e8f0;position:sticky;top:0;z-index:2;background:#f8fafc;' + (extra||'') + '">' + t + '</th>'; };
+  var h = '<div style="overflow:auto;max-height:70vh;border:1px solid #e2e8f0;border-radius:12px;background:#fff">';
+  h += '<table style="border-collapse:collapse;white-space:nowrap;font-size:12px;min-width:100%"><thead><tr>';
+  h += TH('제품명', 'text-align:left;position:sticky;left:0;z-index:4;background:#f8fafc;width:172px;min-width:172px');
+  h += TH('순이익' + INFO('netProfit'), 'background:#fffbeb;border-bottom-color:#fde68a');
+  h += TH('수익률 (ROS)' + INFO('ros'), 'background:#fffbeb;border-bottom-color:#fde68a');
+  h += TH('Contribution' + INFO('contribution'), 'background:#eff6ff;border-bottom-color:#bfdbfe');
+  h += TH('한국 판매가');
+  h += TH('수출 공급가');
+  h += TH('수출 수량');
+  h += TH('매출');
+  h += TH('총 제조원가');
+  h += TH('분담 광고비');
+  h += TH('수출 조건');
+  h += TH('예상 물류비');
+  h += TH('원가율' + INFO('costRate'));
+  h += TH('관리');
+  h += '</tr></thead><tbody>';
+  rows.forEach(function(r){
+    var c = _cpCalcExport(r);
+    var prod = (DB.items||[]).find(function(i){ return i && String(i.id) === String(r.productId); });
+    var nm = (prod && prod.name) || r.name || '(제품 미선택)';
+    var TD = function(v, extra){ return '<td style="padding:8px;text-align:center;border-bottom:1px solid #f1f5f9;' + (extra||'') + '">' + v + '</td>'; };
+    h += '<tr>';
+    h += '<td style="padding:8px 10px;text-align:left;border-bottom:1px solid #f1f5f9;position:sticky;left:0;z-index:3;background:#fff;width:172px;min-width:172px"><span onclick="openCpDetail(' + r.id + ')" style="color:#c2410c;font-weight:700;cursor:pointer;text-decoration:underline">' + _cpEsc(nm) + '</span></td>';
+    h += TD('<b style="color:' + (c.netProfit>=0?'#15803d':'#dc2626') + '">' + _cpWon(c.netProfit) + '</b>', 'background:#fffbeb;font-weight:800');
+    h += TD('<b style="color:' + (c.ros>=0?'#15803d':'#dc2626') + '">' + _cpPct(c.ros) + '</b>', 'background:#fffbeb;font-weight:800');
+    h += TD('<b style="color:' + (c.contribution>=0?'#1d4ed8':'#dc2626') + '">' + _cpWon(c.contribution) + '</b>', 'background:#eff6ff;font-weight:700');
+    h += TD(_cpWon(r.krwPrice));
+    h += TD(_cpWon(c.supplyPrice) + '<div style="font-size:9px;color:#94a3b8;margin-top:1px">' + _cpPct(r.supplyRate) + '</div>');
+    h += TD((Math.round(Number(r.qty)||0)).toLocaleString() + '개');
+    h += TD('<b>' + _cpWon(c.revenue) + '</b>');
+    h += TD(_cpWon(c.totalCogs));
+    h += TD(_cpWon(r.adCost));
+    h += TD(_cpEsc(r.incoterm||'-'));
+    h += TD(_cpWon(r.logiCost));
+    h += TD('<b>' + _cpPct(c.costRate) + '</b><div style="font-size:9px;color:#94a3b8;margin-top:1px">제품원가 ' + _cpWon(r.unitCost) + '</div>');
+    h += TD('<div style="display:flex;flex-direction:column;gap:2px;align-items:center"><button onclick="openCpModal(' + r.id + ')" style="background:#ffedd5;color:#c2410c;border:1px solid #fed7aa;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;cursor:pointer;line-height:1.5">✏️</button><button onclick="deleteCpRow(' + r.id + ')" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;cursor:pointer;line-height:1.5">🗑️</button></div>');
+    h += '</tr>';
+  });
+  h += '</tbody></table></div>';
+  h += '<div style="font-size:10.5px;color:#94a3b8;margin-top:8px;line-height:1.7">· 수출 금액은 부가세가 없습니다 — 표의 모든 금액은 부가세 없는 금액 기준입니다.<br>· 수출 공급가격 = 한국 판매가 × 수출 공급가% &nbsp; · &nbsp; 매출 = 수출 공급가격 × 수출 수량 &nbsp; · &nbsp; 총 제조원가 = 제품원가 × 수출 수량<br>· 항목명 옆 ⓘ 를 클릭하면 계산식 설명을 볼 수 있습니다.</div>';
+  wrap.innerHTML = h;
+}
+
+function _cpOpenModalExport(id, r) {
+  var g = function(f, d){ return (r && r[f] != null && r[f] !== '') ? r[f] : (d==null?'':d); };
+  var items = (DB.items||[]).filter(function(i){ return i && i.name && i.type === '완제품'; });
+  var prodOpts = '<option value="">— 완제품 선택 —</option>';
+  items.forEach(function(i){
+    prodOpts += '<option value="' + i.id + '"' + (r && String(r.productId)===String(i.id) ? ' selected' : '') + '>' + _cpEsc(i.name) + (i.code?(' ('+_cpEsc(i.code)+')'):'') + '</option>';
+  });
+  var curInco = g('incoterm','FOB');
+  var incoOpts = '';
+  _CP_INCOTERMS.forEach(function(t){
+    incoOpts += '<option value="' + t + '"' + (String(curInco)===String(t)?' selected':'') + '>' + t + '</option>';
+  });
+  var fld = function(label, fid, val, unit){
+    return '<div>'
+      + '<label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">' + label + '</label>'
+      + '<div style="display:flex;align-items:center;border:1px solid #cbd5e1;border-radius:7px;overflow:hidden">'
+      + '<input id="' + fid + '" type="number" step="any" value="' + _cpEsc(val) + '" oninput="_cpModalLive()" placeholder="0" style="flex:1;border:none;padding:7px 9px;font-size:12.5px;outline:none;min-width:0">'
+      + (unit ? ('<span style="padding:0 10px;font-size:11.5px;color:#94a3b8;background:#f8fafc;align-self:stretch;display:flex;align-items:center;border-left:1px solid #e2e8f0">' + unit + '</span>') : '')
+      + '</div></div>';
+  };
+  var ov = document.createElement('div');
+  ov.id = 'cp-modal-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99988;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:32px 16px';
+  ov.onclick = function(ev){ if (ev.target === ov) closeCpModal(); };
+  ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:680px;max-width:96vw;box-shadow:0 18px 50px rgba(0,0,0,.3);overflow:hidden">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;padding:15px 20px;background:linear-gradient(135deg,#ffedd5,#fed7aa)">'
+    + '<div style="font-size:15px;font-weight:800;color:#c2410c">🇨🇳 중국 수출 — ' + (id!=null?'행 수정':'행 추가') + '</div>'
+    + '<button onclick="closeCpModal()" style="background:rgba(255,255,255,.5);border:none;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:14px;color:#c2410c">✕</button>'
+    + '</div>'
+    + '<div style="padding:18px 20px;max-height:62vh;overflow-y:auto">'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">'
+    + '<div style="grid-column:1/3"><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">제품명 (완제품 선택)</label>'
+    + '<select id="cp-ex-product" onchange="_cpExportProductChange()" style="width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px">' + prodOpts + '</select></div>'
+    + fld('한국 판매가', 'cp-ex-krwPrice', g('krwPrice',0), '원')
+    + fld('수출 공급가', 'cp-ex-supplyRate', g('supplyRate',0), '%')
+    + fld('수출 수량', 'cp-ex-qty', g('qty',0), '개')
+    + fld('제품원가 COGS', 'cp-ex-unitCost', g('unitCost',0), '원')
+    + fld('분담 광고비', 'cp-ex-adCost', g('adCost',0), '원')
+    + '<div><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">수출 조건 (Incoterms)</label>'
+    + '<select id="cp-ex-incoterm" style="width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px;background:#fff">' + incoOpts + '</select></div>'
+    + fld('예상 물류비용', 'cp-ex-logiCost', g('logiCost',0), '원')
+    + '<div style="grid-column:1/3"><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">비고</label>'
+    + '<input id="cp-ex-note" value="' + _cpEsc(g('note')) + '" style="width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px"></div>'
+    + '</div>'
+    + '<div style="font-size:10.5px;color:#94a3b8;margin-top:10px;line-height:1.7">· 완제품을 선택하면 한국 판매가·제품원가(BOM 합계)가 자동 입력됩니다 (수정 가능)<br>· 수출 금액은 부가세가 없습니다 — 모두 부가세 없는 금액으로 입력하세요.<br>· 수출 공급가격 = 한국 판매가 × 수출 공급가%</div>'
+    + '<div id="cp-m-live" style="margin-top:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:9px;padding:11px 14px;display:flex;gap:20px;align-items:center;flex-wrap:wrap"></div>'
+    + '</div>'
+    + '<div style="padding:13px 20px;border-top:1px solid #f1f5f9;display:flex;justify-content:flex-end;gap:8px">'
+    + '<button onclick="closeCpModal()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">취소</button>'
+    + '<button onclick="saveCpRow()" style="background:#c2410c;color:#fff;border:none;padding:9px 22px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">저장</button>'
+    + '</div></div>';
+  document.body.appendChild(ov);
+  try {
+    var _ps = document.getElementById('cp-ex-product');
+    if (_ps && _ps.value) {
+      var _bc = _cpBomCost(_ps.value);
+      if (_bc > 0) { var _uc = document.getElementById('cp-ex-unitCost'); if (_uc) _uc.value = _bc; }
+    }
+  } catch(_){}
+  _cpModalLive();
+}
+
+function _cpExportProductChange() {
+  var sel = document.getElementById('cp-ex-product');
+  if (!sel) return;
+  var itm = (DB.items||[]).find(function(i){ return i && String(i.id) === String(sel.value); });
+  if (itm) {
+    var kp = document.getElementById('cp-ex-krwPrice');
+    if (kp && itm.actualSalePrice != null && itm.actualSalePrice !== '') kp.value = itm.actualSalePrice;
+    var uc = document.getElementById('cp-ex-unitCost');
+    if (uc) {
+      var bom = _cpBomCost(itm.id);
+      if (bom > 0) uc.value = bom;
+      else if (itm.price) uc.value = itm.price;
+    }
+  }
+  _cpModalLive();
+}
+
+function _cpReadModalExport() {
+  var sel = document.getElementById('cp-ex-product');
+  var pid = sel ? sel.value : '';
+  var prod = (DB.items||[]).find(function(i){ return i && String(i.id) === String(pid); });
+  var inco = document.getElementById('cp-ex-incoterm');
+  return {
+    productId: pid,
+    name: (prod && prod.name) || '',
+    krwPrice: _cpNum('cp-ex-krwPrice'),
+    supplyRate: _cpNum('cp-ex-supplyRate'),
+    qty: _cpNum('cp-ex-qty'),
+    unitCost: _cpNum('cp-ex-unitCost'),
+    adCost: _cpNum('cp-ex-adCost'),
+    incoterm: inco ? inco.value : '',
+    logiCost: _cpNum('cp-ex-logiCost'),
+    note: (document.getElementById('cp-ex-note')||{}).value || ''
+  };
+}
+
+function _cpModalLiveExport(box) {
+  var c = _cpCalcExport(_cpReadModalExport());
+  box.innerHTML = '<div><span style="font-size:11px;color:#c2410c;font-weight:700">순이익</span> '
+    + '<b style="font-size:16px;color:' + (c.netProfit>=0?'#15803d':'#dc2626') + '">' + _cpWon(c.netProfit) + '</b></div>'
+    + '<div><span style="font-size:11px;color:#c2410c;font-weight:700">수익률(ROS)</span> '
+    + '<b style="font-size:16px;color:' + (c.ros>=0?'#15803d':'#dc2626') + '">' + _cpPct(c.ros) + '</b></div>'
+    + '<div><span style="font-size:11px;color:#c2410c;font-weight:700">Contribution</span> '
+    + '<b style="font-size:14px;color:' + (c.contribution>=0?'#1d4ed8':'#dc2626') + '">' + _cpWon(c.contribution) + '</b></div>'
+    + '<div style="font-size:11px;color:#c2410c">매출 ' + _cpWon(c.revenue) + ' · 공급가 ' + _cpWon(c.supplyPrice) + ' · 원가율 ' + _cpPct(c.costRate) + '</div>';
+}
+
+function _cpOpenDetailExport(r) {
+  var c = _cpCalcExport(r);
+  var prod = (DB.items||[]).find(function(i){ return i && String(i.id) === String(r.productId); });
+  var nm = (prod && prod.name) || r.name || '(제품 미선택)';
+  var ov = document.createElement('div');
+  ov.id = 'cp-detail-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99989;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:32px 16px';
+  ov.onclick = function(ev){ if (ev.target === ov) closeCpDetail(); };
+  var line = function(lbl, val, opts){
+    opts = opts || {};
+    return '<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f1f5f9;'
+      + (opts.hi?'background:#fff7ed;font-weight:800;padding:9px 10px;border-radius:7px;border-bottom:none;margin:4px 0':'') + '">'
+      + '<span style="font-size:12px;color:' + (opts.hi?'#c2410c':'#64748b') + ';font-weight:' + (opts.hi?'800':'600') + '">' + lbl + '</span>'
+      + '<span style="font-size:' + (opts.hi?'14px':'12.5px') + ';color:' + (opts.color||'#0f172a') + ';font-weight:' + (opts.hi?'800':'700') + '">' + val + '</span></div>';
+  };
+  var sect = function(t){ return '<div style="font-size:11.5px;font-weight:800;color:#c2410c;margin:14px 0 4px">' + t + '</div>'; };
+  ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:480px;max-width:96vw;box-shadow:0 18px 50px rgba(0,0,0,.3);overflow:hidden">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;padding:15px 20px;background:linear-gradient(135deg,#ffedd5,#fed7aa)">'
+    + '<div><div style="font-size:15px;font-weight:800;color:#c2410c">' + _cpEsc(nm) + '</div>'
+    + '<div style="font-size:11.5px;color:#ea580c;margin-top:2px">🇨🇳 중국 수출</div></div>'
+    + '<button onclick="closeCpDetail()" style="background:rgba(255,255,255,.5);border:none;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:14px;color:#c2410c">✕</button>'
+    + '</div>'
+    + '<div style="padding:16px 20px;max-height:68vh;overflow-y:auto">'
+    + line('순이익', _cpWon(c.netProfit), {hi:true, color:(c.netProfit>=0?'#15803d':'#dc2626')})
+    + line('수익률 (ROS)', _cpPct(c.ros), {hi:true, color:(c.ros>=0?'#15803d':'#dc2626')})
+    + line('Contribution (광고비 차감 전 이익)', _cpWon(c.contribution), {hi:true, color:(c.contribution>=0?'#1d4ed8':'#dc2626')})
+    + sect('매출')
+    + line('한국 판매가', _cpWon(r.krwPrice))
+    + line('수출 공급가 (' + _cpPct(r.supplyRate) + ')', _cpWon(c.supplyPrice))
+    + line('수출 수량', (Math.round(Number(r.qty)||0)).toLocaleString() + '개')
+    + line('매출', _cpWon(c.revenue))
+    + sect('원가 · 비용')
+    + line('제품원가 COGS (개당)', _cpWon(r.unitCost))
+    + line('총 제조원가', _cpWon(c.totalCogs))
+    + line('원가율', _cpPct(c.costRate))
+    + line('예상 물류비', _cpWon(r.logiCost))
+    + line('분담 광고비', _cpWon(r.adCost))
+    + sect('수출 조건')
+    + line('Incoterms', _cpEsc(r.incoterm||'-'))
+    + (r.note ? (sect('비고') + '<div style="font-size:12px;color:#475569;padding:4px 0;white-space:pre-wrap">' + _cpEsc(r.note) + '</div>') : '')
+    + '<div style="font-size:10.5px;color:#94a3b8;margin-top:12px;line-height:1.7">※ 수출 금액은 부가세가 없습니다. 모든 금액은 부가세 없는 금액 기준입니다.</div>'
+    + '</div>'
+    + '<div style="padding:13px 20px;border-top:1px solid #f1f5f9;display:flex;justify-content:flex-end;gap:8px">'
+    + '<button onclick="closeCpDetail();openCpModal(' + r.id + ')" style="background:#ffedd5;color:#c2410c;border:1px solid #fed7aa;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✏️ 수정</button>'
+    + '<button onclick="closeCpDetail()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">닫기</button>'
+    + '</div></div>';
+  document.body.appendChild(ov);
+}
+
 function openCpModal(id) {
   closeCpModal();
   _cpEditId = id;
   const r = (id != null && _cpData) ? (_cpData.rows||[]).find(x => x && String(x.id) === String(id)) : null;
   _cpModalCh = r ? (r.channelType||'homeshopping') : _cpCurrentSub;
   if (_cpModalCh === 'pharmacy') { _cpOpenModalPharmacy(id, r); return; }
+  if (_cpModalCh === 'export') { _cpOpenModalExport(id, r); return; }
   const g = (f,d) => (r && r[f] != null && r[f] !== '') ? r[f] : (d==null?'':d);
   const items = (DB.items||[]).filter(i => i && i.name && i.type === '완제품');  // v1.9.950: 완제품만
   let prodOpts = '<option value="">(제품 선택 안 함 — COGS 직접 입력)</option>';
@@ -11073,6 +11332,7 @@ function _cpModalProductChange() {
 }
 function _cpReadModal() {
   if (_cpModalCh === 'pharmacy') return _cpReadModalPharmacy();
+  if (_cpModalCh === 'export') return _cpReadModalExport();
   const sel = document.getElementById('cp-m-product');
   return {
     name: (document.getElementById('cp-m-name')||{}).value || '',
@@ -11095,6 +11355,7 @@ function _cpModalLive() {
   const box = document.getElementById('cp-m-live');
   if (!box) return;
   if (_cpModalCh === 'pharmacy') { _cpModalLivePharmacy(box); return; }
+  if (_cpModalCh === 'export') { _cpModalLiveExport(box); return; }
   const c = _cpCalc(_cpReadModal());
   box.innerHTML = '<div><span style="font-size:11px;color:#92400e;font-weight:700">순이익</span> '
     + '<b style="font-size:16px;color:' + (c.settlement>=0?'#15803d':'#dc2626') + '">' + _cpWon(c.settlement) + '</b></div>'
@@ -11105,7 +11366,7 @@ function _cpModalLive() {
 function saveCpRow() {
   if (!_cpData) _cpData = _cpDefault();
   const d = _cpReadModal();
-  if (_cpModalCh === 'pharmacy' && !d.productId) { showNotif('완제품을 선택하세요', 'warning'); return; }
+  if ((_cpModalCh === 'pharmacy' || _cpModalCh === 'export') && !d.productId) { showNotif('완제품을 선택하세요', 'warning'); return; }
   if (!d.name.trim()) { showNotif('채널·회차명을 입력하세요', 'warning'); return; }
   if (_cpEditId != null) {
     const r = (_cpData.rows||[]).find(x => x && String(x.id) === String(_cpEditId));
@@ -11136,6 +11397,7 @@ function openCpDetail(id) {
   const r = (_cpData && _cpData.rows ? _cpData.rows : []).find(x => x && String(x.id) === String(id));
   if (!r) { showNotif('행을 찾을 수 없습니다', 'warning'); return; }
   if ((r.channelType||'homeshopping') === 'pharmacy') { _cpOpenDetailPharmacy(r); return; }
+  if ((r.channelType||'homeshopping') === 'export') { _cpOpenDetailExport(r); return; }
   const c = _cpCalc(r);
   const prod = (DB.items||[]).find(i => i && String(i.id) === String(r.productId));
   const ov = document.createElement('div');
