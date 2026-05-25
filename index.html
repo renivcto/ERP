@@ -5281,7 +5281,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.968';
+const ERP_VERSION = 'v1.9.969';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10636,7 +10636,7 @@ function _cpCalc(r) {
   const insertVat = insertFee * 0.1;   // v1.9.949: 자동 10% (인서트 부가세 입력칸 제거)
   const hsComm = actualRevenue * (Number(r.hsCommPct)||0) / 100;          // 홈쇼핑 수수료(부가세 포함)
   const vendorComm = actualRevenue * (Number(r.vendorCommPct)||0) / 100;  // 밴더 수수료(부가세 포함)
-  const cogs = soldQty * (Number(r.cogsUnit)||0);                         // 제품원가
+  const cogs = soldQty * _cpLiveCost(r);                         // 제품원가
   const cogsVat = cogs * 0.1;
   // v1.9.947: 순이익 = 부가세 제외(공급가) 기준. 매출·수수료는 부가세 포함값이라 ÷1.1 로
   //   공급가 환산, 특약금·게스트비·인서트비·제품원가는 이미 공급가(부가세 별도) 입력값.
@@ -10757,7 +10757,7 @@ function _cpCalcPharmacy(r) {
   const shipping = Number(r.shipping)||0;
   const fee1Pct = (r.fee1Pct===''||r.fee1Pct==null) ? 15 : (Number(r.fee1Pct)||0);
   const fee2Pct = (r.fee2Pct===''||r.fee2Pct==null) ? 13 : (Number(r.fee2Pct)||0);
-  const unitCost = Number(r.unitCost)||0;
+  const unitCost = _cpLiveCost(r);
   const supplyPrice = salePrice * supplyRate / 100;          // 공급가 (부가세 포함)
   const revenue = supplyPrice * qty;                         // 매출 (부가세 포함)
   const fee1 = revenue * fee1Pct / 100;                      // 바로팜 1차 수수료 (부가세 포함)
@@ -10833,7 +10833,7 @@ function _cpRenderPharmacyTable(wrap) {
     h += TD(_cpWon(c.fee1) + '<div style="font-size:9px;color:#94a3b8;margin-top:1px">' + _cpPct(c.fee1Pct) + '</div>');
     h += TD(_cpWon(c.fee2) + '<div style="font-size:9px;color:#94a3b8;margin-top:1px">' + _cpPct(c.fee2Pct) + '</div>');
     h += TD(_cpWon(r.fixedCost));
-    h += TD(_cpWon(r.unitCost));
+    h += TD(_cpWon(_cpLiveCost(r)));
     h += TD(_cpWon(c.totalCost));
     h += TD(_cpWon(r.shipping));
     h += TD('<div style="display:flex;flex-direction:column;gap:2px;align-items:center"><button onclick="openCpModal(' + r.id + ')" style="background:#fce7f3;color:#9d174d;border:1px solid #fbcfe8;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;cursor:pointer;line-height:1.5">✏️</button><button onclick="deleteCpRow(' + r.id + ')" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;cursor:pointer;line-height:1.5">🗑️</button></div>');
@@ -10983,7 +10983,7 @@ function _cpOpenDetailPharmacy(r) {
     + line('바로팜 1차 수수료 (' + _cpPct(c.fee1Pct) + ', 부가세 포함)', _cpWon(c.fee1))
     + line('바로팜 2차 수수료 (' + _cpPct(c.fee2Pct) + ', 부가세 포함)', _cpWon(c.fee2))
     + line('고정비 (부가세 제외)', _cpWon(r.fixedCost))
-    + line('제품원가 COGS (개당)', _cpWon(r.unitCost))
+    + line('제품원가 COGS (개당)', _cpWon(_cpLiveCost(r)))
     + line('총원가 (부가세 제외)', _cpWon(c.totalCost))
     + line('예상 배송비 (부가세 포함)', _cpWon(r.shipping))
     + (r.note ? (sect('비고') + '<div style="font-size:12px;color:#475569;padding:4px 0;white-space:pre-wrap">' + _cpEsc(r.note) + '</div>') : '')
@@ -11025,7 +11025,7 @@ function _cpCalcExport(r) {
   var krwPrice = Number(r.krwPrice)||0;
   var supplyRate = Number(r.supplyRate)||0;
   var qty = Number(r.qty)||0;
-  var unitCost = Number(r.unitCost)||0;
+  var unitCost = _cpLiveCost(r);
   var adCost = Number(r.adCost)||0;
   var logiCost = Number(r.logiCost)||0;
   var supplyPrice = krwPrice * supplyRate / 100;        // 수출 공급가격
@@ -11085,7 +11085,7 @@ function _cpRenderExportTable(wrap) {
     h += TD(_cpWon(r.adCost));
     h += TD(_cpEsc(r.incoterm||'-'));
     h += TD(_cpWon(r.logiCost));
-    h += TD('<b>' + _cpPct(c.costRate) + '</b><div style="font-size:9px;color:#94a3b8;margin-top:1px">제품원가 ' + _cpWon(r.unitCost) + '</div>');
+    h += TD('<b>' + _cpPct(c.costRate) + '</b><div style="font-size:9px;color:#94a3b8;margin-top:1px">제품원가 ' + _cpWon(_cpLiveCost(r)) + '</div>');
     h += TD('<div style="display:flex;flex-direction:column;gap:2px;align-items:center"><button onclick="openCpModal(' + r.id + ')" style="background:#ffedd5;color:#c2410c;border:1px solid #fed7aa;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;cursor:pointer;line-height:1.5">✏️</button><button onclick="deleteCpRow(' + r.id + ')" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;cursor:pointer;line-height:1.5">🗑️</button></div>');
     h += '</tr>';
   });
@@ -11235,7 +11235,7 @@ function _cpOpenDetailExport(r) {
     + line('수출 수량', (Math.round(Number(r.qty)||0)).toLocaleString() + '개')
     + line('매출', _cpWon(c.revenue))
     + sect('원가 · 비용')
-    + line('제품원가 COGS (개당)', _cpWon(r.unitCost))
+    + line('제품원가 COGS (개당)', _cpWon(_cpLiveCost(r)))
     + line('총 제조원가', _cpWon(c.totalCogs))
     + line('원가율', _cpPct(c.costRate))
     + line('예상 물류비', _cpWon(r.logiCost))
@@ -11333,6 +11333,17 @@ function _cpBomCost(productId) {
     return s + ((it && it.price) || 0) * (r.qty || 0);
   }, 0));
 }
+// v1.9.969: 제품원가 — 연결된 완제품에 BOM 이 있으면 현재 BOM 합계 원가를 사용
+//   (BOM 변경 즉시 반영), 없으면 저장된 입력값. (홈쇼핑=cogsUnit, 약국·수출=unitCost)
+function _cpLiveCost(r) {
+  if (r && r.productId) {
+    try { var bc = _cpBomCost(r.productId); if (bc > 0) return bc; } catch(_){}
+  }
+  if (!r) return 0;
+  var saved = (r.unitCost != null && r.unitCost !== '') ? r.unitCost : r.cogsUnit;
+  return Number(saved) || 0;
+}
+
 function _cpModalProductChange() {
   const sel = document.getElementById('cp-m-product');
   if (!sel) return;
