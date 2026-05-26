@@ -5281,7 +5281,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.975';
+const ERP_VERSION = 'v1.9.976';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -8097,6 +8097,7 @@ function go(page) {
   if (page === 'work') page = 'workflow';
   // v1.9.316 — 새로고침 시 마지막 페이지 복원을 위해 현재 페이지를 localStorage 에 저장
   try { localStorage.setItem('reniv_last_page', page); } catch(_){}
+  try { sessionStorage.setItem('reniv_session_active', '1'); } catch(_){}
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   const pg = $('page-' + page);
@@ -39560,8 +39561,14 @@ function initERPWhenReady() {
     // v1.9.316 — 새로고침 시 마지막 머물렀던 페이지 복원 (기본: dashboard)
     try {
       const KNOWN_PAGES = ['dashboard','workflow','calendar','gdrive','vendor','item','archive','bom','production','stock','quote','order','approval','sites','accounts','insight','users','qc','cost','cs','sales','settings'];
+      // v1.9.976: 같은 탭 새로고침이면 마지막 페이지 복원, 처음 접속/새 탭/브라우저 재시작이면 dashboard
+      //   sessionStorage 는 같은 탭이 살아있는 동안만 유지(새로고침=유지, 탭닫기/재시작=초기화)
+      if (typeof window._v976_freshSession === 'undefined') {
+        try { window._v976_freshSession = !sessionStorage.getItem('reniv_session_active'); } catch(_){ window._v976_freshSession = false; }
+        try { sessionStorage.setItem('reniv_session_active', '1'); } catch(_){}
+      }
       const _savedPage = localStorage.getItem('reniv_last_page');
-      const _startPage = (_savedPage && KNOWN_PAGES.indexOf(_savedPage) >= 0) ? _savedPage : 'dashboard';
+      const _startPage = (!window._v976_freshSession && _savedPage && KNOWN_PAGES.indexOf(_savedPage) >= 0) ? _savedPage : 'dashboard';
       go(_startPage);
     } catch(e) { try { go('dashboard'); } catch(_){} }
     try { renderDashboard(); } catch(e) { console.warn('renderDashboard 실패:', e); }
