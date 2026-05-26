@@ -5281,7 +5281,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.977';
+const ERP_VERSION = 'v1.9.978';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -11338,7 +11338,7 @@ function openCpModal(id) {
   if (_cpModalCh === 'pharmacy') { _cpOpenModalPharmacy(id, r); return; }
   if (_cpModalCh === 'export') { _cpOpenModalExport(id, r); return; }
   const g = (f,d) => (r && r[f] != null && r[f] !== '') ? r[f] : (d==null?'':d);
-  const items = (DB.items||[]).filter(i => i && i.name && i.type === '완제품');  // v1.9.950: 완제품만
+  const items = (DB.items||[]).filter(i => i && i.name && i.type === '완제품');
   let prodOpts = '<option value="">(제품 선택 안 함 — COGS 직접 입력)</option>';
   items.forEach(i => {
     prodOpts += '<option value="' + i.id + '"' + (r && String(r.productId)===String(i.id) ? ' selected':'') + '>' + _cpEsc(i.name) + (i.code?(' ('+_cpEsc(i.code)+')'):'') + '</option>';
@@ -11355,7 +11355,27 @@ function openCpModal(id) {
       + (unit ? '<span style="padding:0 10px;font-size:11.5px;color:#94a3b8;background:#f8fafc;align-self:stretch;display:flex;align-items:center;border-left:1px solid #e2e8f0">' + unit + '</span>' : '')
       + '</div></div>';
   };
-  const chLabel = _cpModalCh === 'pharmacy' ? '💊 약국 판매' : '📺 홈쇼핑 판매';
+  // v1.9.978: 자동/수동 모드 토글 필드 (판매가 / 제품원가 COGS 용)
+  const modeFld = (label, fid, val, unit, mode, prefix) => {
+    const isAuto = (mode !== 'manual');
+    const ON  = 'padding:3px 11px;border-radius:5px;font-size:11px;cursor:pointer;border:1px solid #0f172a;background:#0f172a;color:#fff;font-weight:700;line-height:1.3';
+    const OFF = 'padding:3px 11px;border-radius:5px;font-size:11px;cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:#475569;font-weight:500;line-height:1.3';
+    const inpBg = isAuto ? '#f1f5f9' : '#fff';
+    const inpColor = isAuto ? '#475569' : '#0f172a';
+    const inpCursor = isAuto ? 'not-allowed' : 'text';
+    return '<div>'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;gap:6px">'
+      + '<label style="font-size:11px;font-weight:700;color:#475569">' + label + '</label>'
+      + '<span style="display:inline-flex;gap:4px;flex-shrink:0">'
+      + '<button type="button" id="' + fid + '-modeAuto" onclick="_cp' + prefix + 'Auto()" title="완제품 정보에서 자동으로 가져옴 (수정 불가)" style="' + (isAuto?ON:OFF) + '">자동</button>'
+      + '<button type="button" id="' + fid + '-modeManual" onclick="_cp' + prefix + 'Manual()" title="직접 입력 (수정 가능)" style="' + (isAuto?OFF:ON) + '">수동</button>'
+      + '</span></div>'
+      + '<div style="display:flex;align-items:center;border:1px solid #cbd5e1;border-radius:7px;overflow:hidden">'
+      + '<input id="' + fid + '" type="number" step="any" value="' + _cpEsc(val) + '" oninput="_cpModalLive()" placeholder="0" data-mode="' + (isAuto?'auto':'manual') + '"' + (isAuto?' disabled':'') + ' style="flex:1;border:none;padding:7px 9px;font-size:12.5px;outline:none;min-width:0;background:' + inpBg + ';color:' + inpColor + ';cursor:' + inpCursor + '">'
+      + (unit ? ('<span style="padding:0 10px;font-size:11.5px;color:#94a3b8;background:#f8fafc;align-self:stretch;display:flex;align-items:center;border-left:1px solid #e2e8f0">' + unit + '</span>') : '')
+      + '</div></div>';
+  };
+  const chLabel = '📺 홈쇼핑 판매';
   const ov = document.createElement('div');
   ov.id = 'cp-modal-overlay';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99988;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:32px 16px';
@@ -11369,13 +11389,13 @@ function openCpModal(id) {
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">'
     + fld('채널명', 'cp-m-name', g('name'), '', {})
     + fld('회차', 'cp-m-round', g('round'), '', {})
-    + '<div style="grid-column:1/3"><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">제품 선택 (BOM 원가 자동)</label>'
+    + '<div style="grid-column:1/3"><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">제품 선택 (BOM 원가·실제 판매가 자동)</label>'
     + '<select id="cp-m-product" onchange="_cpModalProductChange()" style="width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px">' + prodOpts + '</select></div>'
-    + fld('COGS 단가 (개당 원가, BOM 자동·수정가능)', 'cp-m-cogsUnit', g('cogsUnit',0), '원', {type:'number'})
+    + modeFld('제품원가 COGS', 'cp-m-cogsUnit', g('cogsUnit',0), '원', g('cogsUnitMode','auto'), 'HsCogs')
     + fld('구좌 목표 비용', 'cp-m-targetCost', g('targetCost',0), '원', {type:'number'})
     + fld('달성률', 'cp-m-achieveRate', g('achieveRate',0), '%', {type:'number'})
     + fld('전환율', 'cp-m-convRate', g('convRate',70), '%', {type:'number'})
-    + fld('판매가', 'cp-m-sellPrice', g('sellPrice',0), '원', {type:'number'})
+    + modeFld('판매가', 'cp-m-sellPrice', g('sellPrice',0), '원', g('sellPriceMode','auto'), 'HsPrice')
     + fld('특약금', 'cp-m-specialFee', g('specialFee',0), '원', {type:'number'})
     + fld('게스트 비용', 'cp-m-guestFee', g('guestFee',0), '원', {type:'number'})
     + fld('인서트 비용', 'cp-m-insertFee', g('insertFee',0), '원', {type:'number'})
@@ -11383,26 +11403,34 @@ function openCpModal(id) {
     + fld('밴더 수수료', 'cp-m-vendorCommPct', g('vendorCommPct',4), '%', {type:'number'})
     + fld('비고', 'cp-m-note', g('note'), '', {})
     + '</div>'
-    + '<div id="cp-m-live" style="margin-top:14px;background:#fffbeb;border:1px solid #fde68a;border-radius:9px;padding:11px 14px;display:flex;gap:24px;align-items:center;flex-wrap:wrap"></div>'
+    + '<div style="font-size:10.5px;color:#94a3b8;margin-top:10px;line-height:1.7">· <b style="color:#475569">자동</b>: 완제품 품목정보의 실제 판매가·BOM 원가를 자동 사용 (수정 불가, 품목정보 변경 시 즉시 반영)<br>· <b style="color:#475569">수동</b>: 빈칸에 직접 입력 (품목정보 변경에 영향받지 않음)</div>'
+    + '<div id="cp-m-live" style="margin-top:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:9px;padding:11px 14px;display:flex;gap:24px;align-items:center;flex-wrap:wrap"></div>'
     + '</div>'
     + '<div style="padding:13px 20px;border-top:1px solid #f1f5f9;display:flex;justify-content:flex-end;gap:8px">'
     + '<button onclick="closeCpModal()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">취소</button>'
     + '<button onclick="saveCpRow()" style="background:#0f172a;color:#fff;border:none;padding:9px 22px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">저장</button>'
     + '</div></div>';
   document.body.appendChild(ov);
-  // v1.9.949: 인서트 부가세 입력칸 제거 (순이익이 부가세 제외 기준이라 불필요)
-  // v1.9.952: 수정 모달 — 선택된 제품에 BOM 이 있으면 현재 BOM 합계로 COGS 단가 동기화
+  // v1.9.978: 자동 모드일 때만 BOM·품목정보로 자동 동기화 (수동 모드는 사용자 입력 보존)
   try {
-    const _prodSel0 = document.getElementById('cp-m-product');
+    var _prodSel0 = document.getElementById('cp-m-product');
     if (_prodSel0 && _prodSel0.value) {
-      const _bc0 = _cpBomCost(_prodSel0.value);
-      if (_bc0 > 0) { const _cog0 = document.getElementById('cp-m-cogsUnit'); if (_cog0) _cog0.value = _bc0; }
-      const _itm0 = (DB.items||[]).find(function(x){ return x && String(x.id) === String(_prodSel0.value); });
-      if (_itm0 && _itm0.actualSalePrice != null && _itm0.actualSalePrice !== '') { const _sp0 = document.getElementById('cp-m-sellPrice'); if (_sp0) _sp0.value = _itm0.actualSalePrice; }
+      var _itm0 = (DB.items||[]).find(function(x){ return x && String(x.id) === String(_prodSel0.value); });
+      var _cog0 = document.getElementById('cp-m-cogsUnit');
+      if (_cog0 && _cog0.dataset.mode !== 'manual') {
+        var _bc0 = _cpBomCost(_prodSel0.value);
+        if (_bc0 > 0) _cog0.value = _bc0;
+        else if (_itm0 && _itm0.price) _cog0.value = _itm0.price;
+      }
+      var _sp0 = document.getElementById('cp-m-sellPrice');
+      if (_sp0 && _sp0.dataset.mode !== 'manual' && _itm0 && _itm0.actualSalePrice != null && _itm0.actualSalePrice !== '') {
+        _sp0.value = _itm0.actualSalePrice;
+      }
     }
   } catch(_){}
   _cpModalLive();
 }
+
 function closeCpModal() { const ov = document.getElementById('cp-modal-overlay'); if (ov) ov.remove(); }
 // v1.9.952: 제품의 현재 BOM 합계 원가 — DB.boms 에서 실시간 계산(캐시 X)
 function _cpBomCost(productId) {
@@ -11479,21 +11507,28 @@ function _cpExPriceAuto()   { _cpFieldMode({inputId:'cp-ex-krwPrice', productSel
 function _cpExPriceManual() { _cpFieldMode({inputId:'cp-ex-krwPrice', productSelId:'cp-ex-product',kind:'price',mode:'manual'}); }
 function _cpExCogsAuto()    { _cpFieldMode({inputId:'cp-ex-unitCost', productSelId:'cp-ex-product',kind:'cogs', mode:'auto'}); }
 function _cpExCogsManual()  { _cpFieldMode({inputId:'cp-ex-unitCost', productSelId:'cp-ex-product',kind:'cogs', mode:'manual'}); }
+function _cpHsPriceAuto()   { _cpFieldMode({inputId:'cp-m-sellPrice', productSelId:'cp-m-product',kind:'price',mode:'auto'}); }
+function _cpHsPriceManual() { _cpFieldMode({inputId:'cp-m-sellPrice', productSelId:'cp-m-product',kind:'price',mode:'manual'}); }
+function _cpHsCogsAuto()    { _cpFieldMode({inputId:'cp-m-cogsUnit',  productSelId:'cp-m-product',kind:'cogs', mode:'auto'}); }
+function _cpHsCogsManual()  { _cpFieldMode({inputId:'cp-m-cogsUnit',  productSelId:'cp-m-product',kind:'cogs', mode:'manual'}); }
 
 function _cpModalProductChange() {
-  const sel = document.getElementById('cp-m-product');
+  var sel = document.getElementById('cp-m-product');
   if (!sel) return;
-  const itm = (DB.items||[]).find(i => i && String(i.id) === String(sel.value));
+  var itm = (DB.items||[]).find(function(i){ return i && String(i.id) === String(sel.value); });
   if (itm) {
-    // v1.9.952: BOM 이 있으면 현재 BOM 합계를 실시간 계산해 사용 (BOM 수정 즉시 반영)
-    const unit = _cpBomCost(itm.id) || parseFloat(itm.bomCost) || parseFloat(itm.cogs) || parseFloat(itm.price) || 0;
-    const cog = document.getElementById('cp-m-cogsUnit');
-    if (cog) cog.value = unit;
-    const _spel = document.getElementById('cp-m-sellPrice');
-    if (_spel && itm.actualSalePrice != null && itm.actualSalePrice !== '') _spel.value = itm.actualSalePrice;
+    // v1.9.978: 자동 모드일 때만 갱신 (수동 모드는 사용자 입력 보존)
+    var cog = document.getElementById('cp-m-cogsUnit');
+    if (cog && cog.dataset.mode !== 'manual') {
+      var unit = _cpBomCost(itm.id) || parseFloat(itm.bomCost) || parseFloat(itm.cogs) || parseFloat(itm.price) || 0;
+      cog.value = unit;
+    }
+    var sp = document.getElementById('cp-m-sellPrice');
+    if (sp && sp.dataset.mode !== 'manual' && itm.actualSalePrice != null && itm.actualSalePrice !== '') sp.value = itm.actualSalePrice;
   }
   _cpModalLive();
 }
+
 function _cpReadModal() {
   if (_cpModalCh === 'pharmacy') return _cpReadModalPharmacy();
   if (_cpModalCh === 'export') return _cpReadModalExport();
@@ -11503,10 +11538,12 @@ function _cpReadModal() {
     round: (document.getElementById('cp-m-round')||{}).value || '',
     productId: sel ? sel.value : '',
     cogsUnit: _cpNum('cp-m-cogsUnit'),
+    cogsUnitMode: _cpModeOf('cp-m-cogsUnit'),
     targetCost: _cpNum('cp-m-targetCost'),
     achieveRate: _cpNum('cp-m-achieveRate'),
     convRate: _cpNum('cp-m-convRate'),
     sellPrice: _cpNum('cp-m-sellPrice'),
+    sellPriceMode: _cpModeOf('cp-m-sellPrice'),
     specialFee: _cpNum('cp-m-specialFee'),
     guestFee: _cpNum('cp-m-guestFee'),
     insertFee: _cpNum('cp-m-insertFee'),
@@ -11515,6 +11552,7 @@ function _cpReadModal() {
     note: (document.getElementById('cp-m-note')||{}).value || ''
   };
 }
+
 function _cpModalLive() {
   const box = document.getElementById('cp-m-live');
   if (!box) return;
