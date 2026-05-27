@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.0.8';
+const ERP_VERSION = 'v2.0.9';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27306,33 +27306,38 @@ function updateApprovalStats() {
     //  - po_approval 타입: 연결된 order의 날인/승인 플래그를 refId로 조회 (a.refId는 order.id)
     //  - non_po_approval 타입: status만으로 판정
     //  - 날인 흔적(stampData/stampName/stampedAt/stampNotRequired) 중 하나라도 있으면 승인 처리
+    // v2.0.9: ID 타입 불일치 방어 — 모두 String 키로 집합 구성
     const _stampedOrderIds = new Set(
       (DB.orders||[])
         .filter(o => o && (o.stampData || o.stampName || o.stampedAt || o.stampNotRequired))
-        .map(o => o.id)
+        .map(o => String(o.id))
     );
+    // v2.0.9: 존재하는 발주서 ID 집합 — orphan 결재 제외용
+    const _allOrderIds = new Set((DB.orders||[]).map(o => o && o.id != null ? String(o.id) : null).filter(Boolean));
     const pendingApprovals = (DB.approvals||[]).filter(a => {
       if (!a || a.status !== 'pending') return false;
       try {
-        // po_approval: 연결된 발주서가 이미 날인/승인된 경우 pending 잔존 레코드 제외
+        // po_approval: (a) 연결 발주서 미존재 → orphan, (b) 이미 날인됨 → 제외
         if (a.type === 'po_approval' && a.refId != null) {
-          if (_stampedOrderIds.has(a.refId) || _stampedOrderIds.has(Number(a.refId))) return false;
+          const _refStr = String(a.refId);
+          if (!_allOrderIds.has(_refStr)) return false;       // orphan
+          if (_stampedOrderIds.has(_refStr)) return false;    // 이미 날인됨
         }
       } catch(_){}
       return true;
     });
     const pendingOrders = (DB.orders||[]).filter(o => {
       try {
-        // v1.9.229: 날인 또는 결재 생략 플래그 중 하나라도 있으면 승인 처리
-        if (o.stampData || o.stampName || o.stampedAt || o.stampNotRequired) return false;
+        // v2.0.9: ERP양식+도장(approvalStampImage)도 명시적 안전망
+        if (o.stampData || o.stampName || o.stampedAt || o.stampNotRequired || o.approvalStampImage) return false;
         return getOrderApprovalStatus(o) !== 'approved';
       } catch(_) { return false; }
     });
-    // v1.9.230: 중복 카운트 방지 — 동일 order에 pendingApproval이 있고 pendingOrder에도 걸리면 1건만
-    const _pendingOrderIds = new Set(pendingOrders.map(o => o.id));
+    // 중복 카운트 방지 — 동일 order에 pendingApproval이 있고 pendingOrder에도 걸리면 1건만
+    const _pendingOrderIds = new Set(pendingOrders.map(o => String(o.id)));
     const _dedupedApprovals = pendingApprovals.filter(a => {
       if (a.type === 'po_approval' && a.refId != null) {
-        if (_pendingOrderIds.has(a.refId) || _pendingOrderIds.has(Number(a.refId))) return false;
+        if (_pendingOrderIds.has(String(a.refId))) return false;
       }
       return true;
     });
