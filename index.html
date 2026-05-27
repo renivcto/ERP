@@ -5281,7 +5281,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.981';
+const ERP_VERSION = 'v1.9.982';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -22846,7 +22846,8 @@ function confirmStockInQty(orderId) {
   DB.orders[idx] = o;
   try { processOrderStockIn(receivedRows, o.inDate || today(), o.serial || '', o.vendorId, o.id); } catch(e) { console.error('입고 재고반영 실패:', e); }
   try { completeRelatedProductions(o.rows, o.serial || ''); } catch(_){}
-  try { saveData(); } catch(_){}
+  // v1.9.982: 즉시 저장 — 디바운스 saveData() 는 다음 머지 전 미저장 위험
+  try { if (typeof _doSaveData === 'function') _doSaveData().catch(function(e){ console.warn('입고완료 저장 실패:', e); }); else saveData(); } catch(_){ try { saveData(); } catch(__){} }
   if (_m) _m.remove();
   try { renderOrderTable(); } catch(_){}
   try { renderProdTable(); } catch(_){}
@@ -31585,6 +31586,8 @@ function processOrderStockIn(rows, date, serial, orderVendorId, orderId) {
       const idx = DB.items.findIndex(i => i.id === item.id);
       if (idx >= 0) {
         DB.items[idx].stock += row.qty;
+        // v1.9.982: 머지 EDIT RECOVERY 가 로컬 변경을 보존하도록 updatedAt 갱신
+        DB.items[idx].updatedAt = Date.now();
         DB.stockHistory.push({
           id: nextId('stock'),
           itemId: item.id,
@@ -31644,7 +31647,8 @@ function processOrderStockIn(rows, date, serial, orderVendorId, orderId) {
         expiry: '',
         vendorId: null,
         material: '',
-        note: '발주서 입고완료 자동등록'
+        note: '발주서 입고완료 자동등록',
+        updatedAt: Date.now()
       };
       DB.items.push(newItem);
       DB.stockHistory.push({
