@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.994';
+const ERP_VERSION = 'v1.9.995';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28084,6 +28084,22 @@ function _approvalTombMap(list) {
   });
   return m;
 }
+// v1.9.995: tombstone 종합 맵 — DB._deletedApprovalIds + localStorage 전용 stash 병합
+//   머지로 DB 측 tombstone 이 사라져도 stash 가 살아있으면 부활 차단되도록.
+function _approvalTombMapAll() {
+  const m = _approvalTombMap(DB._deletedApprovalIds);
+  try {
+    const stash = JSON.parse(localStorage.getItem('reniv_deleted_approval_ids') || '[]');
+    (stash || []).forEach(function(x){
+      if (!x || x.id == null) return;
+      const k = String(x.id);
+      const ts = Number(x.ts) || 0;
+      const prev = m.get(k);
+      if (prev === undefined || ts > prev) m.set(k, ts);
+    });
+  } catch(_){}
+  return m;
+}
 function _isApprovalTombstoned(approval, tombMap) {
   if (!approval || approval.id == null || !tombMap) return false;
   const ts = tombMap.get(String(approval.id));
@@ -28102,7 +28118,8 @@ function _isApprovalTombstoned(approval, tombMap) {
 function _backupNonPoApprovals() {
   try {
     const cur = (DB.approvals||[]).filter(a => a && a.type === 'non_po_approval' && a.id != null);
-    const tombMap = _approvalTombMap(DB._deletedApprovalIds);
+    // v1.9.995: stash 까지 포함한 종합 tombstone (메인 DB 머지로 사라져도 부활 차단)
+    const tombMap = _approvalTombMapAll();
     const _write = function(existing) {
       try {
         const byId = new Map();
@@ -28135,7 +28152,8 @@ function _applyNonPoBackup(raw) {
     if (!list.length) return 0;
     if (!Array.isArray(DB.approvals)) DB.approvals = [];
     const have = new Set(DB.approvals.filter(a => a && a.id != null).map(a => String(a.id)));
-    const tombMap = _approvalTombMap(DB._deletedApprovalIds);
+    // v1.9.995: stash 까지 포함한 종합 tombstone — 부활 차단 강화
+    const tombMap = _approvalTombMapAll();
     let r = 0;
     list.forEach(a => {
       if (!a || a.id == null || a.type !== 'non_po_approval') return;
