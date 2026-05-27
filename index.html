@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.993';
+const ERP_VERSION = 'v1.9.994';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26114,7 +26114,49 @@ function resyncOrderExpenses(orderId) {
 }
 
 // ═══════════════════ 결재 페이지 렌더 ═══════════════════
+// v1.9.994: po_balance/po_prepay 중복 안전 정리 (같은 orderId+category 는 1건만 — paid 우선)
+// 왜: v203 backfill / Firestore 머지 타이밍 / 데이터 복구 후 ID 카운터 이슈로 같은 발주의
+//     잔금·선급금 expense 가 중복 생성되는 사례 발견 (예: orderId=8 의 po_balance 가 2건).
+//     v409 에서 자동 dedup 이 비활성화됐지만, po_balance/po_prepay 는 (orderId, category)
+//     당 1건이 강한 invariant 라 좁게 자동 정리 안전.
+function _dedupPoExpensesSafe() {
+  try {
+    if (!Array.isArray(DB.expenses)) return 0;
+    var grp = new Map();
+    DB.expenses.forEach(function(e){
+      if (!e || !e.orderId) return;
+      if (e.category !== 'po_balance' && e.category !== 'po_prepay') return;
+      var k = String(e.orderId) + '::' + e.category;
+      if (!grp.has(k)) grp.set(k, []);
+      grp.get(k).push(e);
+    });
+    var rmIds = [];
+    var kept = [];
+    grp.forEach(function(list, key){
+      if (list.length <= 1) return;
+      // paid 우선 → 없으면 createdAt 가장 큰 것
+      var paid = list.find(function(e){ return e && e.paidStatus === 'paid'; });
+      var keep = paid || list.slice().sort(function(a,b){ return (Number(b.createdAt)||0) - (Number(a.createdAt)||0); })[0];
+      list.forEach(function(e){
+        if (e && e !== keep) rmIds.push(e.id);
+      });
+      if (keep) kept.push({ key:key, keepId:keep.id, removedIds:list.filter(function(e){return e!==keep;}).map(function(e){return e.id;}) });
+    });
+    if (rmIds.length === 0) return 0;
+    console.warn('🧹 [v994] po_balance/po_prepay 중복 ' + rmIds.length + '건 자동 정리:', kept);
+    // tombstone 도 등록 — Firestore 머지로 부활 방지
+    if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
+    rmIds.forEach(function(id){ if (!DB._deletedExpenseIds.includes(id)) DB._deletedExpenseIds.push(id); });
+    var rmSet = new Set(rmIds.map(String));
+    DB.expenses = DB.expenses.filter(function(e){ return e && !rmSet.has(String(e.id)); });
+    try { if (typeof _doSaveData === 'function') _doSaveData(); else saveData(); } catch(_){}
+    return rmIds.length;
+  } catch(e){ console.warn('_dedupPoExpensesSafe:', e); return 0; }
+}
+
 function renderApprovalPage() {
+  // v1.9.994: po_balance/po_prepay 중복 자동 정리 (한 orderId+category 당 1건)
+  try { _dedupPoExpensesSafe(); } catch(_){}
   // v1.9.914: 일반 결재 전용 백업에서 누락분 복구 (KPI/목록 일관성)
   try { if (typeof _restoreNonPoApprovalsFromBackup === 'function') _restoreNonPoApprovalsFromBackup(); } catch(_){}
   // v1.9.881: 광고 프로젝트 tombstone 도 적용 (전 페이지 일관성)
