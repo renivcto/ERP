@@ -2273,13 +2273,12 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div class="card-body p0" style="overflow-x:hidden">
             <table style="table-layout:fixed;width:100%">
               <colgroup>
-                <col style="width:96px"><col><col style="width:84px"><col style="width:84px"><col style="width:84px"><col style="width:92px"><col style="width:92px"><col style="width:74px"><col style="width:110px">
+                <col style="width:104px"><col><col style="width:88px"><col style="width:96px"><col style="width:100px"><col style="width:100px"><col style="width:80px"><col style="width:120px">
               </colgroup>
               <thead><tr style="font-size:11.5px">
                 <th style="text-align:center">업체명</th>
                 <th style="text-align:center">품목</th>
                 <th style="text-align:center">발주금액</th>
-                <th style="text-align:center">결재 요청</th>
                 <th style="text-align:center">결재 날인</th>
                 <th style="text-align:center">선급금 지급</th>
                 <th style="text-align:center">잔금</th>
@@ -5288,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.999';
+const ERP_VERSION = 'v2.0.0';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27321,7 +27320,7 @@ function renderApprovalPoTable() {
     return (Number(b && b.id)||0) - (Number(a && a.id)||0);
   });
   if (!orders.length) {
-    tb.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--gray-400)">등록된 발주서가 없습니다</td></tr>';
+    tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--gray-400)">등록된 발주서가 없습니다</td></tr>';
     return;
   }
   tb.innerHTML = orders.map(o => {
@@ -27360,15 +27359,11 @@ function renderApprovalPoTable() {
     } else if (o.stampNotRequired) {
       apBtn = `<span class="badge" style="cursor:pointer;${BADGE_STYLE_AP};background:var(--gray-100);color:var(--gray-600);border-color:var(--gray-300)" onclick="toggleStampNotRequired(${o.id})" title="클릭하면 '결재 전'으로 되돌립니다">⊘ 날인 불필요</span>`;
     } else if (apStatus === 'approved') {
-      apBtn = `<label class="badge" style="cursor:pointer;${BADGE_STYLE_AP};background:var(--sky-50);color:var(--sky-700);border-color:var(--sky-300);font-weight:500" title="결재 완료 — 클릭해서 날인 PDF 업로드">
-           <input type="file" accept="application/pdf,image/*" style="display:none" onchange="uploadStampForOrder(${o.id}, this)">
-           ✅ 결재 완료
-         </label>`;
+      // v2.0.0: 파일 업로드 대신 ERP 양식 팝업 (도장 추가 + 결재 완료 저장)
+      apBtn = `<span class="badge" style="cursor:pointer;${BADGE_STYLE_AP};background:var(--sky-50);color:var(--sky-700);border-color:var(--sky-300);font-weight:500" onclick="openPoApprovalSheet(${o.id})" title="발주서 양식 + 도장 + 결재 완료 저장">✅ 결재 완료</span>`;
     } else {
-      apBtn = `<label class="badge" style="cursor:pointer;${BADGE_STYLE_AP};background:var(--sky-100);color:var(--sky-800);border-color:var(--sky-400);font-weight:500${urgent?';animation:apBlink .9s infinite':''}" title="클릭해서 결재 날인본 업로드">
-           <input type="file" accept="application/pdf,image/*" style="display:none" onchange="uploadStampForOrder(${o.id}, this)">
-           결재 전
-         </label>`;
+      // v2.0.0: 결재 전 → ERP 양식 팝업으로 진입 (도장 추가 → 저장 → 결재 완료 전환)
+      apBtn = `<span class="badge" style="cursor:pointer;${BADGE_STYLE_AP};background:var(--sky-100);color:var(--sky-800);border-color:var(--sky-400);font-weight:500${urgent?';animation:apBlink .9s infinite':''}" onclick="openPoApprovalSheet(${o.id})" title="클릭하면 발주서 양식이 열립니다 — 도장 추가 후 결재 완료 저장">결재 전</span>`;
     }
     // v1.9.211: 선급금 expense — 중복 방지 (paid 우선, 가장 최근 id)
     // v1.9.212: orderId 문자열/숫자 혼재 대응 (Number 정규화)
@@ -27484,9 +27479,6 @@ function renderApprovalPoTable() {
       <td style="text-align:center;padding:8px 2px">
         <div style="font-weight:400;line-height:1.3">${fmtWon(amount)}</div>
         ${_orderDateShort ? `<div style="font-size:11px;color:var(--gray-400);font-weight:500;margin-top:2px;letter-spacing:.2px" title="발주일 ${o.orderDate||''}">${_orderDateShort}</div>` : ''}
-      </td>
-      <td style="text-align:center;padding:8px 2px">
-        <button onclick="openPoApprovalSheet(${o.id})" title="발주서 양식 미리보기 + 도장 + 인쇄/PDF" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:5px 10px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px;line-height:1.1;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,.03)">📄 파일</button>
       </td>
       <td style="text-align:center;padding:8px 2px">${apBtn}</td>
       <td style="text-align:center;padding:8px 2px">${preCell}</td>
@@ -32343,24 +32335,35 @@ function openPoApprovalSheet(orderId) {
         if (alreadyStamped) {
           try { _overlayStampOnCeoCell(o.approvalStampImage); } catch(_){}
         }
-        // 3) 도장 업로드 + 저장 툴바 삽입
+        // 3) 도장 툴바 — 이미 완료된 발주서는 변경 불가 (배지만 표시)
+        //    o.stampName 이 있으면 결재 완료 상태로 간주 (uploaded PDF 또는 erp_form 도장 저장 완료)
+        var isAlreadyApproved = !!(o.stampName);
         var content = document.getElementById('doc-preview-content');
         if (content && !document.getElementById('po-sheet-toolbar')) {
           var toolbar = document.createElement('div');
           toolbar.id = 'po-sheet-toolbar';
-          toolbar.style.cssText = 'display:flex;gap:8px;align-items:center;justify-content:center;padding:10px 14px;margin-bottom:14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;flex-wrap:wrap';
-          var savedBadge = alreadyStamped
-            ? '<span style="font-size:11px;color:#15803d;background:#dcfce7;border:1px solid #86efac;padding:3px 9px;border-radius:99px;font-weight:700">✅ 결재 완료 저장됨</span>'
-            : '';
-          toolbar.innerHTML = ''
-            + '<span style="font-size:12.5px;color:#92400e;font-weight:700">🔴 대표 도장</span>'
-            + savedBadge
-            + '<label style="padding:6px 14px;background:#fff;border:1px solid #fcd34d;color:#92400e;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px">'
-            +   '<input type="file" accept="image/*" style="display:none" onchange="_applyPoApprovalStamp(this)"> 📷 도장 이미지 ' + (alreadyStamped ? '변경' : '선택') + ''
-            + '</label>'
-            + '<button onclick="_savePoApprovalStamp()" style="padding:6px 14px;background:#16a34a;color:#fff;border:1px solid #15803d;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:6px;box-shadow:0 1px 3px rgba(22,163,74,.3)">✅ 결재 완료 저장</button>'
-            + '<button onclick="_removePoApprovalStamp()" style="padding:6px 12px;background:#fff;border:1px solid #cbd5e1;color:#475569;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">✕ 도장 제거</button>'
-            + '<span style="font-size:11px;color:#92400e;line-height:1.4;flex-basis:100%;text-align:center">↗ 도장 추가 후 <b>✅ 결재 완료 저장</b> 버튼을 눌러야 결재 날인 컬럼이 갱신됩니다 · 우측 상단 <b>🖨️ 인쇄/PDF</b> 로 출력 가능</span>';
+          if (isAlreadyApproved) {
+            // 완료된 발주서: 변경 불가 — 안내 배지만
+            toolbar.style.cssText = 'display:flex;gap:10px;align-items:center;justify-content:center;padding:10px 14px;margin-bottom:14px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;flex-wrap:wrap';
+            toolbar.innerHTML = ''
+              + '<span style="font-size:13px;color:#15803d;font-weight:700;display:inline-flex;align-items:center;gap:6px">✅ 결재 완료된 발주서</span>'
+              + '<span style="font-size:11.5px;color:#16653a;line-height:1.4">변경할 수 없습니다 · 우측 상단 <b>🖨️ 인쇄/PDF</b> 로 출력만 가능</span>';
+          } else {
+            // 미완료: 도장 업로드 + 저장 + 제거 툴바
+            toolbar.style.cssText = 'display:flex;gap:8px;align-items:center;justify-content:center;padding:10px 14px;margin-bottom:14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;flex-wrap:wrap';
+            var savedBadge = alreadyStamped
+              ? '<span style="font-size:11px;color:#15803d;background:#dcfce7;border:1px solid #86efac;padding:3px 9px;border-radius:99px;font-weight:700">✅ 결재 완료 저장됨</span>'
+              : '';
+            toolbar.innerHTML = ''
+              + '<span style="font-size:12.5px;color:#92400e;font-weight:700">🔴 대표 도장</span>'
+              + savedBadge
+              + '<label style="padding:6px 14px;background:#fff;border:1px solid #fcd34d;color:#92400e;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px">'
+              +   '<input type="file" accept="image/*" style="display:none" onchange="_applyPoApprovalStamp(this)"> 📷 도장 이미지 ' + (alreadyStamped ? '변경' : '선택') + ''
+              + '</label>'
+              + '<button onclick="_savePoApprovalStamp()" style="padding:6px 14px;background:#16a34a;color:#fff;border:1px solid #15803d;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:6px;box-shadow:0 1px 3px rgba(22,163,74,.3)">✅ 결재 완료 저장</button>'
+              + '<button onclick="_removePoApprovalStamp()" style="padding:6px 12px;background:#fff;border:1px solid #cbd5e1;color:#475569;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">✕ 도장 제거</button>'
+              + '<span style="font-size:11px;color:#92400e;line-height:1.4;flex-basis:100%;text-align:center">↗ 도장 추가 후 <b>✅ 결재 완료 저장</b> 버튼을 눌러야 결재 날인 컬럼이 갱신됩니다 · 우측 상단 <b>🖨️ 인쇄/PDF</b> 로 출력 가능</span>';
+          }
           content.insertBefore(toolbar, content.firstChild);
         }
       } catch(e){ console.warn('openPoApprovalSheet post-render:', e); }
