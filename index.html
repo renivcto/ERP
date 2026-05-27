@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.988';
+const ERP_VERSION = 'v1.9.989';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10701,6 +10701,12 @@ function _rpRender() {
     var isFirst = (idx === 0);
     var isLast = (idx === items.length - 1);
     var amtStr = _rpFmtMoney(it.amount, it.currency);
+    if (it.isMetered) {
+      amtStr = '<div style="display:inline-flex;flex-direction:column;align-items:center;gap:2px">'
+             + '<span style="padding:2px 8px;background:#fef3c7;color:#a16207;border-radius:99px;font-size:10.5px;font-weight:700">📊 종량제</span>'
+             + '<span style="font-size:11.5px;color:#475569;font-weight:700">예상 ' + amtStr + '</span>'
+             + '</div>';
+    }
     var modeStr;
     if (it.paymentMode === 'auto') {
       modeStr = '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;background:#dcfce7;color:#15803d;border-radius:99px;font-size:11px;font-weight:700">⚙️ 자동</span>';
@@ -10713,7 +10719,7 @@ function _rpRender() {
     h += '<tr>';
     h += td('<span onclick="openRecurringDetail(' + it.id + ')" style="color:#6366f1;font-weight:700;cursor:pointer">' + _rpEsc(it.site || '-') + '</span>');
     h += td('<span style="color:#0f172a">' + _rpEsc(it.purpose || '-') + '</span>');
-    h += td('<b style="color:#0f172a">' + amtStr + '</b>');
+    h += td(it.isMetered ? amtStr : ('<b style="color:#0f172a">' + amtStr + '</b>'));
     h += td(modeStr);
     h += td('<span style="font-family:monospace;color:#475569;font-size:11.5px">' + _rpEsc(it.account || '-') + '</span>');
     h += td(urlBtn);
@@ -10739,6 +10745,7 @@ function openRecurringModal(id) {
   var g = function(f, d){ return (r && r[f] != null && r[f] !== '') ? r[f] : (d == null ? '' : d); };
   var currency = g('currency', 'KRW');
   var paymentMode = g('paymentMode', 'auto');
+  var isMetered = !!g('isMetered', false);
   var ov = document.createElement('div');
   ov.id = 'recurring-modal-overlay';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99988;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:32px 16px';
@@ -10770,8 +10777,12 @@ function openRecurringModal(id) {
     + '<option value="USD"' + (currency==='USD'?' selected':'') + '>$ USD</option>'
     + '<option value="AUD"' + (currency==='AUD'?' selected':'') + '>A$ AUD</option>'
     + '</select>'
-    + '<input id="rp-amount" type="number" step="any" value="' + _rpEsc(g('amount', 0)) + '" placeholder="0" style="flex:1;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px;min-width:0;outline:none;box-sizing:border-box">'
-    + '</div></div>'
+    + '<input id="rp-amount" type="number" step="any" value="' + _rpEsc(g('amount', 0)) + '" placeholder="' + (isMetered ? '예상 금액' : '0') + '" style="flex:1;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px;min-width:0;outline:none;box-sizing:border-box;background:' + (isMetered ? '#fffbeb' : '#fff') + '">'
+    + '</div>'
+    + '<div style="margin-top:5px"><label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#64748b;cursor:pointer;font-weight:600">'
+    + '<input id="rp-isMetered" type="checkbox"' + (isMetered ? ' checked' : '') + ' onchange="_rpToggleMetered()" style="margin:0;cursor:pointer">'
+    + '<span>종량제 (사용량 기반 — 위 금액은 예상 금액)</span></label></div>'
+    + '</div>'
     + '<div><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">결제 방식</label>'
     + '<div style="display:flex;gap:6px;align-items:stretch">'
     + '<select id="rp-paymentMode" onchange="_rpToggleAutoDate()" style="flex-shrink:0;width:100px;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px;background:#fff">'
@@ -10800,6 +10811,14 @@ function _rpToggleAutoDate() {
   if (!sel || !inp) return;
   inp.style.display = (sel.value === 'auto') ? '' : 'none';
 }
+// v1.9.989: 종량제 체크박스 토글 — 체크 시 금액 입력칸을 '예상 금액' 모드로 전환
+function _rpToggleMetered() {
+  var ck = document.getElementById('rp-isMetered');
+  var inp = document.getElementById('rp-amount');
+  if (!ck || !inp) return;
+  inp.placeholder = ck.checked ? '예상 금액' : '0';
+  inp.style.background = ck.checked ? '#fffbeb' : '#fff';
+}
 function saveRecurringPayment() {
   if (!_rpData) _rpData = _rpDefault();
   var id = window._rpEditId;
@@ -10810,6 +10829,7 @@ function saveRecurringPayment() {
     applicant: ((document.getElementById('rp-applicant')||{}).value || '').trim(),
     purpose: ((document.getElementById('rp-purpose')||{}).value || '').trim(),
     amount: parseFloat((document.getElementById('rp-amount')||{}).value) || 0,
+    isMetered: !!((document.getElementById('rp-isMetered')||{}).checked),
     currency: (document.getElementById('rp-currency')||{}).value || 'KRW',
     paymentMode: (document.getElementById('rp-paymentMode')||{}).value || 'auto',
     autoPayDate: ((document.getElementById('rp-autoPayDate')||{}).value || '').trim(),
@@ -10879,6 +10899,9 @@ function openRecurringDetail(id) {
       + '</div>';
   };
   var amtStr = _rpFmtMoney(it.amount, it.currency);
+  if (it.isMetered) {
+    amtStr = '<span style="display:inline-block;padding:2px 9px;background:#fef3c7;color:#a16207;border-radius:99px;font-size:11px;font-weight:700;margin-right:6px">📊 종량제</span>예상 ' + amtStr;
+  }
   var modeStr = it.paymentMode === 'auto'
     ? ('⚙️ 자동' + (it.autoPayDate ? ' (' + _rpEsc(it.autoPayDate) + ')' : ''))
     : '✋ 수동';
