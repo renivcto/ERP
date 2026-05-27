@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.0.1';
+const ERP_VERSION = 'v2.0.2';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -22884,8 +22884,12 @@ function renderOrderTable() {
     let stampBadge;
     const _apStatusForOrder = (typeof getOrderApprovalStatus === 'function') ? getOrderApprovalStatus(o) : 'pending';
     if (o.stampName) {
+      // v2.0.2: erp_form 케이스는 openPoApprovalSheet 로 양식+도장 팝업
+      var _badgeClickOT = (o.stampType === 'erp_form')
+        ? `openPoApprovalSheet(${o.id})`
+        : `viewOrderPDFByIdx(${dbIdx},'stamp')`;
       stampBadge = `<span style="position:relative;display:inline-block">
-           <span class="badge" style="cursor:pointer;${BADGE_STYLE};background:var(--sky-50);color:var(--sky-700);border-color:var(--sky-200)" onclick="viewOrderPDFByIdx(${dbIdx},'stamp')" title="${o.stampName}"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--sky-700)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><polyline points="9 15 11 17 15 13"/></svg>결재 완료</span>
+           <span class="badge" style="cursor:pointer;${BADGE_STYLE};background:var(--sky-50);color:var(--sky-700);border-color:var(--sky-200)" onclick="${_badgeClickOT}" title="${o.stampName}"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--sky-700)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><polyline points="9 15 11 17 15 13"/></svg>결재 완료</span>
            ${newBadge}
          </span>`;
     } else if (o.stampNotRequired) {
@@ -22970,7 +22974,102 @@ function renderOrderTable() {
 // v1.9.569 — 발주서 이메일 발송 (.eml 파일 생성)
 //   결재 날인 PDF가 있으면 첨부, 없으면 원본 PDF, 둘 다 없으면 알림
 //   .eml 파일을 다운로드하면 Outlook 이 자동으로 새 메일 창 열어줌 (받는 사람·본문·첨부 모두 채워짐)
-function sendOrderEmail(orderId) {
+// v2.0.2: CDN 스크립트 한 번만 로드
+function _loadScriptOnce(src, checkFn) {
+  return new Promise(function(resolve, reject){
+    try {
+      if (typeof checkFn === 'function' && checkFn()) { resolve(); return; }
+      var existing = Array.prototype.find.call(document.querySelectorAll('script'), function(s){ return s.src === src; });
+      if (existing) {
+        // 이미 추가됨 — onload 가 끝났는지 폴링
+        var tries = 0;
+        var iv = setInterval(function(){
+          if ((typeof checkFn === 'function' && checkFn()) || ++tries > 100) {
+            clearInterval(iv);
+            (typeof checkFn === 'function' && checkFn()) ? resolve() : reject(new Error('script timeout: ' + src));
+          }
+        }, 50);
+        return;
+      }
+      var s = document.createElement('script');
+      s.src = src;
+      s.async = false;
+      s.onload = function(){ resolve(); };
+      s.onerror = function(){ reject(new Error('script load fail: ' + src)); };
+      document.head.appendChild(s);
+    } catch(e){ reject(e); }
+  });
+}
+
+async function _ensurePdfLibs() {
+  await _loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', function(){ return typeof window.html2canvas === 'function'; });
+  await _loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', function(){ return !!(window.jspdf && window.jspdf.jsPDF); });
+}
+
+// v2.0.2: ERP 양식 + 도장 오버레이를 PDF (A4) 로 변환해 data URL 반환
+async function _generateOrderFormStampedPdf(o) {
+  await _ensurePdfLibs();
+  if (typeof showRenivOrderPreview !== 'function') throw new Error('showRenivOrderPreview 없음');
+  // 모달 시각적으로 숨김 (DOM 은 살아있음)
+  showRenivOrderPreview(o);
+  var modal = document.getElementById('overlay-doc-preview');
+  if (modal) {
+    modal.style.opacity = '0';
+    modal.style.pointerEvents = 'none';
+  }
+  try {
+    await new Promise(function(r){ setTimeout(r, 150); });
+    // 도장 오버레이 (이미 저장된 erp_form 경우)
+    if (o.stampType === 'erp_form' && o.approvalStampImage) {
+      var doc = document.getElementById('printable-doc');
+      if (doc) {
+        var cells = doc.querySelectorAll('td');
+        for (var i = 0; i < cells.length; i++) {
+          var td = cells[i];
+          var txt = (td.textContent || '').trim();
+          if (txt.indexOf('이주연') === 0) {
+            td.style.position = 'relative';
+            // (인) 숨김
+            var ss = td.querySelectorAll('span');
+            for (var j = 0; j < ss.length; j++) {
+              if ((ss[j].textContent || '').indexOf('(인)') >= 0) ss[j].style.visibility = 'hidden';
+            }
+            var img = document.createElement('img');
+            img.src = o.approvalStampImage;
+            img.style.cssText = 'position:absolute;top:50%;right:10px;transform:translateY(-50%);width:58px;height:58px;object-fit:contain;opacity:.88;mix-blend-mode:multiply';
+            td.appendChild(img);
+            await new Promise(function(r){ if (img.complete) r(); else { img.onload = r; img.onerror = r; setTimeout(r, 1500); } });
+            break;
+          }
+        }
+      }
+    }
+    await new Promise(function(r){ setTimeout(r, 100); });
+    var printable = document.getElementById('printable-doc');
+    if (!printable) throw new Error('printable-doc 못 찾음');
+    var canvas = await window.html2canvas(printable, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+    var imgData = canvas.toDataURL('image/jpeg', 0.92);
+    var jsPDF = window.jspdf.jsPDF;
+    var pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    var pdfW = pdf.internal.pageSize.getWidth();
+    var pdfH = pdf.internal.pageSize.getHeight();
+    var imgRatio = canvas.height / canvas.width;
+    var margin = 8;
+    var imgW = pdfW - 2 * margin;
+    var imgH = imgW * imgRatio;
+    if (imgH > pdfH - 2 * margin) {
+      imgH = pdfH - 2 * margin;
+      imgW = imgH / imgRatio;
+    }
+    pdf.addImage(imgData, 'JPEG', (pdfW - imgW) / 2, margin, imgW, imgH);
+    return pdf.output('datauristring');
+  } finally {
+    try { if (typeof closeModal === 'function') closeModal('doc-preview'); } catch(_){}
+    if (modal) { modal.style.opacity = ''; modal.style.pointerEvents = ''; }
+  }
+}
+
+async function sendOrderEmail(orderId) {
   const o = (DB.orders||[]).find(x => x && x.id === orderId);
   if (!o) { showNotif('발주서를 찾을 수 없습니다', 'warning'); return; }
   const v = (typeof getVendor === 'function') ? (getVendor(o.vendorId) || {}) : ((DB.vendors||[]).find(x => x && x.id === o.vendorId) || {});
@@ -22979,9 +23078,21 @@ function sendOrderEmail(orderId) {
     showNotif('업체에 이메일이 등록되어 있지 않습니다 (업체 관리에서 등록)', 'warning');
     return;
   }
-  // 첨부 PDF — 결재 날인본 우선, 없으면 원본
+  // 첨부 PDF — v2.0.2: erp_form(ERP 양식+도장) 우선, 다음 stampData(업로드 PDF), 다음 pdfData(원본)
   let pdfData = '', pdfName = '';
-  if (o.stampData) {
+  const _isErpForm = (o.stampType === 'erp_form' && o.approvalStampImage)
+                     || (typeof o.stampName === 'string' && o.stampName.indexOf('[ERP양식+도장]') === 0 && o.approvalStampImage);
+  if (_isErpForm) {
+    try {
+      try { showNotif('🔄 결재 완료 발주서 PDF 생성 중... (~1-2초)', 'info'); } catch(_){}
+      pdfData = await _generateOrderFormStampedPdf(o);
+      pdfName = `발주서_${v.company||'업체'}_${o.orderDate||''}_결재완료.pdf`;
+    } catch(e) {
+      console.error('ERP 양식 PDF 생성 실패:', e);
+      showNotif('PDF 생성 실패: ' + (e && e.message || e), 'error');
+      return;
+    }
+  } else if (o.stampData) {
     pdfData = o.stampData;
     pdfName = o.stampName || `발주서_${v.company||'업체'}_${o.orderDate||''}_날인.pdf`;
   } else if (o.pdfData) {
