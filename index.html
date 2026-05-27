@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.0.6';
+const ERP_VERSION = 'v2.0.8';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -20447,7 +20447,7 @@ function renderProdTable() {
       window.prodProductLineFilter = '전체';
     }
   }
-  // v1.9.292: 1차 상태 그룹 순서 → 2차 입고예정일(inDate) 오름차순 (과거 → 미래). 빈 입고일은 해당 그룹 맨 뒤.
+  // v2.0.7: 1차 상태 그룹 순서 → 2차 입고예정일(inDate) 내림차순 (최신 → 과거). 빈 입고일은 해당 그룹 맨 뒤.
   const statusOrder = {생산중:0, 지연:1, QC검사:2, 생산완료:3, 입고완료:4};
   const allSorted = [...prodAll].sort((a,b)=>{
     const so = (statusOrder[a.status]??5) - (statusOrder[b.status]??5);
@@ -20457,7 +20457,7 @@ function renderProdTable() {
     if (!ad && !bd) return 0;
     if (!ad) return 1;
     if (!bd) return -1;
-    return ad.localeCompare(bd);
+    return bd.localeCompare(ad);
   });
   let filtered = prodFilter==='전체' ? allSorted : allSorted.filter(p=>p.status===prodFilter);
   // v1.9.318 — 제품 라인 필터 적용
@@ -32492,8 +32492,15 @@ function openPoApprovalSheet(orderId) {
   try {
     var o = (DB.orders||[]).find(function(x){ return parseInt(x.id) === parseInt(orderId) || x.id == orderId; });
     if (!o) { try { showNotif('발주서를 찾을 수 없습니다','warning'); } catch(_){} return; }
-    if (typeof showRenivOrderPreview !== 'function') { try { showNotif('미리보기 함수가 없습니다','warning'); } catch(_){} return; }
-    showRenivOrderPreview(o);
+    // v2.0.8: 해외 PO 면 영문 PURCHASE ORDER 양식
+    var _isOverseasPO = !!o.isOverseas;
+    if (_isOverseasPO) {
+      if (typeof showOverseasOrderPreview !== 'function') { try { showNotif('해외 PO 미리보기 함수가 없습니다','warning'); } catch(_){} return; }
+      showOverseasOrderPreview(o);
+    } else {
+      if (typeof showRenivOrderPreview !== 'function') { try { showNotif('미리보기 함수가 없습니다','warning'); } catch(_){} return; }
+      showRenivOrderPreview(o);
+    }
     // 현재 모달이 가리키는 orderId 기억 (저장 함수에서 사용)
     window._poSheetOrderId = orderId;
     // DOM 이 그려진 뒤 후처리
@@ -32501,16 +32508,25 @@ function openPoApprovalSheet(orderId) {
       try {
         var doc = document.getElementById('printable-doc');
         if (!doc) return;
-        // 1) '이주연' 으로 시작하는 td 를 찾아 id + relative 부여
-        var cells = doc.querySelectorAll('td');
-        for (var i = 0; i < cells.length; i++) {
-          var td = cells[i];
-          var txt = (td.textContent || '').trim();
-          if (txt.indexOf('이주연') === 0) {
-            td.id = 'po-sheet-ceo-cell';
-            td.style.position = 'relative';
-            td.style.minHeight = '60px';
-            break;
+        if (_isOverseasPO) {
+          // 해외 PO — Authorized by (Buyer) 박스에 ID 부여 (이미 HTML 에 id 지정됨)
+          var sigBox = document.getElementById('po-sheet-buyer-sig');
+          if (sigBox) {
+            // 통일된 인터페이스 유지 — 동일 ID 매핑
+            sigBox.setAttribute('data-stamp-target', 'true');
+          }
+        } else {
+          // 국문 — '이주연' 으로 시작하는 td 를 찾아 id + relative 부여
+          var cells = doc.querySelectorAll('td');
+          for (var i = 0; i < cells.length; i++) {
+            var td = cells[i];
+            var txt = (td.textContent || '').trim();
+            if (txt.indexOf('이주연') === 0) {
+              td.id = 'po-sheet-ceo-cell';
+              td.style.position = 'relative';
+              td.style.minHeight = '60px';
+              break;
+            }
           }
         }
         // 2) 저장된 도장 이미지가 있으면 자동 재오버레이
@@ -32554,21 +32570,30 @@ function openPoApprovalSheet(orderId) {
   } catch(e){ console.warn('openPoApprovalSheet:', e); }
 }
 
-// v1.9.997: 셀에 도장 이미지를 오버레이하는 공통 헬퍼
+// v1.9.997 / v2.0.8: 도장·사인 이미지 오버레이 — 국문(이주연 칸) + 영문(Buyer 사인 박스) 모두 지원
 function _overlayStampOnCeoCell(dataUrl) {
-  var cell = document.getElementById('po-sheet-ceo-cell');
+  // 우선순위: 국문 셀(po-sheet-ceo-cell) → 영문 buyer sig 박스(po-sheet-buyer-sig)
+  var cell = document.getElementById('po-sheet-ceo-cell') || document.getElementById('po-sheet-buyer-sig');
   if (!cell) return;
   var existing = cell.querySelector('.po-sheet-stamp-img');
   if (existing) existing.remove();
-  var spans = cell.querySelectorAll('span');
-  for (var i = 0; i < spans.length; i++) {
-    var s = spans[i];
-    if ((s.textContent || '').indexOf('(인)') >= 0) { s.style.visibility = 'hidden'; }
+  // 국문일 때만 (인) 텍스트 숨김
+  if (cell.id === 'po-sheet-ceo-cell') {
+    var spans = cell.querySelectorAll('span');
+    for (var i = 0; i < spans.length; i++) {
+      var s = spans[i];
+      if ((s.textContent || '').indexOf('(인)') >= 0) { s.style.visibility = 'hidden'; }
+    }
   }
   var img = document.createElement('img');
   img.src = dataUrl;
   img.className = 'po-sheet-stamp-img';
-  img.style.cssText = 'position:absolute;top:50%;right:10px;transform:translateY(-50%);width:58px;height:58px;object-fit:contain;opacity:.88;pointer-events:none;mix-blend-mode:multiply';
+  // 국문은 작은 도장, 영문은 사인이므로 약간 다른 위치/크기
+  if (cell.id === 'po-sheet-buyer-sig') {
+    img.style.cssText = 'position:absolute;bottom:18px;left:50%;transform:translateX(-50%);max-width:140px;max-height:60px;object-fit:contain;opacity:.92;pointer-events:none;mix-blend-mode:multiply';
+  } else {
+    img.style.cssText = 'position:absolute;top:50%;right:10px;transform:translateY(-50%);width:58px;height:58px;object-fit:contain;opacity:.88;pointer-events:none;mix-blend-mode:multiply';
+  }
   cell.appendChild(img);
 }
 
@@ -32649,6 +32674,126 @@ function _removePoApprovalStamp() {
     }
     try { showNotif('도장 제거됨','info'); } catch(_){}
   }
+}
+
+// ── v2.0.8: 해외 PO — PURCHASE ORDER 영문 양식을 doc-preview 모달에 렌더링 ────────
+function showOverseasOrderPreview(o) {
+  if (!o) return;
+  var esc = function(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
+  var cur = o.currency || 'USD';
+  var fmt = function(n){ return Number(n||0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var b = o.buyer || {};
+  var s = o.supplier || {};
+  var da = o.deliveryAddr || {};
+  var rows = Array.isArray(o.rows) ? o.rows : [];
+  var productTotal = parseFloat(o.productTotal) || rows.reduce(function(sum, r){ return sum + ((parseFloat(r.qty)||0) * (parseFloat(r.price)||0)); }, 0);
+  var oceanFreight = parseFloat(o.oceanFreight) || 0;
+  var grandTotal = productTotal + oceanFreight;
+  var itemRows = rows.map(function(r, i){
+    var qty = parseFloat(r.qty || r.quantity) || 0;
+    var price = parseFloat(r.price || r.unitPrice) || 0;
+    var amount = qty * price;
+    return '<tr>' +
+      '<td style="text-align:center;border:1px solid #cbd5e1;padding:7px;background:#fff">' + (i+1) + '</td>' +
+      '<td style="border:1px solid #cbd5e1;padding:7px;background:#fff">' + esc(r.name || r.description || '-') + '</td>' +
+      '<td style="text-align:center;border:1px solid #cbd5e1;padding:7px;background:#fff">' + esc(r.code || r.productCode || '—') + '</td>' +
+      '<td style="text-align:center;border:1px solid #cbd5e1;padding:7px;background:#fff">' + esc(r.capacity || '-') + '</td>' +
+      '<td style="text-align:right;border:1px solid #cbd5e1;padding:7px;background:#fff;font-variant-numeric:tabular-nums">' + fmt(price) + '</td>' +
+      '<td style="text-align:right;border:1px solid #cbd5e1;padding:7px;background:#fff;font-variant-numeric:tabular-nums">' + qty.toLocaleString() + '</td>' +
+      '<td style="text-align:right;border:1px solid #cbd5e1;padding:7px;background:#fff;font-variant-numeric:tabular-nums">' + fmt(amount) + '</td>' +
+    '</tr>';
+  }).join('');
+  // 스타일은 인라인으로 — doc-preview 모달 안에서 동작
+  var H = '<div id="printable-doc" style="font-family:Helvetica Neue,Arial,맑은 고딕,sans-serif;color:#0f172a;font-size:12px;padding:24px;background:#fff;max-width:820px;margin:0 auto">';
+  H += '<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #0f172a;padding-bottom:12px;margin-bottom:18px">';
+  H += '<h1 style="font-size:28px;font-weight:800;letter-spacing:1.5px;margin:0">PURCHASE ORDER</h1>';
+  H += '<div style="font-size:14px;font-weight:700;color:#1e3a8a">' + esc(o.poNumber || '-') + '</div>';
+  H += '</div>';
+  H += '<div style="display:flex;gap:16px;font-size:11px;color:#475569;margin-bottom:16px">';
+  H += '<span><b>PO Date:</b> ' + esc(o.orderDate || '-') + '</span>';
+  H += '<span><b>Delivery Date:</b> ' + esc(o.deliveryDate || '-') + '</span>';
+  H += '<span><b>Payment:</b> ' + esc(o.payment || '-') + '</span>';
+  H += '<span><b>Shipping:</b> ' + esc(o.shippingTerm || '-') + '</span>';
+  H += '</div>';
+  // BUYER + SUPPLIER
+  var infoBlock = function(title, items){
+    var x = '<div style="border:1px solid #cbd5e1;border-radius:4px;padding:10px 12px;flex:1">';
+    x += '<h3 style="font-size:12.5px;font-weight:700;color:#1e3a8a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.6px">' + title + '</h3>';
+    items.forEach(function(it){
+      x += '<div style="display:flex;gap:8px;padding:3.5px 0;font-size:12px">';
+      x += '<div style="flex:0 0 130px;color:#64748b;font-weight:600">' + it[0] + '</div>';
+      x += '<div style="flex:1;color:#0f172a;word-break:break-word">' + esc(it[1] || '-') + '</div>';
+      x += '</div>';
+    });
+    x += '</div>';
+    return x;
+  };
+  H += '<div style="display:flex;gap:12px;margin-bottom:16px">';
+  H += infoBlock('BUYER', [
+    ['Company', b.company],
+    ['Representative', b.representative],
+    ['Order Contact', b.orderContact],
+    ['Korea Contact', b.koreaContactPerson],
+    ['Korea Tel', b.koreaTel],
+    ['Korea Mobile', b.koreaMobile]
+  ]);
+  H += infoBlock('SUPPLIER', [
+    ['Company', s.company],
+    ['Representative', s.representative],
+    ['Contact Person', s.contactPerson],
+    ['Product', s.product],
+    ['Reference', s.reference],
+    ['Capacity', s.capacity]
+  ]);
+  H += '</div>';
+  // DELIVERY ADDRESS
+  H += '<div style="border:1px solid #cbd5e1;border-radius:4px;padding:10px 12px;margin-bottom:18px">';
+  H += '<h3 style="font-size:12.5px;font-weight:700;color:#9a3412;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.6px">DELIVERY ADDRESS</h3>';
+  ['Company','Address','Contact Person','Company Tel','Mobile'].forEach(function(lbl){
+    var key = ({Company:'company', Address:'address', 'Contact Person':'contactPerson', 'Company Tel':'tel', Mobile:'mobile'})[lbl];
+    H += '<div style="display:flex;gap:8px;padding:3.5px 0;font-size:12px">';
+    H += '<div style="flex:0 0 130px;color:#64748b;font-weight:600">' + lbl + '</div>';
+    H += '<div style="flex:1;color:#0f172a;word-break:break-word">' + esc(da[key] || '-') + '</div>';
+    H += '</div>';
+  });
+  H += '</div>';
+  // Items table
+  H += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px">';
+  H += '<thead><tr>';
+  ['No.','Item Description','Product Code','Capacity','Unit Price ('+esc(cur)+')','Quantity','Amount ('+esc(cur)+')'].forEach(function(h, i){
+    var w = ['38px','','100px','80px','100px','80px','110px'][i] || '';
+    H += '<th style="background:#1e3a8a;color:#fff;padding:9px 6px;font-weight:700;font-size:11.5px;border:1px solid #1e3a8a;text-align:center' + (w?(';width:'+w):'') + '">' + h + '</th>';
+  });
+  H += '</tr></thead>';
+  H += '<tbody>' + (itemRows || '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:20px;border:1px solid #cbd5e1">No items</td></tr>') + '</tbody>';
+  H += '</table>';
+  // Totals
+  H += '<div style="display:flex;justify-content:flex-end;margin-bottom:18px">';
+  H += '<table style="font-size:12px">';
+  H += '<tr><td style="padding:5px 12px;text-align:right;font-weight:600;color:#475569">Product Total</td><td style="padding:5px 12px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;min-width:110px">' + esc(cur) + ' ' + fmt(productTotal) + '</td></tr>';
+  H += '<tr><td style="padding:5px 12px;text-align:right;font-weight:600;color:#475569">Ocean Freight</td><td style="padding:5px 12px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums">' + esc(cur) + ' ' + fmt(oceanFreight) + '</td></tr>';
+  H += '<tr><td style="padding:8px 12px;text-align:right;font-weight:700;color:#1e3a8a;border-top:2px solid #1e3a8a;font-size:14px">TOTAL (Product + Freight)</td><td style="padding:8px 12px;text-align:right;font-weight:700;color:#1e3a8a;border-top:2px solid #1e3a8a;font-size:14px;font-variant-numeric:tabular-nums">' + esc(cur) + ' ' + fmt(grandTotal) + '</td></tr>';
+  H += '<tr><td style="padding:5px 12px;text-align:right;font-weight:600;color:#475569">Duties and Taxes</td><td style="padding:5px 12px;text-align:right;color:#0f172a">' + esc(o.dutiesAndTaxes || '-') + '</td></tr>';
+  H += '</table></div>';
+  // Note
+  if (o.note) {
+    H += '<div style="font-size:10.5px;color:#64748b;margin-top:14px;padding:8px 12px;background:#f1f5f9;border-radius:4px">' + esc(o.note).replace(/\n/g, '<br>') + '</div>';
+  }
+  // Signature
+  H += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:30px;padding-top:18px;border-top:1px solid #cbd5e1">';
+  H += '<div id="po-sheet-buyer-sig" data-sig="buyer" style="text-align:center;font-size:12px;color:#475569;position:relative;min-height:90px">';
+  H += '<div style="font-weight:700;color:#0f172a;margin-bottom:60px;font-size:13px;letter-spacing:0.2px">Authorized by (Buyer)</div>';
+  H += '<div style="border-bottom:1px solid #94a3b8;height:1px;margin-bottom:6px"></div>';
+  H += '</div>';
+  H += '<div data-sig="supplier" style="text-align:center;font-size:12px;color:#475569;position:relative;min-height:90px">';
+  H += '<div style="font-weight:700;color:#0f172a;margin-bottom:60px;font-size:13px;letter-spacing:0.2px">Confirmed by (Supplier)</div>';
+  H += '<div style="border-bottom:1px solid #94a3b8;height:1px;margin-bottom:6px"></div>';
+  H += '</div>';
+  H += '</div>';
+  H += '</div>';
+  if (typeof $ === 'function' && $('doc-preview-title')) $('doc-preview-title').textContent = 'PURCHASE ORDER';
+  if (typeof $ === 'function' && $('doc-preview-content')) $('doc-preview-content').innerHTML = H;
+  if (typeof openModal === 'function') openModal('doc-preview');
 }
 
 // ── 르니브 발주서 양식 출력 ─────────────────────────────
