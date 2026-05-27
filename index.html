@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.1.2';
+const ERP_VERSION = 'v2.1.3';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -20387,7 +20387,53 @@ function aiAnalyzeBOM() {
 // ═══════════════════════════════════════════════════════
 let prodFilter = '전체';
 
+// v2.1.3: 생산 레코드 중복 자동 정리
+//   (productId, orderId, serial, inDate, qty) 가 같으면 1건만 유지.
+//   v984 에서 backfillProductionsFromOrders 의 strict === 비교 버그를 잡았지만,
+//   기존에 누적된 중복은 청소 후에도 COUNT-GUARD 가 서버에서 다시 끌어와 부활할 수 있음.
+//   renderProdTable 호출 시마다 안전한 자연키 기반 dedup 으로 사라지지 않도록 보장.
+//   (po_balance/po_prepay dedup v994 와 동일한 패턴 — 자연 invariant 라 안전)
+function _dedupProductionsSafe() {
+  try {
+    if (!Array.isArray(DB.productions)) return 0;
+    var grp = new Map();
+    DB.productions.forEach(function(p){
+      if (!p || !p.productId) return;
+      var key = String(p.productId) + '::' + (p.orderId == null ? '' : String(p.orderId))
+              + '::' + (p.serial || '') + '::' + (p.inDate || '') + '::' + (Number(p.qty)||0);
+      if (!grp.has(key)) grp.set(key, []);
+      grp.get(key).push(p);
+    });
+    var statusRank = { '입고완료': 0, '생산완료': 1, '지연': 2, 'QC검사': 3, '생산중': 4, '생산대기': 5 };
+    var rmIds = [];
+    var kept = [];
+    grp.forEach(function(list, key){
+      if (list.length <= 1) return;
+      list.sort(function(a, b){
+        var ra = statusRank[a.status] != null ? statusRank[a.status] : 99;
+        var rb = statusRank[b.status] != null ? statusRank[b.status] : 99;
+        if (ra !== rb) return ra - rb;
+        var ta = Number(a.createdAt) || 0;
+        var tb = Number(b.createdAt) || 0;
+        if (tb !== ta) return tb - ta;
+        return (Number(b.id)||0) - (Number(a.id)||0);
+      });
+      var keep = list[0];
+      list.slice(1).forEach(function(p){ rmIds.push(p.id); });
+      kept.push({ key: key, keepId: keep.id, keepStatus: keep.status, removed: list.slice(1).map(function(p){ return { id: p.id, status: p.status }; }) });
+    });
+    if (rmIds.length === 0) return 0;
+    console.warn('🧹 [v2.1.3] 생산 레코드 중복 ' + rmIds.length + '건 자동 정리:', kept);
+    var rmSet = new Set(rmIds.map(String));
+    DB.productions = DB.productions.filter(function(p){ return p && !rmSet.has(String(p.id)); });
+    try { if (typeof _doSaveData === 'function') _doSaveData(); else if (typeof saveData === 'function') saveData(); } catch(_){}
+    return rmIds.length;
+  } catch(e){ console.warn('_dedupProductionsSafe:', e); return 0; }
+}
+
 function renderProdTable() {
+  // v2.1.3: 생산 레코드 중복 자동 정리 (같은 productId+orderId+serial+inDate+qty 는 1건만)
+  try { _dedupProductionsSafe(); } catch(_){}
   // v1.9.292: 발주서의 서브 부가비용 행(목형비/인쇄사양/운송비 등 — DB.items 미등록 → productId=0)은
   //           생산 라인 항목이 아니므로 생산 현황 전 구간에서 제외. 안전하게 기존 데이터만 필터링하고
   //           원본 DB.productions 는 그대로 둔다 (발주서 삭제 시 tombstone 로직이 이미 처리함).
