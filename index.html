@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.0.9';
+const ERP_VERSION = 'v2.1.0';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -32681,7 +32681,7 @@ function _removePoApprovalStamp() {
   }
 }
 
-// ── v2.0.8: 해외 PO — PURCHASE ORDER 영문 양식을 doc-preview 모달에 렌더링 ────────
+// ── v2.1.0: 해외 PO — 원본 previewOverseasPo 와 동일한 PURCHASE ORDER 양식을 doc-preview 모달에 렌더링 ────────
 function showOverseasOrderPreview(o) {
   if (!o) return;
   var esc = function(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
@@ -32699,75 +32699,102 @@ function showOverseasOrderPreview(o) {
     var price = parseFloat(r.price || r.unitPrice) || 0;
     var amount = qty * price;
     return '<tr>' +
-      '<td style="text-align:center;border:1px solid #cbd5e1;padding:7px;background:#fff">' + (i+1) + '</td>' +
-      '<td style="border:1px solid #cbd5e1;padding:7px;background:#fff">' + esc(r.name || r.description || '-') + '</td>' +
-      '<td style="text-align:center;border:1px solid #cbd5e1;padding:7px;background:#fff">' + esc(r.code || r.productCode || '—') + '</td>' +
-      '<td style="text-align:center;border:1px solid #cbd5e1;padding:7px;background:#fff">' + esc(r.capacity || '-') + '</td>' +
-      '<td style="text-align:right;border:1px solid #cbd5e1;padding:7px;background:#fff;font-variant-numeric:tabular-nums">' + fmt(price) + '</td>' +
-      '<td style="text-align:right;border:1px solid #cbd5e1;padding:7px;background:#fff;font-variant-numeric:tabular-nums">' + qty.toLocaleString() + '</td>' +
-      '<td style="text-align:right;border:1px solid #cbd5e1;padding:7px;background:#fff;font-variant-numeric:tabular-nums">' + fmt(amount) + '</td>' +
+      '<td style="text-align:center;border:1px solid #cbd5e1;padding:8px;background:#fff">' + (i+1) + '</td>' +
+      '<td style="border:1px solid #cbd5e1;padding:8px;background:#fff">' + esc(r.name || r.description || '-') + '</td>' +
+      '<td style="text-align:center;border:1px solid #cbd5e1;padding:8px;background:#fff">' + esc(r.code || r.productCode || '—') + '</td>' +
+      '<td style="text-align:center;border:1px solid #cbd5e1;padding:8px;background:#fff">' + esc(r.capacity || '-') + '</td>' +
+      '<td style="text-align:right;border:1px solid #cbd5e1;padding:8px;background:#fff;font-variant-numeric:tabular-nums">' + fmt(price) + '</td>' +
+      '<td style="text-align:right;border:1px solid #cbd5e1;padding:8px;background:#fff;font-variant-numeric:tabular-nums">' + qty.toLocaleString() + '</td>' +
+      '<td style="text-align:right;border:1px solid #cbd5e1;padding:8px;background:#fff;font-variant-numeric:tabular-nums">' + fmt(amount) + '</td>' +
     '</tr>';
   }).join('');
-  // 스타일은 인라인으로 — doc-preview 모달 안에서 동작
-  var H = '<div id="printable-doc" style="font-family:Helvetica Neue,Arial,맑은 고딕,sans-serif;color:#0f172a;font-size:12px;padding:24px;background:#fff;max-width:820px;margin:0 auto">';
+  // 공통 행 헬퍼
+  var rowItem = function(lbl, val){
+    return '<div style="display:flex;gap:8px;padding:3.5px 0;font-size:12px">' +
+           '<div style="flex:0 0 130px;color:#64748b;font-weight:600">' + lbl + '</div>' +
+           '<div style="flex:1;color:#0f172a;word-break:break-word">' + esc(val || '-') + '</div>' +
+           '</div>';
+  };
+  // 핑크 박스용 (placeholder 형태)
+  var pinkRow = function(lbl, val, placeholder){
+    var disp = val ? esc(val) : '<span style="color:#fbcfe8;font-style:italic">' + esc(placeholder || 'Not filled') + '</span>';
+    return '<div style="display:flex;gap:8px;padding:3.5px 0;font-size:12px">' +
+           '<div style="flex:0 0 130px;color:#64748b;font-weight:600">' + lbl + '</div>' +
+           '<div style="flex:1;color:#0f172a;word-break:break-word;background:rgba(253,242,248,0.5);padding:3px 6px;border-radius:3px">' + disp + '</div>' +
+           '</div>';
+  };
+  var H = '<div id="printable-doc" style="font-family:Helvetica Neue,Arial,맑은 고딕,sans-serif;color:#0f172a;font-size:12px;padding:30px 36px;background:#fff;max-width:820px;margin:0 auto;border-radius:6px">';
+  // 헤더
   H += '<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #0f172a;padding-bottom:12px;margin-bottom:18px">';
   H += '<h1 style="font-size:28px;font-weight:800;letter-spacing:1.5px;margin:0">PURCHASE ORDER</h1>';
   H += '<div style="font-size:14px;font-weight:700;color:#1e3a8a">' + esc(o.poNumber || '-') + '</div>';
   H += '</div>';
+  // Meta info
   H += '<div style="display:flex;gap:16px;font-size:11px;color:#475569;margin-bottom:16px">';
-  H += '<span><b>PO Date:</b> ' + esc(o.orderDate || '-') + '</span>';
-  H += '<span><b>Delivery Date:</b> ' + esc(o.deliveryDate || '-') + '</span>';
-  H += '<span><b>Payment:</b> ' + esc(o.payment || '-') + '</span>';
-  H += '<span><b>Shipping:</b> ' + esc(o.shippingTerm || '-') + '</span>';
+  H += '<span><b style="color:#0f172a">PO Date:</b> ' + esc(o.orderDate || '-') + '</span>';
+  H += '<span><b style="color:#0f172a">Delivery:</b> ' + esc(o.deliveryDate || '-') + '</span>';
+  H += '<span><b style="color:#0f172a">Payment:</b> ' + esc(o.payment || '-') + '</span>';
+  H += '<span><b style="color:#0f172a">Shipping:</b> ' + esc(o.shippingTerm || '-') + '</span>';
   H += '</div>';
-  // BUYER + SUPPLIER
-  var infoBlock = function(title, items){
-    var x = '<div style="border:1px solid #cbd5e1;border-radius:4px;padding:10px 12px;flex:1">';
-    x += '<h3 style="font-size:12.5px;font-weight:700;color:#1e3a8a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.6px">' + title + '</h3>';
-    items.forEach(function(it){
-      x += '<div style="display:flex;gap:8px;padding:3.5px 0;font-size:12px">';
-      x += '<div style="flex:0 0 130px;color:#64748b;font-weight:600">' + it[0] + '</div>';
-      x += '<div style="flex:1;color:#0f172a;word-break:break-word">' + esc(it[1] || '-') + '</div>';
-      x += '</div>';
-    });
-    x += '</div>';
-    return x;
-  };
-  H += '<div style="display:flex;gap:12px;margin-bottom:16px">';
-  H += infoBlock('BUYER', [
-    ['Company', b.company],
-    ['Representative', b.representative],
-    ['Order Contact', b.orderContact],
-    ['Korea Contact', b.koreaContactPerson],
-    ['Korea Tel', b.koreaTel],
-    ['Korea Mobile', b.koreaMobile]
-  ]);
-  H += infoBlock('SUPPLIER', [
-    ['Company', s.company],
-    ['Representative', s.representative],
-    ['Contact Person', s.contactPerson],
-    ['Product', s.product],
-    ['Reference', s.reference],
-    ['Capacity', s.capacity]
-  ]);
+  // BUYER + SUPPLIER 그리드
+  H += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">';
+  H += '<div style="border:1px solid #cbd5e1;border-radius:4px;padding:10px 12px">';
+  H += '<h3 style="font-size:12.5px;font-weight:700;color:#1e3a8a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.6px">BUYER</h3>';
+  H += rowItem('Company', b.company);
+  H += rowItem('Representative', b.representative);
+  H += rowItem('Order Contact', b.orderContact);
+  H += rowItem('Korea Contact', b.koreaContactPerson);
+  H += rowItem('Korea Tel', b.koreaTel);
+  H += rowItem('Korea Mobile', b.koreaMobile);
   H += '</div>';
-  // DELIVERY ADDRESS
+  H += '<div style="border:1px solid #cbd5e1;border-radius:4px;padding:10px 12px">';
+  H += '<h3 style="font-size:12.5px;font-weight:700;color:#9d174d;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.6px">SUPPLIER</h3>';
+  H += rowItem('Company', s.company);
+  H += rowItem('Representative', s.representative);
+  H += rowItem('Contact Person', s.contactPerson);
+  H += rowItem('Product', s.product);
+  H += rowItem('Reference', s.reference);
+  H += rowItem('Capacity', s.capacity);
+  H += '</div>';
+  H += '</div>';
+  // DELIVERY ADDRESS — 2-column layout with Mobile separated
   H += '<div style="border:1px solid #cbd5e1;border-radius:4px;padding:10px 12px;margin-bottom:18px">';
   H += '<h3 style="font-size:12.5px;font-weight:700;color:#9a3412;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.6px">DELIVERY ADDRESS</h3>';
-  ['Company','Address','Contact Person','Company Tel','Mobile'].forEach(function(lbl){
-    var key = ({Company:'company', Address:'address', 'Contact Person':'contactPerson', 'Company Tel':'tel', Mobile:'mobile'})[lbl];
-    H += '<div style="display:flex;gap:8px;padding:3.5px 0;font-size:12px">';
-    H += '<div style="flex:0 0 130px;color:#64748b;font-weight:600">' + lbl + '</div>';
-    H += '<div style="flex:1;color:#0f172a;word-break:break-word">' + esc(da[key] || '-') + '</div>';
-    H += '</div>';
-  });
+  H += rowItem('Company', da.company);
+  H += rowItem('Address', da.address);
+  H += rowItem('Contact Person', da.contactPerson);
+  H += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
+  H += rowItem('Company Tel', da.tel);
+  H += rowItem('Mobile', da.mobile);
+  H += '</div>';
+  H += '</div>';
+  // PAYMENT DETAILS + PRODUCT INFORMATION — 핑크 박스
+  H += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px">';
+  H += '<div style="border:1.5px dashed #fbcfe8;background:#fff7f9;border-radius:4px;padding:10px 12px">';
+  H += '<h3 style="font-size:12.5px;font-weight:700;color:#9d174d;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.6px">PAYMENT DETAILS <span style="font-size:9.5px;font-weight:600;color:#be185d;letter-spacing:0;text-transform:none">(to be filled by supplier)</span></h3>';
+  var bank = o.bank || {};
+  H += pinkRow('Bank Name', bank.name, 'Click to enter');
+  H += pinkRow('Account No.', bank.account, 'Click to enter');
+  H += pinkRow('SWIFT / BIC', bank.swift, 'Click to enter');
+  H += pinkRow('Beneficiary', bank.beneficiary, 'Click to enter');
+  H += pinkRow('Bank Address', bank.address, 'Click to enter');
+  H += '</div>';
+  H += '<div style="border:1.5px dashed #fbcfe8;background:#fff7f9;border-radius:4px;padding:10px 12px">';
+  H += '<h3 style="font-size:12.5px;font-weight:700;color:#9d174d;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.6px">PRODUCT INFORMATION <span style="font-size:9.5px;font-weight:600;color:#be185d;letter-spacing:0;text-transform:none">(to be filled by supplier)</span></h3>';
+  H += pinkRow('Production Date', o.productionDate, 'YYYY-MM-DD');
+  H += pinkRow('Expiry Date', o.expiryDate, 'YYYY-MM-DD');
+  H += pinkRow('Lot / Batch No.', o.lotNo, 'Click to enter');
+  H += pinkRow('Country of Origin', o.countryOfOrigin, 'Click to enter');
+  H += pinkRow('Remarks', o.supplierRemarks, 'Click to enter');
+  H += '</div>';
   H += '</div>';
   // Items table
   H += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px">';
   H += '<thead><tr>';
-  ['No.','Item Description','Product Code','Capacity','Unit Price ('+esc(cur)+')','Quantity','Amount ('+esc(cur)+')'].forEach(function(h, i){
-    var w = ['38px','','100px','80px','100px','80px','110px'][i] || '';
-    H += '<th style="background:#1e3a8a;color:#fff;padding:9px 6px;font-weight:700;font-size:11.5px;border:1px solid #1e3a8a;text-align:center' + (w?(';width:'+w):'') + '">' + h + '</th>';
+  var headers = ['No.','Item Description','Product Code','Capacity','Unit Price ('+esc(cur)+')','Quantity','Amount ('+esc(cur)+')'];
+  var widths = ['38px','','100px','80px','100px','80px','110px'];
+  headers.forEach(function(hh, i){
+    H += '<th style="background:#1e3a8a;color:#fff;padding:9px 6px;font-weight:700;font-size:11.5px;border:1px solid #1e3a8a;text-align:center' + (widths[i]?(';width:'+widths[i]):'') + '">' + hh + '</th>';
   });
   H += '</tr></thead>';
   H += '<tbody>' + (itemRows || '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:20px;border:1px solid #cbd5e1">No items</td></tr>') + '</tbody>';
@@ -32786,11 +32813,11 @@ function showOverseasOrderPreview(o) {
   }
   // Signature
   H += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:30px;padding-top:18px;border-top:1px solid #cbd5e1">';
-  H += '<div id="po-sheet-buyer-sig" data-sig="buyer" style="text-align:center;font-size:12px;color:#475569;position:relative;min-height:90px">';
+  H += '<div id="po-sheet-buyer-sig" data-sig="buyer" style="text-align:center;font-size:12px;color:#475569;position:relative;min-height:100px">';
   H += '<div style="font-weight:700;color:#0f172a;margin-bottom:60px;font-size:13px;letter-spacing:0.2px">Authorized by (Buyer)</div>';
   H += '<div style="border-bottom:1px solid #94a3b8;height:1px;margin-bottom:6px"></div>';
   H += '</div>';
-  H += '<div data-sig="supplier" style="text-align:center;font-size:12px;color:#475569;position:relative;min-height:90px">';
+  H += '<div data-sig="supplier" style="text-align:center;font-size:12px;color:#475569;position:relative;min-height:100px">';
   H += '<div style="font-weight:700;color:#0f172a;margin-bottom:60px;font-size:13px;letter-spacing:0.2px">Confirmed by (Supplier)</div>';
   H += '<div style="border-bottom:1px solid #94a3b8;height:1px;margin-bottom:6px"></div>';
   H += '</div>';
