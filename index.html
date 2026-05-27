@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.0.2';
+const ERP_VERSION = 'v2.0.3';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -23062,7 +23062,15 @@ async function _generateOrderFormStampedPdf(o) {
       imgW = imgH / imgRatio;
     }
     pdf.addImage(imgData, 'JPEG', (pdfW - imgW) / 2, margin, imgW, imgH);
-    return pdf.output('datauristring');
+    // v2.0.3: 'datauristring' 은 ';filename=...' 파라미터가 끼어 정규식 매칭 실패 →
+    //   blob 으로 받아 FileReader 로 깨끗한 'data:application/pdf;base64,...' 만들기
+    var blob = pdf.output('blob');
+    return await new Promise(function(resolve, reject){
+      var r = new FileReader();
+      r.onload = function(){ resolve(r.result); };
+      r.onerror = function(){ reject(new Error('FileReader 실패')); };
+      r.readAsDataURL(blob);
+    });
   } finally {
     try { if (typeof closeModal === 'function') closeModal('doc-preview'); } catch(_){}
     if (modal) { modal.style.opacity = ''; modal.style.pointerEvents = ''; }
@@ -23102,9 +23110,11 @@ async function sendOrderEmail(orderId) {
     showNotif('첨부할 발주서 PDF가 없습니다 (수정에서 PDF 업로드 필요)', 'warning');
     return;
   }
-  // dataURL → base64 (data:application/pdf;base64,XXXXX 형식)
-  const base64Match = String(pdfData).match(/^data:[^;]+;base64,(.+)$/);
+  // dataURL → base64 — v2.0.3: 중간에 ;filename=... 같은 파라미터가 끼어도 매칭되도록
+  //   마지막 ';base64,' 이후 전부를 base64 데이터로 인식
+  const base64Match = String(pdfData).match(/;base64,([\s\S]+)$/);
   if (!base64Match) {
+    console.error('PDF 데이터 형식 오류 — pdfData head:', String(pdfData).slice(0, 100));
     showNotif('PDF 데이터 형식 오류', 'error');
     return;
   }
