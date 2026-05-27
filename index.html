@@ -5281,7 +5281,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.984';
+const ERP_VERSION = 'v1.9.985';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -20029,7 +20029,9 @@ function renderProdTable() {
   // v1.9.292: 발주서의 서브 부가비용 행(목형비/인쇄사양/운송비 등 — DB.items 미등록 → productId=0)은
   //           생산 라인 항목이 아니므로 생산 현황 전 구간에서 제외. 안전하게 기존 데이터만 필터링하고
   //           원본 DB.productions 는 그대로 둔다 (발주서 삭제 시 tombstone 로직이 이미 처리함).
-  const prodAll = (DB.productions||[]).filter(p => p && p.productId);
+  // v1.9.985: 품목정보에 없는(삭제된 품목·미등록) 생산 레코드도 표시에서 제외
+  const _itemIdSet = new Set((DB.items||[]).map(i => i && i.id != null ? String(i.id) : null).filter(Boolean));
+  const prodAll = (DB.productions||[]).filter(p => p && p.productId && _itemIdSet.has(String(p.productId)));
   // 전체/생산중/생산완료는 항상 고정, 나머지(지연/QC검사 등)는 데이터 있을 때만
   const extraStatuses = [...new Set(prodAll.map(p=>p.status))].filter(s=>s!=='생산중'&&s!=='생산완료');
   const statuses = ['전체','생산중','생산완료',...extraStatuses];
@@ -22883,7 +22885,7 @@ function confirmStockInQty(orderId) {
   o.updatedAt = Date.now();  // v1.9.405 머지 보호
   DB.orders[idx] = o;
   try { processOrderStockIn(receivedRows, o.inDate || today(), o.serial || '', o.vendorId, o.id); } catch(e) { console.error('입고 재고반영 실패:', e); }
-  try { completeRelatedProductions(o.rows, o.serial || ''); } catch(_){}
+  try { completeRelatedProductions(o.rows, o.serial || '', o.id); } catch(_){}
   // v1.9.982: 즉시 저장 — 디바운스 saveData() 는 다음 머지 전 미저장 위험
   try { if (typeof _doSaveData === 'function') _doSaveData().catch(function(e){ console.warn('입고완료 저장 실패:', e); }); else saveData(); } catch(_){ try { saveData(); } catch(__){} }
   if (_m) _m.remove();
@@ -23978,7 +23980,7 @@ function saveOrder() {
   // ── 입고완료로 변경 시 재고 자동 반영 + 생산완료 처리 ─────
   if (newStockStatus === '입고완료' && prevStockStatus !== '입고완료') {
     processOrderStockIn(rows, $('o-inDate') ? $('o-in-date').value : today(), data.serial || '', data.vendorId, _savedOrderId);
-    completeRelatedProductions(rows, data.serial || '');
+    completeRelatedProductions(rows, data.serial || '', _savedOrderId);
   }
   // ── 입고완료 → 다른 상태로 되돌릴 시 재고 차감 ──────────
   if (prevStockStatus === '입고완료' && newStockStatus !== '입고완료') {
@@ -31565,22 +31567,22 @@ function autoRegisterProduction(rows, orderData) {
 // 입고완료 시 연결된 생산건 → 생산완료 처리
 // v1.9.108 — matchItem은 레거시 데이터(serial 없음)에만 적용해
 //           같은 품목의 다른 발주서 생산 레코드가 잘못 완료 처리되는 버그 방지
-function completeRelatedProductions(rows, serial) {
-  if (!serial && !rows.length) return;
+function completeRelatedProductions(rows, serial, orderId) {
+  // v1.9.985: orderId 매칭 추가 + 타입 무관 비교 (복구 데이터 id 타입 섞임 대응)
+  if (!serial && (orderId == null) && (!rows || !rows.length)) return;
   let completedCount = 0;
-  rows.forEach(row => {
-    const itemId = row.itemId || null;
-    DB.productions.forEach((p, idx) => {
-      if (p.status === '생산완료') return;
-      const matchSerial = serial && p.serial === serial;
-      // itemId 매칭은 생산 레코드에 serial/orderId 연결이 없는 레거시 데이터에만 허용
-      const matchItem = itemId && p.productId === itemId && !p.serial && !p.orderId;
-      if (matchSerial || matchItem) {
-        DB.productions[idx].status = '생산완료';
-        DB.productions[idx].progress = 100;
-        completedCount++;
-      }
-    });
+  const _rowItemIds = (rows||[]).map(r => r && r.itemId != null ? String(r.itemId) : null).filter(Boolean);
+  (DB.productions||[]).forEach((p, idx) => {
+    if (p.status === '생산완료') return;
+    const matchSerial = serial && p.serial === serial;
+    const matchOrderId = (orderId != null) && (p.orderId != null) && String(p.orderId) === String(orderId);
+    // itemId 매칭은 생산 레코드에 serial/orderId 연결이 없는 레거시 데이터에만 허용
+    const matchItem = !p.serial && !p.orderId && p.productId != null && _rowItemIds.indexOf(String(p.productId)) >= 0;
+    if (matchSerial || matchOrderId || matchItem) {
+      DB.productions[idx].status = '생산완료';
+      DB.productions[idx].progress = 100;
+      completedCount++;
+    }
   });
   if (completedCount > 0) {
     showNotif('생산관리 ' + completedCount + '건이 생산완료로 변경되었습니다', 'success');
@@ -31713,11 +31715,11 @@ function processOrderStockIn(rows, date, serial, orderVendorId, orderId) {
     const extra = skippedOutsource > 0 ? ` (외주가공 ${skippedOutsource}건 재고 제외)` : '';
     showNotif('✅ 입고완료! ' + addedCount + '개 품목 재고가 자동 반영되었습니다' + extra, 'success');
     // 연결된 생산건 → 생산완료 처리
-    completeRelatedProductions(rows, serial);
+    completeRelatedProductions(rows, serial, orderId);
     saveData();
   } else if (skippedOutsource > 0) {
     showNotif(`✅ 입고완료! 외주가공 ${skippedOutsource}건은 재고 반영 없이 생산완료 처리됩니다`, 'success');
-    completeRelatedProductions(rows, serial);
+    completeRelatedProductions(rows, serial, orderId);
     saveData();
   } else if (orderId != null) {
     // 추가된 품목은 없지만 processed 기록은 저장
