@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.0.5';
+const ERP_VERSION = 'v2.0.6';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -21803,6 +21803,7 @@ function _populatePoItemSelect(sel, currentItemId) {
 }
 
 // 품목 select 변경 시 자동 채움
+// v2.0.6: 품목정보의 priceCurrency / priceForeign 을 단가·통화에 자동 적용
 function _onPoItemChange(sel) {
   const tr = sel.closest('tr');
   if (!tr) return;
@@ -21817,7 +21818,33 @@ function _onPoItemChange(sel) {
   if (descEl && !descEl.value) descEl.value = item.name || '';
   if (codeEl && !codeEl.value) codeEl.value = item.code || '';
   if (capEl && !capEl.value) capEl.value = item.spec || '';
-  if (priceEl && (!priceEl.value || parseFloat(priceEl.value) === 0)) priceEl.value = item.price || 0;
+  // v2.0.6: 외화 단가 우선 — 품목정보의 통화/외화금액을 그대로 적용
+  if (priceEl) {
+    var _hasForeign = item.priceCurrency && item.priceCurrency !== 'KRW'
+                      && item.priceForeign != null && item.priceForeign !== '';
+    if (_hasForeign) {
+      priceEl.value = item.priceForeign;
+      // 상단 Currency 드롭다운도 자동 동기화
+      var curEl = document.getElementById('po-currency');
+      if (curEl) {
+        var hasOpt = Array.prototype.some.call(curEl.options, function(o){ return o.value === item.priceCurrency; });
+        if (!hasOpt) {
+          var opt = document.createElement('option');
+          opt.value = item.priceCurrency;
+          opt.textContent = item.priceCurrency;
+          curEl.appendChild(opt);
+        }
+        if (curEl.value !== item.priceCurrency) {
+          curEl.value = item.priceCurrency;
+          // change 이벤트 발생 (합계 통화 라벨 등 의존 로직 갱신)
+          try { curEl.dispatchEvent(new Event('change')); } catch(_){}
+        }
+      }
+    } else if (!priceEl.value || parseFloat(priceEl.value) === 0) {
+      // 외화 단가 없으면 기존대로 KRW price
+      priceEl.value = item.price || 0;
+    }
+  }
   _calcPoRowAmount(tr);
   calcPoTotal();
 }
