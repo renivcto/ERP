@@ -5281,7 +5281,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.983';
+const ERP_VERSION = 'v1.9.984';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7885,13 +7885,14 @@ function applyPendingStockIn() {
 
 // 발주서 없이 남은 고아 생산 레코드 자동 정리
 function cleanOrphanProductions() {
-  const orderIds = new Set((DB.orders||[]).map(o=>o.id));
+  // v1.9.984: id 타입 무관 (String 키로 통일 — 복구 데이터에서 숫자↔문자열 섞임 대응)
+  const orderIds = new Set((DB.orders||[]).map(o => o && o.id != null ? String(o.id) : null).filter(Boolean));
   const orderSerials = new Set((DB.orders||[]).map(o=>o.serial).filter(Boolean));
   const before = (DB.productions||[]).length;
   DB.productions = (DB.productions||[]).filter(p => {
     if (!p.note || !p.note.includes('발주서 자동등록')) return true;
-    if (p.orderId && !orderIds.has(p.orderId)) return false;
-    if (!p.orderId && p.serial && !orderSerials.has(p.serial)) return false;
+    if (p.orderId != null && !orderIds.has(String(p.orderId))) return false;
+    if (p.orderId == null && p.serial && !orderSerials.has(p.serial)) return false;
     return true;
   });
   const removed = before - (DB.productions||[]).length;
@@ -7912,16 +7913,17 @@ function backfillProductionsFromOrders() {
       if (!row.name || !row.qty) return;
       // 품목 매칭 (itemId → code → name)
       let item = null;
-      if (row.itemId) item = DB.items.find(i => i.id === row.itemId);
+      // v1.9.984: id 타입 무관 매칭 (복구 데이터에서 숫자↔문자열 섞임 대응)
+      if (row.itemId != null) item = DB.items.find(i => i && String(i.id) === String(row.itemId));
       if (!item && row.code) item = DB.items.find(i => i.code && i.code === row.code);
       if (!item) item = DB.items.find(i => i.name === row.name);
       const itemId = item ? item.id : 0;
-      // 이미 동일 발주·품목의 생산 레코드가 있으면 스킵
+      // 이미 동일 발주·품목의 생산 레코드가 있으면 스킵 (v1.9.984: id 타입 무관)
       const exists = (DB.productions||[]).some(p => {
-        const matchOrder = (o.id && p.orderId === o.id) || (o.serial && p.serial && p.serial === o.serial);
+        const matchOrder = (o.id != null && String(p.orderId) === String(o.id)) || (o.serial && p.serial && p.serial === o.serial);
         if (!matchOrder) return false;
         // itemId가 있는 경우 품목도 일치해야 함. itemId=0이면 품목명으로 비교.
-        if (itemId && p.productId) return p.productId === itemId;
+        if (itemId && p.productId) return String(p.productId) === String(itemId);
         return (p.productName || '') === (item ? item.name : row.name);
       });
       if (exists) return;
@@ -7963,10 +7965,11 @@ function syncProductionStatusFromOrders() {
     (DB.productions||[]).forEach((p, idx) => {
       if (p.status === '생산완료' || p.status === '입고완료') return;
       const matchSerial = o.serial && p.serial === o.serial;
-      const matchOrderId = o.id && p.orderId === o.id;
+      // v1.9.984: id 타입 무관
+      const matchOrderId = o.id != null && String(p.orderId) === String(o.id);
       // itemId 매칭은 생산 레코드에 serial/orderId 연결이 없는 레거시 데이터에만 허용
       const matchItem = !p.serial && !p.orderId &&
-        (o.rows||[]).some(r => r.itemId && r.itemId === p.productId);
+        (o.rows||[]).some(r => r.itemId != null && String(r.itemId) === String(p.productId));
       if (matchSerial || matchOrderId || matchItem) {
         DB.productions[idx].status = '생산완료';
         DB.productions[idx].progress = 100;
@@ -7988,7 +7991,8 @@ function repairIncorrectProductionCompletion() {
     if (p.status !== '생산완료') return;
     // 연결된 발주서 탐색 (orderId 우선, 없으면 serial)
     let linked = null;
-    if (p.orderId) linked = (DB.orders||[]).find(o => o.id === p.orderId);
+    // v1.9.984: id 타입 무관
+    if (p.orderId != null) linked = (DB.orders||[]).find(o => o && String(o.id) === String(p.orderId));
     if (!linked && p.serial) linked = (DB.orders||[]).find(o => o.serial === p.serial);
     if (!linked) return; // 연결 발주서 없으면 건드리지 않음 (수동 생산완료 가능성 존중)
     // 연결 발주서가 입고완료가 아니면 → 생산중으로 복구
