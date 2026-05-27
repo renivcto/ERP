@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.0.0';
+const ERP_VERSION = 'v2.0.1';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -23905,6 +23905,21 @@ function clearOrderFile(type) {
 }
 
 function viewOrderFileDirect(type) {
+  // v2.0.1: stamp 타입이고 현재 발주서가 ERP 양식+도장 저장 방식이면
+  //   PDF 가 아니라 ERP 발주서 양식 팝업으로 열기
+  if (type === 'stamp') {
+    const editVal = (typeof editingId !== 'undefined') ? editingId['add-order'] : null;
+    if (editVal !== null && editVal !== undefined) {
+      const _o = DB.orders[parseInt(editVal)];
+      const _isErpForm = _o && (_o.stampType === 'erp_form'
+                                || (typeof _o.stampName === 'string' && _o.stampName.indexOf('[ERP양식+도장]') === 0));
+      if (_isErpForm && typeof openPoApprovalSheet === 'function') {
+        try { closeModal && closeModal('add-order'); } catch(_){}
+        try { openPoApprovalSheet(_o.id); } catch(e){ console.warn('openPoApprovalSheet:', e); }
+        return;
+      }
+    }
+  }
   let data = type === 'stamp' ? _orderStampData : _orderPdfData;
   if (!data) {
     // 수정 모드에서 기존 DB 레코드의 파일을 조회
