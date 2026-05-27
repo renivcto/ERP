@@ -5288,7 +5288,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.996';
+const ERP_VERSION = 'v1.9.997';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27349,8 +27349,12 @@ function renderApprovalPoTable() {
     const _newStampBadge = _showNewStamp ? `<span class="stamp-new-badge">NEW</span>` : '';
     let apBtn;
     if (o.stampName) {
+      // v1.9.997: stampType==='erp_form' 이면 ERP 양식+도장 팝업 재오픈
+      var _badgeClick = (o.stampType === 'erp_form')
+        ? `openPoApprovalSheet(${o.id})`
+        : `viewOrderPDFByIdx(${DB.orders.indexOf(o)},'stamp')`;
       apBtn = `<span style="position:relative;display:inline-block">
-           <span class="badge" style="cursor:pointer;${BADGE_STYLE_AP};background:var(--sky-50);color:var(--sky-700);border-color:var(--sky-200)" onclick="viewOrderPDFByIdx(${DB.orders.indexOf(o)},'stamp')" title="${o.stampName}"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--sky-700)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><polyline points="9 15 11 17 15 13"/></svg>결재 완료</span>
+           <span class="badge" style="cursor:pointer;${BADGE_STYLE_AP};background:var(--sky-50);color:var(--sky-700);border-color:var(--sky-200)" onclick="${_badgeClick}" title="${o.stampName}"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--sky-700)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><polyline points="9 15 11 17 15 13"/></svg>결재 완료</span>
            ${_newStampBadge}
          </span>`;
     } else if (o.stampNotRequired) {
@@ -32315,6 +32319,8 @@ function openPoApprovalSheet(orderId) {
     if (!o) { try { showNotif('발주서를 찾을 수 없습니다','warning'); } catch(_){} return; }
     if (typeof showRenivOrderPreview !== 'function') { try { showNotif('미리보기 함수가 없습니다','warning'); } catch(_){} return; }
     showRenivOrderPreview(o);
+    // 현재 모달이 가리키는 orderId 기억 (저장 함수에서 사용)
+    window._poSheetOrderId = orderId;
     // DOM 이 그려진 뒤 후처리
     setTimeout(function(){
       try {
@@ -32332,19 +32338,29 @@ function openPoApprovalSheet(orderId) {
             break;
           }
         }
-        // 2) 도장 업로드 툴바를 #doc-preview-content 최상단에 삽입
+        // 2) 저장된 도장 이미지가 있으면 자동 재오버레이
+        var alreadyStamped = !!(o.approvalStampImage && typeof o.approvalStampImage === 'string' && o.approvalStampImage.indexOf('data:') === 0);
+        if (alreadyStamped) {
+          try { _overlayStampOnCeoCell(o.approvalStampImage); } catch(_){}
+        }
+        // 3) 도장 업로드 + 저장 툴바 삽입
         var content = document.getElementById('doc-preview-content');
         if (content && !document.getElementById('po-sheet-toolbar')) {
           var toolbar = document.createElement('div');
           toolbar.id = 'po-sheet-toolbar';
           toolbar.style.cssText = 'display:flex;gap:8px;align-items:center;justify-content:center;padding:10px 14px;margin-bottom:14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;flex-wrap:wrap';
+          var savedBadge = alreadyStamped
+            ? '<span style="font-size:11px;color:#15803d;background:#dcfce7;border:1px solid #86efac;padding:3px 9px;border-radius:99px;font-weight:700">✅ 결재 완료 저장됨</span>'
+            : '';
           toolbar.innerHTML = ''
             + '<span style="font-size:12.5px;color:#92400e;font-weight:700">🔴 대표 도장</span>'
+            + savedBadge
             + '<label style="padding:6px 14px;background:#fff;border:1px solid #fcd34d;color:#92400e;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px">'
-            +   '<input type="file" accept="image/*" style="display:none" onchange="_applyPoApprovalStamp(this)"> 📷 도장 이미지 선택'
+            +   '<input type="file" accept="image/*" style="display:none" onchange="_applyPoApprovalStamp(this)"> 📷 도장 이미지 ' + (alreadyStamped ? '변경' : '선택') + ''
             + '</label>'
+            + '<button onclick="_savePoApprovalStamp()" style="padding:6px 14px;background:#16a34a;color:#fff;border:1px solid #15803d;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:6px;box-shadow:0 1px 3px rgba(22,163,74,.3)">✅ 결재 완료 저장</button>'
             + '<button onclick="_removePoApprovalStamp()" style="padding:6px 12px;background:#fff;border:1px solid #cbd5e1;color:#475569;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">✕ 도장 제거</button>'
-            + '<span style="font-size:11px;color:#92400e;line-height:1.4">↗ 도장 추가 후 우측 상단의 <b>🖨️ 인쇄/PDF</b> 클릭</span>';
+            + '<span style="font-size:11px;color:#92400e;line-height:1.4;flex-basis:100%;text-align:center">↗ 도장 추가 후 <b>✅ 결재 완료 저장</b> 버튼을 눌러야 결재 날인 컬럼이 갱신됩니다 · 우측 상단 <b>🖨️ 인쇄/PDF</b> 로 출력 가능</span>';
           content.insertBefore(toolbar, content.firstChild);
         }
       } catch(e){ console.warn('openPoApprovalSheet post-render:', e); }
@@ -32352,31 +32368,81 @@ function openPoApprovalSheet(orderId) {
   } catch(e){ console.warn('openPoApprovalSheet:', e); }
 }
 
+// v1.9.997: 셀에 도장 이미지를 오버레이하는 공통 헬퍼
+function _overlayStampOnCeoCell(dataUrl) {
+  var cell = document.getElementById('po-sheet-ceo-cell');
+  if (!cell) return;
+  var existing = cell.querySelector('.po-sheet-stamp-img');
+  if (existing) existing.remove();
+  var spans = cell.querySelectorAll('span');
+  for (var i = 0; i < spans.length; i++) {
+    var s = spans[i];
+    if ((s.textContent || '').indexOf('(인)') >= 0) { s.style.visibility = 'hidden'; }
+  }
+  var img = document.createElement('img');
+  img.src = dataUrl;
+  img.className = 'po-sheet-stamp-img';
+  img.style.cssText = 'position:absolute;top:50%;right:10px;transform:translateY(-50%);width:58px;height:58px;object-fit:contain;opacity:.88;pointer-events:none;mix-blend-mode:multiply';
+  cell.appendChild(img);
+}
+
+// v1.9.997: 결재 완료 저장 — 현재 오버레이된 도장 이미지를 DB 에 저장하고 결재 상태 전환
+function _savePoApprovalStamp() {
+  try {
+    var orderId = window._poSheetOrderId;
+    if (orderId == null) { try { showNotif('대상 발주서 정보를 찾을 수 없습니다','warning'); } catch(_){} return; }
+    var cell = document.getElementById('po-sheet-ceo-cell');
+    var img = cell && cell.querySelector('.po-sheet-stamp-img');
+    if (!img || !img.src || img.src.indexOf('data:') !== 0) {
+      try { showNotif('먼저 📷 도장 이미지 선택으로 도장을 추가해주세요','warning'); } catch(_){}
+      return;
+    }
+    var dataUrl = img.src;
+    var fname = (window._poSheetStampName || '대표도장.png');
+    var idx = (DB.orders||[]).findIndex(function(x){ return parseInt(x.id) === parseInt(orderId) || x.id == orderId; });
+    if (idx < 0) { try { showNotif('발주서를 찾을 수 없습니다','warning'); } catch(_){} return; }
+    // 1) 새 필드 — ERP 양식에 도장 이미지를 오버레이한 경우 별도 보관
+    DB.orders[idx].approvalStampImage = dataUrl;
+    DB.orders[idx].approvalStampName = fname;
+    DB.orders[idx].stampType = 'erp_form';
+    // 2) 결재 완료 badge 트리거 — 기존 stampName 흐름 재활용 (stampData 는 건드리지 않음)
+    DB.orders[idx].stampName = '[ERP양식+도장] ' + fname;
+    DB.orders[idx].stampedAt = Date.now();
+    DB.orders[idx].stampUploadedAt = Date.now();
+    DB.orders[idx].updatedAt = Date.now();
+    // 3) 결재 레코드(po_approval) 상태도 approved 로 자동 전이
+    try { if (typeof syncApprovalFromOrderStamp === 'function') syncApprovalFromOrderStamp(DB.orders[idx].id); } catch(_){}
+    // 4) 저장 — 사용자 데이터라 즉시 (debounce 회피)
+    try {
+      if (typeof _doSaveData === 'function') _doSaveData().catch(function(e){ console.warn('도장 저장 후 _doSaveData:', e); });
+      else if (typeof saveDataNow === 'function') saveDataNow();
+      else if (typeof saveData === 'function') saveData();
+    } catch(_){}
+    // 5) 표/배지 갱신
+    try { if (typeof renderApprovalPage === 'function') renderApprovalPage(); } catch(_){}
+    try { if (typeof renderOrderTable === 'function') renderOrderTable(); } catch(_){}
+    try { if (typeof updateApprovalBadges === 'function') updateApprovalBadges(); } catch(_){}
+    try { showNotif('✅ 결재 완료 처리되었습니다 — 결재 날인 컬럼이 갱신됩니다','success'); } catch(_){}
+    // 모달 닫기
+    try { closeModal('doc-preview'); } catch(_){}
+  } catch(e){ console.warn('_savePoApprovalStamp:', e); }
+}
+
 function _applyPoApprovalStamp(inputEl) {
   if (!inputEl || !inputEl.files || !inputEl.files[0]) return;
   var file = inputEl.files[0];
   if (!/^image\//.test(file.type)) { try { showNotif('이미지 파일만 가능합니다','warning'); } catch(_){} return; }
   if (file.size > 5 * 1024 * 1024) { try { showNotif('도장 이미지는 5MB 이하만 가능합니다','warning'); } catch(_){} return; }
+  // v1.9.997: 파일명 보존 — 저장 시 사용
+  window._poSheetStampName = file.name || '대표도장.png';
   var reader = new FileReader();
   reader.onload = function(e){
     try {
       var dataUrl = e.target.result;
-      var cell = document.getElementById('po-sheet-ceo-cell');
-      if (!cell) { try { showNotif('도장 위치를 찾을 수 없습니다','warning'); } catch(_){} return; }
-      var existing = cell.querySelector('.po-sheet-stamp-img');
-      if (existing) existing.remove();
-      // (인) 텍스트 숨김 (도장이 그 자리를 대체)
-      var spans = cell.querySelectorAll('span');
-      for (var i = 0; i < spans.length; i++) {
-        var s = spans[i];
-        if ((s.textContent || '').indexOf('(인)') >= 0) { s.style.visibility = 'hidden'; }
+      if (typeof _overlayStampOnCeoCell === 'function') {
+        _overlayStampOnCeoCell(dataUrl);
       }
-      var img = document.createElement('img');
-      img.src = dataUrl;
-      img.className = 'po-sheet-stamp-img';
-      img.style.cssText = 'position:absolute;top:50%;right:10px;transform:translateY(-50%);width:58px;height:58px;object-fit:contain;opacity:.88;pointer-events:none;mix-blend-mode:multiply';
-      cell.appendChild(img);
-      try { showNotif('✅ 도장이 추가되었습니다 — 우측 상단 🖨️ 인쇄/PDF 로 저장하세요','success'); } catch(_){}
+      try { showNotif('✅ 도장이 추가되었습니다 — 결재 완료 저장 또는 인쇄/PDF 진행하세요','success'); } catch(_){}
     } catch(err){ console.warn('_applyPoApprovalStamp:', err); }
   };
   reader.readAsDataURL(file);
