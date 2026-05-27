@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.989';
+const ERP_VERSION = 'v1.9.990';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10710,7 +10710,9 @@ function _rpRender() {
     var modeStr;
     if (it.paymentMode === 'auto') {
       modeStr = '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;background:#dcfce7;color:#15803d;border-radius:99px;font-size:11px;font-weight:700">⚙️ 자동</span>';
-      if (it.autoPayDate) modeStr += '<div style="font-size:10.5px;color:#64748b;margin-top:2px">' + _rpEsc(it.autoPayDate) + '</div>';
+      // v1.9.990: '매월 N일' 형식 표시 (기존 YYYY-MM-DD 데이터도 dd 추출)
+      var _dN = _rpDayOf(it.autoPayDate);
+      if (_dN > 0) modeStr += '<div style="font-size:10.5px;color:#64748b;margin-top:2px">매월 ' + _dN + '일</div>';
     } else {
       modeStr = '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;background:#fef3c7;color:#a16207;border-radius:99px;font-size:11px;font-weight:700">✋ 수동</span>';
     }
@@ -10789,7 +10791,11 @@ function openRecurringModal(id) {
     + '<option value="auto"' + (paymentMode==='auto'?' selected':'') + '>⚙️ 자동</option>'
     + '<option value="manual"' + (paymentMode==='manual'?' selected':'') + '>✋ 수동</option>'
     + '</select>'
-    + '<input id="rp-autoPayDate" type="date" value="' + _rpEsc(g('autoPayDate')) + '" title="자동결제일" style="flex:1;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px;min-width:0;outline:none;box-sizing:border-box;' + (paymentMode==='auto'?'':'display:none') + '">'
+    + '<div id="rp-autoPayDay-wrap" style="display:' + (paymentMode==='auto'?'flex':'none') + ';align-items:center;gap:5px;flex:1;min-width:0;border:1px solid #cbd5e1;border-radius:7px;padding:6px 10px;font-size:12.5px;background:#fff;color:#475569">'
+    + '<span style="font-weight:600;flex-shrink:0">매월</span>'
+    + '<input id="rp-autoPayDay" type="number" min="1" max="31" value="' + (_rpDayOf(g("autoPayDate"))||'') + '" placeholder="일" style="flex:1;min-width:0;border:none;outline:none;padding:0;font-size:12.5px;text-align:center;background:transparent;font-weight:700;color:#0f172a">'
+    + '<span style="font-weight:600;flex-shrink:0">일</span>'
+    + '</div>'
     + '</div></div>'
     + fldText('이용 계정', 'rp-account', g('account'), '')
     + fldText('사이트 주소 (URL)', 'rp-url', g('url'), '')
@@ -10807,9 +10813,10 @@ function openRecurringModal(id) {
 function closeRecurringModal() { var ov = document.getElementById('recurring-modal-overlay'); if (ov) ov.remove(); window._rpEditId = null; }
 function _rpToggleAutoDate() {
   var sel = document.getElementById('rp-paymentMode');
-  var inp = document.getElementById('rp-autoPayDate');
-  if (!sel || !inp) return;
-  inp.style.display = (sel.value === 'auto') ? '' : 'none';
+  // v1.9.990: '매월 N일' wrapper 로 토글 대상 변경
+  var wrap = document.getElementById('rp-autoPayDay-wrap');
+  if (!sel || !wrap) return;
+  wrap.style.display = (sel.value === 'auto') ? 'flex' : 'none';
 }
 // v1.9.989: 종량제 체크박스 토글 — 체크 시 금액 입력칸을 '예상 금액' 모드로 전환
 function _rpToggleMetered() {
@@ -10818,6 +10825,15 @@ function _rpToggleMetered() {
   if (!ck || !inp) return;
   inp.placeholder = ck.checked ? '예상 금액' : '0';
   inp.style.background = ck.checked ? '#fffbeb' : '#fff';
+}
+// v1.9.990: autoPayDate 값에서 일(day-of-month, 1~31) 추출 — 'YYYY-MM-DD' 또는 'N' 모두 호환
+function _rpDayOf(s) {
+  if (s == null || s === '') return 0;
+  var str = String(s).trim();
+  var m = str.match(/(\d{1,2})$/);
+  if (!m) return 0;
+  var n = parseInt(m[1], 10);
+  return (n >= 1 && n <= 31) ? n : 0;
 }
 function saveRecurringPayment() {
   if (!_rpData) _rpData = _rpDefault();
@@ -10832,7 +10848,13 @@ function saveRecurringPayment() {
     isMetered: !!((document.getElementById('rp-isMetered')||{}).checked),
     currency: (document.getElementById('rp-currency')||{}).value || 'KRW',
     paymentMode: (document.getElementById('rp-paymentMode')||{}).value || 'auto',
-    autoPayDate: ((document.getElementById('rp-autoPayDate')||{}).value || '').trim(),
+    autoPayDate: (function(){
+      // v1.9.990: 매월 N일 (1~31) 정수로 저장. 범위 밖이면 빈 문자열.
+      var v = ((document.getElementById('rp-autoPayDay')||{}).value || '').trim();
+      if (!v) return '';
+      var n = parseInt(v, 10);
+      return (!isNaN(n) && n >= 1 && n <= 31) ? String(n) : '';
+    })(),
     account: ((document.getElementById('rp-account')||{}).value || '').trim(),
     url: ((document.getElementById('rp-url')||{}).value || '').trim(),
     startDate: ((document.getElementById('rp-startDate')||{}).value || '').trim(),
@@ -10902,8 +10924,10 @@ function openRecurringDetail(id) {
   if (it.isMetered) {
     amtStr = '<span style="display:inline-block;padding:2px 9px;background:#fef3c7;color:#a16207;border-radius:99px;font-size:11px;font-weight:700;margin-right:6px">📊 종량제</span>예상 ' + amtStr;
   }
+  // v1.9.990: '매월 N일' 형식 표시
+  var _detailDay = _rpDayOf(it.autoPayDate);
   var modeStr = it.paymentMode === 'auto'
-    ? ('⚙️ 자동' + (it.autoPayDate ? ' (' + _rpEsc(it.autoPayDate) + ')' : ''))
+    ? ('⚙️ 자동' + (_detailDay > 0 ? ' (매월 ' + _detailDay + '일)' : ''))
     : '✋ 수동';
   var urlVal = it.url
     ? ('<a href="' + _rpEsc(it.url) + '" target="_blank" rel="noopener" style="color:#1e40af;font-weight:700">' + _rpEsc(it.url) + '</a>')
