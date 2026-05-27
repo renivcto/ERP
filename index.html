@@ -894,6 +894,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="nav-item" onclick="go('approval');switchApprovalTab('po')"><span class="ico">📄</span>발주서 결재</div>
       <div class="nav-item" onclick="go('approval');switchApprovalTab('nonpo')"><span class="ico">📝</span>일반 결재</div>
       <div class="nav-item" onclick="go('approval');switchApprovalTab('sample')"><span class="ico">🧪</span>샘플 구매</div>
+      <div class="nav-item" onclick="go('recurring')"><span class="ico">🔁</span>정기 결제</div>
     </div>
     <div class="nav-item" onclick="go('insight')"><span class="ico">🌱</span>신제품 개발</div>
   </div>
@@ -2245,7 +2246,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <button id="ap-tab-expense" onclick="switchApprovalTab('expense')" class="ap-tab" style="padding:8px 16px;border:1px solid #0f172a;background:#0f172a;font-size:13px;font-weight:700;cursor:pointer;color:#fff;border-radius:7px;line-height:1.2;transition:all .12s">💳 지출 결의서</button>
         <button id="ap-tab-po" onclick="switchApprovalTab('po')" class="ap-tab" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">📄 발주서 결재</button>
         <button id="ap-tab-nonpo" onclick="switchApprovalTab('nonpo')" class="ap-tab" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">📝 일반 결재</button>
-        <button id="ap-tab-sample" onclick="switchApprovalTab('sample')" class="ap-tab" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">🧪 샘플 구매</button><button onclick="openUnpaidUnifiedView()" class="btn btn-primary btn-sm" style="margin-left:12px;padding:5px 12px;font-size:12.5px">📋 미결재 모아보기</button><button onclick="manualDedupExpenses()" class="btn btn-sm" style="margin-left:6px;padding:5px 12px;font-size:12.5px;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa" title="발주·지출결의서·샘플의 중복 레코드 정리 (지급완료 상태 우선 유지)">🔄 중복 정리</button>
+        <button id="ap-tab-sample" onclick="switchApprovalTab('sample')" class="ap-tab" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">🧪 샘플 구매</button><button onclick="openUnpaidUnifiedView()" class="btn btn-primary btn-sm" style="margin-left:12px;padding:5px 12px;font-size:12.5px">📋 미결재 모아보기</button>
         <!-- v1.9.418: 월별 → 월/주/일/기간별/전체 5종 필터로 확장 — 발주서 결재 / 일반 결재 / 지출 결의서 / 샘플 구매 공용 -->
         <div class="period-filter" data-prefix="ap" style="margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:nowrap">
           <span style="font-size:12px;color:var(--gray-500);font-weight:500;flex-shrink:0">📅</span>
@@ -2392,6 +2393,11 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- v1.9.986: 정기 결제 페이지 -->
+    <div class="page" id="page-recurring">
+      <div id="recurring-content" style="padding:4px 0"></div>
     </div>
 
     <!-- ══════════════ INSIGHT BOARD + 신제품 아이디어 ══════════════ -->
@@ -5281,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.985';
+const ERP_VERSION = 'v1.9.986';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -8088,7 +8094,8 @@ const PAGE_TITLES = {
   bom:'BOM 관리',production:'생산 현황',stock:'재고 관리',quote:'견적서',
   order:'발주서',sites:'사이트 / 계정',insight:'🌱 신제품 개발',accounts:'🔑 외부 계정',users:'사용자 관리',qc:'품질 관리',cost:'원가 분석',settings:'설정 프로필',
   cs:'CS 관리',customers:'👥 고객 정보',sales:'판매 관리',approval:'🖋️ 결재 요청',ads:'📢 광고비 관리',
-  costest:'💰 생산 예상 비용'
+  costest:'💰 생산 예상 비용',
+  recurring:'🔁 정기 결제'
 };
 
 function go(page) {
@@ -8199,6 +8206,7 @@ function go(page) {
     cost: renderCostPage,
     cs: renderCsPage,
     sales: renderSalesPage,
+    recurring: renderRecurringPage,
     settings: () => {
       const saved = localStorage.getItem('reniv_sheets_webapp_url');
       if (saved && $('webapp-url')) $('webapp-url').value = saved;
@@ -10615,6 +10623,292 @@ let _cpData = null;
 let _cpCurrentSub = 'homeshopping';
 let _cpModalCh = 'homeshopping';
 let _cpEditId = null;
+// ═══════════ v1.9.986: 정기 결제 ═══════════
+var _rpData = null;
+window._rpEditId = null;
+function _rpDefault() { return { items: [], updatedAt: 0 }; }
+function _rpSave() {
+  if (!_rpData) _rpData = _rpDefault();
+  _rpData.updatedAt = Date.now();
+  var payload = JSON.stringify(_rpData);
+  try { if (typeof idbSet === 'function') idbSet('reniv_recurring_payments', payload); } catch(_){}
+  try { localStorage.setItem('reniv_recurring_payments', payload); } catch(_){}
+}
+async function _rpLoad() {
+  var cand = [];
+  try { var ls = localStorage.getItem('reniv_recurring_payments'); if (ls) { var p = JSON.parse(ls); if (p && Array.isArray(p.items)) cand.push(p); } } catch(_){}
+  try {
+    if (typeof idbGet === 'function') {
+      var raw = await idbGet('reniv_recurring_payments');
+      if (raw) { var p2 = JSON.parse(raw); if (p2 && Array.isArray(p2.items)) cand.push(p2); }
+    }
+  } catch(_){}
+  cand.sort(function(a, b){ return (Number(b.updatedAt)||0) - (Number(a.updatedAt)||0); });
+  _rpData = cand[0] || _rpDefault();
+}
+function _rpGenId() { var id = Date.now(); var ex = new Set((_rpData && _rpData.items ? _rpData.items : []).map(function(x){ return String(x && x.id); })); while (ex.has(String(id))) id++; return id; }
+function _rpEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function _rpFmtMoney(amount, currency) {
+  amount = Number(amount) || 0;
+  currency = currency || 'KRW';
+  if (currency === 'KRW') return '₩' + Math.round(amount).toLocaleString();
+  if (currency === 'USD') return '$' + amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (currency === 'AUD') return 'A$' + amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return amount.toLocaleString() + ' ' + currency;
+}
+
+function renderRecurringPage() {
+  var host = document.getElementById('recurring-content');
+  if (!host) return;
+  if (!_rpData) {
+    host.innerHTML = '<div style="padding:48px;text-align:center;color:#94a3b8;font-size:13px">불러오는 중…</div>';
+    _rpLoad().then(function(){ _rpRender(); }).catch(function(){ _rpData = _rpDefault(); _rpRender(); });
+    return;
+  }
+  _rpRender();
+}
+
+function _rpRender() {
+  var host = document.getElementById('recurring-content');
+  if (!host) return;
+  if (!_rpData) _rpData = _rpDefault();
+  var items = (_rpData.items || []).slice().sort(function(a, b){
+    return (Number(a.sortOrder)||0) - (Number(b.sortOrder)||0) || (Number(a.id)||0) - (Number(b.id)||0);
+  });
+  var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:10px;flex-wrap:wrap">';
+  h += '<div style="font-size:20px;font-weight:800;color:#0f172a">🔁 정기 결제</div>';
+  h += '<button onclick="openRecurringModal(null)" style="padding:9px 18px;background:#4f46e5;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">＋ 정기 결제 등록</button>';
+  h += '</div>';
+  if (!items.length) {
+    h += '<div style="padding:44px;text-align:center;color:#94a3b8;font-size:13px;background:#f8fafc;border:1px dashed #e2e8f0;border-radius:12px">등록된 정기 결제가 없습니다. <b>＋ 정기 결제 등록</b> 버튼으로 시작하세요.</div>';
+    host.innerHTML = h;
+    return;
+  }
+  h += '<div style="overflow:auto;border:1px solid #e2e8f0;border-radius:12px;background:#fff">';
+  h += '<table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr style="background:#f8fafc">';
+  var TH = function(t, extra){ return '<th style="padding:10px 9px;font-size:11px;font-weight:700;color:#475569;text-align:center;border-bottom:2px solid #e2e8f0;white-space:nowrap;' + (extra||'') + '">' + t + '</th>'; };
+  h += TH('이용 사이트');
+  h += TH('이용 목적');
+  h += TH('결제 금액');
+  h += TH('결제 방식');
+  h += TH('이용 계정');
+  h += TH('사이트');
+  h += TH('정기결제 시작일');
+  h += TH('관리');
+  h += '</tr></thead><tbody>';
+  items.forEach(function(it, idx){
+    var isFirst = (idx === 0);
+    var isLast = (idx === items.length - 1);
+    var amtStr = _rpFmtMoney(it.amount, it.currency);
+    var modeStr;
+    if (it.paymentMode === 'auto') {
+      modeStr = '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;background:#dcfce7;color:#15803d;border-radius:99px;font-size:11px;font-weight:700">⚙️ 자동</span>';
+      if (it.autoPayDate) modeStr += '<div style="font-size:10.5px;color:#64748b;margin-top:2px">' + _rpEsc(it.autoPayDate) + '</div>';
+    } else {
+      modeStr = '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;background:#fef3c7;color:#a16207;border-radius:99px;font-size:11px;font-weight:700">✋ 수동</span>';
+    }
+    var urlBtn = it.url ? ('<a href="' + _rpEsc(it.url) + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;padding:5px 11px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:6px;font-size:11.5px;font-weight:600;text-decoration:none;cursor:pointer">🔗 열기</a>') : '<span style="color:#cbd5e1;font-size:11px">-</span>';
+    var td = function(v, extra){ return '<td style="padding:10px 9px;text-align:center;border-bottom:1px solid #f1f5f9;' + (extra||'') + '">' + v + '</td>'; };
+    h += '<tr>';
+    h += td('<span onclick="openRecurringDetail(' + it.id + ')" style="color:#6366f1;font-weight:700;cursor:pointer">' + _rpEsc(it.site || '-') + '</span>');
+    h += td('<span style="color:#0f172a">' + _rpEsc(it.purpose || '-') + '</span>');
+    h += td('<b style="color:#0f172a">' + amtStr + '</b>');
+    h += td(modeStr);
+    h += td('<span style="font-family:monospace;color:#475569;font-size:11.5px">' + _rpEsc(it.account || '-') + '</span>');
+    h += td(urlBtn);
+    h += td('<span style="color:#475569">' + _rpEsc(it.startDate || '-') + '</span>');
+    var arrowUp = isFirst
+      ? '<button disabled style="background:#f8fafc;color:#cbd5e1;border:1px solid #e2e8f0;padding:2px 7px;border-radius:5px;font-size:11px;cursor:not-allowed">↑</button>'
+      : '<button onclick="moveRecurringPayment(' + it.id + ',-1)" title="위로" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:2px 7px;border-radius:5px;font-size:11px;cursor:pointer">↑</button>';
+    var arrowDn = isLast
+      ? '<button disabled style="background:#f8fafc;color:#cbd5e1;border:1px solid #e2e8f0;padding:2px 7px;border-radius:5px;font-size:11px;cursor:not-allowed">↓</button>'
+      : '<button onclick="moveRecurringPayment(' + it.id + ',1)" title="아래로" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:2px 7px;border-radius:5px;font-size:11px;cursor:pointer">↓</button>';
+    var editBtn = '<button onclick="openRecurringModal(' + it.id + ')" title="수정" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;padding:2px 7px;border-radius:5px;font-size:11px;cursor:pointer;font-weight:700">✏️</button>';
+    var delBtn = '<button onclick="deleteRecurringPayment(' + it.id + ')" title="삭제" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;padding:2px 7px;border-radius:5px;font-size:11px;cursor:pointer;font-weight:700">🗑️</button>';
+    h += td('<div style="display:inline-flex;gap:3px;align-items:center">' + arrowUp + arrowDn + editBtn + delBtn + '</div>');
+    h += '</tr>';
+  });
+  h += '</tbody></table></div>';
+  host.innerHTML = h;
+}
+
+function openRecurringModal(id) {
+  closeRecurringModal();
+  var r = (id != null && _rpData) ? (_rpData.items||[]).find(function(x){ return x && String(x.id) === String(id); }) : null;
+  var g = function(f, d){ return (r && r[f] != null && r[f] !== '') ? r[f] : (d == null ? '' : d); };
+  var currency = g('currency', 'KRW');
+  var paymentMode = g('paymentMode', 'auto');
+  var ov = document.createElement('div');
+  ov.id = 'recurring-modal-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99988;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:32px 16px';
+  ov.onclick = function(ev){ if (ev.target === ov) closeRecurringModal(); };
+  var fldText = function(label, fid, val, placeholder){
+    return '<div><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">' + label + '</label>'
+      + '<input id="' + fid + '" type="text" value="' + _rpEsc(val) + '" placeholder="' + _rpEsc(placeholder||'') + '" style="width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px;outline:none;box-sizing:border-box">'
+      + '</div>';
+  };
+  var fldDate = function(label, fid, val){
+    return '<div><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">' + label + '</label>'
+      + '<input id="' + fid + '" type="date" value="' + _rpEsc(val) + '" style="width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px;outline:none;box-sizing:border-box">'
+      + '</div>';
+  };
+  ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:680px;max-width:96vw;box-shadow:0 18px 50px rgba(0,0,0,.3);overflow:hidden">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;padding:15px 20px;background:linear-gradient(135deg,#e0e7ff,#c7d2fe)">'
+    + '<div style="font-size:15px;font-weight:800;color:#3730a3">🔁 정기 결제 — ' + (id != null ? '수정' : '등록') + '</div>'
+    + '<button onclick="closeRecurringModal()" style="background:rgba(255,255,255,.5);border:none;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:14px;color:#3730a3">✕</button>'
+    + '</div>'
+    + '<div style="padding:18px 20px;max-height:64vh;overflow-y:auto">'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">'
+    + fldText('이용 사이트 (예: Claude · Google · Nanobanana)', 'rp-site', g('site'), '예: Claude')
+    + fldText('사용자', 'rp-applicant', g('applicant'), '예: 송희강')
+    + '<div style="grid-column:1/3">' + fldText('이용 목적', 'rp-purpose', g('purpose'), '예: AI 코딩 도구') + '</div>'
+    + '<div><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">결제 금액</label>'
+    + '<div style="display:flex;gap:6px">'
+    + '<select id="rp-currency" style="flex-shrink:0;width:88px;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px;font-weight:600;background:#fff">'
+    + '<option value="KRW"' + (currency==='KRW'?' selected':'') + '>₩ KRW</option>'
+    + '<option value="USD"' + (currency==='USD'?' selected':'') + '>$ USD</option>'
+    + '<option value="AUD"' + (currency==='AUD'?' selected':'') + '>A$ AUD</option>'
+    + '</select>'
+    + '<input id="rp-amount" type="number" step="any" value="' + _rpEsc(g('amount', 0)) + '" placeholder="0" style="flex:1;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px;min-width:0;outline:none;box-sizing:border-box">'
+    + '</div></div>'
+    + '<div><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">결제 방식</label>'
+    + '<div style="display:flex;gap:6px;align-items:stretch">'
+    + '<select id="rp-paymentMode" onchange="_rpToggleAutoDate()" style="flex-shrink:0;width:100px;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px;background:#fff">'
+    + '<option value="auto"' + (paymentMode==='auto'?' selected':'') + '>⚙️ 자동</option>'
+    + '<option value="manual"' + (paymentMode==='manual'?' selected':'') + '>✋ 수동</option>'
+    + '</select>'
+    + '<input id="rp-autoPayDate" type="date" value="' + _rpEsc(g('autoPayDate')) + '" title="자동결제일" style="flex:1;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px;min-width:0;outline:none;box-sizing:border-box;' + (paymentMode==='auto'?'':'display:none') + '">'
+    + '</div></div>'
+    + fldText('이용 계정', 'rp-account', g('account'), '예: reniv.cto@gmail.com')
+    + fldText('사이트 주소 (URL)', 'rp-url', g('url'), '예: https://claude.ai')
+    + fldDate('정기결제 시작일', 'rp-startDate', g('startDate'))
+    + '<div style="grid-column:1/3"><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">비고</label>'
+    + '<textarea id="rp-note" rows="2" placeholder="" style="width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px;font-family:inherit;resize:vertical;min-height:38px;line-height:1.5;outline:none;box-sizing:border-box">' + _rpEsc(g('note')) + '</textarea></div>'
+    + '</div></div>'
+    + '<div style="padding:13px 20px;border-top:1px solid #f1f5f9;display:flex;justify-content:flex-end;gap:8px">'
+    + '<button onclick="closeRecurringModal()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">취소</button>'
+    + '<button onclick="saveRecurringPayment()" style="background:#4f46e5;color:#fff;border:none;padding:9px 22px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">저장</button>'
+    + '</div></div>';
+  document.body.appendChild(ov);
+  window._rpEditId = id;
+}
+function closeRecurringModal() { var ov = document.getElementById('recurring-modal-overlay'); if (ov) ov.remove(); window._rpEditId = null; }
+function _rpToggleAutoDate() {
+  var sel = document.getElementById('rp-paymentMode');
+  var inp = document.getElementById('rp-autoPayDate');
+  if (!sel || !inp) return;
+  inp.style.display = (sel.value === 'auto') ? '' : 'none';
+}
+function saveRecurringPayment() {
+  if (!_rpData) _rpData = _rpDefault();
+  var id = window._rpEditId;
+  var site = (document.getElementById('rp-site')||{}).value || '';
+  if (!site.trim()) { showNotif('이용 사이트를 입력하세요', 'warning'); return; }
+  var data = {
+    site: site.trim(),
+    applicant: ((document.getElementById('rp-applicant')||{}).value || '').trim(),
+    purpose: ((document.getElementById('rp-purpose')||{}).value || '').trim(),
+    amount: parseFloat((document.getElementById('rp-amount')||{}).value) || 0,
+    currency: (document.getElementById('rp-currency')||{}).value || 'KRW',
+    paymentMode: (document.getElementById('rp-paymentMode')||{}).value || 'auto',
+    autoPayDate: ((document.getElementById('rp-autoPayDate')||{}).value || '').trim(),
+    account: ((document.getElementById('rp-account')||{}).value || '').trim(),
+    url: ((document.getElementById('rp-url')||{}).value || '').trim(),
+    startDate: ((document.getElementById('rp-startDate')||{}).value || '').trim(),
+    note: ((document.getElementById('rp-note')||{}).value || '').trim(),
+    updatedAt: Date.now()
+  };
+  if (id != null) {
+    var idx = (_rpData.items||[]).findIndex(function(x){ return x && String(x.id) === String(id); });
+    if (idx >= 0) _rpData.items[idx] = Object.assign({}, _rpData.items[idx], data);
+  } else {
+    var maxSort = (_rpData.items||[]).reduce(function(m, x){ var s = Number(x && x.sortOrder)||0; return s > m ? s : m; }, 0);
+    _rpData.items.push(Object.assign({ id: _rpGenId(), sortOrder: maxSort + 10, createdAt: Date.now() }, data));
+  }
+  _rpSave();
+  closeRecurringModal();
+  _rpRender();
+  try { showNotif('✅ 저장 완료', 'success'); } catch(_){}
+}
+function deleteRecurringPayment(id) {
+  if (!_rpData) return;
+  var item = (_rpData.items||[]).find(function(x){ return x && String(x.id) === String(id); });
+  if (!item) return;
+  if (!confirm('[' + (item.site||'-') + '] 정기 결제를 삭제하시겠습니까?')) return;
+  _rpData.items = (_rpData.items||[]).filter(function(x){ return x && String(x.id) !== String(id); });
+  _rpSave();
+  _rpRender();
+  try { showNotif('🗑 삭제 완료', 'success'); } catch(_){}
+}
+function moveRecurringPayment(id, dir) {
+  if (!_rpData) return;
+  var items = (_rpData.items||[]).slice().sort(function(a, b){
+    return (Number(a.sortOrder)||0) - (Number(b.sortOrder)||0) || (Number(a.id)||0) - (Number(b.id)||0);
+  });
+  var idx = items.findIndex(function(x){ return x && String(x.id) === String(id); });
+  if (idx < 0) return;
+  var newIdx = idx + (dir > 0 ? 1 : -1);
+  if (newIdx < 0 || newIdx >= items.length) return;
+  var a = items[idx], b = items[newIdx];
+  var sa = Number(a.sortOrder)||0, sb = Number(b.sortOrder)||0;
+  if (sa === sb) { if (dir > 0) sb = sa + 1; else sa = sb + 1; }
+  var newSaForA = sb, newSaForB = sa;
+  _rpData.items = _rpData.items.map(function(x){
+    if (!x) return x;
+    if (String(x.id) === String(a.id)) return Object.assign({}, x, { sortOrder: newSaForA, updatedAt: Date.now() });
+    if (String(x.id) === String(b.id)) return Object.assign({}, x, { sortOrder: newSaForB, updatedAt: Date.now() });
+    return x;
+  });
+  _rpSave();
+  _rpRender();
+}
+function openRecurringDetail(id) {
+  if (!_rpData) return;
+  var it = (_rpData.items||[]).find(function(x){ return x && String(x.id) === String(id); });
+  if (!it) { try { showNotif('찾을 수 없습니다', 'warning'); } catch(_){} return; }
+  closeRecurringDetail();
+  var ov = document.createElement('div');
+  ov.id = 'recurring-detail-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99989;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:32px 16px';
+  ov.onclick = function(ev){ if (ev.target === ov) closeRecurringDetail(); };
+  var line = function(lbl, val){
+    return '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f5f9;gap:14px">'
+      + '<span style="font-size:12px;color:#64748b;font-weight:600;flex-shrink:0">' + lbl + '</span>'
+      + '<span style="font-size:12.5px;color:#0f172a;font-weight:700;text-align:right;word-break:break-all">' + val + '</span>'
+      + '</div>';
+  };
+  var amtStr = _rpFmtMoney(it.amount, it.currency);
+  var modeStr = it.paymentMode === 'auto'
+    ? ('⚙️ 자동' + (it.autoPayDate ? ' (' + _rpEsc(it.autoPayDate) + ')' : ''))
+    : '✋ 수동';
+  var urlVal = it.url
+    ? ('<a href="' + _rpEsc(it.url) + '" target="_blank" rel="noopener" style="color:#1e40af;font-weight:700">' + _rpEsc(it.url) + '</a>')
+    : '-';
+  ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:520px;max-width:96vw;box-shadow:0 18px 50px rgba(0,0,0,.3);overflow:hidden">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;padding:15px 20px;background:linear-gradient(135deg,#e0e7ff,#c7d2fe)">'
+    + '<div><div style="font-size:15px;font-weight:800;color:#3730a3">🔁 ' + _rpEsc(it.site||'-') + '</div>'
+    + '<div style="font-size:11.5px;color:#4338ca;margin-top:2px">정기 결제 상세</div></div>'
+    + '<button onclick="closeRecurringDetail()" style="background:rgba(255,255,255,.5);border:none;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:14px;color:#3730a3">✕</button>'
+    + '</div>'
+    + '<div style="padding:16px 20px;max-height:68vh;overflow-y:auto">'
+    + line('이용 사이트', _rpEsc(it.site||'-'))
+    + line('사용자', _rpEsc(it.applicant||'-'))
+    + line('이용 목적', _rpEsc(it.purpose||'-'))
+    + line('결제 금액', amtStr)
+    + line('결제 방식', modeStr)
+    + line('이용 계정', _rpEsc(it.account||'-'))
+    + line('사이트 주소', urlVal)
+    + line('정기결제 시작일', _rpEsc(it.startDate||'-'))
+    + (it.note ? line('비고', '<span style="white-space:pre-wrap;text-align:left;display:inline-block">' + _rpEsc(it.note) + '</span>') : '')
+    + '</div>'
+    + '<div style="padding:13px 20px;border-top:1px solid #f1f5f9;display:flex;justify-content:flex-end;gap:8px">'
+    + '<button onclick="closeRecurringDetail();openRecurringModal(' + it.id + ')" style="background:#e0e7ff;color:#3730a3;border:1px solid #c7d2fe;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✏️ 수정</button>'
+    + '<button onclick="closeRecurringDetail()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">닫기</button>'
+    + '</div></div>';
+  document.body.appendChild(ov);
+}
+function closeRecurringDetail() { var ov = document.getElementById('recurring-detail-overlay'); if (ov) ov.remove(); }
+
 function _cpDefault() { return { updatedAt: 0, rows: [] }; }
 function _cpGenId() {
   let id = Date.now();
@@ -39646,7 +39940,7 @@ function initERPWhenReady() {
     try { updateBadges(); } catch(e) { console.warn('updateBadges 실패:', e); }
     // v1.9.316 — 새로고침 시 마지막 머물렀던 페이지 복원 (기본: dashboard)
     try {
-      const KNOWN_PAGES = ['dashboard','workflow','calendar','gdrive','vendor','item','archive','bom','production','stock','quote','order','approval','sites','accounts','insight','users','qc','cost','cs','sales','settings'];
+      const KNOWN_PAGES = ['dashboard','workflow','calendar','gdrive','vendor','item','archive','bom','production','stock','quote','order','approval','sites','accounts','insight','users','qc','cost','cs','sales','settings','recurring'];
       // v1.9.976: 같은 탭 새로고침이면 마지막 페이지 복원, 처음 접속/새 탭/브라우저 재시작이면 dashboard
       //   sessionStorage 는 같은 탭이 살아있는 동안만 유지(새로고침=유지, 탭닫기/재시작=초기화)
       if (typeof window._v976_freshSession === 'undefined') {
