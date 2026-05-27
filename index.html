@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.987';
+const ERP_VERSION = 'v1.9.988';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6390,6 +6390,7 @@ async function _doSaveDataInner() {
       // v1.9.594 — 고객 등급 수동 override (key → 'vip'|'regular'|'member'|'normal')
       customerOverrides: (dbToSave.customerOverrides && typeof dbToSave.customerOverrides === 'object') ? dbToSave.customerOverrides : {},
       boms:             dbToSave.boms             || {},
+      bomTimestamps:    dbToSave.bomTimestamps    || {},
       sites:            dbToSave.sites            || [],
       gdocs:            _gdocList                 || [],
       // v1.9.313 — 회사 드라이브 폴더 허브
@@ -39152,6 +39153,7 @@ async function resetToDefaultAndUpload() {
         _nextIds: DB._nextIds||{},
         _processedOrders: DB._processedOrders||[],
         boms: DB.boms||{},
+        bomTimestamps: DB.bomTimestamps||{},
         sites: DB.sites||[],
       }), ts: Date.now()
     });
@@ -40526,23 +40528,50 @@ function initERPWhenReady() {
       merged._nextId.comment  = Math.max(merged._nextId.comment||0,  maxOf(merged.approvalComments||[],'id') + 1);
       merged._nextId.feedPost = Math.max(merged._nextId.feedPost||0, maxOf(merged.feedPosts||[],'id') + 1);
       console.log('🔢 _nextId 복원:', JSON.stringify(merged._nextId));
-      // v1.9.926: boms 병합 — 제품별 union (한쪽이 비어도 다른 쪽 보존).
-      //   기존엔 Firestore 가 비어있지 않으면 통째로 채택 → 로컬에서 새로 등록한
-      //   BOM 이 전부 사라지는 버그. 수정: 제품별로 합치되, 로컬에 BOM 행이
-      //   있으면 로컬 우선(이 PC 가 최신 작업본), 없으면 Firestore 유지.
+      // v1.9.988: boms 머지 — timestamp 비교 기반 (newer-wins).
+      //   기존(v926)은 "로컬에 BOM 행이 있으면 무조건 로컬 우선" → 다른 사용자가
+          //   BOM 을 수정해 Firestore 에 올려도, 이 PC 가 캐시된 옛 BOM 을 그대로
+      //   유지하면서 다시 덮어써 다른 사용자 화면이 계속 옛 BOM 으로 보이는 버그.
+      //   수정: DB.bomTimestamps[productId] 비교 → 더 최근 작업본을 채택,
+      //   타임스탬프가 동률/없으면 Firestore(=공유 진실) 우선.
       {
         const _fsB = (firestoreDB.boms && typeof firestoreDB.boms === 'object') ? firestoreDB.boms : {};
         const _lcB = (localDB.boms && typeof localDB.boms === 'object') ? localDB.boms : {};
+        const _fsBT = (firestoreDB.bomTimestamps && typeof firestoreDB.bomTimestamps === 'object') ? firestoreDB.bomTimestamps : {};
+        const _lcBT = (localDB.bomTimestamps && typeof localDB.bomTimestamps === 'object') ? localDB.bomTimestamps : {};
         const _uB = {};
+        const _uBT = {};
         const _bKeys = {};
         for (const _k in _fsB) _bKeys[_k] = 1;
         for (const _k in _lcB) _bKeys[_k] = 1;
         for (const _k in _bKeys) {
           const _lArr = Array.isArray(_lcB[_k]) ? _lcB[_k] : [];
           const _fArr = Array.isArray(_fsB[_k]) ? _fsB[_k] : [];
-          _uB[_k] = _lArr.length ? _lArr : _fArr;
+          const _lTs = Number(_lcBT[_k]) || 0;
+          const _fTs = Number(_fsBT[_k]) || 0;
+          // 한쪽이 비어있으면 비어있지 않은 쪽 채택 (소실 방지)
+          if (!_lArr.length && _fArr.length) {
+            _uB[_k] = _fArr; _uBT[_k] = _fTs;
+          } else if (_lArr.length && !_fArr.length) {
+            _uB[_k] = _lArr; _uBT[_k] = _lTs;
+          } else if (!_lArr.length && !_fArr.length) {
+            _uB[_k] = []; _uBT[_k] = Math.max(_lTs, _fTs);
+          } else {
+            // 양쪽 모두 BOM 행이 있을 때 → 타임스탬프 비교
+            if (_lTs > _fTs) {
+              _uB[_k] = _lArr; _uBT[_k] = _lTs;
+              try { console.log('🧩 [BOM MERGE] product=' + _k + ' → LOCAL wins (ts ' + _lTs + ' > ' + _fTs + ')'); } catch(_) {}
+            } else if (_fTs > _lTs) {
+              _uB[_k] = _fArr; _uBT[_k] = _fTs;
+              try { console.log('🧩 [BOM MERGE] product=' + _k + ' → FIRESTORE wins (ts ' + _fTs + ' > ' + _lTs + ')'); } catch(_) {}
+            } else {
+              // 타임스탬프 동률(또는 둘 다 0) → Firestore 우선 (공유 진실)
+              _uB[_k] = _fArr; _uBT[_k] = _fTs;
+            }
+          }
         }
         merged.boms = _uB;
+        merged.bomTimestamps = _uBT;
       }
       // v1.9.928: BOM 전용 저장소(reniv_boms_store) + 구조 백업(reniv_boms_rescue)
       //   에서 누락된 BOM 을 채워 넣음 — 메인 DB 가 용량초과/머지로 흔들려도
@@ -40558,10 +40587,13 @@ function initERPWhenReady() {
             return (p && typeof p === 'object') ? p : {};
           } catch(_) { return {}; }
         };
-        // 전용 저장소: 가장 신뢰 — 비어있지 않은 제품은 이 값으로 채택
+        // v1.9.988: 전용 저장소 — 머지 결과가 비어있을 때만 채움 (다른 사용자 변경 덮어쓰기 방지)
         const _storeB = _readBomsKey('reniv_boms_store', true);
         for (const _k in _storeB) {
-          if (Array.isArray(_storeB[_k]) && _storeB[_k].length) merged.boms[_k] = _storeB[_k];
+          if (Array.isArray(_storeB[_k]) && _storeB[_k].length
+              && !(Array.isArray(merged.boms[_k]) && merged.boms[_k].length)) {
+            merged.boms[_k] = _storeB[_k];
+          }
         }
         // 구조 백업: 아직도 비어있는 제품만 보충
         const _rescueB = _readBomsKey('reniv_boms_rescue', false);
