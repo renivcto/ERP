@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.1.3';
+const ERP_VERSION = 'v2.1.4';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -20422,6 +20422,40 @@ function _dedupProductionsSafe() {
       list.slice(1).forEach(function(p){ rmIds.push(p.id); });
       kept.push({ key: key, keepId: keep.id, keepStatus: keep.status, removed: list.slice(1).map(function(p){ return { id: p.id, status: p.status }; }) });
     });
+    // v2.1.4: 2차 dedup — orderId 누락 케이스. (productId + serial + inDate + qty) 가 같은데
+    //   한쪽은 orderId 있고 한쪽은 null/빈 값이면 → orderId 있는 쪽 유지 (백필 실패 부분 레코드 제거)
+    var liveAfter1st = DB.productions.filter(function(p){
+      if (!p) return false;
+      var s = new Set(rmIds.map(String));
+      return !s.has(String(p.id));
+    });
+    var grp2 = new Map();
+    liveAfter1st.forEach(function(p){
+      if (!p || !p.productId) return;
+      if (!p.serial) return; // serial 없으면 2차 키 불가
+      var key2 = String(p.productId) + '::' + p.serial + '::' + (p.inDate || '') + '::' + (Number(p.qty)||0);
+      if (!grp2.has(key2)) grp2.set(key2, []);
+      grp2.get(key2).push(p);
+    });
+    var kept2 = [];
+    grp2.forEach(function(list, key){
+      if (list.length <= 1) return;
+      var withOrder = list.filter(function(p){ return p.orderId != null && p.orderId !== ''; });
+      var noOrder = list.filter(function(p){ return p.orderId == null || p.orderId === ''; });
+      // 둘 다 있어야 의미 있음 (한쪽만 있으면 1차에서 이미 처리됨)
+      if (withOrder.length === 0 || noOrder.length === 0) return;
+      // orderId 있는 쪽 모두 유지, orderId 없는 쪽 전부 제거
+      noOrder.forEach(function(p){ rmIds.push(p.id); });
+      kept2.push({
+        key: key,
+        keepIds: withOrder.map(function(p){ return p.id; }),
+        removedIds: noOrder.map(function(p){ return p.id; }),
+        reason: 'orderId 누락 부분 레코드'
+      });
+    });
+    if (kept2.length) {
+      console.warn('🧹 [v2.1.4] 2차 dedup — orderId 누락 ' + kept2.reduce(function(s,k){return s+k.removedIds.length;},0) + '건 정리:', kept2);
+    }
     if (rmIds.length === 0) return 0;
     console.warn('🧹 [v2.1.3] 생산 레코드 중복 ' + rmIds.length + '건 자동 정리:', kept);
     var rmSet = new Set(rmIds.map(String));
