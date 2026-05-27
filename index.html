@@ -5288,7 +5288,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.998';
+const ERP_VERSION = 'v1.9.999';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -40938,38 +40938,61 @@ function initERPWhenReady() {
           }
         } catch(_){}
       }
-      // v1.9.936: insights — 빈 Firestore 문서가 localStorage 를 덮어쓰지 않도록 union.
-      //   (기존: Firestore 문서가 존재하면 빈 배열이어도 무조건 채택 → 데이터 영구 소실)
+      // v1.9.999: insights 머지 — updatedAt 비교 기반 newer-wins (BOM v988 동일 패턴)
+      //   기존(v936): _fsI.concat(_lcI) 후 첫 발견 id keep → Firestore 항상 우선 → 로컬 수정이
+      //   Firestore 옛 값에 덮여 새로고침 시 되돌아가던 버그. 이제 updatedAt 큰 쪽 채택,
+      //   동률/없음 → Firestore (공유 진실).
       {
         const _fsI = (firestoreDB._insightsDocExists === true && Array.isArray(firestoreDB.insights)) ? firestoreDB.insights : [];
         const _lcI = Array.isArray(localDB.insights) ? localDB.insights : [];
-        if (_fsI.length && _lcI.length) {
-          const _sI = {}; const _uI = [];
-          _fsI.concat(_lcI).forEach(r => { if (r && r.id != null && !_sI[r.id]) { _sI[r.id] = 1; _uI.push(r); } });
-          merged.insights = _uI;
+        if (_fsI.length || _lcI.length) {
+          const _byId = new Map();
+          _lcI.forEach(r => { if (r && r.id != null) _byId.set(String(r.id), r); });
+          _fsI.forEach(r => {
+            if (!r || r.id == null) return;
+            const key = String(r.id);
+            const prev = _byId.get(key);
+            if (!prev) { _byId.set(key, r); return; }
+            const fsTs = Number(r.updatedAt) || 0;
+            const lcTs = Number(prev.updatedAt) || 0;
+            // newer wins; tie/없음 → Firestore (공유 진실)
+            if (fsTs >= lcTs) _byId.set(key, r);
+          });
+          merged.insights = Array.from(_byId.values());
         } else {
-          merged.insights = _fsI.length ? _fsI : _lcI;
+          merged.insights = [];
         }
         if (!merged.insights.length) {
           try { const _bI = JSON.parse(localStorage.getItem('reniv_insights_backup') || '[]'); if (Array.isArray(_bI) && _bI.length) { merged.insights = _bI; console.warn('🛟 insights 전용 백업에서 복구 —', _bI.length, '건'); } } catch(_){}
         }
-        console.log('insights 병합 —', merged.insights.length, '건');
+        console.log('insights 병합 (newer-wins) —', merged.insights.length, '건');
       }
-      // v1.9.936: newProducts — 빈 Firestore 문서가 localStorage 를 덮어쓰지 않도록 union.
+      // v1.9.999: newProducts 머지 — updatedAt 비교 기반 newer-wins
+      //   기존: 첫 발견 id keep → Firestore 항상 우선 → 로컬에서 이름 수정해도 새로고침 시
+      //   Firestore 옛 값이 살아나는 버그. 이제 updatedAt 큰 쪽 채택, 동률/없음 → Firestore.
       {
         const _fsN = (firestoreDB._newProductsDocExists === true && Array.isArray(firestoreDB.newProducts)) ? firestoreDB.newProducts : [];
         const _lcN = Array.isArray(localDB.newProducts) ? localDB.newProducts : [];
-        if (_fsN.length && _lcN.length) {
-          const _sN = {}; const _uN = [];
-          _fsN.concat(_lcN).forEach(r => { if (r && r.id != null && !_sN[r.id]) { _sN[r.id] = 1; _uN.push(r); } });
-          merged.newProducts = _uN;
+        if (_fsN.length || _lcN.length) {
+          const _byId = new Map();
+          _lcN.forEach(r => { if (r && r.id != null) _byId.set(String(r.id), r); });
+          _fsN.forEach(r => {
+            if (!r || r.id == null) return;
+            const key = String(r.id);
+            const prev = _byId.get(key);
+            if (!prev) { _byId.set(key, r); return; }
+            const fsTs = Number(r.updatedAt) || 0;
+            const lcTs = Number(prev.updatedAt) || 0;
+            if (fsTs >= lcTs) _byId.set(key, r);
+          });
+          merged.newProducts = Array.from(_byId.values());
         } else {
-          merged.newProducts = _fsN.length ? _fsN : _lcN;
+          merged.newProducts = [];
         }
         if (!merged.newProducts.length) {
           try { const _bN = JSON.parse(localStorage.getItem('reniv_newProducts_backup') || '[]'); if (Array.isArray(_bN) && _bN.length) { merged.newProducts = _bN; console.warn('🛟 newProducts 전용 백업에서 복구 —', _bN.length, '건'); } } catch(_){}
         }
-        console.log('newProducts 병합 —', merged.newProducts.length, '건');
+        console.log('newProducts 병합 (newer-wins) —', merged.newProducts.length, '건');
       }
       // v1.9.205: 결재 그룹웨어 컬렉션 2차 복구 — 메인 병합 후에도 비어있다면 전용 localStorage 백업에서 복구
       try {
