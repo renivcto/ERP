@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.1.0';
+const ERP_VERSION = 'v2.1.1';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -23008,6 +23008,201 @@ function renderOrderTable() {
 // v1.9.569 — 발주서 이메일 발송 (.eml 파일 생성)
 //   결재 날인 PDF가 있으면 첨부, 없으면 원본 PDF, 둘 다 없으면 알림
 //   .eml 파일을 다운로드하면 Outlook 이 자동으로 새 메일 창 열어줌 (받는 사람·본문·첨부 모두 채워짐)
+// v2.1.1: 사인 캔버스 + 저장된 사인 라이브러리 (해외 PO 결재용)
+function _loadSavedSignatures() {
+  try { return JSON.parse(localStorage.getItem('reniv_saved_signatures') || '[]'); }
+  catch(_) { return []; }
+}
+function _persistSavedSignatures(arr) {
+  try { localStorage.setItem('reniv_saved_signatures', JSON.stringify(arr.slice(0, 20))); }
+  catch(e) { console.warn('signature save fail:', e); }
+}
+// 빈 캔버스 영역 잘라내기 → 사인 부분만 PNG dataURL
+function _trimCanvasToDataUrl(canvas) {
+  var ctx = canvas.getContext('2d');
+  var w = canvas.width, h = canvas.height;
+  var imgData;
+  try { imgData = ctx.getImageData(0, 0, w, h); } catch(e) { return canvas.toDataURL('image/png'); }
+  var data = imgData.data;
+  var minX = w, minY = h, maxX = -1, maxY = -1;
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      var a = data[(y * w + x) * 4 + 3];
+      if (a > 0) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;
+  var pad = 6;
+  minX = Math.max(0, minX - pad);
+  minY = Math.max(0, minY - pad);
+  maxX = Math.min(w-1, maxX + pad);
+  maxY = Math.min(h-1, maxY + pad);
+  var tw = maxX - minX + 1;
+  var th = maxY - minY + 1;
+  var tc = document.createElement('canvas');
+  tc.width = tw; tc.height = th;
+  tc.getContext('2d').drawImage(canvas, minX, minY, tw, th, 0, 0, tw, th);
+  return tc.toDataURL('image/png');
+}
+// 사인 캔버스 모달 열기
+function _openSignaturePad(onApply) {
+  var existing = document.getElementById('sig-pad-overlay');
+  if (existing) existing.remove();
+  var ov = document.createElement('div');
+  ov.id = 'sig-pad-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick = function(e){ if (e.target === ov) ov.remove(); };
+  var box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:12px;padding:18px;width:540px;max-width:96vw;box-shadow:0 20px 50px rgba(0,0,0,.3)';
+  box.innerHTML = ''
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
+    +   '<h3 style="margin:0;font-size:15px;font-weight:700;color:#0f172a">✍️ 직접 사인하기</h3>'
+    +   '<button onclick="document.getElementById(\'sig-pad-overlay\').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:#64748b">✕</button>'
+    + '</div>'
+    + '<div style="font-size:11.5px;color:#64748b;margin-bottom:8px">아래 영역에 마우스(또는 터치)로 사인을 그려주세요</div>'
+    + '<canvas id="sig-pad-canvas" width="500" height="180" style="width:100%;border:2px solid #cbd5e1;border-radius:8px;background:#fff;cursor:crosshair;display:block;touch-action:none"></canvas>'
+    + '<div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">'
+    +   '<input id="sig-pad-name" type="text" placeholder="사인 이름 (저장 시 사용, 예: Stella Song)" style="flex:1;min-width:140px;padding:7px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;outline:none">'
+    +   '<button onclick="_clearSigPad()" style="padding:7px 14px;background:#fff;border:1px solid #cbd5e1;color:#475569;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">🗑 지우기</button>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;flex-wrap:wrap">'
+    +   '<button onclick="document.getElementById(\'sig-pad-overlay\').remove()" style="padding:8px 16px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;font-size:12.5px;font-weight:600">취소</button>'
+    +   '<button onclick="_applySigPad(false)" style="padding:8px 16px;background:#6366f1;color:#fff;border:1px solid #4f46e5;border-radius:6px;cursor:pointer;font-size:12.5px;font-weight:700">✓ 이 사인 사용</button>'
+    +   '<button onclick="_applySigPad(true)" style="padding:8px 16px;background:#16a34a;color:#fff;border:1px solid #15803d;border-radius:6px;cursor:pointer;font-size:12.5px;font-weight:700">💾 사용 + 라이브러리 저장</button>'
+    + '</div>';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  var canvas = document.getElementById('sig-pad-canvas');
+  var ctx = canvas.getContext('2d');
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#0f172a';
+  var drawing = false;
+  var lastX = 0, lastY = 0;
+  function getPos(e) {
+    var rect = canvas.getBoundingClientRect();
+    var scaleX = canvas.width / rect.width;
+    var scaleY = canvas.height / rect.height;
+    var x, y;
+    if (e.touches && e.touches.length) {
+      x = (e.touches[0].clientX - rect.left) * scaleX;
+      y = (e.touches[0].clientY - rect.top) * scaleY;
+    } else {
+      x = (e.clientX - rect.left) * scaleX;
+      y = (e.clientY - rect.top) * scaleY;
+    }
+    return [x, y];
+  }
+  function start(e) { e.preventDefault(); drawing = true; var p = getPos(e); lastX = p[0]; lastY = p[1]; }
+  function move(e) {
+    if (!drawing) return;
+    e.preventDefault();
+    var p = getPos(e);
+    ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p[0], p[1]); ctx.stroke();
+    lastX = p[0]; lastY = p[1];
+  }
+  function end(e) { drawing = false; }
+  canvas.addEventListener('mousedown', start);
+  canvas.addEventListener('mousemove', move);
+  canvas.addEventListener('mouseup', end);
+  canvas.addEventListener('mouseleave', end);
+  canvas.addEventListener('touchstart', start, { passive: false });
+  canvas.addEventListener('touchmove', move, { passive: false });
+  canvas.addEventListener('touchend', end);
+  window._sigPadOnApply = onApply;
+}
+function _clearSigPad() {
+  var canvas = document.getElementById('sig-pad-canvas');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+function _applySigPad(saveToLibrary) {
+  var canvas = document.getElementById('sig-pad-canvas');
+  if (!canvas) return;
+  var dataUrl = _trimCanvasToDataUrl(canvas);
+  if (!dataUrl) { try { showNotif('사인이 비어있습니다','warning'); } catch(_){} return; }
+  if (saveToLibrary) {
+    var nameEl = document.getElementById('sig-pad-name');
+    var name = (nameEl && nameEl.value.trim()) || ('사인 ' + new Date().toLocaleString());
+    var lib = _loadSavedSignatures();
+    lib.unshift({ name: name, dataUrl: dataUrl, ts: Date.now() });
+    _persistSavedSignatures(lib);
+    try { showNotif('💾 사인 라이브러리에 저장됨: ' + name, 'success'); } catch(_){}
+  }
+  var cb = window._sigPadOnApply;
+  document.getElementById('sig-pad-overlay').remove();
+  if (typeof cb === 'function') cb(dataUrl, 'signature.png');
+}
+// 저장된 사인 선택 모달
+function _openSavedSignaturesPicker(onApply) {
+  var existing = document.getElementById('sig-lib-overlay');
+  if (existing) existing.remove();
+  var lib = _loadSavedSignatures();
+  var ov = document.createElement('div');
+  ov.id = 'sig-lib-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick = function(e){ if (e.target === ov) ov.remove(); };
+  var box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:12px;padding:18px;width:640px;max-width:96vw;max-height:80vh;overflow-y:auto;box-shadow:0 20px 50px rgba(0,0,0,.3)';
+  var hdr = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
+    + '<h3 style="margin:0;font-size:15px;font-weight:700;color:#0f172a">📚 저장된 사인 선택</h3>'
+    + '<button onclick="document.getElementById(\'sig-lib-overlay\').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:#64748b">✕</button>'
+    + '</div>';
+  if (!lib.length) {
+    box.innerHTML = hdr + '<div style="text-align:center;padding:40px;color:#94a3b8;font-size:13px;line-height:1.6">저장된 사인이 없습니다.<br><br>먼저 <b>✍️ 직접 사인하기</b> → <b>💾 사용 + 라이브러리 저장</b> 으로 사인을 저장하세요.</div>';
+  } else {
+    var grid = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">';
+    lib.forEach(function(sig, i){
+      var nameSafe = (sig.name || '이름 없음').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+      grid += '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;background:#fafbfc">';
+      grid +=   '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;height:80px;display:flex;align-items:center;justify-content:center;margin-bottom:8px;overflow:hidden">';
+      grid +=     '<img src="' + sig.dataUrl + '" style="max-width:100%;max-height:100%;object-fit:contain">';
+      grid +=   '</div>';
+      grid +=   '<div style="font-size:11.5px;font-weight:600;color:#0f172a;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + nameSafe + '">' + nameSafe + '</div>';
+      grid +=   '<div style="display:flex;gap:5px">';
+      grid +=     '<button onclick="_applySavedSig(' + i + ')" style="flex:1;padding:6px;background:#6366f1;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700">✓ 사용</button>';
+      grid +=     '<button onclick="_deleteSavedSig(' + i + ')" style="padding:6px 9px;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700" title="삭제">🗑</button>';
+      grid +=   '</div>';
+      grid += '</div>';
+    });
+    grid += '</div>';
+    box.innerHTML = hdr + grid;
+  }
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  window._sigLibOnApply = onApply;
+}
+function _applySavedSig(idx) {
+  var lib = _loadSavedSignatures();
+  var sig = lib[idx];
+  if (!sig) return;
+  var cb = window._sigLibOnApply;
+  var ov = document.getElementById('sig-lib-overlay'); if (ov) ov.remove();
+  if (typeof cb === 'function') cb(sig.dataUrl, (sig.name || '저장된사인') + '.png');
+}
+function _deleteSavedSig(idx) {
+  if (!confirm('이 사인을 라이브러리에서 삭제할까요?')) return;
+  var lib = _loadSavedSignatures();
+  lib.splice(idx, 1);
+  _persistSavedSignatures(lib);
+  var cb = window._sigLibOnApply;
+  var ov = document.getElementById('sig-lib-overlay'); if (ov) ov.remove();
+  _openSavedSignaturesPicker(cb);
+}
+// 사인/도장이 결정되면 셀에 오버레이
+function _applySigOrStampDataUrl(dataUrl, fname) {
+  window._poSheetStampName = fname || '사인.png';
+  if (typeof _overlayStampOnCeoCell === 'function') _overlayStampOnCeoCell(dataUrl);
+  try { showNotif('✅ 사인이 추가되었습니다 — 결재 완료 저장 또는 인쇄/PDF 진행하세요','success'); } catch(_){}
+}
+
 // v2.0.2: CDN 스크립트 한 번만 로드
 function _loadScriptOnce(src, checkFn) {
   return new Promise(function(resolve, reject){
@@ -32552,8 +32747,25 @@ function openPoApprovalSheet(orderId) {
             toolbar.innerHTML = ''
               + '<span style="font-size:13px;color:#15803d;font-weight:700;display:inline-flex;align-items:center;gap:6px">✅ 결재 완료된 발주서</span>'
               + '<span style="font-size:11.5px;color:#16653a;line-height:1.4">변경할 수 없습니다 · 우측 상단 <b>🖨️ 인쇄/PDF</b> 로 출력만 가능</span>';
+          } else if (_isOverseasPO) {
+            // v2.1.1: 해외 PO — 사인 (캔버스 / 라이브러리 / 이미지) 3가지 옵션
+            toolbar.style.cssText = 'display:flex;gap:8px;align-items:center;justify-content:center;padding:10px 14px;margin-bottom:14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;flex-wrap:wrap';
+            var savedBadgeOS = alreadyStamped
+              ? '<span style="font-size:11px;color:#15803d;background:#dcfce7;border:1px solid #86efac;padding:3px 9px;border-radius:99px;font-weight:700">✅ 결재 완료 저장됨</span>'
+              : '';
+            toolbar.innerHTML = ''
+              + '<span style="font-size:12.5px;color:#1e40af;font-weight:700">✍️ Buyer 사인</span>'
+              + savedBadgeOS
+              + '<button onclick="_openSignaturePad(_applySigOrStampDataUrl)" style="padding:6px 12px;background:#fff;border:1px solid #93c5fd;color:#1e40af;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">🎨 직접 사인</button>'
+              + '<button onclick="_openSavedSignaturesPicker(_applySigOrStampDataUrl)" style="padding:6px 12px;background:#fff;border:1px solid #93c5fd;color:#1e40af;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">📚 저장된 사인</button>'
+              + '<label style="padding:6px 12px;background:#fff;border:1px solid #93c5fd;color:#1e40af;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px">'
+              +   '<input type="file" accept="image/*" style="display:none" onchange="_applyPoApprovalStamp(this)"> 📷 이미지 업로드'
+              + '</label>'
+              + '<button onclick="_savePoApprovalStamp()" style="padding:6px 14px;background:#16a34a;color:#fff;border:1px solid #15803d;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:6px;box-shadow:0 1px 3px rgba(22,163,74,.3)">✅ 결재 완료 저장</button>'
+              + '<button onclick="_removePoApprovalStamp()" style="padding:6px 12px;background:#fff;border:1px solid #cbd5e1;color:#475569;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">✕ 사인 제거</button>'
+              + '<span style="font-size:11px;color:#1e40af;line-height:1.4;flex-basis:100%;text-align:center">↗ 사인 추가 후 <b>✅ 결재 완료 저장</b> 클릭 · 사인 라이브러리는 브라우저에 저장됨 (재사용 가능)</span>';
           } else {
-            // 미완료: 도장 업로드 + 저장 + 제거 툴바
+            // 국내 발주서 — 도장 업로드 + 저장 + 제거 툴바 (기존)
             toolbar.style.cssText = 'display:flex;gap:8px;align-items:center;justify-content:center;padding:10px 14px;margin-bottom:14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;flex-wrap:wrap';
             var savedBadge = alreadyStamped
               ? '<span style="font-size:11px;color:#15803d;background:#dcfce7;border:1px solid #86efac;padding:3px 9px;border-radius:99px;font-weight:700">✅ 결재 완료 저장됨</span>'
