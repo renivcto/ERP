@@ -5281,7 +5281,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.982';
+const ERP_VERSION = 'v1.9.983';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -18114,7 +18114,9 @@ function saveItem() {
     note:(function(){var el=$('i-note');if(!el)return '';return (typeof el.innerHTML==='string')?el.innerHTML:(el.value||'');})(),
     image: existingItem ? (existingItem.image||'') : '',
     quoteFile: existingItem ? (existingItem.quoteFile||'') : '',
-    quoteFileName: existingItem ? (existingItem.quoteFileName||'') : ''
+    quoteFileName: existingItem ? (existingItem.quoteFileName||'') : '',
+    // v1.9.983: 머지 EDIT RECOVERY 가 로컬 변경(단가·실판가 등)을 보존하도록
+    updatedAt: Date.now()
   };
   // 견적서 삭제 플래그 확인
   if (window._clearQuoteFile) { data.quoteFile=''; data.quoteFileName=''; window._clearQuoteFile=false; }
@@ -18322,6 +18324,20 @@ function editItem(id) {
       if (qExist2) qExist2.style.display = 'none';
       if (qPrev2) qPrev2.innerHTML = '';
     }
+    // v1.9.983: 완제품이면 BOM 합계 원가를 자동으로 단가 필드에 반영 (최신 BOM 우선)
+    try {
+      if (i.type === '완제품' && DB.boms && DB.boms[id] && DB.boms[id].length > 0) {
+        var _bomTotal2 = DB.boms[id].reduce(function(s, r){
+          var it = getItem(r.itemId);
+          return s + ((it && it.price) || 0) * (r.qty || 0);
+        }, 0);
+        if (_bomTotal2 > 0) {
+          if ($('i-currency')) $('i-currency').value = 'KRW';
+          $('i-price').value = Math.round(_bomTotal2);
+          if (typeof updatePriceKrwPreview === 'function') setTimeout(updatePriceKrwPreview, 50);
+        }
+      }
+    } catch(_){}
   }, 50);
 }
 
@@ -19947,7 +19963,25 @@ function saveBOM() {
   if (!DB.bomTimestamps) DB.bomTimestamps = {};
   DB.boms[productId] = rows;
   DB.bomTimestamps[productId] = Date.now();
-  saveData(); closeModal('add-bom'); showNotif('BOM이 저장되었습니다','success');
+  // v1.9.983: BOM 저장 시 연결된 완제품의 단가(i.price)도 자동 갱신 → BOM 변경 즉시 단가 반영
+  try {
+    var _bomTotal = rows.reduce(function(s, r){
+      var it = (DB.items||[]).find(function(i){ return i && String(i.id) === String(r.itemId); });
+      return s + ((it && it.price) || 0) * (Number(r.qty) || 0);
+    }, 0);
+    var _prodIdx = (DB.items||[]).findIndex(function(i){ return i && String(i.id) === String(productId); });
+    if (_prodIdx >= 0) {
+      var _newPrice = Math.round(_bomTotal);
+      if (DB.items[_prodIdx].price !== _newPrice) {
+        console.log('💰 [v983] 완제품 단가 자동 갱신: ' + DB.items[_prodIdx].name + ' ' + DB.items[_prodIdx].price + ' → ' + _newPrice);
+        DB.items[_prodIdx].price = _newPrice;
+        DB.items[_prodIdx].updatedAt = Date.now();
+      }
+    }
+  } catch(e) { console.warn('[v983] 완제품 단가 자동 갱신 실패:', e); }
+  // v1.9.983: 즉시 저장 (디바운스 우회 — 새로고침 전 반영 보장)
+  try { if (typeof _doSaveData === 'function') _doSaveData().catch(function(e){ console.warn('BOM 저장 실패:', e); }); else saveData(); } catch(_){ try { saveData(); } catch(__){} }
+  closeModal('add-bom'); showNotif('BOM이 저장되었습니다','success');
   if ($('page-bom') && $('page-bom').classList.contains('active')) renderBOM();
 }
 
