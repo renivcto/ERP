@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v1.9.990';
+const ERP_VERSION = 'v1.9.991';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10692,6 +10692,7 @@ function _rpRender() {
   h += TH('이용 목적');
   h += TH('결제 금액');
   h += TH('결제 방식');
+  h += TH('결제일');
   h += TH('이용 계정');
   h += TH('사이트');
   h += TH('정기결제 시작일');
@@ -10710,9 +10711,7 @@ function _rpRender() {
     var modeStr;
     if (it.paymentMode === 'auto') {
       modeStr = '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;background:#dcfce7;color:#15803d;border-radius:99px;font-size:11px;font-weight:700">⚙️ 자동</span>';
-      // v1.9.990: '매월 N일' 형식 표시 (기존 YYYY-MM-DD 데이터도 dd 추출)
-      var _dN = _rpDayOf(it.autoPayDate);
-      if (_dN > 0) modeStr += '<div style="font-size:10.5px;color:#64748b;margin-top:2px">매월 ' + _dN + '일</div>';
+      // v1.9.991: 매월 N일은 별도 '결제일' 컬럼으로 이동
     } else {
       modeStr = '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;background:#fef3c7;color:#a16207;border-radius:99px;font-size:11px;font-weight:700">✋ 수동</span>';
     }
@@ -10723,18 +10722,34 @@ function _rpRender() {
     h += td('<span style="color:#0f172a">' + _rpEsc(it.purpose || '-') + '</span>');
     h += td(it.isMetered ? amtStr : ('<b style="color:#0f172a">' + amtStr + '</b>'));
     h += td(modeStr);
+    // v1.9.991: 결제일 컬럼 — 자동은 '매월 N일', 수동은 '-'
+    var _payDayN = _rpDayOf(it.autoPayDate);
+    var payDayCell;
+    if (it.paymentMode === 'auto' && _payDayN > 0) {
+      payDayCell = '<span style="display:inline-block;padding:3px 10px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:6px;font-size:11.5px;font-weight:700">매월 ' + _payDayN + '일</span>';
+    } else {
+      payDayCell = '<span style="color:#cbd5e1;font-size:11px">-</span>';
+    }
+    h += td(payDayCell);
     h += td('<span style="font-family:monospace;color:#475569;font-size:11.5px">' + _rpEsc(it.account || '-') + '</span>');
     h += td(urlBtn);
     h += td('<span style="color:#475569">' + _rpEsc(it.startDate || '-') + '</span>');
+    // v1.9.991: 화살표 작게 (관리 영역 오른쪽 세로 정렬용)
+    var _arrSmDis = 'background:#f8fafc;color:#cbd5e1;border:1px solid #e2e8f0;padding:0 4px;border-radius:4px;font-size:9px;line-height:14px;height:14px;min-width:18px;cursor:not-allowed';
+    var _arrSmEn  = 'background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:0 4px;border-radius:4px;font-size:9px;line-height:14px;height:14px;min-width:18px;cursor:pointer';
     var arrowUp = isFirst
-      ? '<button disabled style="background:#f8fafc;color:#cbd5e1;border:1px solid #e2e8f0;padding:2px 7px;border-radius:5px;font-size:11px;cursor:not-allowed">↑</button>'
-      : '<button onclick="moveRecurringPayment(' + it.id + ',-1)" title="위로" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:2px 7px;border-radius:5px;font-size:11px;cursor:pointer">↑</button>';
+      ? '<button disabled style="' + _arrSmDis + '">↑</button>'
+      : '<button onclick="moveRecurringPayment(' + it.id + ',-1)" title="위로" style="' + _arrSmEn + '">↑</button>';
     var arrowDn = isLast
-      ? '<button disabled style="background:#f8fafc;color:#cbd5e1;border:1px solid #e2e8f0;padding:2px 7px;border-radius:5px;font-size:11px;cursor:not-allowed">↓</button>'
-      : '<button onclick="moveRecurringPayment(' + it.id + ',1)" title="아래로" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:2px 7px;border-radius:5px;font-size:11px;cursor:pointer">↓</button>';
+      ? '<button disabled style="' + _arrSmDis + '">↓</button>'
+      : '<button onclick="moveRecurringPayment(' + it.id + ',1)" title="아래로" style="' + _arrSmEn + '">↓</button>';
     var editBtn = '<button onclick="openRecurringModal(' + it.id + ')" title="수정" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;padding:2px 7px;border-radius:5px;font-size:11px;cursor:pointer;font-weight:700">✏️</button>';
     var delBtn = '<button onclick="deleteRecurringPayment(' + it.id + ')" title="삭제" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;padding:2px 7px;border-radius:5px;font-size:11px;cursor:pointer;font-weight:700">🗑️</button>';
-    h += td('<div style="display:inline-flex;gap:3px;align-items:center">' + arrowUp + arrowDn + editBtn + delBtn + '</div>');
+    // v1.9.991: 관리 영역 — 수정/삭제 세로(왼쪽) + 화살표 세로 작게(오른쪽)
+    h += td('<div style="display:inline-flex;gap:5px;align-items:center;justify-content:center">'
+          + '<div style="display:flex;flex-direction:column;gap:3px">' + editBtn + delBtn + '</div>'
+          + '<div style="display:flex;flex-direction:column;gap:2px">' + arrowUp + arrowDn + '</div>'
+          + '</div>');
     h += '</tr>';
   });
   h += '</tbody></table></div>';
