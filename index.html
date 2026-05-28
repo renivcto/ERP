@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.1.7';
+const ERP_VERSION = 'v2.1.8';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -32401,23 +32401,26 @@ function toggleReaction(commentId, emoji) {
 
 function deleteComment(commentId) {
   if (!confirm('이 의견을 삭제하시겠습니까? (딸린 답글도 함께 삭제됩니다)')) return;
-  const c = DB.approvalComments.find(x => x.id === commentId);
+  // v2.1.8: ID 타입 불일치 방어 — String() 비교로 통일
+  const _cidStr = String(commentId);
+  const c = DB.approvalComments.find(x => x && String(x.id) === _cidStr);
   const ref = c ? c.approvalId : null;
-  // v1.9.208: 자식(답글) 재귀 수집 후 함께 삭제
-  const collectIds = (id, acc) => {
-    acc.add(id);
-    DB.approvalComments.filter(x => x.parentId === id).forEach(ch => collectIds(ch.id, acc));
+  // 자식(답글) 재귀 수집 — String 비교
+  const collectIds = (idStr, acc) => {
+    acc.add(idStr);
+    DB.approvalComments.filter(x => x && String(x.parentId) === idStr).forEach(ch => collectIds(String(ch.id), acc));
     return acc;
   };
-  const idsToRemove = collectIds(commentId, new Set());
-  // v1.9.661: tombstone 등록 — 부활 차단
+  const idsToRemove = collectIds(_cidStr, new Set());
+  // tombstone 등록
   if (!Array.isArray(DB._deletedCommentIds)) DB._deletedCommentIds = [];
   const _now = Date.now();
   idsToRemove.forEach(id => DB._deletedCommentIds.push({ id: String(id), ts: _now }));
   if (DB._deletedCommentIds.length > 1000) {
     DB._deletedCommentIds = DB._deletedCommentIds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 1000);
   }
-  DB.approvalComments = DB.approvalComments.filter(x => !idsToRemove.has(x.id));
+  // v2.1.8: String 키 Set 으로 비교
+  DB.approvalComments = DB.approvalComments.filter(x => x && !idsToRemove.has(String(x.id)));
   console.log('🗑️ [COMMENT DELETE] ' + idsToRemove.size + '건 (' + Array.from(idsToRemove).join(',') + ')');
   // v1.9.661: 즉시 저장 (디바운스 우회)
   if (typeof saveDataNow === 'function') {
