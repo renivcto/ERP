@@ -5290,7 +5290,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.3';
+const ERP_VERSION = 'v2.2.4';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -39609,14 +39609,20 @@ function addNpComment() {
     || (window._currentUser && (window._currentUser.displayName || window._currentUser.email))
     || '익명';
   const authorPhoto = (window._currentUser && window._currentUser.photo) || '';
+  // v2.2.4: 대댓글 parentTs 처리
+  var _replyTs = window._npReplyToTs || null;
   _npComments.push({
     text,
     author: authorName,
     authorEmail: myEmail || '',
     authorPhoto,
     ts: Date.now(),
+    parentTs: _replyTs,
     reactions: {}
   });
+  window._npReplyToTs = null;
+  var _rh = document.getElementById('np-reply-hint');
+  if (_rh) _rh.style.display = 'none';
   if (inp) {
     inp.value = '';
     // v1.9.347: 전송 후 textarea 높이 원복
@@ -39672,6 +39678,29 @@ function toggleNpReaction(idx, emoji) {
   renderNpComments();
 }
 
+// v2.2.4: 대댓글 — 답글 모드 진입
+function replyToNpComment(idx) {
+  var c = _npComments[idx];
+  if (!c) return;
+  window._npReplyToTs = c.ts;
+  var inp = document.getElementById('np-comment-input');
+  if (inp) inp.focus();
+  var host = document.getElementById('np-comments');
+  var parent = host && host.parentElement;
+  var hint = document.getElementById('np-reply-hint');
+  if (!hint && parent) {
+    hint = document.createElement('div');
+    hint.id = 'np-reply-hint';
+    hint.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:6px 10px;margin-top:6px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;font-size:11.5px;color:#0369a1';
+    parent.appendChild(hint);
+  }
+  if (hint) {
+    var snippet = (c.text||'').slice(0,30) + ((c.text||'').length>30?'...':'');
+    hint.innerHTML = '<span>↳ <b>' + (c.author||'담당자') + '</b> 에 답글 작성 중 — "' + snippet + '"</span><button onclick="window._npReplyToTs=null;this.parentElement.style.display=\'none\';" style="background:none;border:none;color:#b91c1c;cursor:pointer;font-size:11.5px;font-weight:700">✕ 취소</button>';
+    hint.style.display = 'flex';
+  }
+}
+
 function renderNpComments() {
   const container = document.getElementById('np-comments');
   if (!container) return;
@@ -39712,13 +39741,9 @@ function renderNpComments() {
       </button>
     </div>`;
 
-    // 내 글일 때만 수정/삭제 버튼 노출
-    const actionBtns = isMe
-      ? `<div style="display:inline-flex;gap:4px;margin-left:6px">
-          <button type="button" onclick="event.stopPropagation();startEditNpComment(${i})" title="수정" style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--gray-400);padding:1px 3px" onmouseenter="this.style.color='var(--sky-600)'" onmouseleave="this.style.color='var(--gray-400)'">✏️</button>
-          <button type="button" onclick="event.stopPropagation();deleteNpComment(${i})" title="삭제" style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--gray-400);padding:1px 3px" onmouseenter="this.style.color='#dc2626'" onmouseleave="this.style.color='var(--gray-400)'">🗑️</button>
-        </div>`
-      : '';
+    // v2.2.4: 답글 버튼 + (내 글) 수정/삭제
+    const replyBtn = `<button type="button" onclick="event.stopPropagation();replyToNpComment(${i})" title="답글" style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--gray-400);padding:1px 3px;font-weight:600" onmouseenter="this.style.color='var(--sky-600)'" onmouseleave="this.style.color='var(--gray-400)'">💬 답글</button>`;
+    const actionBtns = `<div style="display:inline-flex;gap:4px;margin-left:6px;align-items:center">${replyBtn}${isMe?`<button type="button" onclick="event.stopPropagation();startEditNpComment(${i})" title="수정" style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--gray-400);padding:1px 3px" onmouseenter="this.style.color='var(--sky-600)'" onmouseleave="this.style.color='var(--gray-400)'">✏️</button><button type="button" onclick="event.stopPropagation();deleteNpComment(${i})" title="삭제" style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--gray-400);padding:1px 3px" onmouseenter="this.style.color='#dc2626'" onmouseleave="this.style.color='var(--gray-400)'">🗑️</button>`:''}</div>`;
 
     const bubbleBg = isMe ? 'linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)' : '#fff';
     const bubbleBorder = isMe ? '1px solid #93c5fd' : '1px solid var(--gray-200)';
@@ -39742,6 +39767,11 @@ function renderNpComments() {
       ${addBtn}
     </div>`;
 
+    // v2.2.4: 대댓글 표시 변수
+    const _isReply = !!c.parentTs;
+    const _parentComment = _isReply ? _npComments.find(function(x){ return x && x.ts === c.parentTs; }) : null;
+    const _replyHeader = _isReply && _parentComment ? `<div style="font-size:10.5px;color:#64748b;margin-bottom:3px;padding-left:${isMe?'0':'8px'};${isMe?'text-align:right;padding-right:8px':''}">↳ <b>${escapeHtml(_parentComment.author||'담당자')}</b> 에게 답글</div>` : '';
+    const _replyIndentStyle = _isReply ? 'margin-left:32px;padding-left:8px;border-left:2px solid #e2e8f0;' : '';
     // 말풍선 + 아바타 배치 — 내 글은 오른쪽, 남의 글은 왼쪽
     const row = isMe
       ? `<div style="display:flex;gap:8px;align-items:flex-start;justify-content:flex-end;margin-bottom:10px">
@@ -39768,7 +39798,8 @@ function renderNpComments() {
           </div>
         </div>`;
 
-    return row;
+    // v2.2.4: 대댓글이면 들여쓰기 + ↳ 헤더 prepend
+    return _replyHeader + (_isReply ? '<div style="' + _replyIndentStyle + '">' + row + '</div>' : row);
   }).join('');
   container.scrollTop = container.scrollHeight;
 }
