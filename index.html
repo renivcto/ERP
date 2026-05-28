@@ -5290,7 +5290,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.4';
+const ERP_VERSION = 'v2.2.5';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -11161,30 +11161,34 @@ function _cpCalcPharmacy(r) {
   const shipping = Number(r.shipping)||0;
   const fee1Pct = (r.fee1Pct===''||r.fee1Pct==null) ? 15 : (Number(r.fee1Pct)||0);
   const fee2Pct = (r.fee2Pct===''||r.fee2Pct==null) ? 13 : (Number(r.fee2Pct)||0);
+  // v2.2.5: 바로팜 부대 수수료 (기본 5%) — 매출 × % (부가세 포함)
+  const extraFeePct = (r.extraFeePct===''||r.extraFeePct==null) ? 5 : (Number(r.extraFeePct)||0);
   const unitCost = _cpLiveCost(r);
   const supplyPrice = salePrice * supplyRate / 100;          // 공급가 (부가세 포함)
   const revenue = supplyPrice * qty;                         // 매출 (부가세 포함)
   const fee1 = revenue * fee1Pct / 100;                      // 바로팜 1차 수수료 (부가세 포함)
   const fee2 = revenue * fee2Pct / 100;                      // 바로팜 2차 수수료 (부가세 포함)
+  const extraFee = revenue * extraFeePct / 100;              // 바로팜 부대 수수료 (부가세 포함)
   const totalCost = unitCost * qty;                          // 총원가 (부가세 제외)
   const netRevenue = revenue / 1.1;                          // 매출 공급가 (부가세 제외)
   // 순이익(부가세 제외): 매출·수수료·배송비는 부가세 포함값이라 ÷1.1, 고정비·총원가는 이미 부가세 제외
-  const netProfit = netRevenue - (fee1/1.1) - (fee2/1.1) - fixedCost - totalCost - (shipping/1.1);
+  const netProfit = netRevenue - (fee1/1.1) - (fee2/1.1) - (extraFee/1.1) - fixedCost - totalCost - (shipping/1.1);
   const profitRate = netRevenue > 0 ? (netProfit / netRevenue * 100) : 0;
-  return { supplyPrice:supplyPrice, revenue:revenue, fee1:fee1, fee2:fee2, totalCost:totalCost,
+  return { supplyPrice:supplyPrice, revenue:revenue, fee1:fee1, fee2:fee2, extraFee:extraFee, extraFeePct:extraFeePct, totalCost:totalCost,
     netRevenue:netRevenue, netProfit:netProfit, profitRate:profitRate, fee1Pct:fee1Pct, fee2Pct:fee2Pct };
 }
 
 var _CP_PHARM_INFO = {
   ph_name: ['제품명', '이 행에 연결된 완제품입니다.\n제품명을 클릭하면 전체 내역을 팝업으로 볼 수 있습니다.'],
   ph_revenue: ['매출 (부가세 포함)', '약국 공급 매출액입니다. (부가세 포함)\n\n매출 = 공급가 × 판매수량'],
-  ph_netProfit: ['순이익 (부가세 제외)', '부가세를 제외한 순이익입니다.\n\n순이익 = 매출÷1.1 − 바로팜1차÷1.1 − 바로팜2차÷1.1 − 고정비 − 총원가 − 예상배송비÷1.1\n\n※ 매출·수수료·배송비는 부가세 포함값이라 ÷1.1로 부가세를 빼고, 고정비·총원가는 이미 부가세 제외 금액입니다.'],
+  ph_netProfit: ['순이익 (부가세 제외)', '부가세를 제외한 순이익입니다.\n\n순이익 = 매출÷1.1 − 바로팜1차÷1.1 − 바로팜2차÷1.1 − 바로팜부대÷1.1 − 고정비 − 총원가 − 예상배송비÷1.1\n\n※ 매출·수수료·배송비는 부가세 포함값이라 ÷1.1로 부가세를 빼고, 고정비·총원가는 이미 부가세 제외 금액입니다.'],
   ph_profitRate: ['수익율 (부가세 제외)', '부가세 제외 기준 수익율입니다.\n\n수익율 = 순이익 ÷ (매출÷1.1) × 100'],
   ph_salePrice: ['실제 판매가 (부가세 포함)', '완제품의 실제 판매가입니다. (부가세 포함)\n완제품을 선택하면 자동 입력되며 수정할 수 있습니다.'],
   ph_qty: ['판매수량', '약국에 판매한 수량입니다. (입력값)'],
   ph_supplyPrice: ['공급가 (부가세 포함)', '약국에 공급하는 단가입니다. (부가세 포함)\n\n공급가 = 실제 판매가 × 공급율'],
   ph_fee1: ['바로팜 1차 수수료 (부가세 포함)', '바로팜 1차 수수료입니다. (부가세 포함)\n\n바로팜 1차 수수료 = 매출 × 1차 수수료%'],
   ph_fee2: ['바로팜 2차 수수료 (부가세 포함)', '바로팜 2차 수수료입니다. (부가세 포함)\n\n바로팜 2차 수수료 = 매출 × 2차 수수료%'],
+  ph_extraFee: ['바로팜 부대 수수료 (부가세 포함)', '바로팜 부대 수수료입니다. (부가세 포함, 기본값 5%)\n\n바로팜 부대 수수료 = 매출 × 부대 수수료%'],
   ph_fixedCost: ['고정비 (부가세 제외)', '입력한 고정비입니다. (부가세 제외 금액)'],
   ph_cogs: ['제품원가 COGS', '제품 1개당 원가입니다. COGS이므로 부가세 제외 금액입니다.\n완제품의 BOM 합계 원가를 자동으로 가져오며, 수정할 수 있습니다.'],
   ph_totalCost: ['총원가 (부가세 제외)', '판매수량 전체의 제조원가입니다. (부가세 제외)\n\n총원가 = 제품원가 COGS × 판매수량'],
@@ -11215,6 +11219,7 @@ function _cpRenderPharmacyTable(wrap) {
   h += TH('공급가', 'ph_supplyPrice', '부가세 포함', '');
   h += TH('바로팜 1차 수수료', 'ph_fee1', '부가세 포함', '');
   h += TH('바로팜 2차 수수료', 'ph_fee2', '부가세 포함', '');
+  h += TH('바로팜 부대 수수료', 'ph_extraFee', '부가세 포함', '');
   h += TH('고정비', 'ph_fixedCost', '부가세 제외', '');
   h += TH('제품원가', 'ph_cogs', 'COGS', '');
   h += TH('총원가', 'ph_totalCost', '부가세 제외', '');
@@ -11236,6 +11241,7 @@ function _cpRenderPharmacyTable(wrap) {
     h += TD(_cpWon(c.supplyPrice) + '<div style="font-size:9px;color:#94a3b8;margin-top:1px">공급율 ' + _cpPct(r.supplyRate) + '</div>');
     h += TD(_cpWon(c.fee1) + '<div style="font-size:9px;color:#94a3b8;margin-top:1px">' + _cpPct(c.fee1Pct) + '</div>');
     h += TD(_cpWon(c.fee2) + '<div style="font-size:9px;color:#94a3b8;margin-top:1px">' + _cpPct(c.fee2Pct) + '</div>');
+    h += TD(_cpWon(c.extraFee) + '<div style="font-size:9px;color:#94a3b8;margin-top:1px">' + _cpPct(c.extraFeePct) + '</div>');
     h += TD(_cpWon(r.fixedCost));
     h += TD(_cpWon(_cpLiveCost(r)));
     h += TD(_cpWon(c.totalCost));
@@ -11304,6 +11310,7 @@ function _cpOpenModalPharmacy(id, r) {
     + fld('예상 배송비', 'cp-ph-shipping', g('shipping',0), '원', '부가세 포함')
     + fld('바로팜 1차 수수료', 'cp-ph-fee1', g('fee1Pct',15), '%', '')
     + fld('바로팜 2차 수수료', 'cp-ph-fee2', g('fee2Pct',13), '%', '')
+    + fld('바로팜 부대 수수료', 'cp-ph-extraFee', g('extraFeePct',5), '%', '')
     + modeFld('제품원가 COGS', 'cp-ph-unitCost', g('unitCost',0), '원', '', g('unitCostMode','auto'), 'PhCogs')
     + '<div style="grid-column:1/3"><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">비고</label>'
     + '<input id="cp-ph-note" value="' + _cpEsc(g('note')) + '" style="width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px"></div>'
@@ -11369,6 +11376,7 @@ function _cpReadModalPharmacy() {
     shipping: _cpNum('cp-ph-shipping'),
     fee1Pct: _cpNum('cp-ph-fee1'),
     fee2Pct: _cpNum('cp-ph-fee2'),
+    extraFeePct: _cpNum('cp-ph-extraFee'),
     unitCost: _cpNum('cp-ph-unitCost'),
     unitCostMode: _cpModeOf('cp-ph-unitCost'),
     note: (document.getElementById('cp-ph-note')||{}).value || ''
