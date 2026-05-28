@@ -906,7 +906,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="nav-sub" id="sales-sub">
       <div class="nav-item" onclick="go('sales');switchSalesTab('orders')"><span class="ico">📦</span>주문 관리</div>
       <div class="nav-item" onclick="go('sales');switchSalesTab('margin')"><span class="ico">💰</span>마진 분석</div>
-      <div class="nav-item" onclick="go('sales');switchSalesTab('shops')"><span class="ico">🏪</span>쇼핑몰 관리</div>
+      <!-- v2.2.6: 쇼핑몰 → 거래처 정보의 쇼핑몰 탭으로 이동 -->
+      <div class="nav-item" onclick="go('partners');setTimeout(function(){switchPartnersTab('shop')},50)"><span class="ico">🏪</span>쇼핑몰</div>
       <div class="nav-item" onclick="go('ads')"><span class="ico">📢</span>광고비 관리</div>
       <div class="nav-item" onclick="go('sales');switchSalesTab('channel')"><span class="ico">🧮</span>유통채널 수익계산</div>
     </div>
@@ -1379,6 +1380,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <button id="partners-tab-coop" class="btn partners-tab-btn" onclick="switchPartnersTab('coop')" style="padding:10px 18px;font-weight:700;font-size:14px">🤝 협력사</button>
         <button id="partners-tab-mfr" class="btn partners-tab-btn" onclick="switchPartnersTab('mfr')" style="padding:10px 18px;font-weight:700;font-size:14px">🏭 생산업체</button>
         <button id="partners-tab-seller" class="btn partners-tab-btn" onclick="switchPartnersTab('seller')" style="padding:10px 18px;font-weight:700;font-size:14px">🛒 판매업체</button>
+        <button id="partners-tab-shop" class="btn partners-tab-btn" onclick="switchPartnersTab('shop')" style="padding:10px 18px;font-weight:700;font-size:14px">🏪 쇼핑몰</button>
         <!-- v1.9.888: 우리 회사 정보 버튼 -->
         <button onclick="openCompanyInfoModal()" style="margin-left:auto;padding:10px 18px;font-weight:700;font-size:13.5px;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;border:none;border-radius:8px;cursor:pointer;box-shadow:0 2px 8px rgba(124,58,237,.25);transition:all .15s" onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 12px rgba(124,58,237,.35)'" onmouseout="this.style.transform='';this.style.boxShadow='0 2px 8px rgba(124,58,237,.25)'">🏢 우리 회사 정보</button>
       </div>
@@ -1488,6 +1490,9 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           </div>
         </div>
       </div>
+      <!-- v2.2.6: 쇼핑몰 탭 — sales-panel-shops 내용이 DOM 이동으로 들어감 -->
+      <div id="partners-pane-shop" class="partners-pane" style="display:none"></div>
+
     </div>
 
     <!-- ══════════════ VENDOR ══════════════ -->
@@ -2678,7 +2683,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div class="sales-subnav-item active" data-tab="dashboard" onclick="switchSalesTab('dashboard')">📊 매출 대시보드</div>
           <div class="sales-subnav-item" data-tab="orders" onclick="switchSalesTab('orders')">📦 주문 관리</div>
           <div class="sales-subnav-item" data-tab="margin" onclick="switchSalesTab('margin')">💰 마진 분석</div>
-          <div class="sales-subnav-item" data-tab="shops" onclick="switchSalesTab('shops')">🏪 쇼핑몰 관리</div>
+          <!-- v2.2.6: 쇼핑몰 관리 → 거래처 정보 탭으로 이동됨 -->
           <div class="sales-subnav-item" data-tab="ads" onclick="go('ads')">📢 광고비 관리</div>
         </div>
         <!-- 우측 기간 필터 영역 — 활성 탭에 맞는 prefix 만 표시 -->
@@ -5290,7 +5295,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.5';
+const ERP_VERSION = 'v2.2.6';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10644,10 +10649,12 @@ function switchSalesTab(tab) {
   if (tab === 'orders') { renderOrderShopTabs(); renderShopOrderTable(); }
   if (tab === 'margin') { try { renderMarginAnalysis(); } catch(e) { console.warn('renderMarginAnalysis:', e); } }
   if (tab === 'shops') {
-    // 탭 진입 시 항상 목록 뷰로
-    const lv = $('shop-list-view'); if (lv) lv.style.display = '';
-    const dt = $('shop-detail'); if (dt) dt.style.display = 'none';
-    renderShopList();
+    // v2.2.6: 쇼핑몰 관리 → 거래처 정보 탭으로 이동됨. 호환성: 자동 이동.
+    try { if (typeof go === 'function') go('partners'); } catch(_){}
+    setTimeout(function(){
+      try { if (typeof switchPartnersTab === 'function') switchPartnersTab('shop'); } catch(_){}
+    }, 50);
+    return;
   }
   if (tab === 'channel') { try { renderChannelProfit(); } catch(e) { console.warn('renderChannelProfit:', e); } }
 }
@@ -26852,7 +26859,8 @@ function renderApprovalPage() {
 let _partnersMfrFilter = '전체';
 
 function switchPartnersTab(tab) {
-  ['coop','mfr','seller'].forEach(t => {
+  // v2.2.6: shop 탭 추가
+  ['coop','mfr','seller','shop'].forEach(t => {
     const pane = document.getElementById('partners-pane-' + t);
     const btn = document.getElementById('partners-tab-' + t);
     if (pane) pane.style.display = (t === tab) ? '' : 'none';
@@ -26874,9 +26882,27 @@ function switchPartnersTab(tab) {
   if (tab === 'coop')   try { renderCooperatorsTable(); } catch(e) { console.error(e); }
   if (tab === 'mfr')    try { renderPartnersMfrTable(); } catch(e) { console.error(e); }
   if (tab === 'seller') try { renderSellersTable();    } catch(e) { console.error(e); }
+  if (tab === 'shop') {
+    // v2.2.6: 쇼핑몰 탭 — 목록 뷰로 초기화 후 렌더
+    var lv = document.getElementById('shop-list-view'); if (lv) lv.style.display = '';
+    var dt = document.getElementById('shop-detail'); if (dt) dt.style.display = 'none';
+    try { if (typeof renderShopList === 'function') renderShopList(); } catch(e) { console.error(e); }
+  }
 }
 
 window.addEventListener('DOMContentLoaded', function(){
+  // v2.2.6: sales-panel-shops 내용을 partners-pane-shop 으로 이동 (한 번만)
+  setTimeout(function(){
+    try {
+      var src = document.getElementById('sales-panel-shops');
+      var dst = document.getElementById('partners-pane-shop');
+      if (src && dst && !dst.firstChild) {
+        while (src.firstChild) dst.appendChild(src.firstChild);
+        src.style.display = 'none';
+        console.log('🏪 [v2.2.6] 쇼핑몰 UI 를 거래처 정보 탭으로 이동 완료');
+      }
+    } catch(e){ console.warn('shop pane move:', e); }
+  }, 100);
   setTimeout(function(){
     try {
       const t = localStorage.getItem('reniv_partners_tab') || 'coop';
