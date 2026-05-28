@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.1.5';
+const ERP_VERSION = 'v2.1.6';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -8492,30 +8492,34 @@ function renderDashboard() {
 function computeApprovalCountsForHero(){
   try {
     // 1) 결재 대기: pending approval + 미결재 order, po_approval 중복 제거
+    // v2.1.6: updateApprovalStats(v2.0.9) 와 동일한 필터 — String 비교 + orphan 체크 + approvalStampImage
     const _stampedOrderIds = new Set(
       (DB.orders||[])
-        .filter(o => o && (o.stampData || o.stampName || o.stampedAt || o.stampNotRequired))
-        .map(o => o.id)
+        .filter(o => o && (o.stampData || o.stampName || o.stampedAt || o.stampNotRequired || o.approvalStampImage))
+        .map(o => String(o.id))
     );
+    const _allOrderIds = new Set((DB.orders||[]).map(o => o && o.id != null ? String(o.id) : null).filter(Boolean));
     const pendingApprovals = (DB.approvals||[]).filter(a => {
       if (!a || a.status !== 'pending') return false;
       if (a.type === 'po_approval' && a.refId != null) {
-        if (_stampedOrderIds.has(a.refId) || _stampedOrderIds.has(Number(a.refId))) return false;
+        const _refStr = String(a.refId);
+        if (!_allOrderIds.has(_refStr)) return false;       // orphan
+        if (_stampedOrderIds.has(_refStr)) return false;    // 이미 날인됨
       }
       return true;
     });
     const pendingOrders = (DB.orders||[]).filter(o => {
       try {
-        if (o.stampData || o.stampName || o.stampedAt || o.stampNotRequired) return false;
+        if (o.stampData || o.stampName || o.stampedAt || o.stampNotRequired || o.approvalStampImage) return false;
         return (typeof getOrderApprovalStatus === 'function')
           ? (getOrderApprovalStatus(o) !== 'approved')
           : false;
       } catch(_) { return false; }
     });
-    const _pendingOrderIds = new Set(pendingOrders.map(o => o.id));
+    const _pendingOrderIds = new Set(pendingOrders.map(o => String(o.id)));
     const _dedupedApprovals = pendingApprovals.filter(a => {
       if (a.type === 'po_approval' && a.refId != null) {
-        if (_pendingOrderIds.has(a.refId) || _pendingOrderIds.has(Number(a.refId))) return false;
+        if (_pendingOrderIds.has(String(a.refId))) return false;
       }
       return true;
     });
