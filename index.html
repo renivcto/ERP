@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.1.6';
+const ERP_VERSION = 'v2.1.7';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6247,6 +6247,32 @@ async function _doSaveDataInner() {
                   }
                 }
               } catch(tgErr) { console.warn('COUNT-GUARD tombstone 필터 실패:', tgErr); }
+            }
+            // v2.1.7: shopOrders 도 tombstone 체크 — v784 _cleanupMergedShopOrders 가
+            //   _deletedShopOrderSigs 에 'merged:' + orderNo 형식으로 tombstone 등록해 두지만
+            //   COUNT-GUARD 가 이걸 안 봐서 매번 서버에서 끌어오고 → v784 가 또 정리하는 무한 루프 발생.
+            //   이제 COUNT-GUARD 가 tombstone 인식하면 영구 차단됨.
+            if (key === 'shopOrders') {
+              try {
+                const tombSet = Array.isArray(DB._deletedShopOrderSigs)
+                  ? new Set(DB._deletedShopOrderSigs.map(x => x && x.sig).filter(Boolean))
+                  : null;
+                if (tombSet && tombSet.size > 0) {
+                  const srvById = new Map(srvArr.map(o => [o && o.id, o]));
+                  const _before = onlyOnServer.length;
+                  onlyOnServer = onlyOnServer.filter(id => {
+                    const o = srvById.get(id);
+                    if (!o || !o.orderNo) return true;
+                    const sig = 'merged:' + String(o.orderNo);  // v784 sig 형식
+                    if (tombSet.has(sig)) return false; // tombstone 이면 복원 제외
+                    return true;
+                  });
+                  _guardTombSkipped = _before - onlyOnServer.length;
+                  if (_guardTombSkipped > 0) {
+                    console.warn('🪦 [COUNT-GUARD] tombstone 으로 ' + _guardTombSkipped + '건 복원 차단 (' + key + ')');
+                  }
+                }
+              } catch(tgErr) { console.warn('COUNT-GUARD shopOrders tombstone 필터 실패:', tgErr); }
             }
             if (onlyOnServer.length > 0) {
               console.error('🛑 [COUNT-GUARD] ' + key + ' 서버에만 있는 레코드 ' + onlyOnServer.length + '개 감지 (서버:' + srvLen + ' > 로컬:' + locLen + ')');
