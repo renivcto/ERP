@@ -5290,7 +5290,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.0';
+const ERP_VERSION = 'v2.2.3';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -25257,20 +25257,12 @@ function renderFeedCardHtml(p){
   }).join('');
   // 반응 추가 버튼 — v1.9.246: 명확한 감정 아이콘 pill
   const addReactionBtn = `<div class="feed-reaction feed-reaction-add" onclick="showFeedReactionPicker(${p.id}, event)" title="감정 반응 남기기"><span class="emoji">😊</span><span class="cnt">반응</span><span class="plus">＋</span></div>`;
-  // 댓글
+  // 댓글 (v2.2.1: 트리 구조 - 대댓글 들여쓰기, 수정/이모지/답글 지원)
   const comments = Array.isArray(p.comments) ? p.comments : [];
-  const commentsHtml = comments.slice(-3).map(c => `
-    <div class="feed-comment-item">
-      ${feedAvatarHtml(c.authorName||'?', c.authorEmail||'', 28)}
-      <div class="feed-comment-body">
-        <span class="name">${esc(c.authorName||'익명')}</span>
-        <span>${esc(c.text||'').replace(/\n/g,'<br>')}</span>
-        <span class="time">${feedTimeAgo(c.createdAt)}</span>
-        ${((c.authorEmail && c.authorEmail === myEmail) || isAdmin) ? `<button onclick="deleteFeedComment(${p.id},${c.id})" style="background:none;border:0;color:#94a3b8;font-size:11px;cursor:pointer;margin-left:6px">삭제</button>` : ''}
-      </div>
-    </div>
-  `).join('');
-  const hiddenCount = comments.length - Math.min(comments.length, 3);
+  // 최근 3건만 표시 시 부모 포함하여 자식도 같이 표시되도록 그냥 트리 전체 렌더 후 일부 자르기는 복잡 → 전체 렌더, 최대 6건 까지 표시.
+  const commentsLatestN = comments.slice(-6);
+  const commentsHtml = (typeof renderFeedCommentTreeHtml==='function') ? renderFeedCommentTreeHtml(commentsLatestN, p.id, myEmail, isAdmin) : '';
+  const hiddenCount = Math.max(0, comments.length - commentsLatestN.length);
   const moreCommentsBtn = hiddenCount > 0 ? `<button onclick="toggleFeedAllComments(${p.id})" id="feed-more-${p.id}" style="background:none;border:0;color:#2563eb;font-size:11.5px;font-weight:600;cursor:pointer;padding:4px 0">댓글 ${hiddenCount}개 더보기</button>` : '';
 
   // v1.9.301: 상단 eyebrow 재구성 — [아바타+이름] · [카테고리] · [시간] [NEW]  ···  [수정][삭제 박스 버튼]
@@ -25340,7 +25332,7 @@ function renderFeedCardHtml(p){
           ${moreCommentsBtn}
           <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
             ${feedAvatarHtml(feedCurrentUser().name, feedCurrentUser().email, 26)}
-            <input type="text" id="feed-comment-input-${p.id}" placeholder="댓글을 남겨보세요..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addFeedComment(${p.id})}" style="flex:1;background:#f8fafc;border:1px solid transparent;border-radius:999px;padding:7px 14px;font-size:12.5px;outline:none;transition:all .18s;letter-spacing:-.1px" onfocus="this.style.background='#fff';this.style.borderColor='#cbd5e1'" onblur="this.style.background='#f8fafc';this.style.borderColor='transparent'">
+            <textarea id="feed-comment-input-${p.id}" placeholder="댓글을 남겨보세요... (Shift+Enter 줄바꿈)" rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addFeedComment(${p.id})}else if(event.key==='Escape'){this.dataset.parentId='';this.placeholder='댓글을 남겨보세요... (Shift+Enter 줄바꿈)';}" oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'" style="flex:1;background:#f8fafc;border:1px solid transparent;border-radius:14px;padding:8px 14px;font-size:12.5px;font-family:inherit;outline:none;transition:all .18s;letter-spacing:-.1px;resize:none;min-height:36px;max-height:120px;line-height:1.5;box-sizing:border-box" onfocus="this.style.background='#fff';this.style.borderColor='#cbd5e1'" onblur="this.style.background='#f8fafc';this.style.borderColor='transparent'"></textarea>
             <button onclick="addFeedComment(${p.id})" style="background:#0a0a0a;color:#fff;border:0;border-radius:999px;padding:7px 14px;font-size:11.5px;font-weight:700;cursor:pointer;letter-spacing:-.1px">전송</button>
           </div>
         </div>
@@ -25971,6 +25963,156 @@ function showFeedReactionPicker(postId, ev){
 }
 
 // ── 댓글 ───────────────────────────────────────────────
+// v2.2.1: feedPosts 댓글 — 줄바꿈/수정/이모지/대댓글 전면 업그레이드
+var _FEED_CM_EMOJIS = ['👍','❤️','😄','👏','🎉','🙏','🔥','💡'];
+
+// 트리 구성 헬퍼 (parentId 로 children 구성)
+function _feedCommentTree(comments) {
+  var byId = {};
+  (comments||[]).forEach(function(c){ if (c && c.id != null) byId[c.id] = Object.assign({_children: []}, c); });
+  var roots = [];
+  (comments||[]).forEach(function(c){
+    if (!c || c.id == null) return;
+    var node = byId[c.id];
+    if (c.parentId != null && byId[c.parentId]) byId[c.parentId]._children.push(node);
+    else roots.push(node);
+  });
+  // 시간순 정렬 (각 레벨)
+  function sortRec(arr){
+    arr.sort(function(a,b){ return new Date(a.createdAt||0) - new Date(b.createdAt||0); });
+    arr.forEach(function(n){ if (n._children && n._children.length) sortRec(n._children); });
+  }
+  sortRec(roots);
+  return roots;
+}
+
+// 한 코멘트 노드 렌더 (depth 로 들여쓰기)
+function _renderFeedCommentNode(c, postId, myEmail, isAdmin, depth) {
+  if (!c) return '';
+  depth = depth || 0;
+  var isMine = (c.authorEmail && c.authorEmail === myEmail) || isAdmin;
+  var safeName = (typeof esc==='function') ? esc(c.authorName||'익명') : (c.authorName||'익명');
+  var time = (typeof feedTimeAgo==='function') ? feedTimeAgo(c.createdAt) : '';
+  var editedTag = c.updatedAt && c.updatedAt !== c.createdAt ? ' · 수정됨' : '';
+  var textSafe = (typeof esc==='function') ? esc(c.text||'').replace(/\n/g,'<br>') : (c.text||'');
+  var reactions = c.reactions || {};
+  var reactionsHtml = Object.keys(reactions).filter(function(k){ return Number(reactions[k])>0; }).map(function(k){
+    return '<span style="display:inline-block;background:#f0f9ff;border:1px solid #bae6fd;border-radius:999px;padding:1px 8px;font-size:11px;margin-right:4px;cursor:pointer" onclick="toggleFeedCommentReaction(' + JSON.stringify(postId) + ',' + JSON.stringify(c.id) + ',\'' + k + '\')">' + k + ' ' + reactions[k] + '</span>';
+  }).join('');
+  var indent = Math.min(depth, 3) * 24;
+  var arrow = depth > 0 ? '<span style="color:#94a3b8;margin-right:3px">↳</span>' : '';
+  var avatar = (typeof feedAvatarHtml==='function') ? feedAvatarHtml(c.authorName||'?', c.authorEmail||'', 26) : '';
+  var html = '<div class="feed-comment-item" style="display:flex;gap:8px;align-items:flex-start;padding:6px 8px;margin-left:' + indent + 'px;border-radius:8px">'
+    + avatar
+    + '<div class="feed-comment-body" style="flex:1;min-width:0">'
+    +   '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px">'
+    +     '<span class="name" style="font-size:12px;font-weight:700;color:#0f172a">' + arrow + safeName + '</span>'
+    +     '<span class="time" style="font-size:10.5px;color:#94a3b8">' + time + editedTag + '</span>'
+    +   '</div>'
+    +   '<div id="feed-cm-text-' + postId + '-' + c.id + '" style="font-size:12.5px;color:#1e293b;line-height:1.55;white-space:pre-wrap;word-break:break-word">' + textSafe + '</div>'
+    +   (reactionsHtml ? '<div style="margin-top:4px">' + reactionsHtml + '</div>' : '')
+    +   '<div id="feed-cm-actions-' + postId + '-' + c.id + '" style="display:flex;gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap">'
+    +     '<button type="button" onclick="toggleFeedCmReactionPicker(this,' + JSON.stringify(postId) + ',' + JSON.stringify(c.id) + ')" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:1px solid #fcd34d;color:#92400e;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;cursor:pointer">😊 반응 ＋</button>'
+    +     (depth < 3 ? '<button type="button" onclick="replyFeedComment(' + JSON.stringify(postId) + ',' + JSON.stringify(c.id) + ')" style="background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;cursor:pointer">💬 답글</button>' : '')
+    +     (isMine ? '<button type="button" onclick="editFeedComment(' + JSON.stringify(postId) + ',' + JSON.stringify(c.id) + ')" style="background:#eef2ff;border:1px solid #c7d2fe;color:#4338ca;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;cursor:pointer;margin-left:auto">✏️ 수정</button>' : '')
+    +     (isMine ? '<button type="button" onclick="deleteFeedComment(' + JSON.stringify(postId) + ',' + JSON.stringify(c.id) + ')" style="background:transparent;border:none;color:#9ca3af;font-size:11px;cursor:pointer;text-decoration:underline">삭제</button>' : '')
+    +   '</div>'
+    + '</div>'
+    + '</div>';
+  if (c._children && c._children.length) {
+    html += c._children.map(function(ch){ return _renderFeedCommentNode(ch, postId, myEmail, isAdmin, depth+1); }).join('');
+  }
+  return html;
+}
+
+// 트리 전체 렌더 (renderFeedCommentItemHtml 대체)
+function renderFeedCommentTreeHtml(comments, postId, myEmail, isAdmin) {
+  var tree = _feedCommentTree(comments);
+  return tree.map(function(c){ return _renderFeedCommentNode(c, postId, myEmail, isAdmin, 0); }).join('');
+}
+
+// 이모지 picker
+function toggleFeedCmReactionPicker(anchor, postId, commentId) {
+  var existing = document.getElementById('feed-cm-react-picker');
+  if (existing) { existing.remove(); return; }
+  var rect = anchor.getBoundingClientRect();
+  var picker = document.createElement('div');
+  picker.id = 'feed-cm-react-picker';
+  picker.style.cssText = 'position:fixed;top:' + (rect.bottom + 6) + 'px;left:' + rect.left + 'px;z-index:100000;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:6px;box-shadow:0 4px 16px rgba(0,0,0,.15);display:flex;gap:4px';
+  picker.innerHTML = _FEED_CM_EMOJIS.map(function(em){
+    return '<button type="button" onclick="event.stopPropagation();toggleFeedCommentReaction(' + JSON.stringify(postId) + ',' + JSON.stringify(commentId) + ',\'' + em + '\');document.getElementById(\'feed-cm-react-picker\').remove()" style="background:transparent;border:none;padding:4px;font-size:18px;cursor:pointer;border-radius:6px;line-height:1" onmouseenter="this.style.background=\'#f3f4f6\'" onmouseleave="this.style.background=\'transparent\'">' + em + '</button>';
+  }).join('');
+  document.body.appendChild(picker);
+  setTimeout(function(){
+    var closer = function(ev){
+      if (!picker.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target)) {
+        picker.remove();
+        document.removeEventListener('click', closer);
+      }
+    };
+    document.addEventListener('click', closer);
+  }, 0);
+}
+
+// 이모지 토글
+function toggleFeedCommentReaction(postId, commentId, emoji) {
+  var p = (DB.feedPosts||[]).find(function(x){ return x && x.id === postId; });
+  if (!p) return;
+  var c = (p.comments||[]).find(function(x){ return x && x.id === commentId; });
+  if (!c) return;
+  if (!c.reactions) c.reactions = {};
+  c.reactions[emoji] = (c.reactions[emoji] || 0) + 1;
+  try { if (typeof saveData==='function') saveData(); } catch(_){}
+  if (typeof renderFeed==='function') renderFeed();
+}
+
+// 대댓글 - 답글 모드 진입
+function replyFeedComment(postId, commentId) {
+  var inp = document.getElementById('feed-comment-input-' + postId);
+  if (!inp) return;
+  inp.dataset.parentId = String(commentId);
+  inp.placeholder = '답글 작성 중... (취소: Esc)';
+  inp.focus();
+}
+
+// 수정 - inline 편집
+function editFeedComment(postId, commentId) {
+  var textEl = document.getElementById('feed-cm-text-' + postId + '-' + commentId);
+  var actEl = document.getElementById('feed-cm-actions-' + postId + '-' + commentId);
+  if (!textEl || !actEl) return;
+  var p = (DB.feedPosts||[]).find(function(x){ return x && x.id === postId; });
+  if (!p) return;
+  var c = (p.comments||[]).find(function(x){ return x && x.id === commentId; });
+  if (!c) return;
+  var safeText = (c.text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  textEl.innerHTML = '<textarea id="feed-cm-edit-' + postId + '-' + commentId + '" style="width:100%;min-height:60px;border:1px solid #c7d2fe;border-radius:6px;padding:6px 8px;font-size:12.5px;font-family:inherit;resize:vertical;outline:none;box-sizing:border-box">' + safeText + '</textarea>';
+  actEl.innerHTML = ''
+    + '<button onclick="saveFeedCommentEdit(' + JSON.stringify(postId) + ',' + JSON.stringify(commentId) + ')" style="background:#16a34a;color:#fff;border:1px solid #15803d;border-radius:6px;padding:4px 12px;font-size:11.5px;font-weight:700;cursor:pointer">💾 저장</button>'
+    + '<button onclick="cancelFeedCommentEdit(' + JSON.stringify(postId) + ')" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;padding:4px 12px;font-size:11.5px;font-weight:700;cursor:pointer">취소</button>';
+  var ta = document.getElementById('feed-cm-edit-' + postId + '-' + commentId);
+  if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+}
+
+function saveFeedCommentEdit(postId, commentId) {
+  var ta = document.getElementById('feed-cm-edit-' + postId + '-' + commentId);
+  if (!ta) return;
+  var newText = ta.value.trim();
+  if (!newText) { try { showNotif('내용을 입력하세요','warning'); } catch(_){} return; }
+  var p = (DB.feedPosts||[]).find(function(x){ return x && x.id === postId; });
+  if (!p) return;
+  var c = (p.comments||[]).find(function(x){ return x && x.id === commentId; });
+  if (!c) return;
+  c.text = newText;
+  c.updatedAt = new Date().toISOString();
+  try { if (typeof saveData==='function') saveData(); } catch(_){}
+  if (typeof renderFeed==='function') renderFeed();
+  try { showNotif('✅ 댓글이 수정되었습니다','success'); } catch(_){}
+}
+
+function cancelFeedCommentEdit(postId) {
+  if (typeof renderFeed==='function') renderFeed();
+}
+
 function addFeedComment(postId){
   const input = document.getElementById(`feed-comment-input-${postId}`);
   if (!input) return;
@@ -25980,17 +26122,27 @@ function addFeedComment(postId){
   if (!p) return;
   if (!Array.isArray(p.comments)) p.comments = [];
   const u = feedCurrentUser();
+  // v2.2.1: 대댓글 parentId 처리
+  const parentIdRaw = input.dataset && input.dataset.parentId;
+  let parentId = null;
+  if (parentIdRaw) { var n = Number(parentIdRaw); parentId = isNaN(n) ? parentIdRaw : n; }
   const newCid = (DB._nextId && DB._nextId.feedComment) || ((p.comments.reduce((m,c)=>Math.max(m,c.id||0),0))+1);
   if (DB._nextId) DB._nextId.feedComment = newCid + 1;
   p.comments.push({
     id: newCid,
     text,
+    parentId: parentId,
+    reactions: {},
     authorName: u.name,
     authorEmail: u.email,
     createdAt: new Date().toISOString(),
   });
   try { saveData(); } catch(_){}
   input.value = '';
+  input.style.height = '36px';
+  // 답글 모드 초기화
+  if (input.dataset) { input.dataset.parentId = ''; }
+  input.placeholder = '댓글을 남겨보세요... (Shift+Enter 줄바꿈)';
   renderFeed();
 }
 
@@ -26003,6 +26155,7 @@ function deleteFeedComment(postId, commentId){
 }
 
 function toggleFeedAllComments(postId){
+  // v2.2.1: 트리 구조 — 펼치면 전체, 접으면 최근 6건만
   const p = DB.feedPosts.find(x => x.id === postId);
   if (!p) return;
   const container = document.getElementById(`feed-comments-${postId}`);
@@ -26010,13 +26163,14 @@ function toggleFeedAllComments(postId){
   if (!container) return;
   const expanded = container.dataset.expanded === '1';
   const myEmail = (window._currentUser && window._currentUser.email) || '';
+  const isAdmin = !!(window._currentUser && window._currentUser.isAdmin);
   if (expanded) {
-    const last3 = (p.comments||[]).slice(-3);
-    container.innerHTML = last3.map(c => renderFeedCommentItemHtml(c, myEmail, p.id)).join('');
-    if (btn) btn.textContent = `댓글 ${(p.comments||[]).length-3}개 더보기`;
+    const last6 = (p.comments||[]).slice(-6);
+    container.innerHTML = (typeof renderFeedCommentTreeHtml==='function') ? renderFeedCommentTreeHtml(last6, p.id, myEmail, isAdmin) : '';
+    if (btn) btn.textContent = `댓글 ${Math.max(0,(p.comments||[]).length-6)}개 더보기`;
     container.dataset.expanded = '0';
   } else {
-    container.innerHTML = (p.comments||[]).map(c => renderFeedCommentItemHtml(c, myEmail, p.id)).join('');
+    container.innerHTML = (typeof renderFeedCommentTreeHtml==='function') ? renderFeedCommentTreeHtml(p.comments||[], p.id, myEmail, isAdmin) : '';
     if (btn) btn.textContent = '댓글 접기';
     container.dataset.expanded = '1';
   }
@@ -37220,7 +37374,14 @@ function _pmRenderOneComment(p, c, me, isReply) {
       + '</div>';
   } else {
     h += '<div style="font-size:12.5px;color:#1e293b;line-height:1.5;white-space:pre-wrap;word-break:break-word">' + _esc(c.text||'') + '</div>';
-    h += '<div style="display:flex;gap:10px;margin-top:5px">';
+    // v2.2.3: 이모지 반응 영역
+    var reactions = c.reactions || {};
+    var reactionBadges = Object.keys(reactions).filter(function(k){ return Number(reactions[k])>0; }).map(function(k){
+      return '<span style="display:inline-block;background:#f0f9ff;border:1px solid #bae6fd;border-radius:999px;padding:1px 8px;font-size:11px;margin-right:3px;cursor:pointer" onclick="togglePmCommentReaction(\'' + p.id + '\',\'' + c.id + '\',\'' + k + '\')">' + k + ' ' + reactions[k] + '</span>';
+    }).join('');
+    if (reactionBadges) h += '<div style="margin-top:4px">' + reactionBadges + '</div>';
+    h += '<div style="display:flex;gap:10px;margin-top:5px;align-items:center">';
+    h += '<button type="button" onclick="event.stopPropagation();togglePmCmReactionPicker(this,\'' + p.id + '\',\'' + c.id + '\')" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:1px solid #fcd34d;color:#92400e;border-radius:999px;padding:1px 9px;font-size:11px;font-weight:700;cursor:pointer">😊 반응 ＋</button>';
     if (!isReply) h += '<span onclick="pmToggleReply(\'' + p.id + '\',\'' + c.id + '\')" style="font-size:11px;color:#3b82f6;cursor:pointer;font-weight:600">답글</span>';
     if (canEdit) {
       h += '<span onclick="pmStartEditComment(\'' + p.id + '\',\'' + c.id + '\')" style="font-size:11px;color:#64748b;cursor:pointer">수정</span>';
@@ -37230,6 +37391,44 @@ function _pmRenderOneComment(p, c, me, isReply) {
   }
   h += '</div>';
   return h;
+}
+
+// v2.2.3: pmComment 이모지 반응
+var _PM_CM_EMOJIS = ['👍','❤️','😄','👏','🎉','🙏','🔥','💡'];
+function togglePmCmReactionPicker(anchor, pid, cid) {
+  var existing = document.getElementById('pm-cm-react-picker');
+  if (existing) { existing.remove(); return; }
+  var rect = anchor.getBoundingClientRect();
+  var picker = document.createElement('div');
+  picker.id = 'pm-cm-react-picker';
+  picker.style.cssText = 'position:fixed;top:' + (rect.bottom + 6) + 'px;left:' + rect.left + 'px;z-index:100000;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:6px;box-shadow:0 4px 16px rgba(0,0,0,.15);display:flex;gap:4px';
+  picker.innerHTML = _PM_CM_EMOJIS.map(function(em){
+    return '<button type="button" onclick="event.stopPropagation();togglePmCommentReaction(\'' + pid + '\',\'' + cid + '\',\'' + em + '\');document.getElementById(\'pm-cm-react-picker\').remove()" style="background:transparent;border:none;padding:4px;font-size:18px;cursor:pointer;border-radius:6px;line-height:1" onmouseenter="this.style.background=\'#f3f4f6\'" onmouseleave="this.style.background=\'transparent\'">' + em + '</button>';
+  }).join('');
+  document.body.appendChild(picker);
+  setTimeout(function(){
+    var closer = function(ev){
+      if (!picker.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target)) {
+        picker.remove();
+        document.removeEventListener('click', closer);
+      }
+    };
+    document.addEventListener('click', closer);
+  }, 0);
+}
+function togglePmCommentReaction(pid, cid, emoji) {
+  var d = (typeof _ensureProductMap === 'function') ? _ensureProductMap() : null;
+  if (!d) return;
+  var p = d.products.find(function(x){ return x.id === pid; });
+  if (!p) return;
+  var found = _pmFindComment(p, cid);
+  if (!found) return;
+  var c = found.comment;
+  if (!c.reactions) c.reactions = {};
+  c.reactions[emoji] = (c.reactions[emoji] || 0) + 1;
+  p.updatedAt = Date.now();
+  if (typeof _pmSave === 'function') _pmSave();
+  if (typeof openPmDetail === 'function') openPmDetail(pid);
 }
 
 function _pmFindComment(p, id) {
@@ -37901,7 +38100,7 @@ Gross 마진 ${estMarginNum !== null ? estMarginNum.toLocaleString()+'원' : '-'
           <div id="np-card-cmt-list-${it.id}" style="max-height:220px;overflow-y:auto;margin-bottom:6px;padding:4px;background:#fafafa;border:1px solid var(--gray-200);border-radius:8px">${commentsHtml}</div>
           <div style="display:flex;gap:4px;align-items:center">
             <button type="button" onclick="event.stopPropagation();toggleNpInputEmojiPicker(this,'np-card-cmt-input-${it.id}')" title="이모지 넣기" style="padding:4px 7px;background:#fff;border:1px solid var(--gray-300);border-radius:5px;font-size:14px;cursor:pointer;line-height:1;flex-shrink:0" onmouseenter="this.style.background='#f3f4f6';this.style.borderColor='var(--sky-400)'" onmouseleave="this.style.background='#fff';this.style.borderColor='var(--gray-300)'">🙂</button>
-            <input class="fi" id="np-card-cmt-input-${it.id}" placeholder="의견을 남겨주세요..." style="flex:1;font-size:12px;padding:5px 8px" onkeydown="if(event.key==='Enter'){event.stopPropagation();addNpCardComment('${it.id}');}" onclick="event.stopPropagation()">
+            <textarea class="fi" id="np-card-cmt-input-${it.id}" placeholder="의견 (Shift+Enter 줄바꿈)" rows="1" style="flex:1;font-size:12px;padding:5px 8px;resize:none;font-family:inherit;min-height:26px;max-height:80px;line-height:1.4" oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,80)+'px'" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();event.stopPropagation();addNpCardComment('${it.id}');}" onclick="event.stopPropagation()"></textarea>
             <button type="button" onclick="event.stopPropagation();addNpCardComment('${it.id}')" style="padding:4px 12px;background:var(--sky-500);color:#fff;border:none;border-radius:5px;font-size:11.5px;cursor:pointer;font-weight:700">전송</button>
           </div>
         </div>
@@ -38081,7 +38280,15 @@ function _renderNpCommentItem(c, productId, idx) {
         <span style="flex:1"></span>
         ${editDelBtns}
       </div>
-      <div style="font-size:12.5px;color:var(--gray-700);white-space:pre-wrap;word-break:keep-all;line-height:1.5">${escapeHtml(c.text||'')}</div>
+      ${(window._npCardEditing && window._npCardEditing[productId + '_' + idx]) ? `
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <textarea id="np-card-edit-${productId}-${idx}" style="width:100%;min-height:60px;padding:5px 8px;border:1px solid #93c5fd;border-radius:6px;font-size:12.5px;font-family:inherit;resize:vertical;outline:none;box-sizing:border-box">${escapeHtml(c.text||'')}</textarea>
+          <div style="display:flex;gap:5px;justify-content:flex-end">
+            <button type="button" onclick="event.stopPropagation();cancelEditNpCardComment('${productId}',${idx})" style="padding:2px 9px;background:#fff;border:1px solid var(--gray-300);border-radius:5px;font-size:11px;cursor:pointer;font-weight:600">취소</button>
+            <button type="button" onclick="event.stopPropagation();saveEditNpCardComment('${productId}',${idx})" style="padding:2px 10px;background:#16a34a;color:#fff;border:none;border-radius:5px;font-size:11px;cursor:pointer;font-weight:700">💾 저장</button>
+          </div>
+        </div>
+      ` : `<div style="font-size:12.5px;color:var(--gray-700);white-space:pre-wrap;word-break:keep-all;line-height:1.5">${escapeHtml(c.text||'')}</div>`}
       ${reactsHtml ? `<div style="display:flex;gap:4px;margin-top:5px;flex-wrap:wrap">${reactsHtml}</div>` : ''}
     </div>
   </div>`;
@@ -38107,23 +38314,43 @@ function toggleNpCardCommentReact(productId, idx, emoji) {
   setTimeout(() => { const p = document.getElementById('np-card-cmt-' + productId); if (p) p.style.display = ''; }, 10);
 }
 
-// ── 카드 내 코멘트 수정 (본인만) ──
+// ── 카드 내 코멘트 수정 (본인만) — v2.2.2: prompt 대신 inline 편집 ──
 function editNpCardComment(productId, idx) {
   const myEmail = window._currentUser && window._currentUser.email;
   const it = (DB.newProducts||[]).find(x => x.id === productId);
   if (!it || !it.comments || !it.comments[idx]) return;
   const c = it.comments[idx];
-  if (!myEmail || c.authorEmail !== myEmail) { showNotif('본인이 작성한 코멘트만 수정할 수 있어요', 'warning'); return; }
-  const next = prompt('코멘트 수정', c.text || '');
-  if (next === null) return;
-  const trimmed = next.trim();
-  if (!trimmed) { showNotif('내용이 비어있습니다', 'warning'); return; }
-  c.text = trimmed;
-  c.editedAt = Date.now();
+  if (!myEmail || c.authorEmail !== myEmail) { try { showNotif('본인이 작성한 코멘트만 수정할 수 있어요','warning'); } catch(_){} return; }
+  // 편집 모드 마킹 — render 시 textarea 노출
+  window._npCardEditing = window._npCardEditing || {};
+  window._npCardEditing[productId + '_' + idx] = true;
+  if (typeof renderNewProductKanban === 'function') renderNewProductKanban();
+  setTimeout(function(){
+    var p = document.getElementById('np-card-cmt-' + productId); if (p) p.style.display = '';
+    var ta = document.getElementById('np-card-edit-' + productId + '-' + idx);
+    if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+  }, 30);
+}
+function saveEditNpCardComment(productId, idx) {
+  var ta = document.getElementById('np-card-edit-' + productId + '-' + idx);
+  if (!ta) return;
+  var newText = ta.value.trim();
+  if (!newText) { try { showNotif('내용이 비어있습니다','warning'); } catch(_){} return; }
+  var it = (DB.newProducts||[]).find(function(x){ return x.id === productId; });
+  if (!it || !it.comments || !it.comments[idx]) return;
+  it.comments[idx].text = newText;
+  it.comments[idx].editedAt = Date.now();
   it.updatedAt = Date.now();
-  saveDataNow().catch(e => console.error('수정 저장 실패:', e));
-  renderNewProductKanban();
-  setTimeout(() => { const p = document.getElementById('np-card-cmt-' + productId); if (p) p.style.display = ''; }, 10);
+  if (window._npCardEditing) delete window._npCardEditing[productId + '_' + idx];
+  saveDataNow().catch(function(e){ console.error('수정 저장 실패:', e); });
+  if (typeof renderNewProductKanban === 'function') renderNewProductKanban();
+  setTimeout(function(){ var p = document.getElementById('np-card-cmt-' + productId); if (p) p.style.display = ''; }, 10);
+  try { showNotif('✅ 수정 완료','success'); } catch(_){}
+}
+function cancelEditNpCardComment(productId, idx) {
+  if (window._npCardEditing) delete window._npCardEditing[productId + '_' + idx];
+  if (typeof renderNewProductKanban === 'function') renderNewProductKanban();
+  setTimeout(function(){ var p = document.getElementById('np-card-cmt-' + productId); if (p) p.style.display = ''; }, 10);
 }
 
 // ── 카드 내 코멘트 삭제 (본인만) ──
