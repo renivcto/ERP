@@ -5303,7 +5303,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.16';
+const ERP_VERSION = 'v2.2.17';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6270,17 +6270,35 @@ async function _doSaveDataInner() {
             //   이제 COUNT-GUARD 가 tombstone 인식하면 영구 차단됨.
             if (key === 'shopOrders') {
               try {
-                const tombSet = Array.isArray(DB._deletedShopOrderSigs)
-                  ? new Set(DB._deletedShopOrderSigs.map(x => x && x.sig).filter(Boolean))
-                  : null;
-                if (tombSet && tombSet.size > 0) {
+                // v2.2.17: manual + merged + orderNo 매칭 모두 지원
+                const tombArr = Array.isArray(DB._deletedShopOrderSigs) ? DB._deletedShopOrderSigs : [];
+                // tombArr 에서 orderNo 추출 (sig 의 prefix:orderNo[:...] 형식 또는 orderNo 필드)
+                const tombOrderNoSet = new Set();
+                const tombSigSet = new Set();
+                tombArr.forEach(function(t){
+                  if (!t) return;
+                  if (t.sig) tombSigSet.add(t.sig);
+                  if (t.orderNo) tombOrderNoSet.add(String(t.orderNo));
+                  // sig 에서 orderNo 파싱 (예: 'manual:20260529-0000026:장옥순', 'merged:20260529-0000026')
+                  if (t.sig && typeof t.sig === 'string') {
+                    var parts = t.sig.split(':');
+                    if (parts.length >= 2 && parts[1]) tombOrderNoSet.add(parts[1]);
+                  }
+                });
+                if (tombSigSet.size > 0 || tombOrderNoSet.size > 0) {
                   const srvById = new Map(srvArr.map(o => [o && o.id, o]));
                   const _before = onlyOnServer.length;
                   onlyOnServer = onlyOnServer.filter(id => {
                     const o = srvById.get(id);
-                    if (!o || !o.orderNo) return true;
-                    const sig = 'merged:' + String(o.orderNo);  // v784 sig 형식
-                    if (tombSet.has(sig)) return false; // tombstone 이면 복원 제외
+                    if (!o) return true;
+                    // orderNo 기반 매칭 (가장 강력 — manual/merged prefix 무관)
+                    if (o.orderNo && tombOrderNoSet.has(String(o.orderNo))) return false;
+                    // 정확한 sig 매칭 fallback
+                    if (o.orderNo) {
+                      var sigMerged = 'merged:' + String(o.orderNo);
+                      var sigManual = 'manual:' + String(o.orderNo) + ':' + String(o.customerName || '');
+                      if (tombSigSet.has(sigMerged) || tombSigSet.has(sigManual)) return false;
+                    }
                     return true;
                   });
                   _guardTombSkipped = _before - onlyOnServer.length;
@@ -12762,7 +12780,9 @@ async function editOrderQty(orderId) {
 
 async function deleteShopOrder(id) {
   if (!requireWrite()) return;
-  const o = (DB.shopOrders||[]).find(x => x && x.id === id);
+  // v2.2.17: ID 타입 불일치 방어 — String() 비교
+  const _idStr = String(id);
+  const o = (DB.shopOrders||[]).find(x => x && String(x.id) === _idStr);
   if (!o) return;
   // v1.9.535: 정확히 차감된 양(stockDeductedQty)을 복구
   let stockNote = '';
@@ -12795,7 +12815,9 @@ async function deleteShopOrder(id) {
   if (!DB._deletedShopOrderSigs.some(x => x && x.sig === sig)) {
     DB._deletedShopOrderSigs.push({ sig, ts: Date.now(), orderNo: o.orderNo, reason: 'manual-delete' });
   }
-  DB.shopOrders = (DB.shopOrders||[]).filter(x => x.id !== id);
+  // v2.2.17: filter 도 String 비교
+  DB.shopOrders = (DB.shopOrders||[]).filter(x => x && String(x.id) !== _idStr);
+  console.log('🗑️ [shopOrder] 삭제 — id:' + _idStr + ' / orderNo:' + (o.orderNo||'-') + ' / 남은 건수:' + DB.shopOrders.length);
   await saveDataNow(); renderShopOrderTable();
 }
 
