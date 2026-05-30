@@ -5303,7 +5303,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.14';
+const ERP_VERSION = 'v2.2.15';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -22497,12 +22497,8 @@ function previewOverseasPo(orderId) {
   </div>
   ${o.note ? `<div class="note">${esc(o.note).replace(/\n/g, '<br>')}</div>` : ''}
   <div class="signature">
-    <div class="sig-box">
+    <div class="sig-box" style="grid-column:1/3;max-width:380px;margin:0 auto">
       <div class="label">Authorized by (Buyer)</div>
-      <div class="line"></div>
-    </div>
-    <div class="sig-box">
-      <div class="label">Confirmed by (Supplier)</div>
       <div class="line"></div>
     </div>
   </div>
@@ -22720,15 +22716,11 @@ async function generatePdfWithForm() {
     // v1.9.838: 사인 라벨 가운데 정렬 (각 박스 중심에)
     y = ry - 100;
     page.drawLine({ start:{x: 30, y}, end: {x: 565, y}, thickness: 0.5, color: LIGHT_GRAY });
+    // v2.2.15: Supplier 영역 삭제 — Buyer 만 가운데 정렬
     const _bl = "Authorized by (Buyer)";
-    const _sl = "Confirmed by (Supplier)";
     const _blW = fontBold.widthOfTextAtSize(_bl, 10);
-    const _slW = fontBold.widthOfTextAtSize(_sl, 10);
-    page.drawText(_bl, { x: 150 - _blW / 2, y: y - 18, size: 10, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
-    page.drawText(_sl, { x: 430 - _slW / 2, y: y - 18, size: 10, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
-    // v1.9.836: 서명란 — form text field 대신 빈 박스 (잉크/주석 위에 그려지도록)
-    page.drawRectangle({ x: 50, y: y - 90, width: 200, height: 60, borderColor: rgb(0.6, 0.65, 0.72), borderWidth: 0.5 });
-    page.drawRectangle({ x: 330, y: y - 90, width: 200, height: 60, borderColor: rgb(0.6, 0.65, 0.72), borderWidth: 0.5 });
+    page.drawText(_bl, { x: 297 - _blW / 2, y: y - 18, size: 10, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
+    page.drawRectangle({ x: 197, y: y - 90, width: 200, height: 60, borderColor: rgb(0.6, 0.65, 0.72), borderWidth: 0.5 });
     // v1.9.832: NeedAppearances=true + updateFieldAppearances — 입력 텍스트가 박스 안에 표시되도록
     try { form.acroForm.dict.set(PDFName.of("NeedAppearances"), PDFBool.True); } catch(e) { console.warn("NeedAppearances set fail", e); }
     try { form.updateFieldAppearances(font); } catch(e) { console.warn("updateFieldAppearances fail", e); }
@@ -22967,11 +22959,9 @@ async function _generateOverseasPoPdfForm(orderId) {
   // 서명 영역
   y = ry - 100;
   page.drawLine({ start:{x: 30, y}, end: {x: 565, y}, thickness: 0.5, color: LIGHT_GRAY });
-  page.drawText('Authorized by (Buyer)', { x: 80, y: y - 18, size: 10, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
-  page.drawText('Confirmed by (Supplier)', { x: 360, y: y - 18, size: 10, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
-  // v1.9.836: 서명란 — form text field 대신 빈 박스 + 높이 2배
-  page.drawRectangle({ x: 50, y: y - 90, width: 200, height: 60, borderColor: rgb(0.6, 0.65, 0.72), borderWidth: 0.5 });
-  page.drawRectangle({ x: 330, y: y - 90, width: 200, height: 60, borderColor: rgb(0.6, 0.65, 0.72), borderWidth: 0.5 });
+  // v2.2.15: Supplier 영역 삭제 — Buyer 만 가운데
+  page.drawText('Authorized by (Buyer)', { x: 217, y: y - 18, size: 10, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
+  page.drawRectangle({ x: 197, y: y - 90, width: 200, height: 60, borderColor: rgb(0.6, 0.65, 0.72), borderWidth: 0.5 });
 
   // v1.9.832: NeedAppearances + updateFieldAppearances
   try { form.acroForm.dict.set(PDFName.of("NeedAppearances"), PDFBool.True); } catch(e) { console.warn("NeedAppearances set fail", e); }
@@ -33419,14 +33409,10 @@ function showOverseasOrderPreview(o) {
   if (o.note) {
     H += '<div style="font-size:10.5px;color:#64748b;margin-top:14px;padding:8px 12px;background:#f1f5f9;border-radius:4px">' + esc(o.note).replace(/\n/g, '<br>') + '</div>';
   }
-  // Signature
-  H += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:30px;padding-top:18px;border-top:1px solid #cbd5e1">';
-  H += '<div id="po-sheet-buyer-sig" data-sig="buyer" style="text-align:center;font-size:12px;color:#475569;position:relative;min-height:100px">';
+  // Signature — v2.2.15: Supplier 삭제, Buyer 만 가운데
+  H += '<div style="display:flex;justify-content:center;margin-top:30px;padding-top:18px;border-top:1px solid #cbd5e1">';
+  H += '<div id="po-sheet-buyer-sig" data-sig="buyer" style="text-align:center;font-size:12px;color:#475569;position:relative;min-height:100px;max-width:380px;width:100%">';
   H += '<div style="font-weight:700;color:#0f172a;margin-bottom:60px;font-size:13px;letter-spacing:0.2px">Authorized by (Buyer)</div>';
-  H += '<div style="border-bottom:1px solid #94a3b8;height:1px;margin-bottom:6px"></div>';
-  H += '</div>';
-  H += '<div data-sig="supplier" style="text-align:center;font-size:12px;color:#475569;position:relative;min-height:100px">';
-  H += '<div style="font-weight:700;color:#0f172a;margin-bottom:60px;font-size:13px;letter-spacing:0.2px">Confirmed by (Supplier)</div>';
   H += '<div style="border-bottom:1px solid #94a3b8;height:1px;margin-bottom:6px"></div>';
   H += '</div>';
   H += '</div>';
