@@ -5303,7 +5303,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.18';
+const ERP_VERSION = 'v2.2.19';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27556,13 +27556,72 @@ function _getPartnerFileData(prefix, kind) {
   return (window._partnerFiles[prefix] && window._partnerFiles[prefix][kind]) || null;
 }
 
+// v2.2.19: 거래처 정보 빈 화면 자동 복구
+var _partnersRecoverAttempted = { cooperators: false, sellers: false, vendors: false };
+function _partnersTryAutoRecover(key, tbodyId, rerenderFn) {
+  if (_partnersRecoverAttempted[key]) return;
+  _partnersRecoverAttempted[key] = true;
+  try {
+    if (typeof idbGet !== 'function') return;
+    idbGet('reniv_' + key + '_backup').then(function(raw){
+      try {
+        if (!raw) {
+          console.warn('🛡️ [partners auto-recover] ' + key + ' IDB 백업도 없음');
+          return;
+        }
+        var arr = JSON.parse(raw);
+        if (!Array.isArray(arr) || arr.length === 0) return;
+        console.warn('🛡️ [partners auto-recover] ' + key + ' IDB 백업에서 ' + arr.length + '건 복구');
+        DB[key] = arr;
+        if (typeof saveDataNow === 'function') {
+          saveDataNow().catch(function(e){ console.warn('복구 저장 실패:', e); });
+        }
+        if (typeof rerenderFn === 'function') rerenderFn();
+        try { showNotif('🛡️ ' + key + ' ' + arr.length + '건 백업에서 복구', 'success'); } catch(_){}
+      } catch(e){ console.warn('partners auto-recover parse 실패:', e); }
+    }).catch(function(e){ console.warn('partners IDB read 실패:', e); });
+  } catch(e){ console.warn('_partnersTryAutoRecover:', e); }
+}
+// 사용자가 수동으로 복구 시도 — IDB + Firestore 강제 fetch
+function _partnersForceRecover() {
+  console.log('🔄 [partners force recover] 시작');
+  ['cooperators','sellers'].forEach(function(k){
+    _partnersRecoverAttempted[k] = false;  // reset
+    _partnersTryAutoRecover(k, k + '-tbody', k === 'cooperators' ? renderCooperatorsTable : renderSellersTable);
+  });
+  // Firestore 재로드 시도
+  if (typeof loadDataFromFirestore === 'function') {
+    setTimeout(function(){
+      try {
+        showNotif('🔄 Firestore 에서 데이터 재로드 중...', 'info');
+      } catch(_){}
+      loadDataFromFirestore().then(function(fs){
+        if (fs && Array.isArray(fs.cooperators) && fs.cooperators.length) {
+          DB.cooperators = fs.cooperators;
+          console.log('✅ cooperators Firestore 재로드:', fs.cooperators.length, '건');
+        }
+        if (fs && Array.isArray(fs.sellers) && fs.sellers.length) {
+          DB.sellers = fs.sellers;
+          console.log('✅ sellers Firestore 재로드:', fs.sellers.length, '건');
+        }
+        if (typeof saveDataNow === 'function') saveDataNow();
+        if (typeof renderCooperatorsTable === 'function') renderCooperatorsTable();
+        if (typeof renderSellersTable === 'function') renderSellersTable();
+        try { showNotif('✅ 복구 완료', 'success'); } catch(_){}
+      }).catch(function(e){ console.warn('Firestore 재로드 실패:', e); try { showNotif('⚠️ Firestore 로드 실패 — 인터넷 확인 후 새로고침', 'warning'); } catch(_){} });
+    }, 100);
+  }
+}
+
 function renderCooperatorsTable() {
   const tbody = document.getElementById('cooperators-tbody');
   if (!tbody) return;
   if (!Array.isArray(DB.cooperators)) DB.cooperators = [];
   const list = DB.cooperators.slice().sort((a,b)=>(a.company||'').localeCompare(b.company||'','ko'));
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty" style="text-align:center;color:#94a3b8;padding:30px">등록된 협력사가 없습니다. 우측 상단 [+ 협력사 등록] 버튼으로 추가하세요.</td></tr>';
+    // v2.2.19: 비어있으면 IndexedDB 백업에서 자동 복구 시도
+    _partnersTryAutoRecover('cooperators', 'cooperators-tbody', renderCooperatorsTable);
+    tbody.innerHTML = '<tr><td colspan="7" class="empty" style="text-align:center;color:#94a3b8;padding:30px">등록된 협력사가 없습니다. <button onclick="_partnersForceRecover()" style="margin-left:8px;padding:5px 12px;background:#0f172a;color:#fff;border:0;border-radius:6px;font-size:11.5px;font-weight:700;cursor:pointer">🔄 백업에서 복구</button></td></tr>';
     return;
   }
   tbody.innerHTML = list.map(c => {
@@ -27744,7 +27803,9 @@ function renderSellersTable() {
   if (!Array.isArray(DB.sellers)) DB.sellers = [];
   const list = DB.sellers.slice().sort((a,b)=>(a.company||'').localeCompare(b.company||'','ko'));
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty" style="text-align:center;color:#94a3b8;padding:30px">등록된 판매업체가 없습니다. 우측 상단 [+ 판매업체 등록] 버튼으로 추가하세요.</td></tr>';
+    // v2.2.19: 비어있으면 IDB 백업에서 자동 복구 시도
+    _partnersTryAutoRecover('sellers', 'sellers-tbody', renderSellersTable);
+    tbody.innerHTML = '<tr><td colspan="7" class="empty" style="text-align:center;color:#94a3b8;padding:30px">등록된 판매업체가 없습니다. <button onclick="_partnersForceRecover()" style="margin-left:8px;padding:5px 12px;background:#0f172a;color:#fff;border:0;border-radius:6px;font-size:11.5px;font-weight:700;cursor:pointer">🔄 백업에서 복구</button></td></tr>';
     return;
   }
   tbody.innerHTML = list.map(s => {
