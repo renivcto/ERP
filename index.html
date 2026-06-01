@@ -5341,7 +5341,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.29';
+const ERP_VERSION = 'v2.2.30';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -34220,15 +34220,14 @@ function openExpenseApprovalForm(expenseId) {
   // 집행내역 합계
   const execTotal = execRows.reduce((s,r) => s + (Number(r.subtotal)||0), 0);
 
-  // v2.2.28: 해외 PO 양식 — bank 정보 / 외화 금액 / 원화 참고 / 적요 재구성
+  // v2.2.28 + v2.2.30: 해외 PO 양식 — bank 정보 / 외화 금액 (배송료 포함) / 원화 참고 / 적요 breakdown
   let _overseasBankRowHtml = '';
   let _overseasAmountLineHtml = '';
   let _overseasSummary = summary;
   if (_isOverseasPo && _overseasOrder) {
     const _bk = _overseasOrder.bank || {};
     const esc = s => String(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    // 호주식 라벨: Bank Name / 예금주(Name) / BSB / ACC No. / Ref No.
-    // (v65 작업으로 라벨이 호주식으로 변경됨. 필드명은 swift/beneficiary/address 가 BSB/ACC/Ref 에 매핑)
+    // 호주식 라벨
     const bankLines = [
       { lbl: 'BSB',         val: _bk.swift },
       { lbl: 'ACC No.',     val: _bk.beneficiary },
@@ -34240,21 +34239,36 @@ function openExpenseApprovalForm(expenseId) {
       ? bankLines.map(x => '<div style="display:flex;gap:10px;line-height:1.6"><span style="min-width:96px;color:#475569;font-weight:600;font-size:11.5px">' + x.lbl + '</span><span style="font-family:monospace;font-weight:700;letter-spacing:.5px;color:#0f172a">' + esc(x.val) + '</span></div>').join('')
       : '<span style="color:#b91c1c">⚠ Payment Details 가 등록되지 않았습니다 — 해외 PO 모달에서 입력하세요</span>';
     _overseasBankRowHtml = '<tr><th>입금 계좌<br><span style="font-size:10.5px;font-weight:500;color:#6b7280">Payment Details</span></th><td colspan="3" style="padding:10px 12px">' + bankInner + '</td></tr>';
-    // 금액 라인: 외화 큰 글씨 + 원화 작은 참고
-    const _foreignFmt = _overseasCurrency + ' ' + Number(execTotal||0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // v2.2.30: 금액 계산 — grandTotal × percent (배송료 포함)
+    const _productOnly = parseFloat(_overseasOrder.productTotal) || execTotal || 0;
+    const _freightOnly = parseFloat(_overseasOrder.oceanFreight) || 0;
+    const _grandTotal = parseFloat(_overseasOrder.grandTotal) || (_productOnly + _freightOnly);
+    const _pct = percent || 100;
+    const _paymentAmt = _grandTotal * _pct / 100;
+    const _paymentProduct = _productOnly * _pct / 100;
+    const _paymentFreight = _freightOnly * _pct / 100;
+    const _isAir = _overseasOrder.shippingMode === 'air';
+    const _freightLabel = _isAir ? 'Air Freight (항공운송료)' : 'Ocean Freight (해상운송료)';
+    const _fmtCur = n => _overseasCurrency + ' ' + Number(n||0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // 금액 라인 — 배송료 포함 합계
     _overseasAmountLineHtml = '<div class="amount-line" style="flex-direction:column;align-items:stretch;gap:6px">'
       + '<div style="display:flex;justify-content:space-between;align-items:baseline">'
-      +   '<div class="k-amt" style="font-size:13px;color:#78350f">금 액 (Foreign)</div>'
-      +   '<div class="n-amt" style="font-size:22px;color:#1e3a8a;font-variant-numeric:tabular-nums">' + _foreignFmt + '</div>'
+      +   '<div class="k-amt" style="font-size:13px;color:#78350f">입금할 금액 (Total Payment)</div>'
+      +   '<div class="n-amt" style="font-size:22px;color:#1e3a8a;font-variant-numeric:tabular-nums">' + _fmtCur(_paymentAmt) + '</div>'
       + '</div>'
-      + '<div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px dashed #fcd34d;padding-top:6px">'
+      + (_freightOnly > 0 ? ('<div style="display:flex;justify-content:flex-end;gap:14px;font-size:11px;color:#475569;font-variant-numeric:tabular-nums">'
+          + '<span>제품: ' + _fmtCur(_paymentProduct) + '</span>'
+          + '<span>+ 배송비: ' + _fmtCur(_paymentFreight) + '</span>'
+        + '</div>') : '')
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px dashed #fcd34d;padding-top:6px;margin-top:2px">'
       +   '<div style="font-size:11px;color:#92400e">원화 참고 (KRW Reference)</div>'
       +   '<div style="font-size:13px;color:#7c2d12;font-weight:600">' + fmtW(amt) + '<span style="font-size:10px;font-weight:400;color:#92400e;margin-left:4px">※ 환율 변동에 따라 실제 송금액과 다를 수 있음</span></div>'
       + '</div>'
       + '</div>';
-    // 적요 — 외화 우선 + 원화 참고
+    // 적요 — breakdown 형식
     const _balanceLabel = (e.category === 'po_prepay') ? '선급금' : '잔금';
-    _overseasSummary = '발주서 ' + (poSerial||('PO-' + String(_overseasOrder.id).padStart(3,'0'))) + ' 의 ' + _balanceLabel + ' ' + percent + '% 지급 건 (' + _foreignFmt + ' — 원화 참고 ' + fmtW(amt) + ')';
+    const _poRef = poSerial || ('PO-' + String(_overseasOrder.id).padStart(3,'0'));
+    _overseasSummary = '발주서 ' + _poRef + ' — ' + _balanceLabel + ' ' + _pct + '% 지급 건';
   }
 
   const rowsHtml = execRows.map(r => `
@@ -34362,7 +34376,33 @@ function openExpenseApprovalForm(expenseId) {
 
       <div class="section-title">적   요</div>
       <div class="remark">${_isOverseasPo
-        ? `<div class="remark-summary">${(_overseasSummary||'').replace(/</g,'&lt;')}</div>` + (e.note ? (e.note||'').replace(/</g,'&lt;') : `${percent}% ${e.category==='po_prepay'?'선입금':'잔금'} — Foreign ${_overseasCurrency} ${Number(execTotal||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} <span style="font-size:11px;color:#92400e">(원화 참고: ${fmtW(amt)})</span>`)
+        ? (function(){
+            const _pdOnly = parseFloat(_overseasOrder.productTotal) || execTotal || 0;
+            const _fgOnly = parseFloat(_overseasOrder.oceanFreight) || 0;
+            const _grTot = parseFloat(_overseasOrder.grandTotal) || (_pdOnly + _fgOnly);
+            const _pctV = percent || 100;
+            const _payAmt = _grTot * _pctV / 100;
+            const _payProd = _pdOnly * _pctV / 100;
+            const _payFr = _fgOnly * _pctV / 100;
+            const _isA = _overseasOrder.shippingMode === 'air';
+            const _frLbl = _isA ? 'Air Freight (항공운송료)' : 'Ocean Freight (해상운송료)';
+            const _fc = n => _overseasCurrency + ' ' + Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+            let html = `<div class="remark-summary">${(_overseasSummary||'').replace(/</g,'&lt;')}</div>`;
+            html += '<div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;align-items:baseline;font-variant-numeric:tabular-nums;margin-top:4px">';
+            html += '<div style="font-weight:800;color:#1e3a8a;font-size:14px">📥 입금할 금액 (합계)</div>';
+            html += '<div style="font-weight:800;color:#1e3a8a;font-size:16px;text-align:right">' + _fc(_payAmt) + '</div>';
+            html += '<div style="color:#475569;padding-left:14px">• 제품 금액</div>';
+            html += '<div style="color:#1f2937;text-align:right">' + _fc(_payProd) + '</div>';
+            if (_fgOnly > 0) {
+              html += '<div style="color:#475569;padding-left:14px">• 배송비 (' + _frLbl + ')</div>';
+              html += '<div style="color:#1f2937;text-align:right">' + _fc(_payFr) + '</div>';
+            }
+            html += '<div style="color:#92400e;padding-left:14px;border-top:1px dashed #fcd34d;padding-top:4px;font-size:11px">원화 참고 (환율 변동 시 차이 가능)</div>';
+            html += '<div style="color:#7c2d12;text-align:right;border-top:1px dashed #fcd34d;padding-top:4px;font-size:12px;font-weight:600">' + fmtW(amt) + '</div>';
+            html += '</div>';
+            if (e.note) html += '<div style="margin-top:10px;padding-top:8px;border-top:1px dashed #cbd5e1">' + (e.note||'').replace(/</g,'&lt;') + '</div>';
+            return html;
+          })()
         : (e.note ? `<div class="remark-summary">${(summary||'').replace(/</g,'&lt;')}</div>${(e.note||'').replace(/</g,'&lt;')}` : (summary||'').replace(/</g,'&lt;'))}</div>
 
       <div class="footer-text">위와 같이 지출결의하오니 결재하여 주시기 바랍니다.</div>
