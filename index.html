@@ -5346,7 +5346,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.35';
+const ERP_VERSION = 'v2.2.36';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12792,11 +12792,38 @@ window.__dedupShopOrders = function() {
     if (!confirm(removed.length + '건의 중복 주문을 제거합니다. 계속할까요?\n\n' + removed.slice(0,5).map(r => '- ' + (r.orderNo||'-') + ' / ' + (r.customerName||'-') + ' / ' + (r.paymentAmount||0) + '원').join('\n') + (removed.length > 5 ? '\n... 외 ' + (removed.length-5) + '건' : ''))) return 0;
     const dropIds = new Set(removed.map(r => String(r.id)));
     DB.shopOrders = orders.filter(o => o && !dropIds.has(String(o.id)));
-    // tombstone 등록 (Firestore 머지 시 부활 차단)
+    // v2.2.36: tombstone 등록 — COUNT-GUARD 인식 포맷 사용
+    //   sig: 'manual:' + orderNo + ':' + customerName (split(':')[1] 로 orderNo 추출됨)
+    //   orderNo 필드도 추가 — COUNT-GUARD 가 orderNo 직접 매칭함
     removed.forEach(r => {
-      const sig = 'dup-cleanup:' + String(r.orderNo) + '|' + String(r.id);
-      DB._deletedShopOrderSigs.push({ sig, ts: Date.now(), reason: 'manual-dedup' });
+      const orderNo = String(r.orderNo || '');
+      const customerName = String(r.customerName || '');
+      const sig = 'manual:' + orderNo + ':' + customerName;
+      // 같은 sig 중복 추가 방지
+      if (!DB._deletedShopOrderSigs.some(x => x && x.sig === sig)) {
+        DB._deletedShopOrderSigs.push({
+          sig,
+          orderNo,                 // COUNT-GUARD 가 직접 매칭
+          customerName,
+          dupId: String(r.id),     // 참고용
+          ts: Date.now(),
+          reason: 'manual-dedup'
+        });
+      }
     });
+    // localStorage 별도 백업 (sync recovery 가 tombstone 잃어버리는 패턴 방지)
+    try {
+      const _ls = (JSON.parse(localStorage.getItem('reniv_deleted_shoporder_sigs')||'[]') || []);
+      removed.forEach(r => {
+        const orderNo = String(r.orderNo || '');
+        const customerName = String(r.customerName || '');
+        const sig = 'manual:' + orderNo + ':' + customerName;
+        if (!_ls.some(x => x && x.sig === sig)) {
+          _ls.push({ sig, orderNo, customerName, ts: Date.now() });
+        }
+      });
+      localStorage.setItem('reniv_deleted_shoporder_sigs', JSON.stringify(_ls.slice(-500)));
+    } catch(_){}
     try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
     if (typeof saveDataNow === 'function') saveDataNow();
     if (typeof renderShopOrderTable === 'function') renderShopOrderTable();
