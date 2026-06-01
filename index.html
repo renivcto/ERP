@@ -5303,7 +5303,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.21';
+const ERP_VERSION = 'v2.2.22';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7367,6 +7367,48 @@ function enforceMxArchiveV310() {
   } catch (e) { console.warn('v1.9.311 archive enforce skipped:', e); return { moved:0, normalized:0 }; }
 }
 (function enforceMxArchiveV310IIFE() { enforceMxArchiveV310(); })();
+
+// v2.2.22 — archivedItems 의 모든 항목에 tombstone 보강 (1회성 마이그레이션)
+//   원인: v2.2.21 이전에 아카이브된 품목은 tombstone 이 등록 안 되어 머지 시 부활.
+//   수정: 기존 archivedItems 각각에 대해 id/code/name 으로 tombstone 추가.
+//   플래그: DB._archiveTombstoneBackfillV222 = true 로 1회만 실행.
+function backfillArchiveTombstonesV222() {
+  try {
+    if (DB._archiveTombstoneBackfillV222) return 0;
+    if (!Array.isArray(DB.archivedItems)) return 0;
+    if (!Array.isArray(DB._deletedItemIds)) DB._deletedItemIds = [];
+    let added = 0;
+    const now = Date.now();
+    DB.archivedItems.forEach(a => {
+      if (!a) return;
+      const idStr = String(a.id||'');
+      const exists = DB._deletedItemIds.some(t => t && (
+        (idStr && String(t.id||'') === idStr) ||
+        (a.code && String(t.code||'').toLowerCase() === String(a.code).toLowerCase()) ||
+        (a.name && String(t.name||'').toLowerCase() === String(a.name).toLowerCase())
+      ));
+      if (!exists) {
+        DB._deletedItemIds.push({
+          id: idStr || String(now + Math.random()),
+          name: a.name||'',
+          code: a.code||'',
+          reason: 'archive-backfill-v222',
+          ts: now
+        });
+        added++;
+      }
+    });
+    DB._archiveTombstoneBackfillV222 = true;
+    if (DB._deletedItemIds.length > 500) {
+      DB._deletedItemIds = DB._deletedItemIds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
+    }
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+    if (added > 0) console.log('✅ v2.2.22 archive tombstone backfill — ' + added + '건 추가');
+    return added;
+  } catch(e) { console.warn('v2.2.22 backfill skipped:', e); return 0; }
+}
+(function backfillArchiveTombstonesV222IIFE() { backfillArchiveTombstonesV222(); })();
+
 
 // v1.9.211: 중복된 po_prepay/po_balance expense 정리 — 같은 orderId+category에 다중 레코드가 있으면 paid 우선 유지, 나머지 제거
 (function dedupExpensesV211() {
@@ -42070,12 +42112,23 @@ function initERPWhenReady() {
           if (!prev || (x.ts || 0) > (prev.ts || 0)) itTByKey.set(k, x);
         });
         merged._deletedItemIds = Array.from(itTByKey.values()).sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
+        // v2.2.22: id 외에도 code/name 매칭 — post-May22 ID 미스매치로 부활하던 버그 차단
         const itTombSet = new Set(merged._deletedItemIds.map(x => String(x.id)));
-        if (Array.isArray(merged.items) && itTombSet.size > 0) {
+        const itTombCodeSet = new Set(merged._deletedItemIds.map(x => String((x.code||'')).trim().toLowerCase()).filter(c => c));
+        const itTombNameSet = new Set(merged._deletedItemIds.map(x => String((x.name||'')).trim().toLowerCase()).filter(n => n));
+        if (Array.isArray(merged.items) && (itTombSet.size > 0 || itTombCodeSet.size > 0 || itTombNameSet.size > 0)) {
           const before = merged.items.length;
-          merged.items = merged.items.filter(i => i && !itTombSet.has(String(i.id)));
+          merged.items = merged.items.filter(i => {
+            if (!i) return false;
+            if (itTombSet.has(String(i.id))) return false;
+            const c = String((i.code||'')).trim().toLowerCase();
+            if (c && itTombCodeSet.has(c)) return false;
+            const n = String((i.name||'')).trim().toLowerCase();
+            if (n && itTombNameSet.has(n)) return false;
+            return true;
+          });
           const removed = before - merged.items.length;
-          if (removed > 0) console.warn('🪦 [v1.9.892] item tombstone 으로 ' + removed + '건 부활 차단');
+          if (removed > 0) console.warn('🪦 [v2.2.22] item tombstone 으로 ' + removed + '건 부활 차단');
         }
         // v1.9.691: 쇼핑몰 tombstone 머지
         const fsShT = Array.isArray(firestoreDB._deletedShopIds) ? firestoreDB._deletedShopIds : [];
