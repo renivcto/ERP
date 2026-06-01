@@ -5341,7 +5341,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.27';
+const ERP_VERSION = 'v2.2.28';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -34204,12 +34204,50 @@ function openExpenseApprovalForm(expenseId) {
   // v1.9.853: 해외 PO 면 단가/금액/합계를 원래 통화로 표시
   let _isOverseasPo = false;
   let _overseasCurrency = '';
+  let _overseasOrder = null;  // v2.2.28: 양식 분기용 참조
   if ((e.category === 'po_prepay' || e.category === 'po_balance') && e.orderId) {
     const _ord = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
     if (_ord && _ord.isOverseas) {
       _isOverseasPo = true;
       _overseasCurrency = String(_ord.currency || 'USD').toUpperCase();
+      _overseasOrder = _ord;
     }
+  }
+  // v2.2.28: 해외 PO 양식 — bank 정보 / 외화 금액 / 원화 참고 / 적요 재구성
+  let _overseasBankRowHtml = '';
+  let _overseasAmountLineHtml = '';
+  let _overseasSummary = summary;
+  if (_isOverseasPo && _overseasOrder) {
+    const _bk = _overseasOrder.bank || {};
+    const esc = s => String(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    // 호주식 라벨: Bank Name / 예금주(Name) / BSB / ACC No. / Ref No.
+    // (v65 작업으로 라벨이 호주식으로 변경됨. 필드명은 swift/beneficiary/address 가 BSB/ACC/Ref 에 매핑)
+    const bankLines = [
+      { lbl: 'BSB',         val: _bk.swift },
+      { lbl: 'ACC No.',     val: _bk.beneficiary },
+      { lbl: 'Ref No.',     val: _bk.address },
+      { lbl: 'Bank',        val: _bk.name },
+      { lbl: '예금주 (Name)', val: _bk.account },
+    ].filter(x => x.val && String(x.val).trim());
+    const bankInner = bankLines.length
+      ? bankLines.map(x => '<div style="display:flex;gap:10px;line-height:1.6"><span style="min-width:96px;color:#475569;font-weight:600;font-size:11.5px">' + x.lbl + '</span><span style="font-family:monospace;font-weight:700;letter-spacing:.5px;color:#0f172a">' + esc(x.val) + '</span></div>').join('')
+      : '<span style="color:#b91c1c">⚠ Payment Details 가 등록되지 않았습니다 — 해외 PO 모달에서 입력하세요</span>';
+    _overseasBankRowHtml = '<tr><th>입금 계좌<br><span style="font-size:10.5px;font-weight:500;color:#6b7280">Payment Details</span></th><td colspan="3" style="padding:10px 12px">' + bankInner + '</td></tr>';
+    // 금액 라인: 외화 큰 글씨 + 원화 작은 참고
+    const _foreignFmt = _overseasCurrency + ' ' + Number(execTotal||0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    _overseasAmountLineHtml = '<div class="amount-line" style="flex-direction:column;align-items:stretch;gap:6px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline">'
+      +   '<div class="k-amt" style="font-size:13px;color:#78350f">금 액 (Foreign)</div>'
+      +   '<div class="n-amt" style="font-size:22px;color:#1e3a8a;font-variant-numeric:tabular-nums">' + _foreignFmt + '</div>'
+      + '</div>'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px dashed #fcd34d;padding-top:6px">'
+      +   '<div style="font-size:11px;color:#92400e">원화 참고 (KRW Reference)</div>'
+      +   '<div style="font-size:13px;color:#7c2d12;font-weight:600">' + fmtW(amt) + '<span style="font-size:10px;font-weight:400;color:#92400e;margin-left:4px">※ 환율 변동에 따라 실제 송금액과 다를 수 있음</span></div>'
+      + '</div>'
+      + '</div>';
+    // 적요 — 외화 우선 + 원화 참고
+    const _balanceLabel = (e.category === 'po_prepay') ? '선급금' : '잔금';
+    _overseasSummary = '발주서 ' + (poSerial||('PO-' + String(_overseasOrder.id).padStart(3,'0'))) + ' 의 ' + _balanceLabel + ' ' + percent + '% 지급 건 (' + _foreignFmt + ' — 원화 참고 ' + fmtW(amt) + ')';
   }
   const fmtAmt = n => _isOverseasPo
     ? (_overseasCurrency + ' ' + Number(n||0).toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
@@ -34283,10 +34321,12 @@ function openExpenseApprovalForm(expenseId) {
         <tr><th>부   서</th><td>${deptName}</td><th>구   분</th><td><strong>${catInfo.label}</strong></td></tr>
         <tr><th>지 급 처</th><td colspan="3">${e.vendor||'-'}</td></tr>
         <tr><th>지급 예정일</th><td>${dueKor}</td><th>지급 방법</th><td><strong>${payMethod}</strong></td></tr>
-        ${payMethod === '계좌이체' ? `
+        ${_isOverseasPo ? _overseasBankRowHtml : (payMethod === '계좌이체' ? `
         <tr><th>입금 계좌</th><td colspan="3">${bankAccount ? `<span style="font-family:monospace;font-weight:700;letter-spacing:.5px">${bankAccount}</span>${bankName?`&nbsp;&nbsp;<span style=\"color:#4b5563\">(${bankName})</span>`:''}${bankHolder?`&nbsp;&nbsp;예금주: <strong>${bankHolder}</strong>`:''}` : '<span style="color:#b91c1c">⚠ 계좌번호가 등록되지 않았습니다 — 업체관리 또는 샘플 구매 페이지에서 등록하세요</span>'}</td></tr>
-        ` : ''}
-        <tr><th>증   빙</th><td>${taxLabel}</td><th>결재 문서 번호</th><td>EXP-${String(e.id).padStart(4,'0')}${poSerial?` / ${poSerial}`:''}</td></tr>
+        ` : '')}
+        ${_isOverseasPo
+          ? `<tr><th>결재 문서 번호</th><td colspan="3">EXP-${String(e.id).padStart(4,'0')}${poSerial?` / ${poSerial}`:''}</td></tr>`
+          : `<tr><th>증   빙</th><td>${taxLabel}</td><th>결재 문서 번호</th><td>EXP-${String(e.id).padStart(4,'0')}${poSerial?` / ${poSerial}`:''}</td></tr>`}
       </table>
 
       <div class="section-title">집 행 내 역</div>
@@ -34314,13 +34354,15 @@ function openExpenseApprovalForm(expenseId) {
         </tbody>
       </table>
 
-      <div class="amount-line">
+      ${_isOverseasPo ? _overseasAmountLineHtml : `<div class="amount-line">
         <div class="k-amt">금 액 (한글) : 일금 ${amtKor} 원정</div>
         <div class="n-amt">${fmtW(amt)}</div>
-      </div>
+      </div>`}
 
       <div class="section-title">적   요</div>
-      <div class="remark">${e.note ? `<div class="remark-summary">${(summary||'').replace(/</g,'&lt;')}</div>${(e.note||'').replace(/</g,'&lt;')}` : (summary||'').replace(/</g,'&lt;')}</div>
+      <div class="remark">${_isOverseasPo
+        ? `<div class="remark-summary">${(_overseasSummary||'').replace(/</g,'&lt;')}</div>` + (e.note ? (e.note||'').replace(/</g,'&lt;') : `${percent}% ${e.category==='po_prepay'?'선입금':'잔금'} — Foreign ${_overseasCurrency} ${Number(execTotal||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} <span style="font-size:11px;color:#92400e">(원화 참고: ${fmtW(amt)})</span>`)
+        : (e.note ? `<div class="remark-summary">${(summary||'').replace(/</g,'&lt;')}</div>${(e.note||'').replace(/</g,'&lt;')}` : (summary||'').replace(/</g,'&lt;'))}</div>
 
       <div class="footer-text">위와 같이 지출결의하오니 결재하여 주시기 바랍니다.</div>
 
