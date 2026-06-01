@@ -5303,7 +5303,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.20';
+const ERP_VERSION = 'v2.2.21';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -18270,15 +18270,25 @@ async function archiveSelectedItems() {
   if (!confirm(ids.length + '개 품목을 아카이브하시겠습니까?')) return;
   if (!DB.archivedItems) DB.archivedItems = [];
   const _now = Date.now();
+  // v2.2.21: tombstone 등록 — 머지 시 items 에서 제외 (부활 방지)
+  if (!Array.isArray(DB._deletedItemIds)) DB._deletedItemIds = [];
   ids.forEach(id => {
-    const idx = DB.items.findIndex(i => i.id === id);
+    const idx = DB.items.findIndex(i => String(i.id) === String(id));
     if (idx !== -1) {
       const item = DB.items.splice(idx, 1)[0];
       item._archivedAt = new Date().toISOString().slice(0,10);
-      item.updatedAt = _now; // v1.9.699: 머지 우선순위 보호
+      item.updatedAt = _now;
       DB.archivedItems.push(item);
+      // 같은 ID 가 tombstone 에 이미 있으면 중복 추가하지 않음
+      var _idStr = String(id);
+      if (!DB._deletedItemIds.some(t => t && String(t.id) === _idStr)) {
+        DB._deletedItemIds.push({ id: _idStr, name: item.name||'', code: item.code||'', reason: 'archive', ts: _now });
+      }
     }
   });
+  if (DB._deletedItemIds.length > 500) {
+    DB._deletedItemIds = DB._deletedItemIds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
+  }
   // v1.9.699: 즉시 dedup + saveDataNow (race 방지)
   if (typeof _dedupItemsArchive === 'function') _dedupItemsArchive();
   try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
@@ -18288,12 +18298,18 @@ async function archiveSelectedItems() {
 }
 async function restoreArchivedItem(id) {
   if (!DB.archivedItems) return;
-  const idx = DB.archivedItems.findIndex(i => i.id === id);
+  // v2.2.21: String 비교 + tombstone 제거 (복원하면 items 에 다시 표시)
+  const _idStr = String(id);
+  const idx = DB.archivedItems.findIndex(i => String(i.id) === _idStr);
   if (idx === -1) return;
   const item = DB.archivedItems.splice(idx, 1)[0];
   delete item._archivedAt;
-  item.updatedAt = Date.now(); // v1.9.699: 머지 우선순위 보호
+  item.updatedAt = Date.now();
   DB.items.push(item);
+  // tombstone 에서 제거
+  if (Array.isArray(DB._deletedItemIds)) {
+    DB._deletedItemIds = DB._deletedItemIds.filter(t => !(t && String(t.id) === _idStr));
+  }
   // v1.9.699: 즉시 dedup + saveDataNow
   if (typeof _dedupItemsArchive === 'function') _dedupItemsArchive();
   try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
