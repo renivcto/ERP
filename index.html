@@ -5346,7 +5346,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.39';
+const ERP_VERSION = 'v2.2.40';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -22523,12 +22523,14 @@ function _syncOverseasPoApprovalExpense(orderId) {
       expPre.title = `[해외 선급금] ${vendorName}`;
       expPre.vendor = vendorName;
       expPre.note = noteP;
+      expPre.urgent = !!o.urgentPrepay;  // v2.2.40: urgent 갱신
       expPre.updatedAt = Date.now();
     } else {
       expPre.title = `[해외 선급금] ${vendorName}`;
       expPre.vendor = vendorName;
       expPre.note = noteP;
       expPre.amount = _prepayAmt;
+      expPre.urgent = !!o.urgentPrepay;  // v2.2.40: urgent 갱신
       expPre.__krwConverted = false;
       expPre.updatedAt = Date.now();
     }
@@ -22583,6 +22585,7 @@ function _syncOverseasPoApprovalExpense(orderId) {
     exp.note = note;
     if (!exp.dueDate) exp.dueDate = dueDate || '';
     exp.amount = _balanceAmt;
+    exp.urgent = !!o.urgentBalance;  // v2.2.40: urgent 갱신
     exp.__krwConverted = false;
     exp.updatedAt = Date.now();
   }
@@ -29072,7 +29075,21 @@ function renderApprovalExpenseTable() {
   const PAY_BTN_STYLE = 'font-size:11px;padding:3px 7px;min-width:62px;border-radius:6px;font-weight:400;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:0;box-sizing:border-box;line-height:1;box-shadow:0 1px 2px rgba(0,0,0,.03)';
   tb.innerHTML = list.map(e => {
     const paid = e.paidStatus === 'paid';
-    const urgent = !!e.urgent && !paid;
+    // v2.2.40: 발주 카테고리는 PO 의 현재 urgent 플래그를 직접 조회 (stale e.urgent 무시)
+    //   po_prepay  → o.urgentPrepay
+    //   po_balance → o.urgentBalance
+    //   기타       → e.urgent
+    let urgent;
+    if ((e.category === 'po_prepay' || e.category === 'po_balance') && e.orderId) {
+      const _po = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
+      if (_po) {
+        urgent = !!(e.category === 'po_prepay' ? _po.urgentPrepay : _po.urgentBalance) && !paid;
+      } else {
+        urgent = !!e.urgent && !paid;  // PO 없으면 fallback
+      }
+    } else {
+      urgent = !!e.urgent && !paid;
+    }
     // v1.9.258: 지급 예정일 경과 + 미지급 감지 — 날짜와 지급요청 버튼 깜빡임
     const due = e.dueDate || '';
     let daysLeft = null;
