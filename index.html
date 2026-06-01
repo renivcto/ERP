@@ -820,24 +820,11 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
   <div style="font-size:32px">⏳</div>
   <div>데이터 불러오는 중...</div>
   <div id="erp-loader-elapsed" style="font-size:11px;color:#94a3b8;margin-top:6px;font-family:monospace">0.0초</div>
-  <!-- v2.2.33: 긴급 복구 — 15초 후 표시 (init 가 멈춰도 인라인 onclick 으로 작동) -->
-  <div id="erp-loader-rescue" style="display:none;margin-top:24px;padding:18px 22px;background:#fef2f2;border:2px solid #fca5a5;border-radius:10px;max-width:480px;text-align:center">
-    <div style="font-size:13px;font-weight:700;color:#991b1b;margin-bottom:8px">⚠️ 로딩이 오래 걸리고 있어요</div>
-    <div style="font-size:12px;color:#7f1d1d;margin-bottom:14px;line-height:1.5">브라우저 캐시 또는 로컬 데이터 문제일 수 있습니다.<br>아래 버튼을 누르면 안전하게 복구됩니다.</div>
-    <button onclick="(function(){try{Object.keys(localStorage).filter(function(k){return k.indexOf('reniv_')===0}).forEach(function(k){localStorage.removeItem(k)});}catch(e){}try{location.reload(true)}catch(e){location.reload()}})()" style="background:#dc2626;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-right:8px">🔄 안전 초기화 + 새로고침</button>
-    <button onclick="location.reload()" style="background:#fff;color:#dc2626;border:1px solid #dc2626;padding:10px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">단순 새로고침</button>
-    <div style="font-size:10.5px;color:#991b1b;margin-top:10px">초기화 후 Firestore 의 최신 데이터로 다시 로드됩니다 (안전)</div>
+  <div style="margin-top:36px;padding:14px 18px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;max-width:440px;text-align:center">
+    <div style="font-size:11.5px;color:#92400e;margin-bottom:10px">10초 이상 멈춰있나요?</div>
+    <button onclick="try{Object.keys(localStorage).filter(function(k){return k.indexOf(&quot;reniv_&quot;)===0}).forEach(function(k){localStorage.removeItem(k)});}catch(e){}location.reload();" style="background:#dc2626;color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;margin-right:6px">🔄 안전 초기화 + 새로고침</button>
+    <button onclick="location.reload();" style="background:#fff;color:#92400e;border:1px solid #fcd34d;padding:8px 14px;border-radius:6px;font-size:11.5px;cursor:pointer">단순 새로고침</button>
   </div>
-  <script>
-    // v2.2.33: 15초 후 긴급 복구 버튼 자동 표시 (다른 script 가 멈춰도 작동)
-    setTimeout(function(){
-      var rescue = document.getElementById('erp-loader-rescue');
-      var loader = document.getElementById('erp-loader');
-      if (rescue && loader && loader.style.display !== 'none' && getComputedStyle(loader).display !== 'none') {
-        rescue.style.display = 'block';
-      }
-    }, 15000);
-  </script>
 </div>
 <!-- ══ LOGIN SCREEN ══ -->
 <div id="login-screen">
@@ -5359,7 +5346,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.33';
+const ERP_VERSION = 'v2.2.34';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7493,101 +7480,6 @@ function cleanupZeroPoExpensesV226() {
   } catch(e) { console.warn('v2.2.26 cleanup skipped:', e); return 0; }
 }
 (function cleanupZeroPoExpensesV226IIFE() { cleanupZeroPoExpensesV226(); })();
-
-// v2.2.31 — 오래된 tombstone 자동 정리 (90일 초과 시 제거)
-//   원인: tombstone 누적으로 새 데이터(ID 우연 일치) 차단 → 데이터 누락 사례 (권다빈 PC)
-//   수정: 90일 초과 tombstone 자동 prune. 너무 많이 쌓이지 않게 200건 cap.
-//   목적: 옛 tombstone 이 신규 데이터 차단하는 패턴 영구 방지.
-window.pruneOldTombstonesV231 = function pruneOldTombstonesV231() {
-  try {
-    const NINETY_DAYS = 90 * 24 * 60 * 60 * 1000;
-    const now = Date.now();
-    const cutoff = now - NINETY_DAYS;
-    const tombKeys = [
-      '_deletedExpenseIds','_deletedExpenseSigs','_deletedItemIds',
-      '_deletedShopIds','_deletedShopOrderSigs','_deletedSampleIds',
-      '_deletedApprovalIds','_deletedCommentIds','_deletedFeedPostIds',
-      '_deletedOrderSigs','_deletedAdProjectSigs'
-    ];
-    let totalRemoved = 0;
-    tombKeys.forEach(key => {
-      if (!Array.isArray(DB[key])) return;
-      const before = DB[key].length;
-      DB[key] = DB[key].filter(t => {
-        if (!t) return false;
-        const ts = Number(t.ts) || 0;
-        if (ts === 0) return true;  // ts 없는 옛 형식은 보존 (안전)
-        return ts > cutoff;          // 90일 이내만 유지
-      });
-      // 200건 cap (최신 우선)
-      if (DB[key].length > 200) {
-        DB[key] = DB[key].sort((a,b) => (b.ts||0) - (a.ts||0)).slice(0, 200);
-      }
-      totalRemoved += (before - DB[key].length);
-    });
-    if (totalRemoved > 0) {
-      console.log('🧹 [v2.2.31] 오래된 tombstone ' + totalRemoved + '건 자동 정리');
-      try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
-    }
-    return totalRemoved;
-  } catch(e) { console.warn('v2.2.31 tombstone prune skipped:', e); return 0; }
-}
-// v2.2.32 ROLLBACK: 자동 실행 비활성화 (로딩 차단 의심) — window.pruneOldTombstonesV231() 로 수동 호출 가능
-
-// v2.2.31 — 사용자가 콘솔에서 바로 실행 가능한 진단/복구 단축 명령
-window.__diagnosePerPcData = function() {
-  const exp = (DB.expenses||[]).length;
-  const fp = (DB.feedPosts||[]).length;
-  const it = (DB.items||[]).length;
-  const sh = (DB.shopOrders||[]).length;
-  const tombs = {
-    expense_id:   (DB._deletedExpenseIds||[]).length,
-    expense_sig:  (DB._deletedExpenseSigs||[]).length,
-    item:         (DB._deletedItemIds||[]).length,
-    shop:         (DB._deletedShopIds||[]).length,
-    shopOrder:    (DB._deletedShopOrderSigs||[]).length,
-    feedPost:     (DB._deletedFeedPostIds||[]).length,
-    comment:      (DB._deletedCommentIds||[]).length,
-    approval:     (DB._deletedApprovalIds||[]).length,
-    order:        (DB._deletedOrderSigs||[]).length,
-  };
-  console.log('%c=== 이 PC 의 데이터 진단 ===','background:#0ea5e9;color:#fff;padding:4px 8px;font-weight:700');
-  console.log('현재 보이는:', { expenses:exp, feedPosts:fp, items:it, shopOrders:sh });
-  console.table(tombs);
-  const total = Object.values(tombs).reduce((a,b)=>a+b,0);
-  if (total > 100) console.warn('⚠️ tombstone 총 ' + total + '건 — 너무 많음. 데이터 차단 가능성. __resetTombstones() 권장');
-  else console.log('✅ tombstone 정상 범위 (' + total + '건)');
-  return tombs;
-};
-window.__resetTombstones = function() {
-  if (!confirm('이 PC 의 모든 tombstone 을 비웁니다.
-Firestore 데이터가 자동으로 복원됩니다.
-
-계속할까요?')) return;
-  ['_deletedExpenseIds','_deletedExpenseSigs','_deletedItemIds','_deletedShopIds',
-   '_deletedShopOrderSigs','_deletedSampleIds','_deletedApprovalIds','_deletedCommentIds',
-   '_deletedFeedPostIds','_deletedOrderSigs','_deletedAdProjectSigs'
-  ].forEach(k => { DB[k] = []; });
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
-  alert('✅ tombstone 비우기 완료 — 새로고침합니다');
-  location.reload();
-};
-window.__resetAllLocal = function() {
-  if (!confirm('⚠️ 이 PC 의 모든 localStorage 를 비웁니다.
-Firestore 에서 완전히 새로 로드됩니다.
-
-계속할까요?')) return;
-  Object.keys(localStorage).filter(k => k.startsWith('reniv_')).forEach(k => localStorage.removeItem(k));
-  alert('✅ 완료 — 새로고침합니다');
-  location.reload();
-};
-console.log('%c💡 데이터 누락 시 콘솔에서:','background:#10b981;color:#fff;padding:3px 8px') ;
-console.log('  __diagnosePerPcData()  — 이 PC 의 데이터 상태 진단');
-console.log('  __resetTombstones()    — tombstone 만 비우기 (안전)');
-console.log('  __resetAllLocal()      — localStorage 완전 초기화 (최후 수단)');
-
-
-
 
 // v1.9.211: 중복된 po_prepay/po_balance expense 정리 — 같은 orderId+category에 다중 레코드가 있으면 paid 우선 유지, 나머지 제거
 (function dedupExpensesV211() {
