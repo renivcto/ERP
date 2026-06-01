@@ -5341,7 +5341,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.25';
+const ERP_VERSION = 'v2.2.26';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7446,6 +7446,36 @@ function backfillArchiveTombstonesV222() {
   } catch(e) { console.warn('v2.2.22 backfill skipped:', e); return 0; }
 }
 (function backfillArchiveTombstonesV222IIFE() { backfillArchiveTombstonesV222(); })();
+
+// v2.2.26 — amount=0 인 미지급 po_balance/po_prepay expense 일괄 제거 (1회성)
+//   원인: prepayPct=100 케이스에서 ₩0 잔금 expense 생성됨.
+//   수정: amount<=0 이고 미지급(paidStatus !== 'paid') 인 행 자동 삭제.
+//   플래그: DB._zeroPoExpenseCleanupV226 = true 로 1회만 실행.
+function cleanupZeroPoExpensesV226() {
+  try {
+    if (DB._zeroPoExpenseCleanupV226) return 0;
+    if (!Array.isArray(DB.expenses)) return 0;
+    const _before = DB.expenses.length;
+    DB.expenses = DB.expenses.filter(e => {
+      if (!e) return false;
+      if (e.category !== 'po_balance' && e.category !== 'po_prepay') return true;
+      if (e.paidStatus === 'paid') return true;  // 지급완료는 보존
+      const amt = Number(e.amount) || 0;
+      if (amt <= 0) {
+        console.log('🧹 [v2.2.26] amount=0 expense 제거:', e.id, e.category, e.title);
+        return false;
+      }
+      return true;
+    });
+    DB._zeroPoExpenseCleanupV226 = true;
+    const removed = _before - DB.expenses.length;
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+    if (removed > 0) console.log('✅ v2.2.26 잔금/선급금 ₩0 expense ' + removed + '건 정리');
+    return removed;
+  } catch(e) { console.warn('v2.2.26 cleanup skipped:', e); return 0; }
+}
+(function cleanupZeroPoExpensesV226IIFE() { cleanupZeroPoExpensesV226(); })();
+
 
 
 // v1.9.211: 중복된 po_prepay/po_balance expense 정리 — 같은 orderId+category에 다중 레코드가 있으면 paid 우선 유지, 나머지 제거
@@ -22425,6 +22455,13 @@ function _syncOverseasPoApprovalExpense(orderId) {
     if (DB.expenses.length !== _before) console.log('[v2.2.23] 해외 PO 선급금 expense 제거 (prepayPct=0)');
   }
   // === po_balance (잔금) ===
+  // v2.2.26: 잔금 % 가 0 이면 (선결제 100%) 기존 미지급 잔금 expense 제거하고 종료
+  if (_balancePct <= 0) {
+    const _bbefore = DB.expenses.length;
+    DB.expenses = DB.expenses.filter(e => !(e && e.category === 'po_balance' && (e.orderId === o.id || Number(e.orderId) === Number(o.id)) && e.paidStatus !== 'paid'));
+    if (DB.expenses.length !== _bbefore) console.log('[v2.2.26] 해외 PO 잔금 0원 expense 제거 (prepayPct=100)');
+    return;
+  }
   let exp = DB.expenses.find(e => e && e.category === 'po_balance' && (e.orderId === o.id || Number(e.orderId) === Number(o.id)));
   const note = `해외 PO 잔금 ${_balancePct}% (${currency} ${_balanceAmt.toFixed(2)})`;
   if (!exp) {
