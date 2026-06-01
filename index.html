@@ -5303,7 +5303,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.19';
+const ERP_VERSION = 'v2.2.20';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29334,21 +29334,44 @@ function _collectUnpaidItems() {
   const items = [];
 
   // 1) 발주서 결재 — approval not approved AND order not stamped
+  // v2.2.20: 해외 PO + ID 타입 불일치 모두 안전 처리
   (DB.approvals||[]).forEach(a => {
     if (!a || a.type !== 'po_approval') return;
     if (a.status === 'approved') return;
-    const order = (DB.orders||[]).find(o => o && o.id === a.refId);
+    const order = (DB.orders||[]).find(o => o && String(o.id) === String(a.refId));
     if (!order) return; // orphan
     if (_isOrderStamped(order)) return; // 날인본 있거나 날인 불필요 → 결재 완료로 간주
+    // 업체명 — 국내: vendor 이름 / 해외: supplier.company
+    var _v = '-';
+    if (order.isOverseas) {
+      _v = (order.supplier && order.supplier.company) || order.poNumber || '🌐 해외 PO';
+    } else {
+      _v = (typeof vendorName === 'function' && order.vendorId) ? (vendorName(order.vendorId) || '-') : (order.vendor || '-');
+    }
+    // 금액 — orderTotalVat 헬퍼 사용 (국내 VAT 포함, 해외 grandTotal)
+    var _amt = 0;
+    try { _amt = (typeof orderTotalVat === 'function') ? (Number(orderTotalVat(order)) || 0) : (Number(order.totalAmount) || Number(order.grandTotal) || 0); }
+    catch(_) { _amt = Number(order.totalAmount) || Number(order.grandTotal) || 0; }
+    // 통화 표시
+    var _amtLabel;
+    if (order.isOverseas) {
+      var _cur = String(order.currency || 'USD');
+      _amtLabel = _cur + ' ' + _amt.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    } else {
+      _amtLabel = '₩' + Math.round(_amt).toLocaleString();
+    }
+    // 지급 예정일 — 잔금예정일 우선, payDate fallback
+    var _due = order.balanceDueDate || order.payDate || order.deliveryDate || '';
     items.push({
       category: 'po',
-      vendor: order.vendor || '-',
+      vendor: _v,
       title: _orderItemTitle(order) || '발주서',
-      amount: Number(order.totalAmount) || 0,
+      amount: _amt,
+      amountLabel: _amtLabel,  // v2.2.20: 통화 라벨 (해외는 AUD/USD, 국내는 ₩)
       approvalDone: false, approvalLabel: '⏳ 대기',
       payLabel: '-', payColor: '#cbd5e1',
       createdAt: order.orderDate || (a.createdAt ? new Date(a.createdAt).toISOString().slice(0,10) : ''),
-      dueDate: '',
+      dueDate: _due,
       ts: Number(a.createdAt) || 0,
       onClickJs: 'openPoApprovalPage(' + order.id + ')'
     });
@@ -29533,7 +29556,7 @@ function _renderUnpaidUnifiedView() {
       + '<td style="padding:9px 10px;text-align:center"><span style="display:inline-flex;align-items:center;padding:3px 9px;border-radius:4px;font-size:10.5px;font-weight:500;background:' + cs.bg + ';color:' + cs.color + ';border:1px solid ' + cs.border + ';white-space:nowrap">' + cs.label + '</span></td>'
       + '<td style="padding:9px 10px;font-size:12.5px;color:#0f172a;text-align:center">' + safe(it.vendor || '-') + '</td>'
       + '<td style="padding:9px 10px;font-size:12.5px;text-align:center">' + titleClickable + '</td>'
-      + '<td style="padding:9px 10px;text-align:center;font-size:12.5px;color:#0f766e;font-variant-numeric:tabular-nums;white-space:nowrap">' + (it.amount > 0 ? fmtW(it.amount) : '<span style="color:#cbd5e1">-</span>') + '</td>'
+      + '<td style="padding:9px 10px;text-align:center;font-size:12.5px;color:#0f766e;font-variant-numeric:tabular-nums;white-space:nowrap">' + (it.amountLabel ? it.amountLabel : (it.amount > 0 ? fmtW(it.amount) : '<span style="color:#cbd5e1">-</span>')) + '</td>'
       + '<td style="padding:9px 10px;text-align:center">' + payBadge(it) + '</td>'
       + '<td style="padding:9px 10px;text-align:center">' + apBadge(it) + '</td>'
       + '<td style="padding:9px 10px;text-align:center;font-size:11.5px;color:#64748b;white-space:nowrap">' + dueCell + '</td>'
