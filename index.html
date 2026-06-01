@@ -5346,7 +5346,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.34';
+const ERP_VERSION = 'v2.2.35';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12755,6 +12755,55 @@ function _cleanupMergedShopOrders() {
     return diff;
   } catch(e) { console.warn('_cleanupMergedShopOrders 실패:', e); return 0; }
 }
+
+// v2.2.35 — 일반 shopOrders 중복 제거 (콘솔 호출 전용, 자동 IIFE 안 함)
+//   사용: window.__dedupShopOrders() — 같은 (orderNo + shop + amount) 행 1건만 유지
+window.__dedupShopOrders = function() {
+  try {
+    const orders = DB.shopOrders || [];
+    if (!orders.length) { alert('주문이 없습니다'); return 0; }
+    const norm = s => String(s||'').trim();
+    const sigOf = o => {
+      if (!o) return null;
+      return norm(o.orderNo) + '|' + norm(o.shop || o.shopName) + '|' + Math.round(Number(o.paymentAmount || o.totalPrice || 0));
+    };
+    const seen = new Map();
+    const removed = [];
+    if (!Array.isArray(DB._deletedShopOrderSigs)) DB._deletedShopOrderSigs = [];
+    orders.forEach(o => {
+      const sig = sigOf(o);
+      if (!sig || sig === '||0') return;
+      const prev = seen.get(sig);
+      if (!prev) {
+        seen.set(sig, o);
+        return;
+      }
+      // 둘 중 하나 제거 — 송장번호 있는 것 우선 보존, 그 다음 id 작은 것
+      const prevHasTracking = !!(prev.trackingNumber || prev.tracking);
+      const curHasTracking = !!(o.trackingNumber || o.tracking);
+      let keep, drop;
+      if (prevHasTracking && !curHasTracking) { keep = prev; drop = o; }
+      else if (!prevHasTracking && curHasTracking) { keep = o; drop = prev; }
+      else { keep = (Number(prev.id) <= Number(o.id)) ? prev : o; drop = (keep === prev) ? o : prev; }
+      seen.set(sig, keep);
+      removed.push(drop);
+    });
+    if (removed.length === 0) { alert('중복 주문 없음'); return 0; }
+    if (!confirm(removed.length + '건의 중복 주문을 제거합니다. 계속할까요?\n\n' + removed.slice(0,5).map(r => '- ' + (r.orderNo||'-') + ' / ' + (r.customerName||'-') + ' / ' + (r.paymentAmount||0) + '원').join('\n') + (removed.length > 5 ? '\n... 외 ' + (removed.length-5) + '건' : ''))) return 0;
+    const dropIds = new Set(removed.map(r => String(r.id)));
+    DB.shopOrders = orders.filter(o => o && !dropIds.has(String(o.id)));
+    // tombstone 등록 (Firestore 머지 시 부활 차단)
+    removed.forEach(r => {
+      const sig = 'dup-cleanup:' + String(r.orderNo) + '|' + String(r.id);
+      DB._deletedShopOrderSigs.push({ sig, ts: Date.now(), reason: 'manual-dedup' });
+    });
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+    if (typeof saveDataNow === 'function') saveDataNow();
+    if (typeof renderShopOrderTable === 'function') renderShopOrderTable();
+    alert('✅ ' + removed.length + '건 제거 완료');
+    return removed.length;
+  } catch(e) { console.error('dedup 실패:', e); alert('실패: ' + e.message); return 0; }
+};
 
 function renderShopOrderTable() {
   const tbody = $('shop-order-table'); if (!tbody) return;
