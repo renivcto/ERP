@@ -5367,7 +5367,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.41';
+const ERP_VERSION = 'v2.2.42';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -33274,17 +33274,24 @@ function addApprovalComment() {
 }
 
 function replyToApComment(commentId) {
-  const c = DB.approvalComments.find(x => x.id === commentId);
-  if (!c) return;
-  _apReplyToId = commentId;
+  // v2.2.42: String 비교 (ID 타입 불일치 방어)
+  const _cidStr = String(commentId);
+  const c = (DB.approvalComments||[]).find(x => x && String(x.id) === _cidStr);
+  if (!c) {
+    console.warn('[replyToApComment] 댓글 못 찾음 — id:', _cidStr, '/ 전체:', (DB.approvalComments||[]).map(x => String(x.id)).join(','));
+    alert('댓글을 찾을 수 없습니다 (id=' + _cidStr + ')');
+    return;
+  }
+  _apReplyToId = _cidStr;  // string 으로 저장 → addApprovalComment 에서 parentId 매칭 일관성
   const hint = document.getElementById('ap-reply-hint');
   const hintText = document.getElementById('ap-reply-hint-text');
   if (hint && hintText) {
-    hintText.textContent = `↳ ${c.author||'담당자'}: "${(c.text||'').slice(0,40)}${(c.text||'').length>40?'...':''}" 에 답글 작성 중`;
+    hintText.textContent = '↳ ' + (c.author||'담당자') + ': "' + (c.text||'').slice(0,40) + ((c.text||'').length>40?'...':'') + '" 에 답글 작성 중';
     hint.style.display = 'flex';
   }
   const inp = document.getElementById('ap-comment-input');
-  if (inp) inp.focus();
+  if (inp) { inp.focus(); inp.scrollIntoView({behavior:'smooth', block:'center'}); }
+  console.log('[replyToApComment] 답글 모드 진입 — parentId:', _cidStr);
 }
 
 function cancelApReply() {
@@ -33294,8 +33301,13 @@ function cancelApReply() {
 }
 
 function toggleReaction(commentId, emoji) {
-  const c = DB.approvalComments.find(x => x.id === commentId);
-  if (!c) return;
+  // v2.2.42: String 비교
+  const _cidStr = String(commentId);
+  const c = (DB.approvalComments||[]).find(x => x && String(x.id) === _cidStr);
+  if (!c) {
+    console.warn('[toggleReaction] 댓글 못 찾음 — id:', _cidStr);
+    return;
+  }
   if (!c.reactions) c.reactions = {};
   // 단순 토글 카운트 방식 유지 (숫자 증가)
   c.reactions[emoji] = (c.reactions[emoji] || 0) + 1;
