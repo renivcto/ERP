@@ -5346,7 +5346,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.36';
+const ERP_VERSION = 'v2.2.37';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12939,7 +12939,7 @@ function renderShopOrderTable() {
       ${productCell}
       <td style="font-size:13.5px;cursor:pointer;color:#b91c1c;font-weight:700;transition:all .15s" onclick="event.stopPropagation();editOrderQty(${o.id})" onmouseenter="this.style.color='#7f1d1d';this.style.background='#fef2f2'" onmouseleave="this.style.color='#b91c1c';this.style.background=''" title="클릭해서 수량 수정 (재고 자동 연동)">${o.qty||0}</td>
       <td style="font-variant-numeric:tabular-nums;font-size:13px">${amt.toLocaleString()}원</td>
-      <td style="white-space:nowrap;text-align:center"><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 10px;color:var(--red-500);white-space:nowrap;word-break:keep-all;display:inline-block;min-width:36px" onclick="deleteShopOrder(${o.id})">삭제</button></td>
+      <td style="white-space:nowrap;text-align:center"><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 10px;color:var(--red-500);white-space:nowrap;word-break:keep-all;display:inline-block;min-width:36px" onclick="deleteShopOrder('${String(o.id).replace(/'/g, '&#39;')}')">삭제</button></td>
     </tr>`;
   }).join('');
 }
@@ -13091,11 +13091,16 @@ async function editOrderQty(orderId) {
 }
 
 async function deleteShopOrder(id) {
-  if (!requireWrite()) return;
+  console.log('[deleteShopOrder] 호출됨 — id:', id, '(type:', typeof id, ')');
+  if (!requireWrite()) { console.warn('[deleteShopOrder] requireWrite 실패'); return; }
   // v2.2.17: ID 타입 불일치 방어 — String() 비교
   const _idStr = String(id);
   const o = (DB.shopOrders||[]).find(x => x && String(x.id) === _idStr);
-  if (!o) return;
+  if (!o) {
+    console.warn('[deleteShopOrder] 주문 못 찾음 — _idStr:', _idStr, '/ 전체 ID:', (DB.shopOrders||[]).map(x => String(x.id)).join(','));
+    alert('주문을 찾을 수 없습니다 (id=' + _idStr + ')\n콘솔 로그 확인 필요');
+    return;
+  }
   // v1.9.535: 정확히 차감된 양(stockDeductedQty)을 복구
   let stockNote = '';
   let restoreQty = 0;
