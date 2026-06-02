@@ -5448,7 +5448,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.67';
+const ERP_VERSION = 'v2.2.68';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6012,6 +6012,76 @@ async function saveDataNow() {
 }
 
 let _saveQueue = null;
+// v2.2.68: items 별도 백업 + 머지 시 보호
+function _backupItemsNow() {
+  try {
+    const items = (DB.items||[]).filter(Boolean);
+    if (items.length === 0) return;  // 빈 배열은 백업 안 함 (덮어쓰기 방지)
+    const payload = JSON.stringify(items);
+    localStorage.setItem('reniv_items_backup', payload);
+    localStorage.setItem('reniv_items_backup_ts', String(Date.now()));
+    localStorage.setItem('reniv_items_backup_count', String(items.length));
+    // 시점 스냅샷 (시간별 1개)
+    const hourKey = new Date().toISOString().slice(0,13);  // YYYY-MM-DDTHH
+    localStorage.setItem('reniv_items_snap_' + hourKey, payload);
+    // 스냅샷 목록 관리 (최대 24개 = 24시간)
+    try {
+      let list = JSON.parse(localStorage.getItem('reniv_items_snaps_list')||'[]') || [];
+      list = list.filter(s => s.k !== hourKey);
+      list.unshift({ k: hourKey, ts: Date.now(), count: items.length });
+      list = list.slice(0, 24);
+      localStorage.setItem('reniv_items_snaps_list', JSON.stringify(list));
+      // 24개 초과한 옛 스냅샷 제거
+      Object.keys(localStorage).forEach(k => {
+        if (k.startsWith('reniv_items_snap_') && !list.some(s => 'reniv_items_snap_' + s.k === k)) {
+          localStorage.removeItem(k);
+        }
+      });
+    } catch(_){}
+  } catch(e) { console.warn('items 백업 실패:', e); }
+}
+
+// v2.2.68: 콘솔 복구 명령 — items 백업 목록 + 복원
+window.__listItemSnapshots = function() {
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem('reniv_items_snaps_list')||'[]') || []; } catch(_){}
+  const cur = (DB.items||[]).length;
+  console.log('%c=== items 시간별 스냅샷 ===','background:#0ea5e9;color:#fff;padding:4px 8px;font-weight:700');
+  console.table(list.map(s => ({
+    시점키: s.k,
+    저장시각: s.ts ? new Date(s.ts).toLocaleString('ko-KR') : '-',
+    items_건수: s.count,
+    비고: s.count > cur ? '⭐ 현재보다 많음 — 복구 후보' : (s.count < cur ? '(적음)' : '=현재')
+  })));
+  console.log('\n복원: %c__restoreItemSnapshot("시점키")','color:#dc2626;font-weight:700');
+  console.log('최신 백업 복원: %c__restoreItemSnapshot("latest")','color:#059669;font-weight:700');
+  return list;
+};
+window.__restoreItemSnapshot = async function(key) {
+  let payload, srcLabel;
+  if (key === 'latest' || !key) {
+    payload = localStorage.getItem('reniv_items_backup');
+    srcLabel = '최신 백업';
+  } else {
+    payload = localStorage.getItem('reniv_items_snap_' + key);
+    srcLabel = '스냅샷 ' + key;
+  }
+  if (!payload) { alert('해당 스냅샷 없음: ' + key); return; }
+  let items;
+  try { items = JSON.parse(payload); } catch(e) { alert('파싱 실패'); return; }
+  if (!Array.isArray(items)) { alert('배열 아님'); return; }
+  const cur = (DB.items||[]).length;
+  if (!confirm('[' + srcLabel + ']\n' + items.length + '건 items 로 복구\n현재: ' + cur + '건 → ' + items.length + '건\n\n계속?')) return;
+  // 머지: 백업에만 있는 items 만 추가 (기존 보존)
+  const curIds = new Set((DB.items||[]).map(i => String(i.id)));
+  const toAdd = items.filter(i => i && !curIds.has(String(i.id)));
+  DB.items = (DB.items||[]).concat(toAdd);
+  if (typeof _doSaveData === 'function') await _doSaveData();
+  if (typeof renderItemTable === 'function') renderItemTable();
+  alert('✅ 복구 — ' + toAdd.length + '건 추가, 총 ' + DB.items.length + '건');
+};
+console.log('%c💡 items 복구: __listItemSnapshots() 또는 __restoreItemSnapshot("latest")','background:#10b981;color:#fff;padding:3px 8px');
+
 async function _doSaveData() {
   if (_isSaving) {
     // 이미 저장 중이면 큐에 등록하고 현재 저장 완료를 기다림
@@ -6027,6 +6097,7 @@ async function _doSaveData() {
   }
   _isSaving = true;
   try { await _doSaveDataInner(); } finally { _isSaving = false; }
+  try { _backupItemsNow(); } catch(_){}
 }
 
 async function _doSaveDataInner() {
@@ -43398,6 +43469,20 @@ function initERPWhenReady() {
           const removed = before - merged.samples.length;
           if (removed > 0) console.warn('🪦 [v1.9.682] sample tombstone 으로 ' + removed + '건 부활 차단');
         }
+        // v2.2.68: items 백업 보호 — Firestore items 가 백업보다 크게 줄었으면 빠진 것 복구
+        try {
+          let _backup = [];
+          try { _backup = JSON.parse(localStorage.getItem('reniv_items_backup')||'[]') || []; } catch(_){}
+          if (Array.isArray(_backup) && _backup.length > 0 && Array.isArray(merged.items)) {
+            const _curIds = new Set(merged.items.map(i => String(i.id)));
+            const _tombIds = new Set((merged._deletedItemIds||[]).map(t => String(t.id)));
+            const _missing = _backup.filter(b => b && !_curIds.has(String(b.id)) && !_tombIds.has(String(b.id)));
+            if (_missing.length > 0 && _backup.length > merged.items.length + 1) {
+              console.warn('🛡️ [v2.2.68] items 감소 감지 — 백업(' + _backup.length + ') > 머지(' + merged.items.length + '). 누락 ' + _missing.length + '건 자동 추가');
+              merged.items = merged.items.concat(_missing);
+            }
+          }
+        } catch(eBkp) { console.warn('[v2.2.68] items 백업 보호 실패:', eBkp); }
         // v1.9.892: item tombstone 머지 + 필터
         const fsItT = Array.isArray(firestoreDB._deletedItemIds) ? firestoreDB._deletedItemIds : [];
         const lcItT = Array.isArray(localDB._deletedItemIds) ? localDB._deletedItemIds : [];
