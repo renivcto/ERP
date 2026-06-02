@@ -5448,7 +5448,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.69';
+const ERP_VERSION = 'v2.2.70';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29780,14 +29780,33 @@ function renderApprovalExpenseTable() {
   if (_apMonthFilterValue()) {
     list = list.filter(e => _apMatchMonth(e && e.dueDate));
   }
-  // v1.9.291: 지급 요청 건을 위로, 지급완료는 아래로. 같은 그룹 안에서는 결제예정일(dueDate) 오름차순 (과거→미래).
-  //           결제예정일이 없으면 맨 뒤로. 동일 예정일 시 작성일자 최신순 보조 정렬.
+  // v1.9.291 + v2.2.70:
+  //   - 지급 요청 위로 / 지급완료 아래로
+  //   - 지급 요청 그룹: 결제예정일 오름차순 (임박한 것이 위)
+  //   - 지급완료 그룹: 지급일 내림차순 (최신 지급이 위)
   list.sort((a,b) => {
     // 1차: 지급 요청(0) → 지급완료(1)
     const aPaid = (a && a.paidStatus === 'paid') ? 1 : 0;
     const bPaid = (b && b.paidStatus === 'paid') ? 1 : 0;
     if (aPaid !== bPaid) return aPaid - bPaid;
-    // 2차: 결제예정일 오름차순 (빈 값은 뒤로)
+    if (aPaid === 1 && bPaid === 1) {
+      // v2.2.70: 지급완료는 paidDate 내림차순 (최신이 위), 없으면 dueDate / createdAt 내림차순
+      const ap = (a && a.paidDate) || '';
+      const bp = (b && b.paidDate) || '';
+      if (ap && bp && ap !== bp) return bp.localeCompare(ap);
+      if (ap && !bp) return -1;
+      if (!ap && bp) return 1;
+      // paidDate 동일/없음: dueDate 내림차순 fallback
+      const ad2 = (a && a.dueDate) || '';
+      const bd2 = (b && b.dueDate) || '';
+      if (ad2 && bd2 && ad2 !== bd2) return bd2.localeCompare(ad2);
+      // createdAt 내림차순
+      const at2 = Number((a && a.createdAt) || 0);
+      const bt2 = Number((b && b.createdAt) || 0);
+      if (bt2 !== at2) return bt2 - at2;
+      return (Number(b && b.id)||0) - (Number(a && a.id)||0);
+    }
+    // 지급 요청 그룹: 결제예정일 오름차순 (빈 값은 뒤로)
     const ad = (a && a.dueDate) || '';
     const bd = (b && b.dueDate) || '';
     if (ad && bd) {
