@@ -5448,7 +5448,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.59';
+const ERP_VERSION = 'v2.2.60';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -33387,6 +33387,56 @@ async function openPoApprovalPage(orderId) {
           </div>
         </div>
         ${noteBlock}
+        ${(function(){
+          // v2.2.60: 발주서 첨부파일 (해외 PO 의 Invoice/OtherFiles + 옛 발주서의 pdfData)
+          const _files = [];
+          if (o.isOverseas) {
+            if (o.invoiceFile && o.invoiceFile.name) _files.push({...o.invoiceFile, kind:'Invoice'});
+            if (Array.isArray(o.otherFiles)) o.otherFiles.forEach(f => { if (f && f.name) _files.push({...f, kind:'PO 첨부'}); });
+          }
+          if (o.pdfData && o.pdfName) _files.push({ name: o.pdfName, data: o.pdfData, type:'application/pdf', size: 0, kind:'견적/원본' });
+          if (_files.length === 0) return '';
+          const payload = _files.map((f, i) => ({
+            idx: i,
+            name: (f.name||'?').replace(/</g,'&lt;').replace(/"/g,'&quot;'),
+            kind: f.kind,
+            type: f.type||'',
+            size: f.size||0,
+            data: f.data||''
+          }));
+          const _fmtSize = n => n ? (n < 1024 ? n + 'B' : n < 1024*1024 ? Math.round(n/1024) + 'KB' : (n/1024/1024).toFixed(1) + 'MB') : '';
+          let h = '<div style="margin-top:18px">';
+          h += '<div style="font-size:12px;font-weight:800;color:#475569;margin-bottom:8px;letter-spacing:1px">■ 첨 부 파 일 <span style="color:#94a3b8;font-weight:500">(' + _files.length + ')</span></div>';
+          h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:5px">';
+          h += _files.map((f, i) => {
+            const kindBg = f.kind === 'Invoice' ? '#dbeafe' : f.kind === '견적/원본' ? '#fef3c7' : '#e0e7ff';
+            const kindFg = f.kind === 'Invoice' ? '#1e40af' : f.kind === '견적/원본' ? '#92400e' : '#3730a3';
+            const sz = _fmtSize(f.size||0);
+            return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0">'
+              + '<span style="display:inline-block;background:' + kindBg + ';color:' + kindFg + ';padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700">' + f.kind + '</span>'
+              + '<span style="flex:1;color:#1e40af;cursor:pointer;text-decoration:underline;font-size:12.5px" onclick="_poDocViewAttach(' + i + ')" title="클릭하여 미리보기">📄 ' + (f.name||'?').replace(/</g,'&lt;') + '</span>'
+              + (sz ? '<span style="font-size:10.5px;color:#94a3b8;flex-shrink:0">' + sz + '</span>' : '')
+              + '</div>';
+          }).join('');
+          h += '</div></div>';
+          h += '<script>'
+            + 'window.__poDocFiles = ' + JSON.stringify(payload) + ';'
+            + 'window._poDocViewAttach = function(idx){'
+            +   'var f = (window.__poDocFiles||[])[idx];'
+            +   'if(!f||!f.data){alert("파일 데이터가 없습니다");return;}'
+            +   'var w = window.open("","_blank");'
+            +   'if(!w){alert("팝업이 차단되었습니다");return;}'
+            +   'var t = f.type||"";'
+            +   'if(t.indexOf("image/")===0){'
+            +     'w.document.write("<title>"+f.name+"</title><body style=\"margin:0;background:#222;display:flex;align-items:center;justify-content:center;min-height:100vh\"><img src=\""+f.data+"\" style=\"max-width:100%;max-height:100vh\"></body>");'
+            +   '}else{'
+            +     'w.document.write("<title>"+f.name+"</title><iframe src=\""+f.data+"\" style=\"position:fixed;inset:0;width:100%;height:100%;border:0\"></iframe>");'
+            +   '}'
+            +   'w.document.close();'
+            + '};'
+            + '<\/script>';
+          return h;
+        })()}
         ${closingHtml}
       </div>
       <div style="background:#f8fafc;padding:12px 20px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;text-align:center;letter-spacing:.5px">
