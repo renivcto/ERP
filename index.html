@@ -5451,7 +5451,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.89';
+const ERP_VERSION = 'v2.2.90';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13420,15 +13420,14 @@ function _autoDedupIdenticalShopOrders() {
     const norm = s => String(s||'').trim();
     const sigOf = o => {
       if (!o) return null;
-      if (o.cafe24OriginalOrderId) return null; // 분할 자식은 dedup 제외
+      if (o.cafe24OriginalOrderId) return null; // 분할 자식은 dedup 제외 (-1/-2 suffix 라 orderNo 자체가 다름)
       const on = norm(o.orderNo); if (!on) return null;
+      // v2.2.90: 3개 필드만으로 매칭 (productName/shopName 의 미세한 공백 차이 무시)
+      //   같은 (orderNo + customer + amount) 이면 무조건 중복
       return [
         on,
         norm(o.customerName),
-        String(parseInt(o.qty)||0),
-        Math.round(Number(o.paymentAmount || o.totalPrice || 0)),
-        norm(o.productName).slice(0, 80),
-        norm(o.shopName || o.shop)
+        Math.round(Number(o.paymentAmount || o.totalPrice || 0))
       ].join('§');
     };
     const groups = new Map();
@@ -13485,14 +13484,44 @@ function _autoDedupIdenticalShopOrders() {
       });
       localStorage.setItem('reniv_deleted_shoporder_sigs', JSON.stringify(_ls.slice(-500)));
     } catch(_){}
-    console.warn('🪦 [v2.2.87 AUTO-DEDUP] 완전 동일 자사몰 중복 ' + removedAll.length + '건 제거 + tombstone 등록');
-    removedAll.slice(0, 5).forEach(r => console.warn('  · ' + (r.orderNo||'-') + ' / ' + (r.customerName||'-') + ' / id=' + r.id));
+    console.warn('🪦 [v2.2.90 AUTO-DEDUP] 자사몰 중복 ' + removedAll.length + '건 제거 + tombstone 등록');
+    removedAll.slice(0, 10).forEach(r => console.warn('  · ' + (r.orderNo||'-') + ' / ' + (r.customerName||'-') + ' / ₩' + (r.paymentAmount||r.totalPrice||0) + ' / id=' + r.id));
     // 즉시 저장
     try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
-    if (typeof saveDataNow === 'function') saveDataNow().catch(e => console.warn('[v2.2.87] saveDataNow 실패:', e));
+    if (typeof saveDataNow === 'function') saveDataNow().catch(e => console.warn('[v2.2.90] saveDataNow 실패:', e));
     return removedAll.length;
   } catch(e) { console.warn('_autoDedupIdenticalShopOrders 실패:', e); return 0; }
 }
+
+// v2.2.90: 콘솔에서 즉시 강제 dedup + 진단 로그
+window.fixZombieDups = function() {
+  console.log('====== v2.2.90 좀비 dedup 진단 ======');
+  console.log('현재 DB.shopOrders 건수:', (DB.shopOrders||[]).length);
+  // orderNo + customer 그룹별 카운트
+  const grouped = new Map();
+  (DB.shopOrders||[]).forEach(o => {
+    if (!o || o.cafe24OriginalOrderId) return;
+    const key = String(o.orderNo||'') + '|' + String(o.customerName||'') + '|' + Math.round(Number(o.paymentAmount||o.totalPrice||0));
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(o);
+  });
+  const dups = [];
+  grouped.forEach((arr, key) => { if (arr.length > 1) dups.push({ key, count: arr.length, ids: arr.map(o => o.id) }); });
+  console.log('중복 그룹 (orderNo|customer|amount):', dups.length);
+  dups.forEach(d => console.log('  · ' + d.key + ' → ' + d.count + '건 (id: ' + d.ids.join(', ') + ')'));
+  if (dups.length === 0) {
+    console.log('✅ 중복 없음 — 좀비 부활 차단 정상 동작 중');
+    alert('중복 없음');
+    return 0;
+  }
+  const removed = _autoDedupIdenticalShopOrders();
+  console.log('====== 제거: ' + removed + '건 ======');
+  if (typeof renderShopOrderTable === 'function') {
+    setTimeout(() => { try { renderShopOrderTable(); } catch(_){} }, 100);
+  }
+  alert('✅ ' + removed + '건 제거 완료. 새로고침해도 부활하지 않습니다.');
+  return removed;
+};
 
 function renderShopOrderTable() {
   const tbody = $('shop-order-table'); if (!tbody) return;
@@ -43811,10 +43840,10 @@ function initERPWhenReady() {
           [firestoreDB, localDB].forEach(_db => {
             if (!_db || !Array.isArray(_db.shopOrders) || _db.shopOrders.length < 2) return;
             const _norm = s => String(s||'').trim();
+            // v2.2.90: 3개 필드로 완화 (orderNo + customer + amount)
             const _sigOf = o => (!o || o.cafe24OriginalOrderId) ? null
-              : [_norm(o.orderNo), _norm(o.customerName), String(parseInt(o.qty)||0),
-                 Math.round(Number(o.paymentAmount || o.totalPrice || 0)),
-                 _norm(o.productName).slice(0, 80), _norm(o.shopName || o.shop)].join('§');
+              : [_norm(o.orderNo), _norm(o.customerName),
+                 Math.round(Number(o.paymentAmount || o.totalPrice || 0))].join('§');
             const _gr = new Map();
             _db.shopOrders.forEach(o => { const s = _sigOf(o); if (!s) return; if (!_gr.has(s)) _gr.set(s, []); _gr.get(s).push(o); });
             const _drop = new Set();
