@@ -5448,7 +5448,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.65';
+const ERP_VERSION = 'v2.2.67';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29404,10 +29404,35 @@ function toggleOrderTaxInvoice(orderId) {
 
 // v1.9.214: (orderId, category) 보조 키로 id 중복 방어
 async function togglePayStatus(expenseId, orderId, category) {
+  // v2.2.67: 클릭한 expense ID 를 우선 정확 매칭 (String 비교)
+  //   기존: _findExpenseByOrderAndCategory 가 paid 우선 선택 → 사용자가 미지급 버튼 클릭해도
+  //         이미 지급완료인 다른 expense 가 토글되어 상태 뒤바뀌는 버그
   try { _autoHealExpenseIdCollisions && _autoHealExpenseIdCollisions(expenseId); } catch(_){}
-  let e = (typeof _findExpenseByOrderAndCategory === 'function') ? _findExpenseByOrderAndCategory(orderId, category) : null;
-  if (!e) e = DB.expenses.find(x => x.id === expenseId);
-  if (!e) return;
+  const _eidStr = String(expenseId);
+  let e = (DB.expenses||[]).find(x => x && String(x.id) === _eidStr);
+  // ID 매칭 실패 시에만 (orderId, category) fallback (orphan 보호)
+  if (!e && typeof _findExpenseByOrderAndCategory === 'function') {
+    e = _findExpenseByOrderAndCategory(orderId, category);
+  }
+  if (!e) {
+    console.warn('[togglePayStatus] expense 못 찾음 — id:', _eidStr, 'orderId:', orderId, 'category:', category);
+    alert('해당 지출결의서를 찾을 수 없습니다 (id=' + _eidStr + ')');
+    return;
+  }
+  // v2.2.67: 같은 (orderId, category) 의 다른 미지급 중복 행이 있으면 자동 정리
+  if (orderId && category) {
+    const _oidNum = Number(orderId);
+    const _dups = (DB.expenses||[]).filter(x => x && x.category === category && (x.orderId === orderId || Number(x.orderId) === _oidNum) && String(x.id) !== String(e.id));
+    if (_dups.length > 0) {
+      console.warn('[togglePayStatus] 같은 (orderId, category) 중복 ' + _dups.length + '건 발견 — 미지급분 자동 제거');
+      const _dupRemove = _dups.filter(d => d.paidStatus !== 'paid');
+      if (_dupRemove.length > 0) {
+        const _rmIds = new Set(_dupRemove.map(d => String(d.id)));
+        DB.expenses = (DB.expenses||[]).filter(x => x && !_rmIds.has(String(x.id)));
+        console.log('🧹 [togglePayStatus] 중복 미지급 expense ' + _dupRemove.length + '건 자동 제거 (clicked 보존)');
+      }
+    }
+  }
   if (e.paidStatus === 'paid') {
     if (!confirm('이미 지급 완료된 건입니다. 지급 요청 상태로 되돌리시겠습니까?')) return;
     e.paidStatus = 'requested';
@@ -35293,9 +35318,16 @@ function openExpenseApprovalForm(expenseId) {
         if (Array.isArray(e.attachments)) e.attachments.forEach(f => { if (f && f.name) allFiles.push({...f, kind:'첨부'}); });
         if ((e.category === 'po_prepay' || e.category === 'po_balance') && e.orderId) {
           const _po = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
-          if (_po && _po.isOverseas) {
-            if (_po.invoiceFile && _po.invoiceFile.name) allFiles.push({..._po.invoiceFile, kind:'Invoice'});
-            if (Array.isArray(_po.otherFiles)) _po.otherFiles.forEach(f => { if (f && f.name) allFiles.push({...f, kind:'PO 첨부'}); });
+          if (_po) {
+            // v2.2.66: 국내 + 해외 PO 모두 — 견적서/도장PDF/마감자료 통합
+            if (_po.pdfData && _po.pdfName) allFiles.push({ name: _po.pdfName, data: _po.pdfData, type: 'application/pdf', size: 0, kind:'견적서' });
+            if (_po.stampData && _po.stampName) allFiles.push({ name: _po.stampName, data: _po.stampData, type: 'application/pdf', size: 0, kind:'결재 PDF' });
+            if (Array.isArray(_po.closingDocs)) _po.closingDocs.forEach(f => { if (f && f.name) allFiles.push({...f, kind:'마감자료'}); });
+            // 해외 PO 전용
+            if (_po.isOverseas) {
+              if (_po.invoiceFile && _po.invoiceFile.name) allFiles.push({..._po.invoiceFile, kind:'Invoice'});
+              if (Array.isArray(_po.otherFiles)) _po.otherFiles.forEach(f => { if (f && f.name) allFiles.push({...f, kind:'PO 첨부'}); });
+            }
           }
         }
         if (allFiles.length === 0) return '';
@@ -35314,8 +35346,19 @@ function openExpenseApprovalForm(expenseId) {
         let h = '<div class="section-title" style="margin-top:18px">📎 첨부 파일 <span style="font-size:11px;color:#6b7280;font-weight:500">(' + allFiles.length + ')</span></div>';
         h += '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;background:#fafafa">';
         h += allFiles.map((f, i) => {
-          const kindBg = f.kind === '견적서' ? '#fef3c7' : f.kind === 'Invoice' ? '#dbeafe' : '#e0e7ff';
-          const kindFg = f.kind === '견적서' ? '#92400e' : f.kind === 'Invoice' ? '#1e40af' : '#3730a3';
+          // v2.2.66: 분류별 색상 확장
+          const _kindBgMap = {
+            '견적서': '#fef3c7',     '결재 PDF': '#fee2e2',  '마감자료': '#dcfce7',
+            'Invoice': '#dbeafe',    'PO 첨부': '#e0e7ff',
+            '첨부': '#e0e7ff'
+          };
+          const _kindFgMap = {
+            '견적서': '#92400e',     '결재 PDF': '#991b1b',  '마감자료': '#166534',
+            'Invoice': '#1e40af',    'PO 첨부': '#3730a3',
+            '첨부': '#3730a3'
+          };
+          const kindBg = _kindBgMap[f.kind] || '#e0e7ff';
+          const kindFg = _kindFgMap[f.kind] || '#3730a3';
           const fileName = _escHtml(f.name);
           const dataUrl = f.data || '';
           const downloadName = _escAttr(f.name);
