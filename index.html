@@ -5452,7 +5452,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.0';
+const ERP_VERSION = 'v2.3.1';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -36565,8 +36565,7 @@ async function openExpenseApprovalForm(expenseId) {
         : (e.note ? `<div class="remark-summary">${(summary||'').replace(/</g,'&lt;')}</div>${(e.note||'').replace(/</g,'&lt;')}` : (summary||'').replace(/</g,'&lt;'))}</div>
 
       ${(function(){
-        // v2.2.84: 사전 hydrate 된 _hydratedFiles 우선 사용 (IDB __idb__ → base64 변환 완료)
-        //   없으면 (예외 케이스) 기존 방식으로 수집 — 단 __idb__ 인 파일은 about:blank 가 됨
+        // v2.3.1: blob URL 방식 — _hydratedFiles 사용 + 새 창 내부에서 Blob 생성
         const allFiles = Array.isArray(e._hydratedFiles) && e._hydratedFiles.length > 0
           ? e._hydratedFiles.slice()
           : (function(){
@@ -36601,6 +36600,45 @@ async function openExpenseApprovalForm(expenseId) {
         const _escAttr = s => String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
         const _escHtml = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
         let h = '<div class="section-title" style="margin-top:18px">📎 첨부 파일 <span style="font-size:11px;color:#6b7280;font-weight:500">(' + allFiles.length + ')</span></div>';
+        // v2.3.1: 새 창 내부에서 blob URL 변환 — 큰 data: URL 의 about:blank 문제 해결
+        h += '<script>';
+        h += 'window._fileData = window._fileData || {};';
+        // 각 파일 데이터를 JSON 으로 안전하게 임베드
+        allFiles.forEach((f, i) => {
+          const _dataJs = JSON.stringify(typeof f.data === 'string' ? f.data : '');
+          const _nameJs = JSON.stringify(f.name || 'file');
+          const _typeJs = JSON.stringify(f.type || 'application/octet-stream');
+          h += 'window._fileData["f' + i + '"] = {data:' + _dataJs + ', name:' + _nameJs + ', type:' + _typeJs + '};';
+        });
+        h += 'window._openFile = function(key) {';
+        h += '  const f = window._fileData[key];';
+        h += '  if (!f || !f.data || f.data === "__idb__" || f.data.indexOf("data:") !== 0) {';
+        h += '    alert("⚠️ 파일 데이터 없음 또는 손실됨\n\n원본을 다시 첨부하거나, 다른 기기에서 확인 필요.");';
+        h += '    console.warn("[v2.3.1] 파일 데이터 없음:", key, f);';
+        h += '    return false;';
+        h += '  }';
+        h += '  try {';
+        h += '    const arr = f.data.split(",");';
+        h += '    const mime = (arr[0].match(/:(.*?);/) || [null, f.type])[1] || "application/octet-stream";';
+        h += '    const bstr = atob(arr[1] || "");';
+        h += '    const u8 = new Uint8Array(bstr.length);';
+        h += '    for (let i = 0; i < bstr.length; i++) u8[i] = bstr.charCodeAt(i);';
+        h += '    const blob = new Blob([u8], {type: mime});';
+        h += '    const url = URL.createObjectURL(blob);';
+        h += '    const isImage = mime.indexOf("image/") === 0;';
+        h += '    const isPdf = mime === "application/pdf";';
+        h += '    if (isImage || isPdf) {';
+        h += '      window.open(url, "_blank");';
+        h += '    } else {';
+        h += '      const a = document.createElement("a");';
+        h += '      a.href = url; a.download = f.name;';
+        h += '      document.body.appendChild(a); a.click(); document.body.removeChild(a);';
+        h += '    }';
+        h += '    setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 60000);';
+        h += '    return false;';
+        h += '  } catch(e) { alert("파일 열기 실패: " + e.message); console.error(e); return false; }';
+        h += '};';
+        h += '</script>';
         h += '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;background:#fafafa">';
         h += allFiles.map((f, i) => {
           // v2.2.66: 분류별 색상 확장
@@ -36624,23 +36662,23 @@ async function openExpenseApprovalForm(expenseId) {
           const canPreview = type.indexOf('image/') === 0 || type === 'application/pdf' || type === 'text/plain' || type === 'text/html';
           const linkAttrs = canPreview ? 'target="_blank"' : 'download="' + downloadName + '"';
           const icon = canPreview ? '👁️ ' : '⬇️ ';
-          // v2.3.0: data:URL 유효성 검증 강화 — 'data:' 로 시작 + base64 인코딩 + 최소 100자 이상
+          // v2.3.1: blob URL 방식 — href 대신 onclick 으로 _openFile 호출
           const _isValidDataUrl = typeof dataUrl === 'string'
             && dataUrl.length > 100
             && dataUrl !== '__idb__'
             && dataUrl.indexOf('data:') === 0;
           if (!_isValidDataUrl) {
-            // 콘솔에 진단 정보 출력 (사용자가 F12 로 확인 가능)
-            try { console.warn('[v2.3.0] 첨부 데이터 invalid — ' + f.kind + ' / ' + (f.name||'?') + ' / data:', typeof dataUrl, dataUrl ? (dataUrl.length > 50 ? dataUrl.slice(0,50) + '...' : dataUrl) : '(empty)'); } catch(_){}
+            try { console.warn('[v2.3.1] 첨부 데이터 invalid — ' + f.kind + ' / ' + (f.name||'?') + ' / data:', typeof dataUrl, dataUrl ? (dataUrl.length > 50 ? dataUrl.slice(0,50) + '...' : dataUrl) : '(empty)'); } catch(_){}
             return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;' + (i < allFiles.length-1 ? 'border-bottom:1px dashed #e2e8f0;' : '') + '">'
               + '<span style="display:inline-block;background:' + kindBg + ';color:' + kindFg + ';padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700;flex-shrink:0">' + f.kind + '</span>'
-              + '<span style="flex:1;color:#94a3b8;font-size:12.5px;font-style:italic" title="원본 데이터가 IDB/Firestore 어디에도 없음 (옛 데이터) — 콘솔(F12)에서 diagExpenseAttach(expenseId) 진단 가능">⚠️ ' + fileName + ' — 데이터 손실 (콘솔 진단 가능)</span>'
+              + '<span style="flex:1;color:#94a3b8;font-size:12.5px;font-style:italic" title="원본 데이터가 IDB/Firestore 어디에도 없음 (옛 데이터)">⚠️ ' + fileName + ' — 데이터 손실</span>'
               + '<span style="font-size:10.5px;color:#cbd5e1;flex-shrink:0">- - -</span>'
               + '</div>';
           }
+          // v2.3.1: onclick 으로 새 창에서 blob URL 생성 후 open (큰 data:URL 도 안정적)
           return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;' + (i < allFiles.length-1 ? 'border-bottom:1px dashed #e2e8f0;' : '') + '">'
             + '<span style="display:inline-block;background:' + kindBg + ';color:' + kindFg + ';padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700;flex-shrink:0">' + f.kind + '</span>'
-            + '<a href="' + dataUrl + '" ' + linkAttrs + ' style="flex:1;color:#1e40af;text-decoration:underline;font-size:12.5px;cursor:pointer" title="' + (canPreview ? '클릭하여 새 창에서 보기' : '클릭하여 다운로드') + '">' + icon + '📄 ' + fileName + '</a>'
+            + '<a href="javascript:void(0)" onclick="return _openFile(\'f' + i + '\')" style="flex:1;color:#1e40af;text-decoration:underline;font-size:12.5px;cursor:pointer" title="' + (canPreview ? '클릭하여 새 창에서 보기' : '클릭하여 다운로드') + '">' + icon + '📄 ' + fileName + '</a>'
             + '<span style="font-size:10.5px;color:#94a3b8;flex-shrink:0">' + _fmtSize(f.size||0) + '</span>'
             + '</div>';
         }).join('');
