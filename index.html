@@ -2880,7 +2880,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
                 <div id="sd-avg-ads" style="font-size:14px;font-weight:800;color:#9d174d">-</div>
               </div>
               <div style="text-align:center;background:#f0fdf4;border-radius:6px;padding:8px 6px">
-                <div style="color:#166534;font-weight:600;margin-bottom:3px">일 평균 마진율</div>
+                <div style="color:#166534;font-weight:600;margin-bottom:3px">일 평균 NET 마진</div>
                 <div id="sd-avg-margin" style="font-size:14px;font-weight:800;color:#15803d">-</div>
               </div>
             </div>
@@ -5448,7 +5448,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.61';
+const ERP_VERSION = 'v2.2.62';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13799,9 +13799,10 @@ function _sdRenderMediaPanel(m, fmtWon) {
       + '</div>'
       + '</div>';
   });
-  // 광고 매체별 (메타/구글/네이버 등)
+  // v2.2.62: 광고 매체별 — 모두 '기타' 면 의미 없으므로 숨김
   const platList = Object.entries(m.adByPlatform).filter(([,v]) => v > 0).sort((a,b) => b[1] - a[1]);
-  if (platList.length > 0) {
+  const onlyEtc = platList.length === 1 && (platList[0][0] === '기타' || platList[0][0] === '');
+  if (platList.length > 0 && !onlyEtc) {
     html += '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #e5e7eb">'
       + '<div style="font-size:11px;color:#94a3b8;font-weight:600;margin-bottom:5px">📢 광고 매체별 지출</div>'
       + platList.map(([p, v]) => '<div style="display:flex;justify-content:space-between;font-size:11.5px;padding:3px 4px"><span>' + p.replace(/</g,'&lt;') + '</span><span style="color:#be185d;font-weight:700">' + fmtWon(v) + '</span></div>').join('')
@@ -13988,7 +13989,7 @@ function renderSalesDashboard() {
     if (start && end) days = Math.max(1, Math.round((new Date(end) - new Date(start)) / 86400000) + 1);
   } catch(_){}
   if ($('sd-avg-ads')) $('sd-avg-ads').textContent = m.tAdsTotal > 0 ? fmtWon(m.tAdsTotal / days) : '-';
-  if ($('sd-avg-margin')) $('sd-avg-margin').textContent = tRev > 0 ? marginRate.toFixed(1) + '%' : '-';
+  if ($('sd-avg-margin')) $('sd-avg-margin').textContent = tRev > 0 ? fmtWon(netMargin / days) : '-';
   // v2.2.47: 매체별 패널 렌더
   _sdRenderMediaPanel(m, fmtWon);
   // 캘린더가 열려있으면 다시 그리기
@@ -14014,11 +14015,11 @@ function renderSalesDashboard() {
         return `<div style="padding:11px 6px;${isLast?'':'border-bottom:1px solid var(--gray-100);'}">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
             <span style="font-size:14px;font-weight:800;color:#0f172a">${rankIcons[i]||(i+1)} ${(s.name||'-').replace(/</g,'&lt;')}</span>
-            <span style="font-size:11.5px;color:var(--gray-500)">${s.count}건</span>
+            <span style="font-size:11.5px;color:var(--gray-500)">주문 ${s.count}건</span>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:13px">
             <span style="color:var(--sky-700);font-weight:700">${fmtWon(s.rev)}</span>
-            <span style="color:${netColor};font-weight:700">NET ${netPct}%</span>
+            <span style="color:${netColor};font-weight:700">NET ${fmtWon(s.net)}</span>
           </div>
         </div>`;
       }).join('');
