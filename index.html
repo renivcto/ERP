@@ -5451,7 +5451,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.91';
+const ERP_VERSION = 'v2.2.92';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13616,7 +13616,8 @@ function renderShopOrderTable() {
       let mappedLabel = '';
       if (mappedItem) {
         const code = mappedItem.code ? `(${mappedItem.code}) ` : '';
-        mappedLabel = `<div style="font-size:10px;color:#94a3b8;font-weight:400;margin-top:3px;cursor:pointer;text-align:center" onclick="event.stopPropagation();openMappingForOrder(${o.id})" title="클릭해서 매핑 변경">${code}${(mappedItem.name||'-').replace(/</g,'&lt;')}</div>`;
+        // v2.2.92: 이미 매핑된 주문 → 매핑 변경 + 재고 자동 조정 함수 호출
+        mappedLabel = `<div style="font-size:10px;color:#94a3b8;font-weight:400;margin-top:3px;cursor:pointer;text-align:center;text-decoration:underline;text-decoration-color:#cbd5e1;text-underline-offset:2px" onclick="event.stopPropagation();changeOrderItemMapping(${o.id})" title="클릭해서 매핑 변경 (재고 자동 조정)">${code}${(mappedItem.name||'-').replace(/</g,'&lt;')} <span style="color:#0ea5e9;font-weight:700">✎</span></div>`;
       } else {
         mappedLabel = `<div style="font-size:10px;color:#dc2626;margin-top:3px;text-align:center">⚠️ 매핑된 품목 없음 (id=${o.itemId})</div>`;
       }
@@ -14179,6 +14180,159 @@ function openMappingForOrder(orderId) {
   window._mappingMode = 'existing';
   window._mappingShopId = shopId;
   openProductMappingModal(unmappedList, shopId);
+}
+
+// v2.2.92 — 이미 매핑된 주문의 품목 매핑 변경 + 재고 자동 조정
+async function changeOrderItemMapping(orderId) {
+  if (!requireWrite()) return;
+  const order = (DB.shopOrders||[]).find(o => o && o.id === orderId);
+  if (!order) { showNotif('주문을 찾을 수 없습니다', 'warning'); return; }
+  const currentItem = order.itemId ? (DB.items||[]).find(it => it && it.id === order.itemId) : null;
+
+  // 기존 모달 제거
+  document.getElementById('change-mapping-overlay')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'change-mapping-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10010;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  // 완제품/반제품 위주로 노출, 검색은 모든 품목
+  const allItems = (DB.items||[]).filter(it => it && it.id != null && it.name);
+  const buildRow = (it) => {
+    const stock = Number(it.stock || 0);
+    const stockColor = stock <= 0 ? '#dc2626' : (stock < (it.minStock || 0) ? '#d97706' : '#16a34a');
+    const isCurrent = currentItem && currentItem.id === it.id;
+    return `<button type="button" onclick="_confirmChangeMapping(${orderId}, ${JSON.stringify(it.id).replace(/"/g,'&quot;')})" style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:${isCurrent?'#eff6ff':'#fff'};border:1px solid ${isCurrent?'#bfdbfe':'#e2e8f0'};border-radius:7px;cursor:pointer;width:100%;text-align:left;font-family:inherit" onmouseenter="this.style.background='#f0f9ff';this.style.borderColor='#7dd3fc'" onmouseleave="this.style.background='${isCurrent?'#eff6ff':'#fff'}';this.style.borderColor='${isCurrent?'#bfdbfe':'#e2e8f0'}'">
+      <span style="font-size:10px;color:#64748b;font-weight:700;min-width:64px;font-family:monospace">${(it.code||'-')}</span>
+      <span style="flex:1;font-size:12.5px;font-weight:${isCurrent?700:600};color:#0f172a">${(it.name||'').replace(/</g,'&lt;')} ${it.spec?`<span style="color:#94a3b8;font-size:11px;font-weight:500">${it.spec}</span>`:''}</span>
+      <span style="font-size:11px;color:${stockColor};font-weight:700;min-width:50px;text-align:right">재고 ${stock}</span>
+      ${isCurrent?'<span style="font-size:10px;color:#2563eb;font-weight:700;background:#dbeafe;padding:2px 7px;border-radius:4px">현재</span>':''}
+    </button>`;
+  };
+
+  const orderQty = Number(order.qty) || 1;
+  const wasDeducted = !!order.stockDeducted;
+
+  overlay.innerHTML = `
+    <div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;max-width:640px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(15,23,42,.3);overflow:hidden">
+      <div style="padding:16px 20px 12px;border-bottom:1px solid #f1f5f9;background:linear-gradient(135deg,#ddd6fe 0%,#bae6fd 100%);display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:11px;color:#5b21b6;font-weight:700;letter-spacing:.3px;margin-bottom:3px">🔗 품목 매핑 변경</div>
+          <div style="font-size:14.5px;font-weight:800;color:#0f172a">${(order.orderNo||order.id||'-')}</div>
+        </div>
+        <button onclick="document.getElementById('change-mapping-overlay')?.remove()" style="background:#fff;border:1px solid #ddd6fe;font-size:16px;color:#5b21b6;cursor:pointer;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center">✕</button>
+      </div>
+      <div style="padding:12px 20px;background:#f8fafc;border-bottom:1px solid #f1f5f9;font-size:12.5px;color:#475569">
+        <div style="margin-bottom:5px"><b style="color:#0f172a">상품명:</b> ${(order.productName||'-').replace(/</g,'&lt;')}</div>
+        <div><b style="color:#0f172a">수량:</b> ${orderQty} · <b style="color:#0f172a">현재 매핑:</b> ${currentItem ? `<span style="color:#16a34a;font-weight:700">${(currentItem.code||'')} ${(currentItem.name||'')}</span>` : '<span style="color:#dc2626">없음</span>'} · <b style="color:#0f172a">재고차감:</b> ${wasDeducted ? '<span style="color:#16a34a;font-weight:700">✅ 됨</span>' : '<span style="color:#dc2626">안 됨</span>'}</div>
+      </div>
+      <div style="padding:10px 20px;border-bottom:1px solid #f1f5f9">
+        <input id="change-mapping-search" type="text" placeholder="품목명·코드로 검색..." oninput="_filterChangeMappingList()" autofocus style="width:100%;padding:9px 12px;font-size:13px;border:1px solid #cbd5e1;border-radius:7px;outline:none" onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='#cbd5e1'">
+      </div>
+      <div id="change-mapping-list" style="overflow-y:auto;padding:10px 20px;flex:1;display:flex;flex-direction:column;gap:5px">
+        ${allItems.map(buildRow).join('')}
+      </div>
+      <div style="padding:10px 20px;border-top:1px solid #f1f5f9;background:#fafafa;font-size:11px;color:#64748b;text-align:center">
+        품목 선택 시 자동으로: 기존 차감 재고 복구 → 새 매핑 품목 재고 차감 → stockHistory 기록
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  // 검색 기능
+  window._filterChangeMappingList = function() {
+    const q = (document.getElementById('change-mapping-search')||{}).value || '';
+    const qLow = q.trim().toLowerCase();
+    const list = document.getElementById('change-mapping-list');
+    if (!list) return;
+    const filtered = qLow
+      ? allItems.filter(it => (it.name||'').toLowerCase().includes(qLow) || (it.code||'').toLowerCase().includes(qLow) || (it.spec||'').toLowerCase().includes(qLow))
+      : allItems;
+    list.innerHTML = filtered.map(buildRow).join('') || '<div style="text-align:center;color:#94a3b8;font-size:12px;padding:20px">검색 결과 없음</div>';
+  };
+}
+
+// v2.2.92 — 매핑 변경 확정 + 재고 자동 조정
+async function _confirmChangeMapping(orderId, newItemId) {
+  const order = (DB.shopOrders||[]).find(o => o && o.id === orderId);
+  if (!order) { showNotif('주문을 찾을 수 없습니다', 'warning'); return; }
+  const newItem = (DB.items||[]).find(it => it && it.id === newItemId);
+  if (!newItem) { showNotif('선택한 품목을 찾을 수 없습니다', 'warning'); return; }
+  const oldItem = order.itemId ? (DB.items||[]).find(it => it && it.id === order.itemId) : null;
+
+  if (oldItem && oldItem.id === newItem.id) {
+    showNotif('이미 동일 품목으로 매핑되어 있습니다', 'info');
+    document.getElementById('change-mapping-overlay')?.remove();
+    return;
+  }
+
+  const wasDeducted = !!order.stockDeducted;
+  const oldDeductedQty = Number(order.stockDeductedQty || order.qty || 0);
+  const orderQty = Number(order.qty) || 1;
+
+  // 확인 메시지
+  let confirmMsg = `매핑 변경:\n`;
+  confirmMsg += `  기존: ${oldItem ? (oldItem.code||'') + ' ' + (oldItem.name||'') : '(없음)'}\n`;
+  confirmMsg += `  새로: ${newItem.code||''} ${newItem.name||''}\n\n`;
+  if (wasDeducted && oldItem) {
+    confirmMsg += `📦 기존 품목 [${oldItem.name}] 재고 ${oldDeductedQty}개 복구\n`;
+  }
+  confirmMsg += `📦 새 품목 [${newItem.name}] 재고 ${orderQty}개 차감\n`;
+  confirmMsg += `현재 재고: ${Number(newItem.stock||0)} → ${Number(newItem.stock||0) - orderQty}`;
+  if (Number(newItem.stock||0) < orderQty) {
+    confirmMsg += `\n⚠️ 재고 부족 (음수 허용 — 추후 입고 시 자동 보정)`;
+  }
+  if (!confirm(confirmMsg)) return;
+
+  if (!Array.isArray(DB.stockHistory)) DB.stockHistory = [];
+  const todayStr = new Date().toISOString().slice(0,10);
+
+  // 1) 기존 품목 재고 복구
+  if (wasDeducted && oldItem && oldDeductedQty > 0) {
+    oldItem.stock = Number(oldItem.stock||0) + oldDeductedQty;
+    DB.stockHistory.push({
+      id: nextId('stock'), itemId: oldItem.id, type: 'in', qty: oldDeductedQty,
+      price: oldItem.price || 0, date: todayStr,
+      lot: oldItem.lot || '',
+      note: `매핑변경 재고복구 [${order.orderNo||'-'}] ${oldDeductedQty}개`
+    });
+  }
+
+  // 2) 새 품목 재고 차감
+  newItem.stock = Number(newItem.stock||0) - orderQty;
+  DB.stockHistory.push({
+    id: nextId('stock'), itemId: newItem.id, type: 'out', qty: orderQty,
+    price: newItem.price || 0, date: todayStr,
+    lot: newItem.lot || '',
+    note: `매핑변경 재고차감 [${order.orderNo||'-'}] ${orderQty}개 (${oldItem?oldItem.code:'(미매핑)'} → ${newItem.code})`
+  });
+
+  // 3) 주문에 새 매핑 적용
+  order.itemId = newItem.id;
+  order.stockDeducted = true;
+  order.stockDeductedQty = orderQty;
+  order.stockDeductedAt = Date.now();
+  order.updatedAt = Date.now();
+  order.mappingChangedAt = Date.now();
+  order.mappingChangeHistory = order.mappingChangeHistory || [];
+  order.mappingChangeHistory.push({
+    ts: Date.now(),
+    from: oldItem ? { id: oldItem.id, code: oldItem.code, name: oldItem.name } : null,
+    to: { id: newItem.id, code: newItem.code, name: newItem.name }
+  });
+
+  // 4) 저장
+  try {
+    if (typeof saveDataNow === 'function') await saveDataNow();
+    else if (typeof saveData === 'function') saveData();
+  } catch(e) { console.warn('매핑 변경 저장 실패:', e); }
+
+  document.getElementById('change-mapping-overlay')?.remove();
+  showNotif(`✅ 매핑 변경 완료 — ${newItem.code} ${newItem.name} (재고 자동 조정)`, 'success');
+
+  // 5) 화면 갱신
+  try { renderShopOrderTable(); } catch(_){}
+  try { if (typeof renderItemTable === 'function') renderItemTable(); } catch(_){}
 }
 
 // ─────────────────────────────────────────────────────────
