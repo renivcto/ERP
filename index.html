@@ -5452,7 +5452,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.95';
+const ERP_VERSION = 'v2.2.96';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -14322,18 +14322,29 @@ async function _confirmChangeMapping(orderId, newItemId) {
     to: { id: newItem.id, code: newItem.code, name: newItem.name }
   });
 
-  // 4) 저장
-  try {
-    if (typeof saveDataNow === 'function') await saveDataNow();
-    else if (typeof saveData === 'function') saveData();
-  } catch(e) { console.warn('매핑 변경 저장 실패:', e); }
+  // v2.2.96: 즉시 UI 갱신 — save 를 await 하지 않고 백그라운드로
+  // 4) localStorage 동기 즉시 저장 (Firestore 완료 안 돼도 새로고침 유지)
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
 
+  // 5) 즉시 화면 갱신 — 모달 닫기 전에 (DOM 업데이트 보장)
+  try { renderShopOrderTable(); } catch(_){}
+  try { if (typeof renderItemTable === 'function') renderItemTable(); } catch(_){}
+
+  // 6) 모달 닫기 + 알림
   document.getElementById('change-mapping-overlay')?.remove();
   showNotif(`✅ 매핑 변경 완료 — ${newItem.code} ${newItem.name} (재고 자동 조정)`, 'success');
 
-  // 5) 화면 갱신
-  try { renderShopOrderTable(); } catch(_){}
-  try { if (typeof renderItemTable === 'function') renderItemTable(); } catch(_){}
+  // 7) Firestore 백그라운드 저장 (await 없음 → UI 안 막힘)
+  try {
+    if (typeof saveDataNow === 'function') {
+      saveDataNow()
+        .then(() => { try { renderShopOrderTable(); } catch(_){} })
+        .catch(e => console.warn('매핑 변경 Firestore 저장 실패:', e));
+    } else if (typeof saveData === 'function') saveData();
+  } catch(e) { console.warn('매핑 변경 저장 실패:', e); }
+
+  // 8) 안전망 — 100ms 후 한 번 더 (Firestore async 완료 후 stale 머지 방지)
+  setTimeout(() => { try { renderShopOrderTable(); } catch(_){} }, 120);
 }
 
 // ─────────────────────────────────────────────────────────
