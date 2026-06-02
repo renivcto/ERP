@@ -5448,7 +5448,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.68';
+const ERP_VERSION = 'v2.2.69';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27972,6 +27972,27 @@ function _dedupPoExpensesSafe() {
 }
 
 function renderApprovalPage() {
+  // v2.2.69: Firestore 머지 완료 전엔 fast-path 데이터로 잘못 표시하지 않게 placeholder
+  if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) {
+    try {
+      // 상단 stat 카드 4개 placeholder
+      ['ap-stat-pending','ap-stat-paypending','ap-stat-balance-due','ap-stat-month-orders','ap-stat-month-paid'].forEach(function(id){
+        var el = document.getElementById(id);
+        if (el) el.textContent = '…';
+      });
+      // 응급 알림 배지 숨김
+      ['ap-stat-pending-urgent','ap-stat-paypending-urgent'].forEach(function(id){
+        var el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+      // 4개 테이블 placeholder
+      ['ap-po-table','ap-exp-table','ap-nonpo-table','ap-sample-table'].forEach(function(id){
+        var el = document.getElementById(id);
+        if (el) el.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:#94a3b8;font-size:12.5px">⏳ Firestore 데이터 동기화 중…</td></tr>';
+      });
+    } catch(_){}
+    return;
+  }
   // v1.9.994: po_balance/po_prepay 중복 자동 정리 (한 orderId+category 당 1건)
   try { _dedupPoExpensesSafe(); } catch(_){}
   // v1.9.914: 일반 결재 전용 백업에서 누락분 복구 (KPI/목록 일관성)
@@ -29025,6 +29046,8 @@ function switchApprovalTab(tab, skipSwitch) {
 }
 
 function updateApprovalStats() {
+  // v2.2.69: 머지 완료 전엔 stat 계산 skip (renderApprovalPage 가 placeholder 표시 중)
+  if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) return;
   try {
     // v1.9.220: 5박스 재설계
     // 1) 결재 대기: approvals(pending) + orders(결재 전) 전체 카운트
@@ -29130,6 +29153,18 @@ function updateApprovalStats() {
 }
 
 function updateApprovalBadges() {
+  // v2.2.69: 머지 완료 전엔 사이드바 배지도 placeholder
+  if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) {
+    try {
+      const _b = document.getElementById('nb-approval');
+      if (_b) {
+        // 배지 텍스트만 비움 (숫자 잘못 표시 방지)
+        const _badge = _b.querySelector('.badge-num') || _b.querySelector('span:last-child');
+        if (_badge) _badge.textContent = '';
+      }
+    } catch(_){}
+    return;
+  }
   try {
     const b = $('nb-approval');
     if (!b) return;
