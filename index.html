@@ -5448,7 +5448,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.57';
+const ERP_VERSION = 'v2.2.58';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -31811,6 +31811,13 @@ function saveExpense() {
       // v2.2.49: proofType 도 저장
       const _editPt = ($('ape-proof-type') && $('ape-proof-type').value) || '';
       if (_editPt) ex.proofType = _editPt;
+      // v2.2.58: 계좌 정보 동기화 (account ↔ bankAccount 둘 다)
+      const _editAcc = ($('ape-account') && $('ape-account').value) || '';
+      const _editHld = ($('ape-account-holder') && $('ape-account-holder').value) || '';
+      ex.account = _editAcc;
+      ex.accountHolder = _editHld;
+      ex.bankAccount = _editAcc;
+      ex.bankHolder = _editHld;
       if (_newPm === '법인카드' && _prevPm !== '법인카드') ex.taxInvoice = '수령완료';
       // v1.9.500: 광고비 필드 저장 + 동기화
       if (_ad) {
@@ -31865,6 +31872,9 @@ function saveExpense() {
     amount,
     account: ($('ape-account') && $('ape-account').value) || '',
     accountHolder: ($('ape-account-holder') && $('ape-account-holder').value) || '',
+    // v2.2.58: 미리보기/지출결의서 PDF 가 읽는 필드명 호환 (둘 다 저장)
+    bankAccount: ($('ape-account') && $('ape-account').value) || '',
+    bankHolder: ($('ape-account-holder') && $('ape-account-holder').value) || '',
     dueDate: $('ape-duedate').value || '',
     paidDate: '',
     paidStatus: 'requested',
@@ -34926,8 +34936,9 @@ function openExpenseApprovalForm(expenseId) {
   // v1.9.219: 지급 방법 및 계좌정보 — expense 자체에 있으면 그대로 사용, 없으면 샘플/업체에서 조회
   let payMethod = (e.payMethod && String(e.payMethod).trim()) || '';
   let bankName    = e.bankName    || '';
-  let bankAccount = e.bankAccount || '';
-  let bankHolder  = e.bankHolder  || '';
+  // v2.2.58: 옛/새 필드명 모두 호환 (bankAccount → account fallback)
+  let bankAccount = e.bankAccount || e.account        || '';
+  let bankHolder  = e.bankHolder  || e.accountHolder  || '';
   if (!payMethod && e.category === 'sample' && e.sampleId) {
     const sp = (DB.samples||[]).find(x => x && (x.id === e.sampleId || Number(x.id) === Number(e.sampleId)));
     if (sp) {
