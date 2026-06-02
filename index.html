@@ -2848,7 +2848,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div id="sd-calendar-panel" style="display:none;margin-bottom:16px">
           <div class="card">
             <div class="card-hdr">
-              <span class="card-title">📅 일별 매출 / 광고비 / NET 마진율</span>
+              <span class="card-title">📅 일별 📈매출 / 📢광고비 / ⭐NET 마진 (금액)</span>
               <span style="font-size:11px;color:var(--gray-400);font-weight:500">해당 월 기준 — 일자별 상세</span>
             </div>
             <div class="card-body" id="sd-calendar-host" style="padding:14px 16px"></div>
@@ -5448,7 +5448,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.52';
+const ERP_VERSION = 'v2.2.53';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13813,10 +13813,11 @@ function _sdRenderCalendar() {
     const rev = dailyRev[ds] || 0, ads = dailyAds[ds] || 0;
     const dayNum = d.getDate();
     const hasData = rev > 0 || ads > 0;
-    // 단순 NET 추정 = rev - ads (수수료/COGS 무시, 빠른 시각화용)
+    // v2.2.53: 단순 NET 추정 = rev - ads (수수료/COGS 무시)
     const roughNet = rev - ads;
     const marginPct = rev > 0 ? (roughNet / rev * 100) : null;
-    const marginColor = marginPct == null ? '#94a3b8' : (marginPct >= 50 ? '#15803d' : marginPct >= 20 ? '#a16207' : '#dc2626');
+    // 금액 기반 색상: 양수=초록, 음수=빨강, 0=회색
+    const marginColor = (rev === 0 && ads === 0) ? '#94a3b8' : (roughNet >= 0 ? '#15803d' : '#dc2626');
     const dow = (d.getDay() + 6) % 7;
     const dowColor = dow === 5 ? '#0ea5e9' : (dow === 6 ? '#dc2626' : '#0f172a');
     html += '<div style="min-height:70px;padding:5px 6px;border:1px solid ' + (hasData ? '#bfdbfe' : '#f1f5f9') + ';border-radius:5px;background:' + (hasData ? '#f8fafc' : '#fff') + '">'
@@ -13824,12 +13825,16 @@ function _sdRenderCalendar() {
     if (hasData) {
       html += '<div style="font-size:10px;color:#0369a1;font-weight:700">📈 ' + (rev > 0 ? fmt(rev).replace('₩','') + '원' : '-') + '</div>';
       if (ads > 0) html += '<div style="font-size:10px;color:#be185d;font-weight:600">📢 ' + fmt(ads).replace('₩','') + '원</div>';
-      if (marginPct != null) html += '<div style="font-size:10px;color:' + marginColor + ';font-weight:700">⭐ ' + marginPct.toFixed(0) + '%</div>';
+      // v2.2.53: NET 마진율 → NET 마진 (금액) 표시
+      if (rev > 0 || ads > 0) {
+        const _netSign = roughNet >= 0 ? '' : '-';
+        html += '<div style="font-size:10px;color:' + marginColor + ';font-weight:700">⭐ ' + _netSign + fmt(Math.abs(roughNet)).replace('₩','') + '원</div>';
+      }
     }
     html += '</div>';
   });
   html += '</div>';
-  html += '<div style="margin-top:10px;font-size:10.5px;color:#94a3b8;text-align:center">⚠️ 일별 마진율은 (매출 - 광고비) 단순 추정 — 수수료/COGS 제외, 빠른 시각화용</div>';
+  html += '<div style="margin-top:10px;font-size:10.5px;color:#94a3b8;text-align:center">⚠️ 일별 NET 마진은 (매출 - 광고비) 단순 추정 — 수수료/COGS 제외</div>';
   host.innerHTML = html;
 }
 
