@@ -5448,7 +5448,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.60';
+const ERP_VERSION = 'v2.2.61';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -33396,45 +33396,30 @@ async function openPoApprovalPage(orderId) {
           }
           if (o.pdfData && o.pdfName) _files.push({ name: o.pdfName, data: o.pdfData, type:'application/pdf', size: 0, kind:'견적/원본' });
           if (_files.length === 0) return '';
-          const payload = _files.map((f, i) => ({
-            idx: i,
-            name: (f.name||'?').replace(/</g,'&lt;').replace(/"/g,'&quot;'),
-            kind: f.kind,
-            type: f.type||'',
-            size: f.size||0,
-            data: f.data||''
-          }));
-          const _fmtSize = n => n ? (n < 1024 ? n + 'B' : n < 1024*1024 ? Math.round(n/1024) + 'KB' : (n/1024/1024).toFixed(1) + 'MB') : '';
+          const _fmtSize2 = n => n ? (n < 1024 ? n + 'B' : n < 1024*1024 ? Math.round(n/1024) + 'KB' : (n/1024/1024).toFixed(1) + 'MB') : '';
+          const _escA = s => String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+          const _escH = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
           let h = '<div style="margin-top:18px">';
           h += '<div style="font-size:12px;font-weight:800;color:#475569;margin-bottom:8px;letter-spacing:1px">■ 첨 부 파 일 <span style="color:#94a3b8;font-weight:500">(' + _files.length + ')</span></div>';
           h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:5px">';
           h += _files.map((f, i) => {
             const kindBg = f.kind === 'Invoice' ? '#dbeafe' : f.kind === '견적/원본' ? '#fef3c7' : '#e0e7ff';
             const kindFg = f.kind === 'Invoice' ? '#1e40af' : f.kind === '견적/원본' ? '#92400e' : '#3730a3';
-            const sz = _fmtSize(f.size||0);
+            const sz = _fmtSize2(f.size||0);
+            const dataUrl = f.data || '';
+            const downloadName = _escA(f.name);
+            const fileName = _escH(f.name);
+            const type = (f.type||'').toLowerCase();
+            const canPreview = type.indexOf('image/') === 0 || type === 'application/pdf' || type === 'text/plain' || type === 'text/html';
+            const linkAttrs = canPreview ? 'target="_blank"' : 'download="' + downloadName + '"';
+            const icon = canPreview ? '👁️ ' : '⬇️ ';
             return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0">'
               + '<span style="display:inline-block;background:' + kindBg + ';color:' + kindFg + ';padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700">' + f.kind + '</span>'
-              + '<span style="flex:1;color:#1e40af;cursor:pointer;text-decoration:underline;font-size:12.5px" onclick="_poDocViewAttach(' + i + ')" title="클릭하여 미리보기">📄 ' + (f.name||'?').replace(/</g,'&lt;') + '</span>'
+              + '<a href="' + dataUrl + '" ' + linkAttrs + ' style="flex:1;color:#1e40af;text-decoration:underline;font-size:12.5px;cursor:pointer" title="' + (canPreview ? '클릭하여 새 창에서 보기' : '클릭하여 다운로드') + '">' + icon + '📄 ' + fileName + '</a>'
               + (sz ? '<span style="font-size:10.5px;color:#94a3b8;flex-shrink:0">' + sz + '</span>' : '')
               + '</div>';
           }).join('');
           h += '</div></div>';
-          h += '<script>'
-            + 'window.__poDocFiles = ' + JSON.stringify(payload) + ';'
-            + 'window._poDocViewAttach = function(idx){'
-            +   'var f = (window.__poDocFiles||[])[idx];'
-            +   'if(!f||!f.data){alert("파일 데이터가 없습니다");return;}'
-            +   'var w = window.open("","_blank");'
-            +   'if(!w){alert("팝업이 차단되었습니다");return;}'
-            +   'var t = f.type||"";'
-            +   'if(t.indexOf("image/")===0){'
-            +     'w.document.write("<title>"+f.name+"</title><body style=\"margin:0;background:#222;display:flex;align-items:center;justify-content:center;min-height:100vh\"><img src=\""+f.data+"\" style=\"max-width:100%;max-height:100vh\"></body>");'
-            +   '}else{'
-            +     'w.document.write("<title>"+f.name+"</title><iframe src=\""+f.data+"\" style=\"position:fixed;inset:0;width:100%;height:100%;border:0\"></iframe>");'
-            +   '}'
-            +   'w.document.close();'
-            + '};'
-            + '<\/script>';
           return h;
         })()}
         ${closingHtml}
@@ -35256,11 +35241,10 @@ function openExpenseApprovalForm(expenseId) {
         : (e.note ? `<div class="remark-summary">${(summary||'').replace(/</g,'&lt;')}</div>${(e.note||'').replace(/</g,'&lt;')}` : (summary||'').replace(/</g,'&lt;'))}</div>
 
       ${(function(){
-        // v2.2.59: 첨부파일 섹션 — quotes (견적서) + attachments (일반) + invoiceFile + otherFiles (해외 PO)
+        // v2.2.59 + v2.2.61: 첨부파일 섹션 — 직접 <a href> 링크 (안정적)
         const allFiles = [];
         if (Array.isArray(e.quotes)) e.quotes.forEach(f => { if (f && f.name) allFiles.push({...f, kind:'견적서'}); });
         if (Array.isArray(e.attachments)) e.attachments.forEach(f => { if (f && f.name) allFiles.push({...f, kind:'첨부'}); });
-        // 해외 PO 연결건 — 발주서의 invoice/otherFiles 도 함께
         if ((e.category === 'po_prepay' || e.category === 'po_balance') && e.orderId) {
           const _po = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
           if (_po && _po.isOverseas) {
@@ -35279,35 +35263,28 @@ function openExpenseApprovalForm(expenseId) {
           data: f.data || ''
         }));
         const _fmtSize = (n) => n < 1024 ? n + 'B' : n < 1024*1024 ? Math.round(n/1024) + 'KB' : (n/1024/1024).toFixed(1) + 'MB';
+        const _escAttr = s => String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+        const _escHtml = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
         let h = '<div class="section-title" style="margin-top:18px">📎 첨부 파일 <span style="font-size:11px;color:#6b7280;font-weight:500">(' + allFiles.length + ')</span></div>';
         h += '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;background:#fafafa">';
         h += allFiles.map((f, i) => {
-          const kindBadge = '<span style="display:inline-block;background:' + (f.kind === '견적서' ? '#fef3c7' : f.kind === 'Invoice' ? '#dbeafe' : '#e0e7ff') + ';color:' + (f.kind === '견적서' ? '#92400e' : f.kind === 'Invoice' ? '#1e40af' : '#3730a3') + ';padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700;margin-right:8px">' + f.kind + '</span>';
-          const fileName = (f.name||'?').replace(/</g,'&lt;');
+          const kindBg = f.kind === '견적서' ? '#fef3c7' : f.kind === 'Invoice' ? '#dbeafe' : '#e0e7ff';
+          const kindFg = f.kind === '견적서' ? '#92400e' : f.kind === 'Invoice' ? '#1e40af' : '#3730a3';
+          const fileName = _escHtml(f.name);
+          const dataUrl = f.data || '';
+          const downloadName = _escAttr(f.name);
+          const type = (f.type||'').toLowerCase();
+          // 브라우저가 인라인 표시 가능한 타입: 이미지, PDF, txt, html
+          const canPreview = type.indexOf('image/') === 0 || type === 'application/pdf' || type === 'text/plain' || type === 'text/html';
+          const linkAttrs = canPreview ? 'target="_blank"' : 'download="' + downloadName + '"';
+          const icon = canPreview ? '👁️ ' : '⬇️ ';
           return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;' + (i < allFiles.length-1 ? 'border-bottom:1px dashed #e2e8f0;' : '') + '">'
-            + kindBadge
-            + '<span style="flex:1;color:#1e40af;cursor:pointer;text-decoration:underline;font-size:12.5px" onclick="_expViewAttachment(' + i + ')" title="클릭하여 미리보기">📄 ' + fileName + '</span>'
+            + '<span style="display:inline-block;background:' + kindBg + ';color:' + kindFg + ';padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700;flex-shrink:0">' + f.kind + '</span>'
+            + '<a href="' + dataUrl + '" ' + linkAttrs + ' style="flex:1;color:#1e40af;text-decoration:underline;font-size:12.5px;cursor:pointer" title="' + (canPreview ? '클릭하여 새 창에서 보기' : '클릭하여 다운로드') + '">' + icon + '📄 ' + fileName + '</a>'
             + '<span style="font-size:10.5px;color:#94a3b8;flex-shrink:0">' + _fmtSize(f.size||0) + '</span>'
             + '</div>';
         }).join('');
         h += '</div>';
-        // 미리보기 함수를 window 에 주입할 script 도 함께 출력
-        h += '<script>'
-          + 'window.__expFiles = ' + JSON.stringify(filesPayload) + ';'
-          + 'window._expViewAttachment = function(idx){'
-          +   'var f = (window.__expFiles||[])[idx];'
-          +   'if(!f||!f.data){alert("파일 데이터가 없습니다");return;}'
-          +   'var w = window.open("","_blank");'
-          +   'if(!w){alert("팝업이 차단되었습니다");return;}'
-          +   'var t = f.type||"";'
-          +   'if(t.indexOf("image/")===0){'
-          +     'w.document.write("<title>"+f.name+"</title><body style=\"margin:0;background:#222;display:flex;align-items:center;justify-content:center;min-height:100vh\"><img src=\""+f.data+"\" style=\"max-width:100%;max-height:100vh\"></body>");'
-          +   '}else{'
-          +     'w.document.write("<title>"+f.name+"</title><iframe src=\""+f.data+"\" style=\"position:fixed;inset:0;width:100%;height:100%;border:0\"></iframe>");'
-          +   '}'
-          +   'w.document.close();'
-          + '};'
-          + '<\/script>';
         return h;
       })()}
       <div class="footer-text">위와 같이 지출결의하오니 결재하여 주시기 바랍니다.${_isOverseasPo ? '<div style="font-size:11px;color:#6b7280;font-weight:500;margin-top:4px;letter-spacing:0.5px">We hereby request your approval for the above expense.</div>' : ''}</div>
