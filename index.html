@@ -5448,7 +5448,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.51';
+const ERP_VERSION = 'v2.2.52';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13891,35 +13891,22 @@ function renderSalesDashboard() {
   const _modeEl = document.querySelector('.period-filter[data-prefix="sd"] .period-mode');
   const _mode = _modeEl ? _modeEl.value : '';
   if (_mode === 'all') {
-    // v2.2.51: 전체 모드 — 메인 데이터도 이번달로 override (사용자 요청: 이번달 / 전월 둘 다)
-    const ranges = _sdAllModeRanges();
-    _prevForCompare = _sdCalcMetrics(ranges.prevStart, ranges.prevEnd);
-    _prevLabel = ranges.prevLabel;
-    // 메인 데이터 = 이번달
-    const _thisMonth = _sdCalcMetrics(ranges.thisStart, ranges.thisEnd);
-    if (_thisMonth && _thisMonth.tRev > 0) {
-      // 카드 값 재계산
-      const _fw = n => '₩' + Math.round(n).toLocaleString();
-      if ($('sd-total-rev'))   $('sd-total-rev').textContent   = _fw(_thisMonth.tRev);
-      if ($('sd-net-rev'))     $('sd-net-rev').textContent     = _fw(_thisMonth.netRev);
-      if ($('sd-net-margin'))  $('sd-net-margin').textContent  = _fw(_thisMonth.netMargin);
-      if ($('sd-margin-rate')) $('sd-margin-rate').textContent = _thisMonth.marginRate.toFixed(1) + '%';
-      if ($('sd-ads-cost'))    $('sd-ads-cost').textContent    = _thisMonth.tAdsTotal > 0 ? _fw(_thisMonth.tAdsTotal) : '-';
-      // 상단 라벨 갱신
-      try {
-        const _lbl = document.getElementById('sd-period-label');
-        if (_lbl) _lbl.textContent = '📅 ' + ranges.thisLabel + ' (전체기간 모드)';
-      } catch(_){}
-      // 비교용 변수도 이번달로 교체 (아래 _sdRenderPrevCompare 가 올바른 값 사용)
-      tRev = _thisMonth.tRev;
-      netRev = _thisMonth.netRev;
-      netMargin = _thisMonth.netMargin;
-      marginRate = _thisMonth.marginRate;
-      m.tAdsTotal = _thisMonth.tAdsTotal;
-      m.shopAgg = _thisMonth.shopAgg;
-      m.adByShop = _thisMonth.adByShop;
-      m.adByPlatform = _thisMonth.adByPlatform;
-    }
+    // v2.2.52: 전체 모드 = 전체 누적 데이터 그대로 표시 (override 안 함)
+    //   비교 행은 숨김 처리 — 전체 vs 단일월 비교는 의미 없음
+    _prevForCompare = null;
+    _prevLabel = '';
+    // 상단 라벨
+    try {
+      const _lbl = document.getElementById('sd-period-label');
+      if (_lbl) _lbl.textContent = '📅 전체 기간';
+      const _plbl = document.getElementById('sd-prev-label');
+      if (_plbl) _plbl.textContent = '누적 데이터 (비교 기준 없음)';
+    } catch(_){}
+    // 각 카드 하단 비교 행 숨김 / 또는 '누적' 표시
+    ['sd-total-rev-prev','sd-net-rev-prev','sd-ads-cost-prev','sd-net-margin-prev','sd-margin-rate-prev'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '<div style="font-size:10.5px;color:#94a3b8">누적</div>';
+    });
   } else {
     const pr = _sdPrevMonthRange(start, end);
     _prevLabel = pr.label || '전월';
