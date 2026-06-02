@@ -5452,7 +5452,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.96';
+const ERP_VERSION = 'v2.2.97';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -35885,9 +35885,22 @@ async function openExpenseApprovalForm(expenseId) {
   //   (인쇄 페이지의 <a href="${data}"> 가 __idb__ 면 about:blank 로 이동하던 문제)
   e._hydratedFiles = [];
   try {
-    const _hyd = async (val, key) => {
-      if (val !== '__idb__') return val;
-      try { const v = await idbGet(key); return v || val; } catch(_){ return val; }
+    // v2.2.97: IDB miss 시 Firestore fallback + IDB 캐시 백필
+    const _hyd = async (val, key, fsLoadFn) => {
+      if (val !== '__idb__') return val; // 이미 inline base64 거나 다른 값
+      // 1) IDB 시도
+      try { const v = await idbGet(key); if (v) return v; } catch(_){}
+      // 2) Firestore fallback (있으면)
+      if (typeof fsLoadFn === 'function') {
+        try {
+          const v = await fsLoadFn();
+          if (v) {
+            try { idbSet(key, v); } catch(_){} // 다음번 빠른 로드를 위해 IDB 에 캐시
+            return v;
+          }
+        } catch(fe) { console.warn('[v2.2.97 hyd] Firestore fallback 실패:', fe); }
+      }
+      return null; // 둘 다 실패
     };
     if (Array.isArray(e.quotes)) {
       for (let qi = 0; qi < e.quotes.length; qi++) {
@@ -35907,17 +35920,20 @@ async function openExpenseApprovalForm(expenseId) {
       const _po = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
       if (_po) {
         if (_po.pdfData && _po.pdfName) {
-          const d = await _hyd(_po.pdfData, 'order_pdf_' + _po.id);
+          // v2.2.97: _loadSharedOrderPdf(_po.id, 'pdf') Firestore fallback
+          const d = await _hyd(_po.pdfData, 'order_pdf_' + _po.id, () => (typeof _loadSharedOrderPdf === 'function' ? _loadSharedOrderPdf(_po.id, 'pdf') : null));
           e._hydratedFiles.push({ name: _po.pdfName, data: d, type: 'application/pdf', size: 0, kind: '견적서' });
         }
         if (_po.stampData && _po.stampName) {
-          const d = await _hyd(_po.stampData, 'order_stamp_' + _po.id);
+          // v2.2.97: _loadSharedOrderPdf(_po.id, 'stamp') Firestore fallback
+          const d = await _hyd(_po.stampData, 'order_stamp_' + _po.id, () => (typeof _loadSharedOrderPdf === 'function' ? _loadSharedOrderPdf(_po.id, 'stamp') : null));
           e._hydratedFiles.push({ name: _po.stampName, data: d, type: 'application/pdf', size: 0, kind: '결재 PDF' });
         }
         if (Array.isArray(_po.closingDocs)) {
           for (let di = 0; di < _po.closingDocs.length; di++) {
             const f = _po.closingDocs[di]; if (!f || !f.name) continue;
-            const d = await _hyd(f.data, 'order_closing_' + _po.id + '_' + di);
+            // v2.2.97: _loadSharedOrderClosing(_po.id, di) Firestore fallback
+            const d = await _hyd(f.data, 'order_closing_' + _po.id + '_' + di, () => (typeof _loadSharedOrderClosing === 'function' ? _loadSharedOrderClosing(_po.id, di) : null));
             e._hydratedFiles.push({ ...f, data: d, kind: '마감자료' });
           }
         }
@@ -35927,9 +35943,10 @@ async function openExpenseApprovalForm(expenseId) {
         }
       }
     }
-    console.log('[v2.2.84] 지출결의서 첨부 hydrate 완료:', e._hydratedFiles.length, '건');
+    const _missing = e._hydratedFiles.filter(f => !f.data || f.data === '__idb__').length;
+    console.log('[v2.2.97] 지출결의서 첨부 hydrate 완료:', e._hydratedFiles.length, '건 (데이터 없음:', _missing, '건)');
   } catch(err) {
-    console.warn('[v2.2.84] hydration 실패:', err);
+    console.warn('[v2.2.97] hydration 실패:', err);
   }
 
   // 분류 한글 라벨
@@ -36332,6 +36349,15 @@ async function openExpenseApprovalForm(expenseId) {
           const canPreview = type.indexOf('image/') === 0 || type === 'application/pdf' || type === 'text/plain' || type === 'text/html';
           const linkAttrs = canPreview ? 'target="_blank"' : 'download="' + downloadName + '"';
           const icon = canPreview ? '👁️ ' : '⬇️ ';
+          // v2.2.97: 데이터 없는 파일은 빈 링크 대신 명확한 상태 표시
+          const _hasData = dataUrl && dataUrl !== '__idb__' && dataUrl.length > 10;
+          if (!_hasData) {
+            return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;' + (i < allFiles.length-1 ? 'border-bottom:1px dashed #e2e8f0;' : '') + '">'
+              + '<span style="display:inline-block;background:' + kindBg + ';color:' + kindFg + ';padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700;flex-shrink:0">' + f.kind + '</span>'
+              + '<span style="flex:1;color:#94a3b8;font-size:12.5px;font-style:italic" title="원본 데이터가 IDB/Firestore 어디에도 없음 (옛 데이터)">⚠️ ' + fileName + ' — 데이터 손실</span>'
+              + '<span style="font-size:10.5px;color:#cbd5e1;flex-shrink:0">- - -</span>'
+              + '</div>';
+          }
           return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;' + (i < allFiles.length-1 ? 'border-bottom:1px dashed #e2e8f0;' : '') + '">'
             + '<span style="display:inline-block;background:' + kindBg + ';color:' + kindFg + ';padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700;flex-shrink:0">' + f.kind + '</span>'
             + '<a href="' + dataUrl + '" ' + linkAttrs + ' style="flex:1;color:#1e40af;text-decoration:underline;font-size:12.5px;cursor:pointer" title="' + (canPreview ? '클릭하여 새 창에서 보기' : '클릭하여 다운로드') + '">' + icon + '📄 ' + fileName + '</a>'
