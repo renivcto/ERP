@@ -2859,9 +2859,9 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div class="card">
             <div class="card-hdr">
               <span class="card-title">🍩 쇼핑몰별 매출 비중</span>
-              <span style="font-size:10.5px;color:var(--gray-400);font-weight:500">호버 시 NET 마진율</span>
+              <span style="font-size:10.5px;color:var(--gray-400);font-weight:500">🖱️ 그래프에 마우스를 올리세요</span>
             </div>
-            <div class="card-body" style="padding:14px 16px 18px"><div id="sd-shop-svg-host" style="min-height:240px"></div></div>
+            <div class="card-body" style="padding:14px 16px 18px;position:relative"><div id="sd-shop-svg-host" style="min-height:240px"></div><div id="sd-donut-tip" style="display:none;position:fixed;z-index:10000;pointer-events:none;border-radius:10px;padding:10px 14px;font-size:12.5px;line-height:1.55;box-shadow:0 6px 24px rgba(15,23,42,.18);border:1.5px solid rgba(15,23,42,.08);min-width:200px;backdrop-filter:blur(8px)"></div></div>
           </div>
           <div class="card">
             <div class="card-hdr">
@@ -5448,7 +5448,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.53';
+const ERP_VERSION = 'v2.2.54';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13593,6 +13593,60 @@ function openMappingForOrder(orderId) {
 // ─────────────────────────────────────────────────────────
 // v1.9.367: 매출 대시보드 — 실제 계산 + 쇼핑몰별 차트 + TOP 3
 // ─────────────────────────────────────────────────────────
+// v2.2.54: 도넛 차트 커스텀 툴팁
+function _sdShowDonutTip(ev, el) {
+  const tip = document.getElementById('sd-donut-tip');
+  if (!tip || !el) return;
+  let data;
+  try { data = JSON.parse((el.getAttribute('data-tip')||'').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<')); } catch(_) { return; }
+  // 색상 → 옅은 배경
+  const lightBg = _sdColorToLight(data.color || '#6366f1');
+  const fmt = n => '₩' + Math.round(Number(n)||0).toLocaleString();
+  const netColor = (data.net >= 0) ? '#15803d' : '#dc2626';
+  tip.style.background = lightBg.bg;
+  tip.style.borderColor = lightBg.border;
+  tip.style.color = '#0f172a';
+  tip.innerHTML =
+    '<div style="display:flex;align-items:center;gap:6px;font-weight:800;font-size:13px;color:' + (data.color||'#0f172a') + ';padding-bottom:6px;margin-bottom:6px;border-bottom:1px solid ' + lightBg.border + '">'
+    + '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' + (data.color||'#6366f1') + '"></span>'
+    + '<span>' + (data.name||'-') + '</span>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:11.5px">'
+    +   '<span style="color:#475569;font-weight:600">매출</span><span style="text-align:right;font-weight:700;color:#0369a1">' + fmt(data.rev) + ' <span style="color:#94a3b8;font-weight:500">(' + data.revPct + '%)</span></span>'
+    +   '<span style="color:#475569;font-weight:600">NET 마진</span><span style="text-align:right;font-weight:700;color:' + netColor + '">' + fmt(data.net) + ' <span style="color:#94a3b8;font-weight:500">(NET ' + data.netPct + '%)</span></span>'
+    +   '<span style="color:#475569;font-weight:600">주문</span><span style="text-align:right;font-weight:700">' + data.count + '건</span>'
+    + '</div>';
+  tip.style.display = 'block';
+  // 커서 옆에 따라다님 (오른쪽 아래)
+  const x = ev.clientX + 14;
+  const y = ev.clientY + 12;
+  // 화면 밖 넘어가면 반대편으로
+  const W = window.innerWidth, H = window.innerHeight;
+  const rect = tip.getBoundingClientRect();
+  const finalX = (x + rect.width > W - 20) ? (ev.clientX - rect.width - 14) : x;
+  const finalY = (y + rect.height > H - 20) ? (ev.clientY - rect.height - 12) : y;
+  tip.style.left = finalX + 'px';
+  tip.style.top = finalY + 'px';
+}
+function _sdHideDonutTip() {
+  const tip = document.getElementById('sd-donut-tip');
+  if (tip) tip.style.display = 'none';
+}
+function _sdColorToLight(hex) {
+  // 도넛 팔레트 색상 → 옅은 배경 + 보더 매칭
+  const map = {
+    '#6366f1': { bg:'#eef2ff', border:'#c7d2fe' },  // indigo
+    '#22c55e': { bg:'#f0fdf4', border:'#bbf7d0' },  // green
+    '#f59e0b': { bg:'#fffbeb', border:'#fde68a' },  // amber
+    '#ec4899': { bg:'#fdf2f8', border:'#fbcfe8' },  // pink
+    '#0ea5e9': { bg:'#f0f9ff', border:'#bae6fd' },  // sky
+    '#a855f7': { bg:'#faf5ff', border:'#e9d5ff' },  // purple
+    '#ef4444': { bg:'#fef2f2', border:'#fecaca' },  // red
+    '#14b8a6': { bg:'#f0fdfa', border:'#99f6e4' }   // teal
+  };
+  return map[hex] || { bg:'#f8fafc', border:'#e2e8f0' };
+}
+
 // v2.2.47: 매출 대시보드 헬퍼 — 주어진 기간의 KPI 계산
 function _sdCalcMetrics(start, end) {
   const orders = (DB.shopOrders||[]).filter(o => {
@@ -13993,8 +14047,18 @@ function renderSalesDashboard() {
     const color = palette[i % palette.length];
     const sharePct = (frac * 100).toFixed(1);
     const netPct = s.rev > 0 ? (s.net / s.rev * 100).toFixed(1) : '0.0';
-    const tip = `${s.name} · 매출 ${fmtWon(s.rev)} (${sharePct}%) · NET 마진 ${fmtWon(s.net)} (${netPct}%) · ${s.count}건`;
-    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="38" stroke-dasharray="${dasharray}" stroke-dashoffset="${dashoffset}" transform="rotate(-90 ${cx} ${cy})" style="transition:stroke-width .15s ease" onmouseover="this.setAttribute('stroke-width','44')" onmouseout="this.setAttribute('stroke-width','38')"><title>${tip}</title></circle>`;
+    // v2.2.54: 커스텀 툴팁 데이터 — _sdShowDonutTip 으로 다중행 표시
+    const _sName = (s.name||'-').replace(/</g,'&lt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    const _payload = JSON.stringify({
+      name: _sName,
+      color: color,
+      rev: s.rev,
+      revPct: sharePct,
+      net: s.net,
+      netPct: netPct,
+      count: s.count
+    }).replace(/"/g,'&quot;');
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="38" stroke-dasharray="${dasharray}" stroke-dashoffset="${dashoffset}" transform="rotate(-90 ${cx} ${cy})" style="transition:stroke-width .15s ease;cursor:pointer" data-tip="${_payload}" onmousemove="_sdShowDonutTip(event, this)" onmouseover="this.setAttribute('stroke-width','44')" onmouseout="this.setAttribute('stroke-width','38');_sdHideDonutTip()"></circle>`;
   }).join('');
   // 가운데 텍스트
   const marginColor = marginRate >= 15 ? '#16a34a' : marginRate >= 5 ? '#d97706' : '#dc2626';
