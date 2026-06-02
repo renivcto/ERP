@@ -5367,7 +5367,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.44';
+const ERP_VERSION = 'v2.2.45';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42284,6 +42284,49 @@ function initERPWhenReady() {
           if (Array.isArray(firestoreDB.samples)) firestoreDB.samples = firestoreDB.samples.filter(s => s && !_smTombSetEarly.has(String(s.id)));
           if (Array.isArray(localDB.samples)) localDB.samples = localDB.samples.filter(s => s && !_smTombSetEarly.has(String(s.id)));
         }
+        // v2.2.45: shopOrders tombstone 사전 차단 — 같은 패턴
+        //   COUNT-GUARD 는 저장 시점에만 동작 → 로드 시점에 별도 필터 없으면 부활
+        let _shopOrderTombSigSet = new Set();
+        let _shopOrderTombOrderNoSet = new Set();
+        try {
+          const _fsSoT = Array.isArray(firestoreDB._deletedShopOrderSigs) ? firestoreDB._deletedShopOrderSigs : [];
+          const _lcSoT = Array.isArray(localDB._deletedShopOrderSigs) ? localDB._deletedShopOrderSigs : [];
+          let _lsSoT = [];
+          try { _lsSoT = JSON.parse(localStorage.getItem('reniv_deleted_shoporder_sigs')||'[]') || []; } catch(_){}
+          [..._fsSoT, ..._lcSoT, ..._lsSoT].forEach(t => {
+            if (!t) return;
+            if (t.sig) _shopOrderTombSigSet.add(String(t.sig));
+            if (t.orderNo) _shopOrderTombOrderNoSet.add(String(t.orderNo));
+            // sig 에서 orderNo 추출 (예: 'manual:20260601-0000011:고다연')
+            if (t.sig && typeof t.sig === 'string') {
+              const parts = String(t.sig).split(':');
+              if (parts.length >= 2 && parts[1]) _shopOrderTombOrderNoSet.add(parts[1]);
+            }
+          });
+          const _hasAnyTomb = _shopOrderTombSigSet.size > 0 || _shopOrderTombOrderNoSet.size > 0;
+          if (_hasAnyTomb) {
+            const _filterShopOrder = (o) => {
+              if (!o) return false;
+              if (o.orderNo && _shopOrderTombOrderNoSet.has(String(o.orderNo))) return false;
+              if (o.orderNo) {
+                const _sigM = 'manual:' + String(o.orderNo) + ':' + String(o.customerName||'');
+                const _sigG = 'merged:' + String(o.orderNo);
+                if (_shopOrderTombSigSet.has(_sigM) || _shopOrderTombSigSet.has(_sigG)) return false;
+              }
+              return true;
+            };
+            if (Array.isArray(firestoreDB.shopOrders)) {
+              const _bf = firestoreDB.shopOrders.length;
+              firestoreDB.shopOrders = firestoreDB.shopOrders.filter(_filterShopOrder);
+              if (firestoreDB.shopOrders.length !== _bf) console.warn('🪦 [v2.2.45 PRE] firestoreDB.shopOrders tombstone 사전 차단:', _bf - firestoreDB.shopOrders.length, '건');
+            }
+            if (Array.isArray(localDB.shopOrders)) {
+              const _bl = localDB.shopOrders.length;
+              localDB.shopOrders = localDB.shopOrders.filter(_filterShopOrder);
+              if (localDB.shopOrders.length !== _bl) console.warn('🪦 [v2.2.45 PRE] localDB.shopOrders tombstone 사전 차단:', _bl - localDB.shopOrders.length, '건');
+            }
+          }
+        } catch(eSo) { console.warn('[v2.2.45] shopOrders tombstone 사전 필터 실패:', eSo); }
       } catch(e) { console.warn('[v1.9.693] tombstone 사전 필터 실패:', e); }
       // v1.9.945: 일반 결재(approval) tombstone 사전 차단 — SYNC RECOVERY 가 tombstone 을
       //   무시하고 삭제된 결재를 다시 끌어오는(부활) 버그 차단. 양쪽 입력에서 미리 제거.
