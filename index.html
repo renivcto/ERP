@@ -5452,7 +5452,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.99';
+const ERP_VERSION = 'v2.3.0';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13637,6 +13637,123 @@ window.deleteAp = async function(id) {
 };
 
 console.log('%c💡 v2.2.99 결재 도구: listPending() / autoFixApPending() / approveAp(id) / deleteAp(id)','background:#10b981;color:#fff;padding:3px 8px');
+
+// v2.3.0 — approved 를 pending 으로 복구 (모르고 잘못 처리한 경우)
+window.unapproveAp = async function(id) {
+  if (id == null) { console.log('사용법: unapproveAp(123)'); return; }
+  const a = (DB.approvals||[]).find(x => x && (x.id === id || Number(x.id) === Number(id) || String(x.id) === String(id)));
+  if (!a) { console.warn('❌ id=' + id + ' 결재 못 찾음'); return; }
+  console.log('복구 전:', { id: a.id, status: a.status, title: a.title, approvedAt: a.approvedAt });
+  a.status = 'pending';
+  delete a.approvedAt;
+  delete a.manualApprove;
+  a.updatedAt = Date.now();
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+  if (typeof saveDataNow === 'function') await saveDataNow();
+  if (typeof updateApprovalBadges === 'function') updateApprovalBadges();
+  if (typeof renderApprovalPage === 'function') renderApprovalPage();
+  console.log('%c✅ id=' + id + ' → pending 복구 완료','background:#10b981;color:#fff;padding:3px 8px');
+  alert('✅ 결재 ID ' + id + ' 결재 요청 상태로 복구 완료');
+};
+
+// v2.3.0 — 최근 변경된 approval 목록 (사용자가 모르고 바꾼 거 찾기)
+window.recentApproved = function(minutes) {
+  const m = minutes || 30;
+  const cutoff = Date.now() - m * 60 * 1000;
+  const list = (DB.approvals||[])
+    .filter(a => a && a.status === 'approved' && (a.approvedAt || a.updatedAt || 0) >= cutoff)
+    .sort((a, b) => (b.approvedAt||b.updatedAt||0) - (a.approvedAt||a.updatedAt||0));
+  console.log('%c━━ 최근 ' + m + '분 내 approved 처리된 결재 ━━','background:#f59e0b;color:#fff;padding:4px 10px;font-weight:700');
+  if (list.length === 0) {
+    console.log('  없음');
+    return [];
+  }
+  list.forEach(a => {
+    const ts = a.approvedAt || a.updatedAt || 0;
+    const ago = Math.round((Date.now() - ts) / 60000);
+    console.log('  ID=' + a.id + ' | ' + a.type + ' | ' + (a.category||'-')
+      + ' | "' + (a.title||'-').slice(0,50) + '"'
+      + ' | ' + ago + '분 전'
+      + (a.manualApprove ? ' | 수동 승인' : ''));
+  });
+  console.log('  → 복구: unapproveAp(<ID>)');
+  return list;
+};
+
+// v2.3.0 — 특정 지출결의서 첨부 데이터 진단 (IDB / Firestore / 인라인 상태)
+window.diagExpenseAttach = async function(expenseId) {
+  const e = (DB.expenses||[]).find(x => x && (x.id === expenseId || Number(x.id) === Number(expenseId)));
+  if (!e) { console.warn('지출결의서 없음 — id:', expenseId); return; }
+  console.log('%c=== 지출결의서 첨부 진단 — id=' + e.id + ' ===','background:#6366f1;color:#fff;padding:4px 10px;font-weight:700');
+  console.log('제목:', e.title, '/ 분류:', e.category);
+  // expense.attachments
+  if (Array.isArray(e.attachments) && e.attachments.length > 0) {
+    console.log('▼ e.attachments (' + e.attachments.length + '건):');
+    for (let i = 0; i < e.attachments.length; i++) {
+      const f = e.attachments[i];
+      const _len = typeof f.data === 'string' ? f.data.length : 0;
+      const _isMarker = f.data === '__idb__';
+      const idbKey = 'expense_attach_' + e.id + '_' + i;
+      let idbHas = false;
+      try { const v = await idbGet(idbKey); idbHas = !!v; } catch(_){}
+      console.log('  [' + i + '] ' + (f.name||'?') + ' | data 길이:' + _len + (_isMarker ? ' (__idb__)' : '') + ' | IDB(' + idbKey + '):' + (idbHas ? '✅' : '❌'));
+    }
+  }
+  // expense.quotes
+  if (Array.isArray(e.quotes) && e.quotes.length > 0) {
+    console.log('▼ e.quotes (' + e.quotes.length + '건):');
+    for (let i = 0; i < e.quotes.length; i++) {
+      const f = e.quotes[i];
+      const _len = typeof f.data === 'string' ? f.data.length : 0;
+      const _isMarker = f.data === '__idb__';
+      const idbKey = 'expense_quote_' + e.id + '_' + i;
+      let idbHas = false;
+      try { const v = await idbGet(idbKey); idbHas = !!v; } catch(_){}
+      console.log('  [' + i + '] ' + (f.name||'?') + ' | data 길이:' + _len + (_isMarker ? ' (__idb__)' : '') + ' | IDB(' + idbKey + '):' + (idbHas ? '✅' : '❌'));
+    }
+  }
+  // 연결 발주서
+  if (e.orderId) {
+    const po = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
+    if (po) {
+      console.log('▼ 연결 발주서 id=' + po.id);
+      // pdfData (견적서)
+      if (po.pdfData) {
+        const _isMarker = po.pdfData === '__idb__';
+        const idbKey = 'order_pdf_' + po.id;
+        let idbHas = false, fsHas = false;
+        try { const v = await idbGet(idbKey); idbHas = !!v; } catch(_){}
+        try { const v = await _loadSharedOrderPdf(po.id, 'pdf'); fsHas = !!v; } catch(_){}
+        console.log('  견적서: ' + (po.pdfName||'-') + ' | data 길이:' + (typeof po.pdfData === 'string' ? po.pdfData.length : 0) + (_isMarker ? ' (__idb__)' : '') + ' | IDB:' + (idbHas ? '✅' : '❌') + ' | Firestore:' + (fsHas ? '✅' : '❌'));
+      }
+      // stampData (결재 PDF)
+      if (po.stampData) {
+        const _isMarker = po.stampData === '__idb__';
+        const idbKey = 'order_stamp_' + po.id;
+        let idbHas = false, fsHas = false;
+        try { const v = await idbGet(idbKey); idbHas = !!v; } catch(_){}
+        try { const v = await _loadSharedOrderPdf(po.id, 'stamp'); fsHas = !!v; } catch(_){}
+        console.log('  결재PDF: ' + (po.stampName||'-') + ' | data 길이:' + (typeof po.stampData === 'string' ? po.stampData.length : 0) + (_isMarker ? ' (__idb__)' : '') + ' | IDB:' + (idbHas ? '✅' : '❌') + ' | Firestore:' + (fsHas ? '✅' : '❌'));
+      }
+      // closingDocs
+      if (Array.isArray(po.closingDocs)) {
+        console.log('  마감자료 (' + po.closingDocs.length + '건):');
+        for (let i = 0; i < po.closingDocs.length; i++) {
+          const f = po.closingDocs[i];
+          const _isMarker = f && f.data === '__idb__';
+          const idbKey = 'order_closing_' + po.id + '_' + i;
+          let idbHas = false, fsHas = false;
+          try { const v = await idbGet(idbKey); idbHas = !!v; } catch(_){}
+          try { const v = await _loadSharedOrderClosing(po.id, i); fsHas = !!v; } catch(_){}
+          console.log('    [' + i + '] ' + (f.name||'?') + ' | data 길이:' + (typeof f.data === 'string' ? f.data.length : 0) + (_isMarker ? ' (__idb__)' : '') + ' | IDB:' + (idbHas ? '✅' : '❌') + ' | Firestore:' + (fsHas ? '✅' : '❌'));
+        }
+      }
+    }
+  }
+  console.log('═══════════════════════');
+};
+
+console.log('%c💡 v2.3.0 도구: unapproveAp(id) / recentApproved(분) / diagExpenseAttach(expenseId)','background:#f59e0b;color:#fff;padding:3px 8px');
 
 window.fixZombieDups = function() {
   console.log('====== v2.2.90 좀비 dedup 진단 ======');
@@ -36507,12 +36624,17 @@ async function openExpenseApprovalForm(expenseId) {
           const canPreview = type.indexOf('image/') === 0 || type === 'application/pdf' || type === 'text/plain' || type === 'text/html';
           const linkAttrs = canPreview ? 'target="_blank"' : 'download="' + downloadName + '"';
           const icon = canPreview ? '👁️ ' : '⬇️ ';
-          // v2.2.97: 데이터 없는 파일은 빈 링크 대신 명확한 상태 표시
-          const _hasData = dataUrl && dataUrl !== '__idb__' && dataUrl.length > 10;
-          if (!_hasData) {
+          // v2.3.0: data:URL 유효성 검증 강화 — 'data:' 로 시작 + base64 인코딩 + 최소 100자 이상
+          const _isValidDataUrl = typeof dataUrl === 'string'
+            && dataUrl.length > 100
+            && dataUrl !== '__idb__'
+            && dataUrl.indexOf('data:') === 0;
+          if (!_isValidDataUrl) {
+            // 콘솔에 진단 정보 출력 (사용자가 F12 로 확인 가능)
+            try { console.warn('[v2.3.0] 첨부 데이터 invalid — ' + f.kind + ' / ' + (f.name||'?') + ' / data:', typeof dataUrl, dataUrl ? (dataUrl.length > 50 ? dataUrl.slice(0,50) + '...' : dataUrl) : '(empty)'); } catch(_){}
             return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;' + (i < allFiles.length-1 ? 'border-bottom:1px dashed #e2e8f0;' : '') + '">'
               + '<span style="display:inline-block;background:' + kindBg + ';color:' + kindFg + ';padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700;flex-shrink:0">' + f.kind + '</span>'
-              + '<span style="flex:1;color:#94a3b8;font-size:12.5px;font-style:italic" title="원본 데이터가 IDB/Firestore 어디에도 없음 (옛 데이터)">⚠️ ' + fileName + ' — 데이터 손실</span>'
+              + '<span style="flex:1;color:#94a3b8;font-size:12.5px;font-style:italic" title="원본 데이터가 IDB/Firestore 어디에도 없음 (옛 데이터) — 콘솔(F12)에서 diagExpenseAttach(expenseId) 진단 가능">⚠️ ' + fileName + ' — 데이터 손실 (콘솔 진단 가능)</span>'
               + '<span style="font-size:10.5px;color:#cbd5e1;flex-shrink:0">- - -</span>'
               + '</div>';
           }
