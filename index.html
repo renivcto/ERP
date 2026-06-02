@@ -5452,7 +5452,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.97';
+const ERP_VERSION = 'v2.2.98';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13495,6 +13495,53 @@ function _autoDedupIdenticalShopOrders() {
 }
 
 // v2.2.90: 콘솔에서 즉시 강제 dedup + 진단 로그
+// v2.2.98 — 결재 대기 KPI 가 어떤 레코드들로 구성되는지 진단
+window.diagApPending = function() {
+  console.log('%c====== 결재 대기 KPI 진단 ======','background:#3b82f6;color:#fff;padding:4px 10px;font-weight:700');
+  if (typeof updateApprovalBadges === 'function') updateApprovalBadges();
+  const d = window.__lastApPendingDiag;
+  if (!d) {
+    console.log('진단 데이터 없음 — 결재요청 페이지에 한 번 다녀와주세요');
+    return;
+  }
+  console.log('총 결재 대기:', d.total, ' (응급:', d.urgent, ')');
+  console.log('');
+  console.log('--- 1) pending approvals (a.status === \'pending\') ---');
+  if (d.pendingApprovals.length === 0) {
+    console.log('  없음');
+  } else {
+    d.pendingApprovals.forEach(a => {
+      const ur = a.priority === 'urgent' ? '🚨' : '  ';
+      console.log('  ' + ur + ' [' + a.type + '] id=' + a.id
+        + ' / category=' + (a.category||'-')
+        + ' / refId=' + (a.refId==null?'(null)':a.refId)
+        + ' / title="' + (a.title||'').slice(0,40) + '"'
+        + ' / 생성일=' + (a.createdAt ? new Date(a.createdAt).toISOString().slice(0,10) : '-'));
+    });
+  }
+  console.log('');
+  console.log('--- 2) pending orders (날인/승인 없음) ---');
+  if (d.pendingOrders.length === 0) {
+    console.log('  없음');
+  } else {
+    d.pendingOrders.forEach(o => {
+      const ur = o.urgent ? '🚨' : '  ';
+      console.log('  ' + ur + ' id=' + o.id + ' / serial=' + (o.serial||'-')
+        + ' / vendor=' + (typeof vendorName === 'function' ? vendorName(o.vendorId) : '-')
+        + ' / stampData:' + o.stampData + ' / stampName:' + o.stampName
+        + ' / stampNotRequired:' + o.stampNotRequired
+        + ' / approvalStatus:' + o.approvalStatus);
+    });
+  }
+  console.log('');
+  console.log('💡 응급(🚨)으로 표시된 레코드가 "응급 1" 의 원인입니다.');
+  console.log('💡 결재 완료된 게 분명하면, DB 에서 status="approved" 로 수정 필요. 콘솔에서:');
+  console.log('   (DB.approvals||[]).filter(a => a.id === <id>)[0].status = "approved"; saveDataNow();');
+  console.log('================================');
+  return d;
+};
+console.log('%c💡 결재 대기 진단: diagApPending()','background:#3b82f6;color:#fff;padding:3px 8px');
+
 window.fixZombieDups = function() {
   console.log('====== v2.2.90 좀비 dedup 진단 ======');
   console.log('현재 DB.shopOrders 건수:', (DB.shopOrders||[]).length);
@@ -29782,9 +29829,24 @@ function updateApprovalStats() {
       return true;
     });
     const pending = _dedupedApprovals.length + pendingOrders.length;
-    const urgentApprovals = _dedupedApprovals.filter(a => a.priority === 'urgent').length;
+    // v2.2.98: 응급 카운트도 status='pending' 인 것만 (이미 결재 완료된 urgent priority 의 zombie 차단)
+    const urgentApprovals = _dedupedApprovals.filter(a => a.priority === 'urgent' && a.status === 'pending').length;
     const urgentOrders = pendingOrders.filter(o => !!o.urgent).length;
     const urgentPending = urgentApprovals + urgentOrders;
+    // v2.2.98: 진단 데이터 노출
+    window.__lastApPendingDiag = {
+      pendingApprovals: _dedupedApprovals.map(a => ({
+        id: a.id, type: a.type, title: a.title, status: a.status, priority: a.priority,
+        refId: a.refId, category: a.category, createdAt: a.createdAt
+      })),
+      pendingOrders: pendingOrders.map(o => ({
+        id: o.id, serial: o.serial, vendorId: o.vendorId, urgent: o.urgent,
+        stampData: !!o.stampData, stampName: !!o.stampName, stampNotRequired: !!o.stampNotRequired,
+        approvalStatus: (typeof getOrderApprovalStatus === 'function' ? getOrderApprovalStatus(o) : 'unknown')
+      })),
+      total: pending,
+      urgent: urgentPending
+    };
 
     // 2) 지출 결의 대기: paid 아닌 expense 카운트 + 응급(urgent 플래그 OR 지급예정일 경과)
     // v1.9.903: 응급 카운트를 아래 표의 강조 기준(blinkAttention = urgent || isOverdue)과 일치시킴
