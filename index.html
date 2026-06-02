@@ -5448,7 +5448,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.49';
+const ERP_VERSION = 'v2.2.50';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13650,35 +13650,67 @@ function _sdCalcMetrics(start, end) {
 
 // v2.2.47: 전월 합산 기간 계산 (start/end ISO 날짜 받아 이전 달 범위 반환)
 function _sdPrevMonthRange(start, end) {
-  if (!start || !end) return { prevStart: '', prevEnd: '' };
-  // 현재 기간 길이만큼 그대로 이전으로 평행 이동 (월별이면 정확히 1달 전 같은 기간)
+  if (!start || !end) return { prevStart: '', prevEnd: '', label: '전월' };
   try {
     const s = new Date(start), e = new Date(end);
+    // 월별: 정확히 1개월 전 같은 기간
+    const isMonth = s.getDate() === 1 && (() => {
+      const last = new Date(e.getFullYear(), e.getMonth()+1, 0);
+      return e.getDate() === last.getDate() && s.getMonth() === e.getMonth();
+    })();
     const prevS = new Date(s); prevS.setMonth(prevS.getMonth() - 1);
     const prevE = new Date(e); prevE.setMonth(prevE.getMonth() - 1);
-    return { prevStart: prevS.toISOString().slice(0,10), prevEnd: prevE.toISOString().slice(0,10) };
-  } catch(_) { return { prevStart: '', prevEnd: '' }; }
+    let label = '전월';
+    if (isMonth) {
+      label = (prevS.getMonth()+1) + '월';
+    } else {
+      // 주/일/기간별
+      const days = Math.round((e - s) / 86400000) + 1;
+      if (days === 7) label = '직전 주';
+      else if (days === 1) label = '전일';
+      else label = '직전 ' + days + '일';
+    }
+    return { prevStart: prevS.toISOString().slice(0,10), prevEnd: prevE.toISOString().slice(0,10), label };
+  } catch(_) { return { prevStart: '', prevEnd: '', label: '전월' }; }
 }
 
-// v2.2.47: 전월 비교 % 표시 (curr vs prev)
-function _sdRenderPrevCompare(elId, curr, prev, isPercent) {
+// v2.2.50: '전체' 모드 — 이번 달(현재) vs 전월(이전 달) 로 비교 폴백
+function _sdAllModeRanges() {
+  const now = new Date();
+  const thisStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const thisEnd = new Date(now.getFullYear(), now.getMonth()+1, 0);
+  const prevStart = new Date(now.getFullYear(), now.getMonth()-1, 1);
+  const prevEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+  const iso = d => d.toISOString().slice(0,10);
+  return {
+    thisStart: iso(thisStart), thisEnd: iso(thisEnd),
+    prevStart: iso(prevStart), prevEnd: iso(prevEnd),
+    thisLabel: (thisStart.getMonth()+1) + '월',
+    prevLabel: (prevStart.getMonth()+1) + '월'
+  };
+}
+
+// v2.2.47 + v2.2.50: 전월 비교 — % 화살표 + 전월 실제 값 함께 표시
+function _sdRenderPrevCompare(elId, curr, prev, isPercent, prevLabel) {
   const el = document.getElementById(elId);
   if (!el) return;
+  const label = prevLabel || '전월';
+  const fmtVal = v => isPercent ? (v.toFixed(1) + '%') : ('₩' + Math.round(v).toLocaleString());
   if (prev === 0 || prev == null || isNaN(prev)) {
-    el.textContent = '전월 -';
-    el.style.color = '#94a3b8';
+    el.innerHTML = '<div style="font-size:11px;color:#94a3b8">' + label + ' -</div>';
     return;
   }
   const diff = curr - prev;
-  let pct;
+  const diffColor = diff >= 0 ? '#15803d' : '#dc2626';
+  let diffTxt;
   if (isPercent) {
-    pct = diff;  // %p 차이
-    el.textContent = (diff >= 0 ? '▲ +' : '▼ ') + Math.abs(diff).toFixed(1) + '%p';
+    diffTxt = (diff >= 0 ? '▲ +' : '▼ ') + Math.abs(diff).toFixed(1) + '%p';
   } else {
-    pct = (diff / Math.abs(prev)) * 100;
-    el.textContent = (diff >= 0 ? '▲ +' : '▼ ') + Math.abs(pct).toFixed(1) + '%';
+    const pct = (diff / Math.abs(prev)) * 100;
+    diffTxt = (diff >= 0 ? '▲ +' : '▼ ') + Math.abs(pct).toFixed(1) + '%';
   }
-  el.style.color = diff >= 0 ? '#15803d' : '#dc2626';
+  el.innerHTML = '<div style="font-size:11px;font-weight:700;color:' + diffColor + '">' + diffTxt + '</div>'
+               + '<div style="font-size:10.5px;color:#64748b;margin-top:1px">' + label + ': ' + fmtVal(prev) + '</div>';
 }
 
 // v2.2.47: 매체별 매출/광고비 렌더링
@@ -13851,14 +13883,32 @@ function renderSalesDashboard() {
   if ($('sd-net-margin'))  $('sd-net-margin').textContent  = tRev > 0 ? fmtWon(netMargin) : '-';
   if ($('sd-margin-rate')) $('sd-margin-rate').textContent = tRev > 0 ? marginRate.toFixed(1) + '%' : '-';
   if ($('sd-ads-cost'))    $('sd-ads-cost').textContent    = m.tAdsTotal > 0 ? fmtWon(m.tAdsTotal) : '-';
-  // v2.2.47: 전월 비교 표시
-  if (mPrev) {
-    _sdRenderPrevCompare('sd-total-rev-prev', tRev, mPrev.tRev, false);
-    _sdRenderPrevCompare('sd-net-rev-prev', netRev, mPrev.netRev, false);
-    _sdRenderPrevCompare('sd-ads-cost-prev', m.tAdsTotal, mPrev.tAdsTotal, false);
-    _sdRenderPrevCompare('sd-net-margin-prev', netMargin, mPrev.netMargin, false);
-    _sdRenderPrevCompare('sd-margin-rate-prev', marginRate, mPrev.marginRate, true);
+  // v2.2.47 + v2.2.50: 전월 비교 표시 (전체 모드는 이번달 vs 전월 폴백)
+  let _prevForCompare = mPrev;
+  let _prevLabel = '전월';
+  const _modeEl = document.querySelector('.period-filter[data-prefix="sd"] .period-mode');
+  const _mode = _modeEl ? _modeEl.value : '';
+  if (_mode === 'all') {
+    // 전체 모드 — 이번달 vs 전월 (실제 표시는 전체 데이터지만 비교는 월 단위)
+    const ranges = _sdAllModeRanges();
+    _prevForCompare = _sdCalcMetrics(ranges.prevStart, ranges.prevEnd);
+    _prevLabel = ranges.prevLabel;
+  } else {
+    const pr = _sdPrevMonthRange(start, end);
+    _prevLabel = pr.label || '전월';
   }
+  if (_prevForCompare) {
+    _sdRenderPrevCompare('sd-total-rev-prev', tRev, _prevForCompare.tRev, false, _prevLabel);
+    _sdRenderPrevCompare('sd-net-rev-prev', netRev, _prevForCompare.netRev, false, _prevLabel);
+    _sdRenderPrevCompare('sd-ads-cost-prev', m.tAdsTotal, _prevForCompare.tAdsTotal, false, _prevLabel);
+    _sdRenderPrevCompare('sd-net-margin-prev', netMargin, _prevForCompare.netMargin, false, _prevLabel);
+    _sdRenderPrevCompare('sd-margin-rate-prev', marginRate, _prevForCompare.marginRate, true, _prevLabel);
+  }
+  // 상단 'vs 전월 비교' 라벨도 갱신
+  try {
+    const _prevLblEl = document.getElementById('sd-prev-label');
+    if (_prevLblEl) _prevLblEl.textContent = 'vs ' + _prevLabel + ' 비교';
+  } catch(_){}
   // v2.2.47: 일 평균 광고비/마진율
   let days = 1;
   try {
