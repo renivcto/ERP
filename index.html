@@ -5451,7 +5451,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.74';
+const ERP_VERSION = 'v2.2.75';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -32843,9 +32843,7 @@ function openApprovalDetail(approvalId) {
           ${amountSpan?`<div style="margin-left:auto;font-size:13px;font-weight:700;color:#0f172a">${amountSpan}</div>`:''}
         </div>
       </div>
-      <!-- v2.2.0: a.note(특이사항/비고) 표시 제거 — 발주서의 footer note 가 결재 상세에 노출되던 부분 -->
-      <!-- ${a.note?`<div>...</div>`:''} -->
-      ${attaches.length?`<div style="padding:0 20px 16px">${attachHtml.replace('margin-top:10px','margin-top:0')}</div>`:''}
+      <!-- v2.2.75: 본문/첨부 숨김 (의견만 남기는 용도) -->
     </div>
     ${renderCommentSectionShell()}
   `;
@@ -33847,20 +33845,11 @@ function openExpenseDetail(expenseId) {
       </div>
     </div>` : '';
   const acctLine = (e.account || e.accountHolder) ? `<div style="margin-top:8px;padding:8px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;color:#0f172a"><span style="color:#64748b;font-weight:700;margin-right:8px">💳 입금 계좌</span>${e.account||''}${e.accountHolder?` <span style="color:#64748b">· 예금주</span> ${e.accountHolder}`:''}</div>` : '';
+  // v2.2.75: 본문/첨부 숨김 — 최소한의 제목 정보만 + 댓글 섹션
   body.innerHTML = `
-    <div style="background:#f9fafb;padding:14px;border-radius:8px;margin-bottom:14px">
+    <div style="background:#f9fafb;padding:10px 14px;border-radius:8px;margin-bottom:10px">
       <div style="font-size:11px;color:var(--gray-500);font-weight:600">💳 지출 결의서${e.category?' · '+e.category:''}</div>
-      <div style="font-size:16px;font-weight:700;margin-top:4px">${e.title||'-'}</div>
-      <div style="margin-top:6px;display:flex;gap:12px;font-size:12px;color:var(--gray-700);flex-wrap:wrap">
-        <span>💰 ${fmtWon(e.amount||0)}</span>
-        <span>${e.vendor?'🏢 '+e.vendor:''}</span>
-        <span>${e.dueDate?'📅 요청일 '+e.dueDate:''}</span>
-        <span>${e.paidStatus==='paid'?'✅ 지급완료':'⏳ 지급대기'}</span>
-      </div>
-      ${acctLine}
-      ${e.note?`<div style="margin-top:10px;padding:10px;background:#fff;border-radius:6px;font-size:12.5px;color:var(--gray-700);white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.55">${e.note}</div>`:''}
-      ${imageStrip}
-      ${fileList}
+      <div style="font-size:14.5px;font-weight:700;margin-top:3px">${(e.title||'-').replace(/</g,'&lt;')}</div>
     </div>
     ${renderCommentSectionShell()}
   `;
@@ -33883,11 +33872,15 @@ function renderCommentSectionShell() {
     <div style="display:flex;gap:8px;align-items:flex-start">
       <div style="flex:1;display:flex;gap:6px">
         <button type="button" title="이모지 넣기" onclick="event.stopPropagation();toggleNpInputEmojiPicker(this,'ap-comment-input')" style="padding:8px 12px;background:#fff;border:1px solid var(--gray-300);border-radius:8px;font-size:18px;cursor:pointer;line-height:1;flex-shrink:0;height:60px" onmouseenter="this.style.background='#f3f4f6';this.style.borderColor='var(--sky-400)'" onmouseleave="this.style.background='#fff';this.style.borderColor='var(--gray-300)'">🙂</button>
+        <button type="button" title="이미지/파일 첨부" onclick="event.stopPropagation();document.getElementById('ap-comment-file-input').click()" style="padding:8px 12px;background:#fff;border:1px solid var(--gray-300);border-radius:8px;font-size:16px;cursor:pointer;line-height:1;flex-shrink:0;height:60px" onmouseenter="this.style.background='#f3f4f6';this.style.borderColor='var(--sky-400)'" onmouseleave="this.style.background='#fff';this.style.borderColor='var(--gray-300)'">📎</button>
+        <input type="file" id="ap-comment-file-input" multiple accept="image/*,.pdf,.docx,.doc,.xlsx,.xls,.csv,.hwp,.txt" onchange="_apCommentHandleFiles(this)" style="display:none">
         <textarea class="fi" id="ap-comment-input" placeholder="의견을 입력해 주세요..." rows="2" style="flex:1;font-size:14px;padding:10px 12px;resize:vertical;min-height:60px;font-family:inherit" onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey))addApprovalComment()"></textarea>
       </div>
       <button class="btn btn-primary btn-sm" onclick="addApprovalComment()" style="height:60px;padding:0 18px;font-size:13.5px;font-weight:700">등록</button>
     </div>
-    <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px;text-align:right">Ctrl/Cmd + Enter 로 등록</div>
+    <!-- v2.2.75: 첨부 미리보기 -->
+    <div id="ap-comment-attach-preview" style="display:none;margin-top:6px;display:flex;flex-direction:column;gap:4px"></div>
+    <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px;text-align:right">Ctrl/Cmd + Enter 로 등록 · 📎 파일은 한 번에 여러 개 선택 가능</div>
   `;
 }
 
@@ -33944,6 +33937,32 @@ function _renderApCommentNode(c, depth) {
     </div>
     <!-- v2.2.0: 코멘트 텍스트 + 액션을 id 로 감싸 inline 편집 가능하게 -->
     <div id="apcm-text-${c.id}" style="font-size:14px;color:var(--gray-800);white-space:pre-wrap;line-height:1.55">${(c.text||'').replace(/</g,'&lt;')}</div>
+    ${(function(){
+      // v2.2.75: 댓글 첨부 표시
+      const atts = Array.isArray(c.attachments) ? c.attachments.filter(a => a && a.name) : [];
+      if (atts.length === 0) return '';
+      const imgs = atts.filter(a => (a.type||'').indexOf('image/') === 0);
+      const files = atts.filter(a => (a.type||'').indexOf('image/') !== 0);
+      let h = '<div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">';
+      if (imgs.length > 0) {
+        h += '<div style="display:flex;gap:5px;flex-wrap:wrap">';
+        h += imgs.map(a => '<a href="' + a.data + '" target="_blank" style="display:inline-block"><img src="' + a.data + '" style="max-height:120px;max-width:200px;border-radius:6px;border:1px solid #e2e8f0;cursor:zoom-in"></a>').join('');
+        h += '</div>';
+      }
+      files.forEach(a => {
+        const sz = a.size ? (a.size < 1024*1024 ? Math.round(a.size/1024)+'KB' : (a.size/1024/1024).toFixed(1)+'MB') : '';
+        const type = (a.type||'').toLowerCase();
+        const canPreview = type === 'application/pdf' || type === 'text/plain';
+        const linkAttr = canPreview ? 'target="_blank"' : 'download="' + (a.name||'file').replace(/"/g,'&quot;') + '"';
+        h += '<a href="' + a.data + '" ' + linkAttr + ' style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;color:#1e40af;text-decoration:none;max-width:300px">'
+          + '<span>📄</span>'
+          + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (a.name||'?').replace(/</g,'&lt;') + '</span>'
+          + (sz ? '<span style="font-size:10.5px;color:#94a3b8">' + sz + '</span>' : '')
+          + '</a>';
+      });
+      h += '</div>';
+      return h;
+    })()}
     ${reactionBadges?`<div style="margin-top:8px">${reactionBadges}</div>`:''}
     <div id="apcm-actions-${c.id}" style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button onclick="event.stopPropagation();toggleApReactionPicker(this, '${c.id}')" title="감정 반응 남기기" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:1px solid #fcd34d;color:#92400e;border-radius:999px;padding:4px 12px;font-size:12.5px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:5px;line-height:1;letter-spacing:-.1px;transition:transform .12s, box-shadow .12s, background .12s" onmouseenter="this.style.background='linear-gradient(135deg,#fde68a,#fcd34d)';this.style.borderColor='#f59e0b';this.style.transform='translateY(-1px)';this.style.boxShadow='0 2px 6px rgba(245,158,11,.18)'" onmouseleave="this.style.background='linear-gradient(135deg,#fef3c7,#fde68a)';this.style.borderColor='#fcd34d';this.style.transform='translateY(0)';this.style.boxShadow='none'"><span style="font-size:14px;line-height:1">😊</span><span style="font-size:11.5px;line-height:1">반응</span><span style="font-size:11px;font-weight:800;opacity:.7;margin-left:1px">＋</span></button>
@@ -33982,11 +34001,50 @@ function renderApprovalComments(refKey, hideEmptyState) {
   list.innerHTML = roots.map(n => walk(n, 0)).join('');
 }
 
+// v2.2.75: 댓글 파일 첨부 - 임시 저장소
+window._apCommentAttachments = [];
+function _apCommentHandleFiles(input) {
+  const files = input.files || [];
+  if (!files.length) return;
+  if (!Array.isArray(window._apCommentAttachments)) window._apCommentAttachments = [];
+  Array.from(files).forEach(f => {
+    if (f.size > 10 * 1024 * 1024) { alert(f.name + ' — 10MB 초과, skip'); return; }
+    const reader = new FileReader();
+    reader.onload = function(ev){
+      window._apCommentAttachments.push({ name: f.name, data: ev.target.result, type: f.type, size: f.size });
+      _apCommentRenderAttachPreview();
+    };
+    reader.readAsDataURL(f);
+  });
+  input.value = '';
+}
+function _apCommentRenderAttachPreview() {
+  const wrap = document.getElementById('ap-comment-attach-preview');
+  if (!wrap) return;
+  const files = window._apCommentAttachments || [];
+  if (!files.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  wrap.style.display = 'flex';
+  wrap.innerHTML = files.map((f, i) => {
+    const sz = f.size < 1024 ? f.size+'B' : f.size < 1024*1024 ? Math.round(f.size/1024)+'KB' : (f.size/1024/1024).toFixed(1)+'MB';
+    return '<div style="display:flex;align-items:center;gap:6px;padding:5px 9px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:11.5px">'
+      + '<span>' + ((f.type||'').indexOf('image/')===0 ? '🖼️' : '📄') + '</span>'
+      + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (f.name||'?').replace(/</g,'&lt;') + ' <span style="color:#94a3b8">' + sz + '</span></span>'
+      + '<button type="button" onclick="_apCommentRemoveAttach(' + i + ')" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;padding:1px 7px;font-size:10.5px;cursor:pointer">제거</button>'
+      + '</div>';
+  }).join('');
+}
+function _apCommentRemoveAttach(idx) {
+  if (!Array.isArray(window._apCommentAttachments)) return;
+  window._apCommentAttachments.splice(idx, 1);
+  _apCommentRenderAttachPreview();
+}
+
 function addApprovalComment() {
   const inp = $('ap-comment-input');
   if (!inp) return;
   const text = (inp.value || '').trim();
-  if (!text) return;
+  const attaches = Array.isArray(window._apCommentAttachments) ? window._apCommentAttachments.slice() : [];
+  if (!text && attaches.length === 0) return;
   const ref = _currentApprovalDetailId;
   if (ref == null) return;
   // v1.9.653: updatedAt 명시 — 머지 시 SYNC RECOVERY + 최신 판정 양쪽 모두 작동
@@ -34015,11 +34073,14 @@ function addApprovalComment() {
     parentId: _apReplyToId || null,
     author: '담당자',
     text,
+    attachments: attaches,  // v2.2.75
     reactions: {},
     createdAt: _now,
     updatedAt: _now,
   });
   inp.value = '';
+  window._apCommentAttachments = [];
+  _apCommentRenderAttachPreview();
   _apReplyToId = null;
   const hint = document.getElementById('ap-reply-hint');
   if (hint) hint.style.display = 'none';
