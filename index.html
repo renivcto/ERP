@@ -5451,7 +5451,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.79';
+const ERP_VERSION = 'v2.2.80';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6347,13 +6347,132 @@ async function _doSaveDataInner() {
     }
   });
 
+  // v2.2.80 — 지출결의서/댓글/신제품 첨부 IDB 오프로드
+  //   원인: 첨부 파일이 inline base64 로 저장되어 localStorage 5MB 한도 초과 + Firestore 1MB 초과
+  //         → 지급완료 토글 등 사용자 작업이 localStorage 에 저장되지 못해 새로고침 시 revert
+  //   패턴: 기존 approvals.attachments / vendors.quotes 와 동일 (검증된 패턴)
+  let _v280Offload = { expenses: 0, comments: 0, newProducts: 0, bytes: 0 };
+  try {
+    // 2.1 expenses[i].attachments[ai].data
+    (dbToSave.expenses||[]).forEach((ex, ei) => {
+      if (!ex) return;
+      if (Array.isArray(ex.attachments) && ex.attachments.length) {
+        ex.attachments.forEach((at, ai) => {
+          if (!at || typeof at.data !== 'string') return;
+          if (at.data === '__idb__') return;
+          if (at.data.length > 100) {
+            try {
+              idbSet('expense_attach_' + ex.id + '_' + ai, at.data);
+              _v280Offload.bytes += at.data.length;
+              _v280Offload.expenses++;
+              dbToSave.expenses[ei].attachments[ai] = { ...at, data: '__idb__' };
+            } catch(_){}
+          }
+        });
+      }
+      // 2.2 expenses[i].quotes[qi].data (견적서 첨부)
+      if (Array.isArray(ex.quotes) && ex.quotes.length) {
+        ex.quotes.forEach((q, qi) => {
+          if (!q || typeof q.data !== 'string') return;
+          if (q.data === '__idb__') return;
+          if (q.data.length > 100) {
+            try {
+              idbSet('expense_quote_' + ex.id + '_' + qi, q.data);
+              _v280Offload.bytes += q.data.length;
+              _v280Offload.expenses++;
+              dbToSave.expenses[ei].quotes[qi] = { ...q, data: '__idb__' };
+            } catch(_){}
+          }
+        });
+      }
+    });
+
+    // 2.3 approvalComments[i].attachments[ai].data
+    (dbToSave.approvalComments||[]).forEach((c, ci) => {
+      if (!c || !Array.isArray(c.attachments) || !c.attachments.length) return;
+      c.attachments.forEach((at, ai) => {
+        if (!at || typeof at.data !== 'string') return;
+        if (at.data === '__idb__') return;
+        if (at.data.length > 100) {
+          try {
+            idbSet('comment_attach_' + c.id + '_' + ai, at.data);
+            _v280Offload.bytes += at.data.length;
+            _v280Offload.comments++;
+            dbToSave.approvalComments[ci].attachments[ai] = { ...at, data: '__idb__' };
+          } catch(_){}
+        }
+      });
+    });
+
+    // 2.4 newProducts 이미지 필드 (productImg/productImgs[]/formulationImg/formulationImgs[]/packagingImg)
+    (dbToSave.newProducts||[]).forEach((np, ni) => {
+      if (!np || !np.id) return;
+      // 단일 이미지 필드
+      ['productImg','formulationImg','packagingImg'].forEach(field => {
+        const v = np[field];
+        if (typeof v === 'string' && v !== '__idb__' && v.length > 100) {
+          try {
+            idbSet('newProduct_' + np.id + '_' + field, v);
+            _v280Offload.bytes += v.length;
+            _v280Offload.newProducts++;
+            dbToSave.newProducts[ni][field] = '__idb__';
+          } catch(_){}
+        }
+      });
+      // 배열 이미지 필드
+      ['productImgs','formulationImgs'].forEach(field => {
+        if (!Array.isArray(np[field])) return;
+        np[field].forEach((src, idx) => {
+          if (typeof src !== 'string' || src === '__idb__' || src.length <= 100) return;
+          try {
+            idbSet('newProduct_' + np.id + '_' + field + '_' + idx, src);
+            _v280Offload.bytes += src.length;
+            _v280Offload.newProducts++;
+            dbToSave.newProducts[ni][field][idx] = '__idb__';
+          } catch(_){}
+        });
+      });
+      // note (HTML rich text — inline base64 가능)
+      if (typeof np.note === 'string' && np.note !== '__idb__' && np.note.length > 2000) {
+        try {
+          idbSet('newProduct_' + np.id + '_note', np.note);
+          _v280Offload.bytes += np.note.length;
+          _v280Offload.newProducts++;
+          dbToSave.newProducts[ni].note = '__idb__';
+        } catch(_){}
+      }
+    });
+
+    if (_v280Offload.expenses + _v280Offload.comments + _v280Offload.newProducts > 0) {
+      console.log('📦 [v2.2.80 OFFLOAD] expenses:' + _v280Offload.expenses
+        + ', comments:' + _v280Offload.comments
+        + ', newProducts:' + _v280Offload.newProducts
+        + ' → ' + (_v280Offload.bytes/1024).toFixed(1) + 'KB IDB 이전');
+    }
+  } catch(e) {
+    console.warn('⚠️ [v2.2.80 OFFLOAD] 실패:', e);
+  }
+
   // localStorage 항상 저장 (백업)
   try {
     const lsJson = JSON.stringify(dbToSave);
     localStorage.setItem(STORE_KEY, lsJson);
     console.log('💾 [localStorage] 저장 완료:', lsJson.length, 'bytes — shopOrders:', (dbToSave.shopOrders||[]).length, '건');
   } catch(e) {
-    console.error('❌ [localStorage] 저장 실패!', e.message, '— 크기:', JSON.stringify(dbToSave).length);
+    const _sz = JSON.stringify(dbToSave).length;
+    console.error('❌ [localStorage] 저장 실패!', e.message, '— 크기:', _sz);
+    // v2.2.80 — Quota 초과는 사용자에게 즉시 알림 (silent fail 방지)
+    if (e && e.name === 'QuotaExceededError') {
+      try {
+        if (!window._v280QuotaWarned) {
+          window._v280QuotaWarned = true;
+          if (typeof showNotif === 'function') {
+            showNotif('⚠️ 브라우저 저장 공간 초과 — Firestore 에는 저장됩니다. 새 탭으로 재로딩 권장', 'warning');
+          }
+          setTimeout(()=>{ window._v280QuotaWarned = false; }, 30000);
+        }
+      } catch(_){}
+    }
   }
 
   // v1.9.205: 결재 그룹웨어 전용 독립 백업 (데이터 손실 2차 방지)
@@ -7029,6 +7148,65 @@ async function restoreIDBData() {
       if (v) DB.samples[si].receipt = v;
     }
   }
+  // v2.2.80 — expenses/comments/newProducts 의 __idb__ 마커 복원
+  try {
+    for (let ei = 0; ei < (DB.expenses||[]).length; ei++) {
+      const ex = DB.expenses[ei];
+      if (!ex) continue;
+      if (Array.isArray(ex.attachments)) {
+        for (let ai = 0; ai < ex.attachments.length; ai++) {
+          const at = ex.attachments[ai];
+          if (at && at.data === '__idb__') {
+            const v = await idbGet('expense_attach_' + ex.id + '_' + ai);
+            if (v) DB.expenses[ei].attachments[ai].data = v;
+            // miss 시 마커 보존 (다른 기기에서 등록되었을 수 있음)
+          }
+        }
+      }
+      if (Array.isArray(ex.quotes)) {
+        for (let qi = 0; qi < ex.quotes.length; qi++) {
+          const q = ex.quotes[qi];
+          if (q && q.data === '__idb__') {
+            const v = await idbGet('expense_quote_' + ex.id + '_' + qi);
+            if (v) DB.expenses[ei].quotes[qi].data = v;
+          }
+        }
+      }
+    }
+    for (let ci = 0; ci < (DB.approvalComments||[]).length; ci++) {
+      const c = DB.approvalComments[ci];
+      if (!c || !Array.isArray(c.attachments)) continue;
+      for (let ai = 0; ai < c.attachments.length; ai++) {
+        const at = c.attachments[ai];
+        if (at && at.data === '__idb__') {
+          const v = await idbGet('comment_attach_' + c.id + '_' + ai);
+          if (v) DB.approvalComments[ci].attachments[ai].data = v;
+        }
+      }
+    }
+    for (let ni = 0; ni < (DB.newProducts||[]).length; ni++) {
+      const np = DB.newProducts[ni];
+      if (!np || !np.id) continue;
+      for (const field of ['productImg','formulationImg','packagingImg','note']) {
+        if (np[field] === '__idb__') {
+          const v = await idbGet('newProduct_' + np.id + '_' + field);
+          if (v) DB.newProducts[ni][field] = v;
+        }
+      }
+      for (const field of ['productImgs','formulationImgs']) {
+        if (!Array.isArray(np[field])) continue;
+        for (let idx = 0; idx < np[field].length; idx++) {
+          if (np[field][idx] === '__idb__') {
+            const v = await idbGet('newProduct_' + np.id + '_' + field + '_' + idx);
+            if (v) DB.newProducts[ni][field][idx] = v;
+          }
+        }
+      }
+    }
+  } catch(e) {
+    console.warn('⚠️ [v2.2.80 HYDRATE] 실패:', e);
+  }
+
   // 프로필 사진 복원
   const photo = await idbGet('reniv_user_photo');
   if (photo) applyUserPhoto(photo);
@@ -7036,6 +7214,229 @@ async function restoreIDBData() {
   const logo = await idbGet('reniv_logo');
   if (logo) applyLogo(logo);
 }
+
+// v2.2.80 — 영구 저장 권한 요청 (IDB 가 디스크 압박 시 자동 evict 되지 않도록)
+async function _v280RequestPersistentStorage() {
+  try {
+    if (!navigator.storage || typeof navigator.storage.persist !== 'function') {
+      console.log('[v2.2.80 PERSIST] API 미지원');
+      return;
+    }
+    const already = await navigator.storage.persisted();
+    if (already) {
+      console.log('[v2.2.80 PERSIST] 이미 영구 저장됨');
+      return;
+    }
+    const granted = await navigator.storage.persist();
+    if (granted) {
+      console.log('✅ [v2.2.80 PERSIST] 영구 저장 권한 획득 — 자동 삭제 안 됨');
+    } else {
+      console.log('[v2.2.80 PERSIST] 권한 거부 — IDB 자동 evict 가능 (Firestore 백업으로 안전)');
+    }
+    try {
+      const est = await navigator.storage.estimate();
+      console.log('[v2.2.80 PERSIST] 저장소 추정:', {
+        usage: ((est.usage||0)/1024/1024).toFixed(1) + 'MB',
+        quota: ((est.quota||0)/1024/1024).toFixed(0) + 'MB',
+      });
+    } catch(_){}
+  } catch(e) {
+    console.warn('[v2.2.80 PERSIST] 실패:', e);
+  }
+}
+
+// v2.2.80 — retroactive: 사용자 PC 에 이미 inline 으로 저장된 base64 첨부를 IDB 로 강제 이동
+//   이번에 ENABLE 한 expenses/comments/newProducts 가 대상. 한 번 실행하면 다음부터는 자동 처리됨.
+//   안전: 1) 메모리 내에서만 마이그레이션 → 2) IDB 저장 성공 시에만 마커 교체 → 3) 완료 후 saveDataNow
+async function _v280MigrateInlineToIdb() {
+  if (window._v280MigrationDone) return;
+  try {
+    // 이미 완료 마커 확인
+    if (localStorage.getItem('v280_migrate_done') === '1') {
+      window._v280MigrationDone = true;
+      return;
+    }
+    if (!_firestoreDataLoaded) {
+      // Firestore 로드 전엔 안전상 마이그레이션 미실행 (덮어쓰기 방지)
+      console.log('[v2.2.80 MIGRATE] Firestore 로드 대기 중 — skip');
+      return;
+    }
+    console.log('🚚 [v2.2.80 MIGRATE] 시작 — 기존 inline base64 → IDB');
+    let moved = 0, skipped = 0, failed = 0, freed = 0;
+
+    // expenses.attachments / expenses.quotes
+    for (const ex of (DB.expenses||[])) {
+      if (!ex || ex.id == null) continue;
+      if (Array.isArray(ex.attachments)) {
+        for (let ai = 0; ai < ex.attachments.length; ai++) {
+          const at = ex.attachments[ai];
+          if (!at || typeof at.data !== 'string') continue;
+          if (at.data === '__idb__') { skipped++; continue; }
+          if (at.data.length < 100) continue;
+          try {
+            await idbSet('expense_attach_' + ex.id + '_' + ai, at.data);
+            freed += at.data.length;
+            ex.attachments[ai] = { ...at, data: '__idb__' };
+            moved++;
+          } catch(e) { failed++; }
+        }
+      }
+      if (Array.isArray(ex.quotes)) {
+        for (let qi = 0; qi < ex.quotes.length; qi++) {
+          const q = ex.quotes[qi];
+          if (!q || typeof q.data !== 'string') continue;
+          if (q.data === '__idb__') { skipped++; continue; }
+          if (q.data.length < 100) continue;
+          try {
+            await idbSet('expense_quote_' + ex.id + '_' + qi, q.data);
+            freed += q.data.length;
+            ex.quotes[qi] = { ...q, data: '__idb__' };
+            moved++;
+          } catch(e) { failed++; }
+        }
+      }
+    }
+
+    // approvalComments.attachments
+    for (const c of (DB.approvalComments||[])) {
+      if (!c || c.id == null || !Array.isArray(c.attachments)) continue;
+      for (let ai = 0; ai < c.attachments.length; ai++) {
+        const at = c.attachments[ai];
+        if (!at || typeof at.data !== 'string') continue;
+        if (at.data === '__idb__') { skipped++; continue; }
+        if (at.data.length < 100) continue;
+        try {
+          await idbSet('comment_attach_' + c.id + '_' + ai, at.data);
+          freed += at.data.length;
+          c.attachments[ai] = { ...at, data: '__idb__' };
+          moved++;
+        } catch(e) { failed++; }
+      }
+    }
+
+    // newProducts 이미지/note
+    for (const np of (DB.newProducts||[])) {
+      if (!np || !np.id) continue;
+      for (const field of ['productImg','formulationImg','packagingImg']) {
+        const v = np[field];
+        if (typeof v !== 'string' || v === '__idb__' || v.length < 100) continue;
+        try {
+          await idbSet('newProduct_' + np.id + '_' + field, v);
+          freed += v.length;
+          np[field] = '__idb__';
+          moved++;
+        } catch(e) { failed++; }
+      }
+      for (const field of ['productImgs','formulationImgs']) {
+        if (!Array.isArray(np[field])) continue;
+        for (let idx = 0; idx < np[field].length; idx++) {
+          const v = np[field][idx];
+          if (typeof v !== 'string' || v === '__idb__' || v.length < 100) continue;
+          try {
+            await idbSet('newProduct_' + np.id + '_' + field + '_' + idx, v);
+            freed += v.length;
+            np[field][idx] = '__idb__';
+            moved++;
+          } catch(e) { failed++; }
+        }
+      }
+      if (typeof np.note === 'string' && np.note !== '__idb__' && np.note.length > 2000) {
+        try {
+          await idbSet('newProduct_' + np.id + '_note', np.note);
+          freed += np.note.length;
+          np.note = '__idb__';
+          moved++;
+        } catch(e) { failed++; }
+      }
+    }
+
+    console.log('✅ [v2.2.80 MIGRATE] 완료 — 이전:' + moved + ' 건너뜀:' + skipped + ' 실패:' + failed
+      + ' 확보:' + (freed/1024/1024).toFixed(2) + 'MB');
+
+    if (moved > 0) {
+      try {
+        await saveDataNow();
+        console.log('✅ [v2.2.80 MIGRATE] 마이그레이션 후 저장 완료');
+      } catch(e) {
+        console.warn('⚠️ [v2.2.80 MIGRATE] 저장 실패 — 다음 저장 시 재시도됨:', e);
+      }
+      try {
+        if (typeof showNotif === 'function') {
+          showNotif('💾 저장 공간 ' + (freed/1024/1024).toFixed(1) + 'MB 확보 (' + moved + '개 파일 안전 보관)', 'success');
+        }
+      } catch(_){}
+    }
+
+    // 완료 마커 (다음 새로고침부터 skip)
+    try { localStorage.setItem('v280_migrate_done', '1'); } catch(_){}
+    window._v280MigrationDone = true;
+
+  } catch(e) {
+    console.error('❌ [v2.2.80 MIGRATE] 실패:', e);
+    // 실패해도 다음 새로고침에 재시도 (완료 마커 안 찍음)
+  }
+}
+
+// v2.2.80 — 진단/롤백 콘솔 명령
+window.v280Status = async function() {
+  try {
+    const est = navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : {};
+    const persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted() : false;
+    const lsTotal = Object.keys(localStorage).reduce((s,k)=>{ try{return s+(localStorage.getItem(k)||'').length;}catch(_){return s;} },0);
+    console.log('====== v2.2.80 STATUS ======');
+    console.log('IDB 영구 저장:', persisted ? '✅' : '❌');
+    console.log('IDB 사용량:', ((est.usage||0)/1024/1024).toFixed(1) + 'MB / ' + ((est.quota||0)/1024/1024).toFixed(0) + 'MB');
+    console.log('localStorage 총:', (lsTotal/1024/1024).toFixed(2) + 'MB');
+    console.log('마이그레이션 완료:', localStorage.getItem('v280_migrate_done') === '1' ? '✅' : '❌ (다음 새로고침 시 자동 실행)');
+    console.log('expenses inline 첨부 남음:',
+      (DB.expenses||[]).reduce((s,e)=>s+((e.attachments||[]).filter(a=>a&&a.data&&a.data!=='__idb__'&&a.data.length>100).length+(e.quotes||[]).filter(q=>q&&q.data&&q.data!=='__idb__'&&q.data.length>100).length),0));
+    console.log('comments inline 첨부 남음:',
+      (DB.approvalComments||[]).reduce((s,c)=>s+((c.attachments||[]).filter(a=>a&&a.data&&a.data!=='__idb__'&&a.data.length>100).length),0));
+    console.log('newProducts inline 이미지 남음:',
+      (DB.newProducts||[]).reduce((s,np)=>{
+        let c=0;
+        ['productImg','formulationImg','packagingImg'].forEach(f=>{ if(typeof np[f]==='string'&&np[f]!=='__idb__'&&np[f].length>100) c++; });
+        ['productImgs','formulationImgs'].forEach(f=>{ if(Array.isArray(np[f])) c+=np[f].filter(v=>typeof v==='string'&&v!=='__idb__'&&v.length>100).length; });
+        return s+c;
+      },0));
+    console.log('============================');
+  } catch(e) { console.error(e); }
+};
+
+window.v280RunMigration = async function(force) {
+  if (force) {
+    localStorage.removeItem('v280_migrate_done');
+    window._v280MigrationDone = false;
+  }
+  await _v280MigrateInlineToIdb();
+};
+
+// v2.2.80 — 페이지 로드 후 영구 저장 권한 + retroactive 마이그레이션
+(function _v280Init(){
+  let _tried = false;
+  function _tryRun(){
+    if (_tried) return;
+    try { _v280RequestPersistentStorage(); } catch(_){}
+    // Firestore 로드 완료 + DB 준비 후 마이그레이션
+    if (typeof _firestoreDataLoaded !== 'undefined' && _firestoreDataLoaded && typeof DB === 'object' && DB) {
+      _tried = true;
+      setTimeout(()=>{ _v280MigrateInlineToIdb(); }, 3000); // 3초 후 (사용자 작업 우선)
+    }
+  }
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    setTimeout(_tryRun, 2000);
+  } else {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(_tryRun, 2000));
+  }
+  // 안전망: 10초 간격으로 5번 까지 재시도 (Firestore 늦게 로드되는 경우)
+  let _retries = 0;
+  const _itv = setInterval(() => {
+    if (_tried || _retries++ >= 5) { clearInterval(_itv); return; }
+    _tryRun();
+  }, 10000);
+})();
+
+
 
 function loadData() {
   try {
