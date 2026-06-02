@@ -5448,7 +5448,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.70';
+const ERP_VERSION = 'v2.2.71';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27972,26 +27972,44 @@ function _dedupPoExpensesSafe() {
 }
 
 function renderApprovalPage() {
-  // v2.2.69: Firestore 머지 완료 전엔 fast-path 데이터로 잘못 표시하지 않게 placeholder
+  // v2.2.69 + v2.2.71: Firestore 머지 완료 전엔 placeholder, 800ms 초과 시 fast-path 강제 렌더
   if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) {
-    try {
-      // 상단 stat 카드 4개 placeholder
-      ['ap-stat-pending','ap-stat-paypending','ap-stat-balance-due','ap-stat-month-orders','ap-stat-month-paid'].forEach(function(id){
-        var el = document.getElementById(id);
-        if (el) el.textContent = '…';
-      });
-      // 응급 알림 배지 숨김
-      ['ap-stat-pending-urgent','ap-stat-paypending-urgent'].forEach(function(id){
-        var el = document.getElementById(id);
-        if (el) el.style.display = 'none';
-      });
-      // 4개 테이블 placeholder
-      ['ap-po-table','ap-exp-table','ap-nonpo-table','ap-sample-table'].forEach(function(id){
-        var el = document.getElementById(id);
-        if (el) el.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:#94a3b8;font-size:12.5px">⏳ Firestore 데이터 동기화 중…</td></tr>';
-      });
-    } catch(_){}
-    return;
+    const _bypass = window.__apFastPathBypass === true;
+    if (!_bypass) {
+      try {
+        // 상단 stat 카드 4개 placeholder (점 3개 - 짧고 가벼움)
+        ['ap-stat-pending','ap-stat-paypending','ap-stat-balance-due','ap-stat-month-orders','ap-stat-month-paid'].forEach(function(id){
+          var el = document.getElementById(id);
+          if (el) el.textContent = '…';
+        });
+        ['ap-stat-pending-urgent','ap-stat-paypending-urgent'].forEach(function(id){
+          var el = document.getElementById(id);
+          if (el) el.style.display = 'none';
+        });
+        ['ap-po-table','ap-exp-table','ap-nonpo-table','ap-sample-table'].forEach(function(id){
+          var el = document.getElementById(id);
+          if (el) el.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:#94a3b8;font-size:12.5px">⏳ Firestore 데이터 동기화 중…</td></tr>';
+        });
+        // 800ms 타임아웃 — Firestore 응답 늦으면 fast-path 강제 렌더
+        if (!window.__apFastPathTimer) {
+          window.__apFastPathTimer = setTimeout(function(){
+            if (typeof _firestoreDataLoaded === 'undefined' || !_firestoreDataLoaded) {
+              window.__apFastPathBypass = true;
+              console.log('⏱️ [v2.2.71] Firestore 응답 지연 — fast-path 강제 렌더');
+              try { renderApprovalPage(); } catch(_){}
+            }
+            window.__apFastPathTimer = null;
+          }, 800);
+        }
+      } catch(_){}
+      return;
+    }
+    // bypass=true: 아래로 통과 (fast-path 렌더)
+  }
+  // Firestore 머지 완료 시 bypass 플래그 자동 해제 (다음 새로고침 대비)
+  if (typeof _firestoreDataLoaded !== 'undefined' && _firestoreDataLoaded) {
+    window.__apFastPathBypass = false;
+    if (window.__apFastPathTimer) { clearTimeout(window.__apFastPathTimer); window.__apFastPathTimer = null; }
   }
   // v1.9.994: po_balance/po_prepay 중복 자동 정리 (한 orderId+category 당 1건)
   try { _dedupPoExpensesSafe(); } catch(_){}
@@ -29046,8 +29064,8 @@ function switchApprovalTab(tab, skipSwitch) {
 }
 
 function updateApprovalStats() {
-  // v2.2.69: 머지 완료 전엔 stat 계산 skip (renderApprovalPage 가 placeholder 표시 중)
-  if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) return;
+  // v2.2.69 + v2.2.71: 머지 완료 전엔 stat skip — 단, fast-path bypass 면 통과
+  if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded && !window.__apFastPathBypass) return;
   try {
     // v1.9.220: 5박스 재설계
     // 1) 결재 대기: approvals(pending) + orders(결재 전) 전체 카운트
@@ -29153,8 +29171,8 @@ function updateApprovalStats() {
 }
 
 function updateApprovalBadges() {
-  // v2.2.69: 머지 완료 전엔 사이드바 배지도 placeholder
-  if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) {
+  // v2.2.69 + v2.2.71: 머지 완료 전엔 placeholder — fast-path bypass 면 통과
+  if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded && !window.__apFastPathBypass) {
     try {
       const _b = document.getElementById('nb-approval');
       if (_b) {
