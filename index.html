@@ -5452,7 +5452,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.98';
+const ERP_VERSION = 'v2.2.99';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13541,6 +13541,102 @@ window.diagApPending = function() {
   return d;
 };
 console.log('%c💡 결재 대기 진단: diagApPending()','background:#3b82f6;color:#fff;padding:3px 8px');
+
+// v2.2.99 — pending 한 줄씩 간결하게 출력
+window.listPending = function() {
+  if (typeof updateApprovalBadges === 'function') updateApprovalBadges();
+  const d = window.__lastApPendingDiag;
+  if (!d) { console.log('진단 데이터 없음 — 결재요청 페이지 한 번 방문 필요'); return; }
+  console.log('%c━━ 결재 대기 ' + d.total + '건 (응급 ' + d.urgent + ') ━━','background:#dc2626;color:#fff;padding:4px 10px;font-weight:700');
+  if (d.pendingApprovals.length > 0) {
+    console.log('▼ pending approvals (' + d.pendingApprovals.length + '건):');
+    d.pendingApprovals.forEach(a => {
+      console.log('  ID=' + a.id + ' | ' + a.type + ' | ' + (a.priority==='urgent'?'🚨 응급':'일반') + ' | ' + (a.category||'-') + ' | "' + (a.title||'-').slice(0,50) + '"');
+    });
+    console.log('  → 해결: approveAp(<ID>) 또는 deleteAp(<ID>)');
+  }
+  if (d.pendingOrders.length > 0) {
+    console.log('▼ pending orders (' + d.pendingOrders.length + '건):');
+    d.pendingOrders.forEach(o => {
+      console.log('  ID=' + o.id + ' | serial=' + (o.serial||'-') + ' | urgent=' + o.urgent);
+    });
+    console.log('  → 해결: 발주서 결재 페이지에서 날인 또는 날인불필요 처리');
+  }
+};
+
+// v2.2.99 — 자동 fix: po_approval 인데 연결 order 에 stamp/stampNotRequired 있으면 → approved 처리
+window.autoFixApPending = async function() {
+  console.log('%c━━ 자동 정리 시작 ━━','background:#10b981;color:#fff;padding:4px 10px;font-weight:700');
+  let fixed = 0;
+  (DB.approvals||[]).forEach(a => {
+    if (!a || a.status !== 'pending') return;
+    if (a.type !== 'po_approval' || a.refId == null) return;
+    const order = (DB.orders||[]).find(o => o && String(o.id) === String(a.refId));
+    if (!order) {
+      console.log('  ⚠️ id=' + a.id + ' orphan (연결 order 없음) — 그대로 둠');
+      return;
+    }
+    if (order.stampData || order.stampName || order.stampNotRequired || order.stampedAt || order.approvalStampImage) {
+      a.status = 'approved';
+      a.approvedAt = Date.now();
+      a.updatedAt = Date.now();
+      a.manualApprove = true;
+      console.log('  ✅ id=' + a.id + ' "' + (a.title||'').slice(0,40) + '" → approved (order ' + order.id + ' 날인 있음)');
+      fixed++;
+    }
+  });
+  if (fixed > 0) {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+    if (typeof saveDataNow === 'function') {
+      await saveDataNow();
+    }
+    if (typeof updateApprovalBadges === 'function') updateApprovalBadges();
+    if (typeof renderApprovalPage === 'function') renderApprovalPage();
+    console.log('%c✅ ' + fixed + '건 자동 정리 완료','background:#10b981;color:#fff;padding:3px 8px');
+    alert('✅ ' + fixed + '건 자동 정리 완료. 새로고침해도 유지됩니다.');
+  } else {
+    console.log('자동 정리 가능한 항목 없음. listPending() 으로 확인 후 수동 approveAp(id) 사용.');
+    alert('자동 정리 항목 없음. 콘솔에서 listPending() 으로 확인하세요.');
+  }
+  return fixed;
+};
+
+// v2.2.99 — 특정 approval 을 명시적으로 approved 처리 (오타 방지)
+window.approveAp = async function(id) {
+  if (id == null) { console.log('사용법: approveAp(123)'); return; }
+  const a = (DB.approvals||[]).find(x => x && (x.id === id || Number(x.id) === Number(id) || String(x.id) === String(id)));
+  if (!a) { console.warn('❌ id=' + id + ' 결재 못 찾음'); return; }
+  console.log('처리 전:', { id: a.id, status: a.status, title: a.title });
+  a.status = 'approved';
+  a.approvedAt = Date.now();
+  a.updatedAt = Date.now();
+  a.manualApprove = true;
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+  if (typeof saveDataNow === 'function') await saveDataNow();
+  if (typeof updateApprovalBadges === 'function') updateApprovalBadges();
+  if (typeof renderApprovalPage === 'function') renderApprovalPage();
+  console.log('%c✅ id=' + id + ' → approved','background:#10b981;color:#fff;padding:3px 8px');
+  alert('✅ 결재 ID ' + id + ' approved 처리 완료');
+};
+
+// v2.2.99 — 특정 approval 삭제 (옛 zombie 결재 제거용)
+window.deleteAp = async function(id) {
+  if (id == null) { console.log('사용법: deleteAp(123)'); return; }
+  const a = (DB.approvals||[]).find(x => x && (x.id === id || Number(x.id) === Number(id) || String(x.id) === String(id)));
+  if (!a) { console.warn('❌ id=' + id + ' 결재 못 찾음'); return; }
+  if (!confirm('결재 삭제:\nid=' + id + '\ntype=' + a.type + '\ntitle="' + (a.title||'-') + '"\n\n삭제할까요?')) return;
+  if (!Array.isArray(DB._deletedApprovalIds)) DB._deletedApprovalIds = [];
+  DB._deletedApprovalIds.push({ id: a.id, ts: Date.now(), reason: 'manual-delete-v299' });
+  DB.approvals = (DB.approvals||[]).filter(x => x && String(x.id) !== String(a.id));
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+  if (typeof saveDataNow === 'function') await saveDataNow();
+  if (typeof updateApprovalBadges === 'function') updateApprovalBadges();
+  if (typeof renderApprovalPage === 'function') renderApprovalPage();
+  console.log('%c🗑️ id=' + id + ' 삭제 완료','background:#dc2626;color:#fff;padding:3px 8px');
+  alert('🗑️ 결재 ID ' + id + ' 삭제 완료');
+};
+
+console.log('%c💡 v2.2.99 결재 도구: listPending() / autoFixApPending() / approveAp(id) / deleteAp(id)','background:#10b981;color:#fff;padding:3px 8px');
 
 window.fixZombieDups = function() {
   console.log('====== v2.2.90 좀비 dedup 진단 ======');
