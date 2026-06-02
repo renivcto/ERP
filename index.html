@@ -5451,7 +5451,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.86';
+const ERP_VERSION = 'v2.2.87';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13409,10 +13409,97 @@ window.__dedupShopOrders = function() {
   } catch(e) { console.error('dedup 실패:', e); alert('실패: ' + e.message); return 0; }
 };
 
+// v2.2.87 — 자사몰/일반 중복 자동 제거 (모든 필드 완전 동일한 행 1건만 유지)
+//   원인: tombstone 이 ID 기반인데, Cloud Function/다른 기기가 NEW ID 로 동일 데이터 재삽입 → 부활
+//   조건: cafe24OriginalOrderId 가 있으면 (분할 자식 행) → 절대 dedup 안 함
+//   키: orderNo + customerName + qty + paymentAmount + productName + shopName
+function _autoDedupIdenticalShopOrders() {
+  try {
+    const orders = DB.shopOrders || [];
+    if (orders.length < 2) return 0;
+    const norm = s => String(s||'').trim();
+    const sigOf = o => {
+      if (!o) return null;
+      if (o.cafe24OriginalOrderId) return null; // 분할 자식은 dedup 제외
+      const on = norm(o.orderNo); if (!on) return null;
+      return [
+        on,
+        norm(o.customerName),
+        String(parseInt(o.qty)||0),
+        Math.round(Number(o.paymentAmount || o.totalPrice || 0)),
+        norm(o.productName).slice(0, 80),
+        norm(o.shopName || o.shop)
+      ].join('§');
+    };
+    const groups = new Map();
+    orders.forEach(o => {
+      const sig = sigOf(o);
+      if (!sig) return;
+      if (!groups.has(sig)) groups.set(sig, []);
+      groups.get(sig).push(o);
+    });
+    const removedAll = [];
+    groups.forEach((arr, sig) => {
+      if (arr.length < 2) return;
+      // 우선순위 정렬: 송장번호 있는 것 → stockDeducted 된 것 → id 작은 것
+      arr.sort((a,b) => {
+        const at = !!(a.trackingNumber || a.tracking) ? 1 : 0;
+        const bt = !!(b.trackingNumber || b.tracking) ? 1 : 0;
+        if (at !== bt) return bt - at; // 송장 있는 게 앞으로
+        const as = a.stockDeducted ? 1 : 0;
+        const bs = b.stockDeducted ? 1 : 0;
+        if (as !== bs) return bs - as;
+        return (Number(a.id)||0) - (Number(b.id)||0);
+      });
+      // 첫 번째 (가장 신뢰할 만한) 만 keep, 나머지는 drop
+      for (let i = 1; i < arr.length; i++) removedAll.push(arr[i]);
+    });
+    if (removedAll.length === 0) return 0;
+    const dropIds = new Set(removedAll.map(r => String(r.id)));
+    DB.shopOrders = orders.filter(o => o && !dropIds.has(String(o.id)));
+    // tombstone 등록 (manual 형식 — COUNT-GUARD 가 인식)
+    if (!Array.isArray(DB._deletedShopOrderSigs)) DB._deletedShopOrderSigs = [];
+    const now = Date.now();
+    removedAll.forEach(r => {
+      const orderNo = String(r.orderNo || '');
+      const customerName = String(r.customerName || '');
+      const sig = 'manual:' + orderNo + ':' + customerName;
+      // 같은 sig + 같은 dupId 가 있으면 skip
+      if (!DB._deletedShopOrderSigs.some(x => x && x.sig === sig && String(x.dupId||x.id) === String(r.id))) {
+        DB._deletedShopOrderSigs.push({
+          sig, orderNo, customerName, dupId: String(r.id), id: r.id,
+          ts: now, reason: 'auto-dedup-v287'
+        });
+      }
+    });
+    // localStorage 백업
+    try {
+      const _ls = (JSON.parse(localStorage.getItem('reniv_deleted_shoporder_sigs')||'[]') || []);
+      removedAll.forEach(r => {
+        const orderNo = String(r.orderNo || '');
+        const customerName = String(r.customerName || '');
+        const sig = 'manual:' + orderNo + ':' + customerName;
+        if (!_ls.some(x => x && x.sig === sig && String(x.dupId) === String(r.id))) {
+          _ls.push({ sig, orderNo, customerName, dupId: String(r.id), ts: now });
+        }
+      });
+      localStorage.setItem('reniv_deleted_shoporder_sigs', JSON.stringify(_ls.slice(-500)));
+    } catch(_){}
+    console.warn('🪦 [v2.2.87 AUTO-DEDUP] 완전 동일 자사몰 중복 ' + removedAll.length + '건 제거 + tombstone 등록');
+    removedAll.slice(0, 5).forEach(r => console.warn('  · ' + (r.orderNo||'-') + ' / ' + (r.customerName||'-') + ' / id=' + r.id));
+    // 즉시 저장
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+    if (typeof saveDataNow === 'function') saveDataNow().catch(e => console.warn('[v2.2.87] saveDataNow 실패:', e));
+    return removedAll.length;
+  } catch(e) { console.warn('_autoDedupIdenticalShopOrders 실패:', e); return 0; }
+}
+
 function renderShopOrderTable() {
   const tbody = $('shop-order-table'); if (!tbody) return;
   // v1.9.784: 합쳐진 중복 자동 정리
   try { _cleanupMergedShopOrders(); } catch(_){}
+  // v2.2.87: 모든 필드 완전 동일한 자사몰 중복 자동 제거 (좀비 부활 차단)
+  try { _autoDedupIdenticalShopOrders(); } catch(_){}
   // v1.9.379: 기간 필터 초기화 (한 번만 효력 있음)
   if (typeof _periodInit === 'function') _periodInit('so');
   const period = (typeof _periodComputeRange === 'function') ? _periodComputeRange('so') : { start:'', end:'' };
@@ -43723,6 +43810,38 @@ function initERPWhenReady() {
             }
           }
         } catch(eSo) { console.warn('[v2.2.45] shopOrders tombstone 사전 필터 실패:', eSo); }
+        // v2.2.87: Firestore/local 머지 후에도 완전 동일 중복 강제 제거 — 자동 부활 차단
+        try {
+          [firestoreDB, localDB].forEach(_db => {
+            if (!_db || !Array.isArray(_db.shopOrders) || _db.shopOrders.length < 2) return;
+            const _norm = s => String(s||'').trim();
+            const _sigOf = o => (!o || o.cafe24OriginalOrderId) ? null
+              : [_norm(o.orderNo), _norm(o.customerName), String(parseInt(o.qty)||0),
+                 Math.round(Number(o.paymentAmount || o.totalPrice || 0)),
+                 _norm(o.productName).slice(0, 80), _norm(o.shopName || o.shop)].join('§');
+            const _gr = new Map();
+            _db.shopOrders.forEach(o => { const s = _sigOf(o); if (!s) return; if (!_gr.has(s)) _gr.set(s, []); _gr.get(s).push(o); });
+            const _drop = new Set();
+            _gr.forEach(arr => {
+              if (arr.length < 2) return;
+              arr.sort((a,b) => {
+                const at = !!(a.trackingNumber || a.tracking) ? 1 : 0;
+                const bt = !!(b.trackingNumber || b.tracking) ? 1 : 0;
+                if (at !== bt) return bt - at;
+                const as = a.stockDeducted ? 1 : 0;
+                const bs = b.stockDeducted ? 1 : 0;
+                if (as !== bs) return bs - as;
+                return (Number(a.id)||0) - (Number(b.id)||0);
+              });
+              for (let i = 1; i < arr.length; i++) _drop.add(String(arr[i].id));
+            });
+            if (_drop.size > 0) {
+              const _before = _db.shopOrders.length;
+              _db.shopOrders = _db.shopOrders.filter(o => o && !_drop.has(String(o.id)));
+              console.warn('🪦 [v2.2.87 PRE-MERGE] 완전 동일 자사몰 중복 ' + (_before - _db.shopOrders.length) + '건 제거');
+            }
+          });
+        } catch(eSo2) { console.warn('[v2.2.87] PRE-MERGE dedup 실패:', eSo2); }
       } catch(e) { console.warn('[v1.9.693] tombstone 사전 필터 실패:', e); }
       // v1.9.945: 일반 결재(approval) tombstone 사전 차단 — SYNC RECOVERY 가 tombstone 을
       //   무시하고 삭제된 결재를 다시 끌어오는(부활) 버그 차단. 양쪽 입력에서 미리 제거.
