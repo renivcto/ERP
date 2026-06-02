@@ -5448,7 +5448,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.64';
+const ERP_VERSION = 'v2.2.65';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13646,6 +13646,36 @@ function _sdColorToLight(hex) {
   };
   return map[hex] || { bg:'#f8fafc', border:'#e2e8f0' };
 }
+
+// v2.2.65: 지출결의서 expense 진단 명령
+window.__diagnoseExpense = function(expenseId) {
+  const e = (DB.expenses||[]).find(x => x && (x.id === expenseId || Number(x.id) === Number(expenseId) || String(x.id) === String(expenseId)));
+  if (!e) { console.warn('expense 없음 — id:', expenseId); return; }
+  console.log('%c=== expense 진단 ===','background:#0ea5e9;color:#fff;padding:4px 8px;font-weight:700');
+  console.log('id:', e.id, '| 분류:', e.category, '| 제목:', e.title);
+  console.log('금액:', e.amount, '/ 업체:', e.vendor);
+  console.log('계좌 필드:');
+  ['bankAccount','account','bankHolder','accountHolder','bankName','bank'].forEach(k => {
+    console.log('  e.' + k + ':', e[k] === undefined ? '(undefined)' : e[k]);
+  });
+  console.log('첨부 필드:');
+  console.log('  attachments:', Array.isArray(e.attachments) ? e.attachments.length + '건' : '(없음)', e.attachments);
+  console.log('  quotes:', Array.isArray(e.quotes) ? e.quotes.length + '건' : '(없음)', e.quotes);
+  if (e.orderId) {
+    const o = (DB.orders||[]).find(x => x && (x.id === e.orderId || Number(x.id) === Number(e.orderId)));
+    if (o) {
+      console.log('연결 발주서 #' + o.id + ' (해외:' + !!o.isOverseas + ')');
+      if (o.isOverseas) {
+        console.log('  invoiceFile:', o.invoiceFile ? '(' + (o.invoiceFile.name||'?') + ')' : '(없음)');
+        console.log('  otherFiles:', Array.isArray(o.otherFiles) ? o.otherFiles.length + '건' : '(없음)');
+      }
+    }
+  }
+  console.log('═══════════════════════');
+  console.log('💡 데이터 누락 시: 다른 사용자가 이 expense 를 수정 후 저장하면 다시 정상 동기화됩니다');
+  return e;
+};
+console.log('%c💡 expense 진단: __diagnoseExpense(expenseId)','background:#10b981;color:#fff;padding:3px 8px');
 
 // v2.2.47: 매출 대시보드 헬퍼 — 주어진 기간의 KPI 계산
 function _sdCalcMetrics(start, end) {
@@ -34982,10 +35012,14 @@ function openExpenseApprovalForm(expenseId) {
   const taxLabel = e.taxInvoice === '수령완료' ? '세금계산서 (수령완료)' : '세금계산서';
   // v1.9.219: 지급 방법 및 계좌정보 — expense 자체에 있으면 그대로 사용, 없으면 샘플/업체에서 조회
   let payMethod = (e.payMethod && String(e.payMethod).trim()) || '';
-  let bankName    = e.bankName    || '';
-  // v2.2.58: 옛/새 필드명 모두 호환 (bankAccount → account fallback)
-  let bankAccount = e.bankAccount || e.account        || '';
-  let bankHolder  = e.bankHolder  || e.accountHolder  || '';
+  let bankName    = e.bankName    || (e.bank && e.bank.name) || '';
+  // v2.2.58 + v2.2.65: 옛/새/중첩 필드명 모두 호환
+  let bankAccount = e.bankAccount || e.account || (e.bank && e.bank.account) || (e.bank && e.bank.number) || '';
+  let bankHolder  = e.bankHolder  || e.accountHolder || (e.bank && e.bank.holder) || (e.bank && e.bank.beneficiary) || '';
+  // v2.2.65: 진단 로그 (콘솔에서 데이터 누락 확인 가능)
+  if (!bankAccount && (e.category === 'po_balance' || e.category === 'po_prepay' || e.category === 'sample' || e.category === 'other' || e.category === 'ad')) {
+    console.log('[expense voucher] 계좌 누락 감지 — expense:', e.id, '/ 사용 가능 필드:', Object.keys(e || {}).filter(k => /bank|account|holder/i.test(k)).join(', ') || '(없음)');
+  }
   if (!payMethod && e.category === 'sample' && e.sampleId) {
     const sp = (DB.samples||[]).find(x => x && (x.id === e.sampleId || Number(x.id) === Number(e.sampleId)));
     if (sp) {
