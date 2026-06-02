@@ -5448,7 +5448,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.63';
+const ERP_VERSION = 'v2.2.64';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13767,15 +13767,26 @@ function _sdRenderPrevCompare(elId, curr, prev, isPercent, prevLabel) {
                + '<div style="font-size:10.5px;color:#64748b;margin-top:1px">' + label + ': ' + fmtVal(prev) + '</div>';
 }
 
-// v2.2.47: 매체별 매출/광고비 렌더링
+// v2.2.47 + v2.2.64: 매체별 매출/광고비 — 매출 OR 광고 있는 모든 쇼핑몰 표시
 function _sdRenderMediaPanel(m, fmtWon) {
   const host = document.getElementById('sd-media-host');
   if (!host) return;
-  const shopList = Object.entries(m.shopAgg).map(([id, s]) => {
+  // 매출 쇼핑몰 ID + 광고 쇼핑몰 ID 합집합
+  const allShopIds = new Set();
+  Object.keys(m.shopAgg).forEach(id => allShopIds.add(id));
+  Object.keys(m.adByShop).forEach(id => allShopIds.add(id));
+  const shopList = Array.from(allShopIds).map(id => {
+    const s = m.shopAgg[id];
     const adAmt = m.adByShop[id] || 0;
-    const revVATEx = s.rev / 1.1;
-    const roas = adAmt > 0 ? (s.rev / adAmt) : null;
-    return { id, name: s.name, rev: s.rev, ads: adAmt, roas, revVATEx };
+    if (s) {
+      const revVATEx = s.rev / 1.1;
+      const roas = adAmt > 0 && s.rev > 0 ? (s.rev / adAmt) : null;
+      return { id, name: s.name, rev: s.rev, ads: adAmt, roas, revVATEx, hasOrders: true };
+    }
+    // 매출은 없고 광고만 있는 케이스 — 쇼핑몰명 조회
+    const shop = (DB.shops||[]).find(x => x && String(x.id) === String(id));
+    const name = shop ? (shop.name || '쇼핑몰') : (id === 'unknown' || id === '' ? '미지정' : '쇼핑몰');
+    return { id, name, rev: 0, ads: adAmt, roas: null, revVATEx: 0, hasOrders: false };
   });
   if (shopList.length === 0 && m.tAdsTotal === 0) {
     host.innerHTML = '<div style="text-align:center;padding:80px 0;color:var(--gray-400);font-size:12.5px">조회 기간에 매체별 데이터 없음</div>';
