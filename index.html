@@ -5367,7 +5367,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.45';
+const ERP_VERSION = 'v2.2.46';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13149,9 +13149,10 @@ async function deleteShopOrder(id) {
   }
   // v1.9.784: 삭제 tombstone — 다음 fetch 때 재생성 방지
   if (!Array.isArray(DB._deletedShopOrderSigs)) DB._deletedShopOrderSigs = [];
+  // v2.2.46: id 도 함께 등록 (사전 필터의 ID 매칭용)
   const sig = 'manual:' + String(o.orderNo || '') + ':' + String(o.customerName || '');
-  if (!DB._deletedShopOrderSigs.some(x => x && x.sig === sig)) {
-    DB._deletedShopOrderSigs.push({ sig, ts: Date.now(), orderNo: o.orderNo, reason: 'manual-delete' });
+  if (!DB._deletedShopOrderSigs.some(x => x && x.sig === sig && String(x.id||x.dupId) === String(o.id))) {
+    DB._deletedShopOrderSigs.push({ sig, id: o.id, dupId: o.id, ts: Date.now(), orderNo: o.orderNo, customerName: o.customerName, reason: 'manual-delete' });
   }
   // v2.2.17: filter 도 String 비교
   DB.shopOrders = (DB.shopOrders||[]).filter(x => x && String(x.id) !== _idStr);
@@ -42305,14 +42306,31 @@ function initERPWhenReady() {
           });
           const _hasAnyTomb = _shopOrderTombSigSet.size > 0 || _shopOrderTombOrderNoSet.size > 0;
           if (_hasAnyTomb) {
+            // v2.2.46: ID 기반 매칭으로 변경 (over-filter 차단)
+            //   - tombstone 의 dupId/id 가 있고 정확히 매칭될 때만 제거
+            //   - orderNo/sig 만으로는 합법적인 같은 주문번호 entry 도 제거하던 버그 (v2.2.45 회귀)
+            //   - 단, merged:* prefix tombstone 은 cafe24 분할 부모 제거 용도 → orderNo 매칭 유지
+            const _shopOrderTombIdSet = new Set();
+            [..._fsSoT, ..._lcSoT, ..._lsSoT].forEach(t => {
+              if (!t) return;
+              if (t.dupId != null) _shopOrderTombIdSet.add(String(t.dupId));
+              if (t.id != null && t.sig && String(t.sig).indexOf('manual:') === 0) _shopOrderTombIdSet.add(String(t.id));
+            });
+            // merged:* prefix 만 추출 (cafe24 분할 부모 정리용 — 기존 v784 동작 유지)
+            const _mergedOrderNoSet = new Set();
+            [..._fsSoT, ..._lcSoT, ..._lsSoT].forEach(t => {
+              if (t && t.sig && String(t.sig).indexOf('merged:') === 0) {
+                const parts = String(t.sig).split(':');
+                if (parts[1]) _mergedOrderNoSet.add(parts[1]);
+              }
+            });
             const _filterShopOrder = (o) => {
               if (!o) return false;
-              if (o.orderNo && _shopOrderTombOrderNoSet.has(String(o.orderNo))) return false;
-              if (o.orderNo) {
-                const _sigM = 'manual:' + String(o.orderNo) + ':' + String(o.customerName||'');
-                const _sigG = 'merged:' + String(o.orderNo);
-                if (_shopOrderTombSigSet.has(_sigM) || _shopOrderTombSigSet.has(_sigG)) return false;
-              }
+              // ID 정확 매칭 → 제거 (manual delete tombstone)
+              if (o.id != null && _shopOrderTombIdSet.has(String(o.id))) return false;
+              // merged:* (cafe24 부모) → orderNo 매칭으로 제거 (기존 v784 의도)
+              //   단, cafe24OriginalOrderId 가 없는 행만 (= 부모 행) 제거
+              if (o.orderNo && _mergedOrderNoSet.has(String(o.orderNo)) && !o.cafe24OriginalOrderId) return false;
               return true;
             };
             if (Array.isArray(firestoreDB.shopOrders)) {
