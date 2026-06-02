@@ -5451,7 +5451,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.83';
+const ERP_VERSION = 'v2.2.84';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -35655,9 +35655,65 @@ function _numberToKoreanWon(num) {
 //     - po_balance : 발주서(잔금 %) → 집행내역 = 발주서 rows
 //     - sample     : 샘플 구매 → 집행내역 = 샘플 rows
 //     - other      : 기타 → 제목을 집행내역 1줄로
-function openExpenseApprovalForm(expenseId) {
+async function openExpenseApprovalForm(expenseId) {
   const e = DB.expenses.find(x => x && (x.id === expenseId || Number(x.id) === Number(expenseId)));
   if (!e) { showNotif('지출결의서를 찾을 수 없습니다', 'warning'); return; }
+
+  // v2.2.84: 팝업 차단 회피 — window.open 을 즉시 호출 + 로딩 화면 표시
+  const _w_early = window.open('', '_blank');
+  if (!_w_early) { alert('팝업이 차단되었습니다. 팝업 허용 후 다시 시도해주세요.'); return; }
+  _w_early.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>지출결의서 로딩 중...</title><style>body{font-family:\'Noto Sans KR\',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb;color:#475569}.box{text-align:center}.spin{width:42px;height:42px;border:4px solid #e0e7ff;border-top-color:#6366f1;border-radius:50%;animation:s 0.8s linear infinite;margin:0 auto 14px}@keyframes s{to{transform:rotate(360deg)}}</style></head><body><div class="box"><div class="spin"></div><div style="font-size:14px;font-weight:600">📄 첨부 파일 불러오는 중...</div><div style="font-size:11.5px;color:#94a3b8;margin-top:6px">잠시만 기다려 주세요</div></div></body></html>');
+
+  // v2.2.84: 첨부 파일 사전 hydration — __idb__ 마커를 IDB 에서 실제 base64 로 복원
+  //   (인쇄 페이지의 <a href="${data}"> 가 __idb__ 면 about:blank 로 이동하던 문제)
+  e._hydratedFiles = [];
+  try {
+    const _hyd = async (val, key) => {
+      if (val !== '__idb__') return val;
+      try { const v = await idbGet(key); return v || val; } catch(_){ return val; }
+    };
+    if (Array.isArray(e.quotes)) {
+      for (let qi = 0; qi < e.quotes.length; qi++) {
+        const f = e.quotes[qi]; if (!f || !f.name) continue;
+        const d = await _hyd(f.data, 'expense_quote_' + e.id + '_' + qi);
+        e._hydratedFiles.push({ ...f, data: d, kind: '견적서' });
+      }
+    }
+    if (Array.isArray(e.attachments)) {
+      for (let ai = 0; ai < e.attachments.length; ai++) {
+        const f = e.attachments[ai]; if (!f || !f.name) continue;
+        const d = await _hyd(f.data, 'expense_attach_' + e.id + '_' + ai);
+        e._hydratedFiles.push({ ...f, data: d, kind: '첨부' });
+      }
+    }
+    if ((e.category === 'po_prepay' || e.category === 'po_balance') && e.orderId) {
+      const _po = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
+      if (_po) {
+        if (_po.pdfData && _po.pdfName) {
+          const d = await _hyd(_po.pdfData, 'order_pdf_' + _po.id);
+          e._hydratedFiles.push({ name: _po.pdfName, data: d, type: 'application/pdf', size: 0, kind: '견적서' });
+        }
+        if (_po.stampData && _po.stampName) {
+          const d = await _hyd(_po.stampData, 'order_stamp_' + _po.id);
+          e._hydratedFiles.push({ name: _po.stampName, data: d, type: 'application/pdf', size: 0, kind: '결재 PDF' });
+        }
+        if (Array.isArray(_po.closingDocs)) {
+          for (let di = 0; di < _po.closingDocs.length; di++) {
+            const f = _po.closingDocs[di]; if (!f || !f.name) continue;
+            const d = await _hyd(f.data, 'order_closing_' + _po.id + '_' + di);
+            e._hydratedFiles.push({ ...f, data: d, kind: '마감자료' });
+          }
+        }
+        if (_po.isOverseas) {
+          if (_po.invoiceFile && _po.invoiceFile.name) e._hydratedFiles.push({ ..._po.invoiceFile, kind: 'Invoice' });
+          if (Array.isArray(_po.otherFiles)) _po.otherFiles.forEach(f => { if (f && f.name) e._hydratedFiles.push({ ...f, kind: 'PO 첨부' }); });
+        }
+      }
+    }
+    console.log('[v2.2.84] 지출결의서 첨부 hydrate 완료:', e._hydratedFiles.length, '건');
+  } catch(err) {
+    console.warn('[v2.2.84] hydration 실패:', err);
+  }
 
   // 분류 한글 라벨
   const catMap = {
@@ -35865,8 +35921,9 @@ function openExpenseApprovalForm(expenseId) {
       <td style="text-align:right;font-weight:600">${fmtAmt(r.subtotal)}</td>
     </tr>`).join('');
 
-  const w = window.open('', '_blank');
-  if (!w) { alert('팝업이 차단되었습니다. 팝업 허용 후 다시 시도해주세요.'); return; }
+  // v2.2.84: 앞서 연 _w_early 창을 재사용 (팝업 차단 회피)
+  const w = _w_early;
+  w.document.open();
   w.document.write(`<!DOCTYPE html><html><head><title>지출결의서 - ${e.title||''}</title>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap');
@@ -35999,24 +36056,28 @@ function openExpenseApprovalForm(expenseId) {
         : (e.note ? `<div class="remark-summary">${(summary||'').replace(/</g,'&lt;')}</div>${(e.note||'').replace(/</g,'&lt;')}` : (summary||'').replace(/</g,'&lt;'))}</div>
 
       ${(function(){
-        // v2.2.59 + v2.2.61: 첨부파일 섹션 — 직접 <a href> 링크 (안정적)
-        const allFiles = [];
-        if (Array.isArray(e.quotes)) e.quotes.forEach(f => { if (f && f.name) allFiles.push({...f, kind:'견적서'}); });
-        if (Array.isArray(e.attachments)) e.attachments.forEach(f => { if (f && f.name) allFiles.push({...f, kind:'첨부'}); });
-        if ((e.category === 'po_prepay' || e.category === 'po_balance') && e.orderId) {
-          const _po = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
-          if (_po) {
-            // v2.2.66: 국내 + 해외 PO 모두 — 견적서/도장PDF/마감자료 통합
-            if (_po.pdfData && _po.pdfName) allFiles.push({ name: _po.pdfName, data: _po.pdfData, type: 'application/pdf', size: 0, kind:'견적서' });
-            if (_po.stampData && _po.stampName) allFiles.push({ name: _po.stampName, data: _po.stampData, type: 'application/pdf', size: 0, kind:'결재 PDF' });
-            if (Array.isArray(_po.closingDocs)) _po.closingDocs.forEach(f => { if (f && f.name) allFiles.push({...f, kind:'마감자료'}); });
-            // 해외 PO 전용
-            if (_po.isOverseas) {
-              if (_po.invoiceFile && _po.invoiceFile.name) allFiles.push({..._po.invoiceFile, kind:'Invoice'});
-              if (Array.isArray(_po.otherFiles)) _po.otherFiles.forEach(f => { if (f && f.name) allFiles.push({...f, kind:'PO 첨부'}); });
-            }
-          }
-        }
+        // v2.2.84: 사전 hydrate 된 _hydratedFiles 우선 사용 (IDB __idb__ → base64 변환 완료)
+        //   없으면 (예외 케이스) 기존 방식으로 수집 — 단 __idb__ 인 파일은 about:blank 가 됨
+        const allFiles = Array.isArray(e._hydratedFiles) && e._hydratedFiles.length > 0
+          ? e._hydratedFiles.slice()
+          : (function(){
+              const arr = [];
+              if (Array.isArray(e.quotes)) e.quotes.forEach(f => { if (f && f.name) arr.push({...f, kind:'견적서'}); });
+              if (Array.isArray(e.attachments)) e.attachments.forEach(f => { if (f && f.name) arr.push({...f, kind:'첨부'}); });
+              if ((e.category === 'po_prepay' || e.category === 'po_balance') && e.orderId) {
+                const _po = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
+                if (_po) {
+                  if (_po.pdfData && _po.pdfName) arr.push({ name: _po.pdfName, data: _po.pdfData, type: 'application/pdf', size: 0, kind:'견적서' });
+                  if (_po.stampData && _po.stampName) arr.push({ name: _po.stampName, data: _po.stampData, type: 'application/pdf', size: 0, kind:'결재 PDF' });
+                  if (Array.isArray(_po.closingDocs)) _po.closingDocs.forEach(f => { if (f && f.name) arr.push({...f, kind:'마감자료'}); });
+                  if (_po.isOverseas) {
+                    if (_po.invoiceFile && _po.invoiceFile.name) arr.push({..._po.invoiceFile, kind:'Invoice'});
+                    if (Array.isArray(_po.otherFiles)) _po.otherFiles.forEach(f => { if (f && f.name) arr.push({...f, kind:'PO 첨부'}); });
+                  }
+                }
+              }
+              return arr;
+            })();
         if (allFiles.length === 0) return '';
         // window 안에서 파일 미리보기 함수 정의 — 파일 데이터를 미리 인코딩해서 함수에 전달
         const filesPayload = allFiles.map((f, i) => ({
