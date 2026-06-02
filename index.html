@@ -5448,7 +5448,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.50';
+const ERP_VERSION = 'v2.2.51';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13730,7 +13730,9 @@ function _sdRenderMediaPanel(m, fmtWon) {
   shopList.sort((a,b) => b.rev - a.rev);
   let html = '<div style="display:flex;flex-direction:column;gap:6px">';
   shopList.forEach(s => {
-    const roasTxt = s.roas != null ? s.roas.toFixed(1) + 'x' : '광고 없음';
+    // v2.2.51: ROAS % 표기 (1.2x → 120%)
+    const roasTxt = s.roas != null ? (s.roas * 100).toFixed(0) + '%' : '광고 없음';
+    // 임계: 300%(3x) 이상 초록, 150%(1.5x) 이상 주황, 미만 빨강
     const roasColor = s.roas != null ? (s.roas >= 3 ? '#15803d' : (s.roas >= 1.5 ? '#a16207' : '#dc2626')) : '#94a3b8';
     html += '<div style="padding:8px 10px;background:#fafafa;border-radius:6px;border-left:3px solid #6366f1">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">'
@@ -13883,16 +13885,41 @@ function renderSalesDashboard() {
   if ($('sd-net-margin'))  $('sd-net-margin').textContent  = tRev > 0 ? fmtWon(netMargin) : '-';
   if ($('sd-margin-rate')) $('sd-margin-rate').textContent = tRev > 0 ? marginRate.toFixed(1) + '%' : '-';
   if ($('sd-ads-cost'))    $('sd-ads-cost').textContent    = m.tAdsTotal > 0 ? fmtWon(m.tAdsTotal) : '-';
-  // v2.2.47 + v2.2.50: 전월 비교 표시 (전체 모드는 이번달 vs 전월 폴백)
+  // v2.2.47 + v2.2.50 + v2.2.51: 전월 비교 + 전체모드 이번달 override
   let _prevForCompare = mPrev;
   let _prevLabel = '전월';
   const _modeEl = document.querySelector('.period-filter[data-prefix="sd"] .period-mode');
   const _mode = _modeEl ? _modeEl.value : '';
   if (_mode === 'all') {
-    // 전체 모드 — 이번달 vs 전월 (실제 표시는 전체 데이터지만 비교는 월 단위)
+    // v2.2.51: 전체 모드 — 메인 데이터도 이번달로 override (사용자 요청: 이번달 / 전월 둘 다)
     const ranges = _sdAllModeRanges();
     _prevForCompare = _sdCalcMetrics(ranges.prevStart, ranges.prevEnd);
     _prevLabel = ranges.prevLabel;
+    // 메인 데이터 = 이번달
+    const _thisMonth = _sdCalcMetrics(ranges.thisStart, ranges.thisEnd);
+    if (_thisMonth && _thisMonth.tRev > 0) {
+      // 카드 값 재계산
+      const _fw = n => '₩' + Math.round(n).toLocaleString();
+      if ($('sd-total-rev'))   $('sd-total-rev').textContent   = _fw(_thisMonth.tRev);
+      if ($('sd-net-rev'))     $('sd-net-rev').textContent     = _fw(_thisMonth.netRev);
+      if ($('sd-net-margin'))  $('sd-net-margin').textContent  = _fw(_thisMonth.netMargin);
+      if ($('sd-margin-rate')) $('sd-margin-rate').textContent = _thisMonth.marginRate.toFixed(1) + '%';
+      if ($('sd-ads-cost'))    $('sd-ads-cost').textContent    = _thisMonth.tAdsTotal > 0 ? _fw(_thisMonth.tAdsTotal) : '-';
+      // 상단 라벨 갱신
+      try {
+        const _lbl = document.getElementById('sd-period-label');
+        if (_lbl) _lbl.textContent = '📅 ' + ranges.thisLabel + ' (전체기간 모드)';
+      } catch(_){}
+      // 비교용 변수도 이번달로 교체 (아래 _sdRenderPrevCompare 가 올바른 값 사용)
+      tRev = _thisMonth.tRev;
+      netRev = _thisMonth.netRev;
+      netMargin = _thisMonth.netMargin;
+      marginRate = _thisMonth.marginRate;
+      m.tAdsTotal = _thisMonth.tAdsTotal;
+      m.shopAgg = _thisMonth.shopAgg;
+      m.adByShop = _thisMonth.adByShop;
+      m.adByPlatform = _thisMonth.adByPlatform;
+    }
   } else {
     const pr = _sdPrevMonthRange(start, end);
     _prevLabel = pr.label || '전월';
