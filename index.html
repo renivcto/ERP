@@ -5451,7 +5451,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.75';
+const ERP_VERSION = 'v2.2.76';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29560,6 +29560,29 @@ async function togglePayStatus(expenseId, orderId, category) {
     if (!confirm('이미 지급 완료된 건입니다. 지급 요청 상태로 되돌리시겠습니까?')) return;
     e.paidStatus = 'requested';
     e.paidDate = '';
+    // v2.2.76: paid → requested 토글 시, 같은 (orderId, category) 의 다른 paid 중복도 함께 제거
+    //   (안 그러면 _dedupPoExpensesSafe 가 paid 우선 정책으로 다른 paid 를 살리고 e 를 제거함 → 토글 무효화)
+    if (orderId && category) {
+      const _oidNum2 = Number(orderId);
+      const _otherPaid = (DB.expenses||[]).filter(x => x
+        && x.category === category
+        && (x.orderId === orderId || Number(x.orderId) === _oidNum2)
+        && String(x.id) !== String(e.id)
+        && x.paidStatus === 'paid'
+      );
+      if (_otherPaid.length > 0) {
+        const _rmIds = new Set(_otherPaid.map(d => String(d.id)));
+        DB.expenses = (DB.expenses||[]).filter(x => x && !_rmIds.has(String(x.id)));
+        console.warn('🧹 [togglePayStatus] paid→requested 토글 — 다른 paid 중복 ' + _otherPaid.length + '건 제거 (e 보존)');
+        // tombstone 등록 (Firestore 머지 시 부활 차단)
+        if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
+        _otherPaid.forEach(d => {
+          if (!DB._deletedExpenseIds.some(t => t && String(t.id) === String(d.id))) {
+            DB._deletedExpenseIds.push({ id: d.id, ts: Date.now(), reason: 'toggle-dup-cleanup' });
+          }
+        });
+      }
+    }
   } else {
     const today = new Date().toISOString().slice(0,10);
     const d = prompt('지급일을 입력하세요 (YYYY-MM-DD)', today);
