@@ -5451,7 +5451,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.2.76';
+const ERP_VERSION = 'v2.2.77';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29604,8 +29604,21 @@ async function togglePayStatus(expenseId, orderId, category) {
     console.error('❌ [SAVE] toggle 실패:', err);
     try { showNotif('⚠️ 저장 실패: ' + (err.message||err), 'error'); } catch(_){}
   }
-  renderApprovalPage();
-  updateApprovalBadges();
+  // v2.2.77: 즉시 UI 갱신 — 모든 expense 관련 테이블 직접 호출 (renderApprovalPage 만으로는 캐싱돼 안 바뀜)
+  try { renderApprovalPage(); } catch(_){}
+  try { updateApprovalBadges(); } catch(_){}
+  // 직접 expense 테이블 강제 재렌더 (filterExpense 경유 — 필터 상태 보존하며 즉시 반영)
+  try {
+    if (typeof filterExpense === 'function') {
+      filterExpense(window._apExpFilter || 'all');
+    }
+  } catch(_){}
+  // PO/NonPO/Sample 테이블도 강제 재렌더 (같은 expense 가 여러 탭에 영향)
+  try { if (typeof renderApprovalPoTable === 'function') renderApprovalPoTable(); } catch(_){}
+  try { if (typeof renderApprovalNonPoTable === 'function') renderApprovalNonPoTable(); } catch(_){}
+  try { if (typeof renderApprovalSampleTable === 'function') renderApprovalSampleTable(); } catch(_){}
+  // stat 카드도 즉시 갱신
+  try { if (typeof updateApprovalStats === 'function') updateApprovalStats(); } catch(_){}
 }
 
 // v1.9.212: expense id 정규화 헬퍼 — 문자열/숫자 혼재 대응 방어
