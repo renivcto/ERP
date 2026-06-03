@@ -5450,7 +5450,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.7';
+const ERP_VERSION = 'v2.3.8';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6018,11 +6018,26 @@ let _saveQueue = null;
 function _backupItemsNow() {
   try {
     const items = (DB.items||[]).filter(Boolean);
-    if (items.length === 0) return;  // 빈 배열은 백업 안 함 (덮어쓰기 방지)
+    if (items.length === 0) return;
     const payload = JSON.stringify(items);
-    localStorage.setItem('reniv_items_backup', payload);
-    localStorage.setItem('reniv_items_backup_ts', String(Date.now()));
-    localStorage.setItem('reniv_items_backup_count', String(items.length));
+    // v2.3.8: QuotaExceededError graceful — IDB 로 fallback
+    try {
+      localStorage.setItem('reniv_items_backup', payload);
+      localStorage.setItem('reniv_items_backup_ts', String(Date.now()));
+      localStorage.setItem('reniv_items_backup_count', String(items.length));
+    } catch(qErr) {
+      if (qErr && qErr.name === 'QuotaExceededError') {
+        // localStorage 가득 참 — IDB 에만 백업
+        try { if (typeof idbSet === 'function') idbSet('reniv_items_backup', payload); } catch(_){}
+        if (!window._v238QuotaItemsWarned) {
+          window._v238QuotaItemsWarned = true;
+          console.warn('⚠️ [v2.3.8] items_backup localStorage quota — IDB 로 백업 (안전)');
+          setTimeout(() => { window._v238QuotaItemsWarned = false; }, 60000);
+        }
+        return; // 아래 스냅샷도 skip
+      }
+      throw qErr;
+    }
     // 시점 스냅샷 (시간별 1개)
     const hourKey = new Date().toISOString().slice(0,13);  // YYYY-MM-DDTHH
     localStorage.setItem('reniv_items_snap_' + hourKey, payload);
@@ -6384,7 +6399,45 @@ async function _doSaveDataInner() {
           }
         });
       }
+      // v2.3.8: expense.note 등 큰 string 필드도 오프로드 (inline base64 가능)
+      const _expSmallKeys = new Set(['id','category','title','vendor','amount','account','accountHolder','dueDate','urgent','payMethod','proofType','bankAccount','bankHolder','bankName','status','paidStatus','paidDate','approvedAt','createdAt','updatedAt','orderId','approvalId','sampleId','attachments','quotes','adShopId','adPlatform','adStartDate','adEndDate','adProjectId','taxInvoice']);
+      Object.keys(ex).forEach(k => {
+        if (_expSmallKeys.has(k)) return;
+        const v = ex[k];
+        if (typeof v !== 'string' || v === '__idb__') return;
+        if (v.length > 2000) {
+          try {
+            idbSet('expense_field_' + ex.id + '_' + k, v);
+            _v280Offload.bytes += v.length;
+            _v280Offload.expenses++;
+            dbToSave.expenses[ei][k] = '__idb__';
+          } catch(_){}
+        }
+      });
     });
+    // v2.3.8: expenses 크기 진단 + 2차 강제 오프로드
+    try {
+      let _expSize = JSON.stringify(dbToSave.expenses||[]).length;
+      console.log('📏 [v2.3.8 SIZE] expenses:', _expSize, 'bytes', '(건수:', (dbToSave.expenses||[]).length, ')');
+      if (_expSize > 900000) {
+        console.warn('⚠️ [v2.3.8] expenses ' + (_expSize/1024).toFixed(0) + 'KB > 900KB — 2차 강제 오프로드 (threshold 200자)');
+        let _2nd = 0;
+        (dbToSave.expenses||[]).forEach((ex, ei) => {
+          if (!ex || ex.id == null) return;
+          Object.keys(ex).forEach(k => {
+            if (_expSmallKeys.has(k)) return;
+            const v = ex[k];
+            if (typeof v !== 'string' || v === '__idb__') return;
+            if (v.length > 200) {
+              try { idbSet('expense_field_' + ex.id + '_' + k, v); dbToSave.expenses[ei][k] = '__idb__'; _2nd++; } catch(_){}
+            }
+          });
+        });
+        _expSize = JSON.stringify(dbToSave.expenses||[]).length;
+        console.log('📏 [v2.3.8 SIZE] 2차 후:', _expSize, 'bytes (추가 오프로드:', _2nd, '건)');
+        if (_expSize > 900000) console.error('🚨 [v2.3.8] expenses 여전히 900KB 초과 — Firestore 저장 실패 가능');
+      }
+    } catch(_){}
 
     // 2.3 approvalComments[i].attachments[ai].data
     (dbToSave.approvalComments||[]).forEach((c, ci) => {
@@ -7158,7 +7211,6 @@ async function restoreIDBData() {
           if (at && at.data === '__idb__') {
             const v = await idbGet('expense_attach_' + ex.id + '_' + ai);
             if (v) DB.expenses[ei].attachments[ai].data = v;
-            // miss 시 마커 보존 (다른 기기에서 등록되었을 수 있음)
           }
         }
       }
@@ -7169,6 +7221,14 @@ async function restoreIDBData() {
             const v = await idbGet('expense_quote_' + ex.id + '_' + qi);
             if (v) DB.expenses[ei].quotes[qi].data = v;
           }
+        }
+      }
+      // v2.3.8: expense 의 일반 string 필드 hydrate (note 등)
+      const keys = Object.keys(ex);
+      for (const k of keys) {
+        if (ex[k] === '__idb__' && k !== 'attachments' && k !== 'quotes') {
+          const v = await idbGet('expense_field_' + ex.id + '_' + k);
+          if (v) DB.expenses[ei][k] = v;
         }
       }
     }
