@@ -5450,7 +5450,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.8';
+const ERP_VERSION = 'v2.3.9';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -44535,17 +44535,31 @@ function initERPWhenReady() {
           });
           const _hasAnyTomb = _shopOrderTombSigSet.size > 0 || _shopOrderTombOrderNoSet.size > 0;
           if (_hasAnyTomb) {
-            // v2.2.46: ID 기반 매칭으로 변경 (over-filter 차단)
-            //   - tombstone 의 dupId/id 가 있고 정확히 매칭될 때만 제거
-            //   - orderNo/sig 만으로는 합법적인 같은 주문번호 entry 도 제거하던 버그 (v2.2.45 회귀)
-            //   - 단, merged:* prefix tombstone 은 cafe24 분할 부모 제거 용도 → orderNo 매칭 유지
+            // v2.2.46 + v2.3.9: ID 매칭 + manual:* tombstone 의 orderNo+customer 매칭 추가
+            //   v2.2.46 ID 기반: cafe24 분할 보호
+            //   v2.3.9 추가: Cloud Function 이 NEW ID 로 재삽입해도 차단 — 단 cafe24OriginalOrderId 없는 행만
             const _shopOrderTombIdSet = new Set();
+            // v2.3.9: manual:* 의 (orderNo,customer) pair 집합
+            const _manualOrderNoCustSet = new Set();
             [..._fsSoT, ..._lcSoT, ..._lsSoT].forEach(t => {
               if (!t) return;
               if (t.dupId != null) _shopOrderTombIdSet.add(String(t.dupId));
               if (t.id != null && t.sig && String(t.sig).indexOf('manual:') === 0) _shopOrderTombIdSet.add(String(t.id));
+              // v2.3.9: manual:orderNo:customer 매칭 set 구성
+              if (t.sig && typeof t.sig === 'string' && t.sig.indexOf('manual:') === 0) {
+                const orderNo = String(t.orderNo || '').trim();
+                const customer = String(t.customerName || '').trim();
+                if (orderNo && customer) {
+                  _manualOrderNoCustSet.add(orderNo + '§' + customer);
+                }
+                // sig 자체에서 추출 시도 (orderNo 또는 customerName 없는 옛 tombstone)
+                const parts = String(t.sig).split(':');
+                if (parts.length >= 3 && parts[1] && parts[2]) {
+                  _manualOrderNoCustSet.add(parts[1].trim() + '§' + parts[2].trim());
+                }
+              }
             });
-            // merged:* prefix 만 추출 (cafe24 분할 부모 정리용 — 기존 v784 동작 유지)
+            // merged:* prefix (cafe24 분할 부모 정리용)
             const _mergedOrderNoSet = new Set();
             [..._fsSoT, ..._lcSoT, ..._lsSoT].forEach(t => {
               if (t && t.sig && String(t.sig).indexOf('merged:') === 0) {
@@ -44555,10 +44569,17 @@ function initERPWhenReady() {
             });
             const _filterShopOrder = (o) => {
               if (!o) return false;
-              // ID 정확 매칭 → 제거 (manual delete tombstone)
+              // ID 정확 매칭 → 제거
               if (o.id != null && _shopOrderTombIdSet.has(String(o.id))) return false;
-              // merged:* (cafe24 부모) → orderNo 매칭으로 제거 (기존 v784 의도)
-              //   단, cafe24OriginalOrderId 가 없는 행만 (= 부모 행) 제거
+              // v2.3.9: orderNo+customer 매칭 — cafe24 분할 자식이 아닐 때만
+              if (!o.cafe24OriginalOrderId && o.orderNo && o.customerName) {
+                const key = String(o.orderNo).trim() + '§' + String(o.customerName).trim();
+                if (_manualOrderNoCustSet.has(key)) {
+                  console.warn('🪦 [v2.3.9 PRE-MERGE] manual tombstone orderNo+customer 매칭 차단:', o.orderNo, '/', o.customerName, '(id=' + o.id + ')');
+                  return false;
+                }
+              }
+              // merged:* (cafe24 부모)
               if (o.orderNo && _mergedOrderNoSet.has(String(o.orderNo)) && !o.cafe24OriginalOrderId) return false;
               return true;
             };
