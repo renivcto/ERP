@@ -5512,7 +5512,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.15';
+const ERP_VERSION = 'v2.3.16';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -33873,6 +33873,18 @@ async function saveSample() {
 }
 
 // ═══════════ 슬랙 Webhook ═══════════
+// v2.3.16: 한국시간 짧은 포맷 헬퍼 — MM-DD HH:mm:ss (KST)
+function _kstShortTime() {
+  const now = new Date();
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const MM = String(kst.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(kst.getUTCDate()).padStart(2, '0');
+  const HH = String(kst.getUTCHours()).padStart(2, '0');
+  const mm = String(kst.getUTCMinutes()).padStart(2, '0');
+  const ss = String(kst.getUTCSeconds()).padStart(2, '0');
+  return `${MM}-${dd} ${HH}:${mm}:${ss}`;
+}
+
 // v2.3.15: 드라이브 슬랙 상태 배지 갱신 + 입력란 채우기
 function _updateSlackDriveStatusBadge() {
   const badge = document.getElementById('slack-drive-status-badge');
@@ -33921,7 +33933,7 @@ async function testSlackDriveWebhook() {
     const kind = _detectWebhookKind(cleaned);
     const author = (window._currentUser && (window._currentUser.name || window._currentUser.email)) || '';
     const body = _buildWebhookPayload(kind, 'drive_folder_added', {
-      text: `🧪 르니브 ERP — 드라이브 슬랙 연동 테스트${author?`\n👤 테스트: ${author}`:''}\n⏰ ${new Date().toLocaleString('ko-KR')}`
+      text: `🧪 르니브 ERP — 드라이브 슬랙 연동 테스트${author?`\n👤 테스트: ${author}`:''}\n⏰ ${_kstShortTime()} (KST)`
     });
     await _postWebhook(cleaned, kind, body);
     if (typeof showNotif === 'function') showNotif('✅ 드라이브 슬랙 테스트 전송 완료 — 채널 확인', 'success');
@@ -39086,16 +39098,10 @@ async function saveDriveFolder() {
       const author = (window._currentUser && (window._currentUser.name || window._currentUser.email)) || '';
       const isUrl = /^https?:\/\//i.test(slackChannel);
       const chLabel = isUrl ? '(폴더 전용 Webhook)' : `#${slackChannel}`;
-      // v2.3.15: 카테고리에 폴더명 추가 포맷 (사용자 요청)
+      // v2.3.15: 카테고리에 폴더명 추가 포맷
+      // v2.3.16: _kstShortTime 헬퍼 재사용
       const _catLabel = (DF_CATS[data.category]||DF_CATS.etc).label;
-      const _now = new Date();
-      const _kst = new Date(_now.getTime() + 9*60*60*1000);
-      const _MM = String(_kst.getUTCMonth()+1).padStart(2,'0');
-      const _dd = String(_kst.getUTCDate()).padStart(2,'0');
-      const _HH = String(_kst.getUTCHours()).padStart(2,'0');
-      const _mm = String(_kst.getUTCMinutes()).padStart(2,'0');
-      const _ss = String(_kst.getUTCSeconds()).padStart(2,'0');
-      const _timeStr = `${_MM}-${_dd} ${_HH}:${_mm}:${_ss}`;
+      const _timeStr = _kstShortTime();
       const text = isNew
         ? `📁 '${_catLabel}'에 "${name}" 추가\n\n🔗 ${url}${author?`\n👤 등록자: ${author}`:''}\n⏰ ${_timeStr} (KST)`
         : `✏️ '${_catLabel}' / "${name}" 수정\n\n🔗 ${url}${author?`\n👤 수정자: ${author}`:''}\n⏰ ${_timeStr} (KST)`;
