@@ -5450,7 +5450,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.10';
+const ERP_VERSION = 'v2.3.11';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6714,7 +6714,11 @@ async function _doSaveDataInner() {
                 console.log('🔀 [COUNT-GUARD] ' + key + ' 자동 병합: ' + val.length + ' + ' + onlyOnServer.length + ' = ' + merged.length);
                 // 로컬 DB도 병합된 것으로 갱신 (중요!)
                 if (key === 'orders') DB.orders = merged;
-                if (key === 'shopOrders') DB.shopOrders = merged;
+                if (key === 'shopOrders') {
+                DB.shopOrders = merged;
+                // v2.3.11: 머지 직후 perma-block 즉시 적용 (render 까지 기다리지 X)
+                try { if (typeof _applyPermaBlocks === 'function') _applyPermaBlocks(); } catch(_){}
+              }
                 payload.data = JSON.stringify(merged);
                 try { _backupOrdersNow('count_guard_merge_' + key); } catch(_){}
                 try { showNotif('⚠️ 다른 기기와 데이터 차이 감지 — ' + key + ' 자동 병합 (' + merged.length + '건)', 'info'); } catch(_){}
@@ -14339,16 +14343,32 @@ async function deleteShopOrder(id) {
       });
     }
   }
-  // v1.9.784: 삭제 tombstone — 다음 fetch 때 재생성 방지
+  // v1.9.784: 삭제 tombstone
   if (!Array.isArray(DB._deletedShopOrderSigs)) DB._deletedShopOrderSigs = [];
-  // v2.2.46: id 도 함께 등록 (사전 필터의 ID 매칭용)
   const sig = 'manual:' + String(o.orderNo || '') + ':' + String(o.customerName || '');
   if (!DB._deletedShopOrderSigs.some(x => x && x.sig === sig && String(x.id||x.dupId) === String(o.id))) {
     DB._deletedShopOrderSigs.push({ sig, id: o.id, dupId: o.id, ts: Date.now(), orderNo: o.orderNo, customerName: o.customerName, reason: 'manual-delete' });
   }
-  // v2.2.17: filter 도 String 비교
+  // v2.3.11: 자동 perma-block — orderNo+customer 기준으로 영구 차단 리스트 등록
+  //   Firestore 에 부활해도 _applyPermaBlocks 가 모든 load/render 단계에서 자동 제거
+  if (!Array.isArray(DB._permaBlockedShopOrders)) DB._permaBlockedShopOrders = [];
+  if (!o.cafe24OriginalOrderId && o.orderNo) {
+    const _on = String(o.orderNo||'').trim();
+    const _cn = String(o.customerName||'').trim();
+    const exists = DB._permaBlockedShopOrders.some(b => b && String(b.orderNo||'').trim() === _on && String(b.customerName||'').trim() === _cn);
+    if (!exists) {
+      DB._permaBlockedShopOrders.push({
+        orderNo: _on, customerName: _cn,
+        reason: 'manual-delete-auto-block',
+        ts: Date.now()
+      });
+      console.log('🚫 [v2.3.11 AUTO-BLOCK] 영구 차단 등록 — ' + _on + ' / ' + _cn);
+    }
+  }
   DB.shopOrders = (DB.shopOrders||[]).filter(x => x && String(x.id) !== _idStr);
-  console.log('🗑️ [shopOrder] 삭제 — id:' + _idStr + ' / orderNo:' + (o.orderNo||'-') + ' / 남은 건수:' + DB.shopOrders.length);
+  console.log('🗑️ [shopOrder] 삭제 — id:' + _idStr + ' / orderNo:' + (o.orderNo||'-') + ' / 남은:' + DB.shopOrders.length + ' / tombstone+perma-block 등록');
+  // 삭제 후 perma-block 적용 (다른 같은 orderNo+customer 행 있으면 같이 제거)
+  try { if (typeof _applyPermaBlocks === 'function') _applyPermaBlocks(); } catch(_){}
   await saveDataNow(); renderShopOrderTable();
 }
 
