@@ -5450,7 +5450,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.5';
+const ERP_VERSION = 'v2.3.6';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13781,6 +13781,31 @@ window.fixZombieDups = function() {
   alert('✅ ' + removed + '건 제거 완료. 새로고침해도 부활하지 않습니다.');
   return removed;
 };
+
+// v2.3.6 — 10초마다 자동 dedup (Cloud Function 의 NEW ID 재삽입 차단)
+//   사용자가 떠나도 작동 → 좀비가 부활하자마자 다음 cycle 에서 제거
+//   단, 페이지 진입 1회 + 콘솔로그는 변경 있을 때만
+(function _v236AutoDedupTimer(){
+  let _v236LastCount = -1;
+  function _runDedup() {
+    if (typeof _autoDedupIdenticalShopOrders !== 'function') return;
+    if (!Array.isArray(DB.shopOrders)) return;
+    if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) return;
+    const _beforeLen = DB.shopOrders.length;
+    const removed = _autoDedupIdenticalShopOrders();
+    if (removed > 0) {
+      console.warn('🔁 [v2.3.6 TIMER] 좀비 ' + removed + '건 자동 제거 (총 ' + _beforeLen + ' → ' + DB.shopOrders.length + ')');
+      try { if (typeof renderShopOrderTable === 'function') renderShopOrderTable(); } catch(_){}
+    }
+    _v236LastCount = DB.shopOrders.length;
+  }
+  // 페이지 로드 후 5초 뒤 첫 실행, 이후 10초마다
+  setTimeout(() => {
+    _runDedup();
+    setInterval(_runDedup, 10000);
+  }, 5000);
+  console.log('%c💡 v2.3.6 자동 좀비 dedup 타이머 활성 (10초 간격)','background:#10b981;color:#fff;padding:3px 8px');
+})();
 
 function renderShopOrderTable() {
   const tbody = $('shop-order-table'); if (!tbody) return;
