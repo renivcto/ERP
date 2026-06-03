@@ -5512,7 +5512,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.18';
+const ERP_VERSION = 'v2.3.19';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -34151,8 +34151,17 @@ async function _postWebhook(url, kind, body) {
 }
 
 async function testSlackWebhook() {
-  const url = _cleanWebhookUrl($('aps-webhook-url').value);
-  if (!url) { showNotif('Webhook URL을 먼저 입력하세요', 'warning'); return; }
+  // v2.3.19: 모달 입력란 우선, 없거나 비어있으면 DB.appSettings 값 사용
+  //          (설정 페이지 카드의 '연결 테스트' 버튼에서 호출 시 모달이 안 열려있음)
+  let rawUrl = '';
+  const inpEl = document.getElementById('aps-webhook-url');
+  if (inpEl && (inpEl.value || '').trim()) {
+    rawUrl = inpEl.value;
+  } else if (DB.appSettings && DB.appSettings.slackWebhookUrl) {
+    rawUrl = DB.appSettings.slackWebhookUrl;
+  }
+  const url = _cleanWebhookUrl(rawUrl);
+  if (!url) { showNotif('Webhook URL을 먼저 입력하세요 (설정 → Webhook URL 입력·수정)', 'warning'); return; }
   // v1.9.320: URL 형식 기본 검증
   if (!/^https?:\/\//i.test(url)) {
     showNotif('⚠️ URL 은 http:// 또는 https:// 로 시작해야 합니다', 'warning');
