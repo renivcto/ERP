@@ -3314,6 +3314,37 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             </div>
           </div>
         </div>
+        <!-- v2.3.13: 슬랙 Webhook 연동 카드 -->
+        <div class="card" id="slack-settings-card">
+          <div class="card-hdr">
+            <span class="card-title">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 122.8 122.8" width="16" height="16" style="vertical-align:middle;margin-right:4px"><path d="M25.8 77.6a12.9 12.9 0 1 1-12.9-12.9h12.9z" fill="#E01E5A"/><path d="M32.3 77.6a12.9 12.9 0 1 1 25.8 0v32.3a12.9 12.9 0 1 1-25.8 0z" fill="#E01E5A"/><path d="M45.2 25.8a12.9 12.9 0 1 1 12.9-12.9v12.9z" fill="#36C5F0"/><path d="M45.2 32.3a12.9 12.9 0 1 1 0 25.8H12.9a12.9 12.9 0 1 1 0-25.8z" fill="#36C5F0"/><path d="M97 45.2a12.9 12.9 0 1 1 12.9 12.9H97z" fill="#2EB67D"/><path d="M90.5 45.2a12.9 12.9 0 1 1-25.8 0V12.9a12.9 12.9 0 1 1 25.8 0z" fill="#2EB67D"/><path d="M77.6 97a12.9 12.9 0 1 1-12.9 12.9V97z" fill="#ECB22E"/><path d="M77.6 90.5a12.9 12.9 0 1 1 0-25.8h32.3a12.9 12.9 0 1 1 0 25.8z" fill="#ECB22E"/></svg>
+              슬랙 Webhook 연동
+            </span>
+            <span class="badge" id="slack-status-badge" style="font-size:11px;background:#fef3c7;color:#92400e">미설정</span>
+          </div>
+          <div class="card-body">
+            <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12.5px;color:#475569;line-height:1.65">
+              📌 <strong>결재-요청 채널</strong>로 다음 알림이 전송됩니다:<br>
+              💳 지출결의서 등록 · 📄 발주서 결재 요청 · 📝 일반 결재 요청<br>
+              🔁 정기 결제 등록 · ⏰ 지급예정일 경과 · 🚨 응급 강조
+            </div>
+            <div style="background:var(--sky-50);border:1px solid var(--sky-200);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11.5px;color:var(--sky-800)">
+              💡 <strong>Webhook URL 받는 방법</strong>:<br>
+              ① reniv.slack.com/apps → "Incoming Webhooks" 검색<br>
+              ② 슬랙에 추가 → <strong>#결재-요청</strong> 채널 선택<br>
+              ③ 생성된 <code style="background:#fff;padding:1px 6px;border-radius:3px;font-size:11px">https://hooks.slack.com/services/...</code> URL 복사
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-primary" onclick="openApprovalSettings()" style="flex:1;min-width:160px">
+                ⚙️ Webhook URL 입력·수정
+              </button>
+              <button class="btn btn-outline" onclick="testSlackWebhook()" title="현재 등록된 Webhook 으로 테스트 메시지 전송">
+                🧪 연결 테스트
+              </button>
+            </div>
+          </div>
+        </div>
         <div class="card" id="trello-settings-card" style="display:none">
           <div class="card-hdr"><span class="card-title">🎯 Trello 연동</span><span class="badge sky" style="font-size:11px">보드 2개 설정됨</span></div>
           <div class="card-body">
@@ -5450,7 +5481,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.12';
+const ERP_VERSION = 'v2.3.13';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -33809,6 +33840,27 @@ async function saveSample() {
 }
 
 // ═══════════ 슬랙 Webhook ═══════════
+// v2.3.13: 설정 페이지 슬랙 상태 배지 갱신
+function _updateSlackStatusBadge() {
+  const badge = document.getElementById('slack-status-badge');
+  if (!badge) return;
+  const enabled = !!(DB.appSettings && DB.appSettings.slackEnabled);
+  const url = (DB.appSettings && DB.appSettings.slackWebhookUrl) || '';
+  if (enabled && url) {
+    badge.textContent = '✅ 연결됨';
+    badge.style.background = '#dcfce7';
+    badge.style.color = '#166534';
+  } else if (url) {
+    badge.textContent = '⏸️ URL 입력됨 · 비활성';
+    badge.style.background = '#fef3c7';
+    badge.style.color = '#92400e';
+  } else {
+    badge.textContent = '미설정';
+    badge.style.background = '#fef3c7';
+    badge.style.color = '#92400e';
+  }
+}
+
 function openApprovalSettings() {
   openModal('ap-settings');
   // v1.9.247 — localStorage 독립 백업에서 복원 (Firestore/DB 동시 소실 시 안전망)
@@ -33863,6 +33915,7 @@ function saveSlackSettings() {
   try { saveData(); } catch(_){}
   closeModal('ap-settings');
   showNotif('✅ 슬랙 설정 저장 완료 (Firestore + 로컬 백업)', 'success');
+  try { _updateSlackStatusBadge(); } catch(_){}
 }
 
 // v1.9.197 — 슬랙/잔디 Webhook 자동 감지
