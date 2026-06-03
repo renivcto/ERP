@@ -5450,7 +5450,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.9';
+const ERP_VERSION = 'v2.3.10';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13552,6 +13552,94 @@ function _autoDedupIdenticalShopOrders() {
   } catch(e) { console.warn('_autoDedupIdenticalShopOrders 실패:', e); return 0; }
 }
 
+// v2.3.10 — 영구 블록 리스트: 어떤 경로(Cloud Function 포함)로도 들어오면 즉시 제거
+//   tombstone 과 별개로 작동 — 사용자가 명시적으로 "이 주문은 절대 보고 싶지 않다" 라고 선언
+function _applyPermaBlocks() {
+  try {
+    if (!Array.isArray(DB._permaBlockedShopOrders)) return 0;
+    if (DB._permaBlockedShopOrders.length === 0) return 0;
+    const orders = DB.shopOrders || [];
+    if (orders.length === 0) return 0;
+    const norm = s => String(s||'').trim();
+    const blockedSet = new Set();
+    DB._permaBlockedShopOrders.forEach(b => {
+      if (!b || !b.orderNo) return;
+      const key = norm(b.orderNo) + '§' + norm(b.customerName||'');
+      blockedSet.add(key);
+    });
+    if (blockedSet.size === 0) return 0;
+    const removed = [];
+    DB.shopOrders = orders.filter(o => {
+      if (!o) return false;
+      // cafe24 분할 자식은 보호 (안전)
+      if (o.cafe24OriginalOrderId) return true;
+      const key = norm(o.orderNo) + '§' + norm(o.customerName);
+      if (blockedSet.has(key)) { removed.push(o); return false; }
+      return true;
+    });
+    if (removed.length > 0) {
+      console.warn('🚫 [v2.3.10 PERMA-BLOCK] ' + removed.length + '건 즉시 제거 (영구 차단 리스트 매칭)');
+      removed.slice(0, 5).forEach(r => console.warn('  · ' + r.orderNo + ' / ' + r.customerName + ' / id=' + r.id));
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+      if (typeof saveDataNow === 'function') saveDataNow().catch(e => console.warn(e));
+    }
+    return removed.length;
+  } catch(e) { console.warn('_applyPermaBlocks 실패:', e); return 0; }
+}
+
+// 콘솔 — 특정 주문을 영구 차단 리스트에 추가
+window.blockOrder = async function(orderNo, customerName, reason) {
+  if (!orderNo) { console.log('사용법: blockOrder("20260601-0000011", "고다연", "cafe24 중복")'); return; }
+  if (!Array.isArray(DB._permaBlockedShopOrders)) DB._permaBlockedShopOrders = [];
+  const norm = s => String(s||'').trim();
+  const _o = norm(orderNo), _c = norm(customerName||'');
+  if (DB._permaBlockedShopOrders.some(b => norm(b.orderNo) === _o && norm(b.customerName||'') === _c)) {
+    console.log('이미 차단 리스트에 있음:', _o, '/', _c);
+    return;
+  }
+  DB._permaBlockedShopOrders.push({
+    orderNo: _o, customerName: _c,
+    reason: reason || '사용자 영구 차단',
+    ts: Date.now()
+  });
+  console.log('%c🚫 영구 차단 등록: ' + _o + ' / ' + _c,'background:#dc2626;color:#fff;padding:3px 8px');
+  // 즉시 적용
+  const removed = _applyPermaBlocks();
+  if (typeof renderShopOrderTable === 'function') renderShopOrderTable();
+  if (typeof saveDataNow === 'function') await saveDataNow();
+  alert('🚫 영구 차단 등록 완료 (제거: ' + removed + '건)\n앞으로 cafe24/coupang Cloud Function 이 재삽입해도 자동 차단됩니다.');
+};
+
+window.unblockOrder = async function(orderNo, customerName) {
+  if (!Array.isArray(DB._permaBlockedShopOrders)) return;
+  const norm = s => String(s||'').trim();
+  const _o = norm(orderNo), _c = norm(customerName||'');
+  const before = DB._permaBlockedShopOrders.length;
+  DB._permaBlockedShopOrders = DB._permaBlockedShopOrders.filter(b => !(norm(b.orderNo) === _o && norm(b.customerName||'') === _c));
+  const removed = before - DB._permaBlockedShopOrders.length;
+  if (removed > 0) {
+    console.log('%c✅ 차단 해제: ' + _o + ' / ' + _c,'background:#10b981;color:#fff;padding:3px 8px');
+    if (typeof saveDataNow === 'function') await saveDataNow();
+    alert('✅ 차단 해제 (' + removed + '건)\n다음 동기화부터 다시 표시됩니다.');
+  } else {
+    console.log('차단 리스트에 없음');
+    alert('차단 리스트에 없음');
+  }
+};
+
+window.listBlocked = function() {
+  const list = DB._permaBlockedShopOrders || [];
+  console.log('%c━━ 영구 차단 리스트 (' + list.length + '건) ━━','background:#dc2626;color:#fff;padding:4px 10px;font-weight:700');
+  list.forEach((b, i) => {
+    const ago = b.ts ? Math.round((Date.now()-b.ts)/60000) + '분 전' : '-';
+    console.log('  [' + i + '] ' + b.orderNo + ' / ' + (b.customerName||'-') + ' / ' + (b.reason||'-') + ' / ' + ago);
+  });
+  if (list.length === 0) console.log('  비어있음');
+  console.log('  → 해제: unblockOrder("orderNo", "customer")');
+};
+
+console.log('%c🚫 v2.3.10 영구 차단: blockOrder(orderNo, customer, reason) / unblockOrder / listBlocked','background:#dc2626;color:#fff;padding:3px 8px');
+
 // v2.2.90: 콘솔에서 즉시 강제 dedup + 진단 로그
 // v2.2.98 — 결재 대기 KPI 가 어떤 레코드들로 구성되는지 진단
 window.diagApPending = function() {
@@ -13956,8 +14044,10 @@ function renderShopOrderTable() {
   const tbody = $('shop-order-table'); if (!tbody) return;
   // v1.9.784: 합쳐진 중복 자동 정리
   try { _cleanupMergedShopOrders(); } catch(_){}
-  // v2.2.87: 모든 필드 완전 동일한 자사몰 중복 자동 제거 (좀비 부활 차단)
+  // v2.2.87: 모든 필드 완전 동일한 자사몰 중복 자동 제거
   try { _autoDedupIdenticalShopOrders(); } catch(_){}
+  // v2.3.10: 영구 차단 리스트 적용 — Cloud Function 이 어떤 ID 로 재삽입해도 즉시 제거
+  try { _applyPermaBlocks(); } catch(_){}
   // v1.9.379: 기간 필터 초기화 (한 번만 효력 있음)
   if (typeof _periodInit === 'function') _periodInit('so');
   const period = (typeof _periodComputeRange === 'function') ? _periodComputeRange('so') : { start:'', end:'' };
