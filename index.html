@@ -5512,7 +5512,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.17';
+const ERP_VERSION = 'v2.3.18';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -45119,14 +45119,16 @@ function initERPWhenReady() {
         const lcS = (localDB && typeof localDB.appSettings === 'object' && localDB.appSettings) ? localDB.appSettings : {};
         const mergedSettings = {};
         // string 필드: 비어있지 않은 값 우선 (Firestore > localStorage, 둘 다 있으면 Firestore)
-        const strKeys = ['slackWebhookUrl','geminiApiKey'];
+        // v2.3.18: slackDriveWebhookUrl 추가
+        const strKeys = ['slackWebhookUrl','geminiApiKey','slackDriveWebhookUrl'];
         strKeys.forEach(k => {
           const fs = (typeof fsS[k] === 'string' && fsS[k].trim()) ? fsS[k] : '';
           const lc = (typeof lcS[k] === 'string' && lcS[k].trim()) ? lcS[k] : '';
           mergedSettings[k] = fs || lc || '';
         });
         // boolean/number 필드: Firestore 우선
-        ['slackEnabled'].forEach(k => {
+        // v2.3.18: slackDriveEnabled 추가
+        ['slackEnabled','slackDriveEnabled'].forEach(k => {
           mergedSettings[k] = (fsS[k] !== undefined) ? !!fsS[k] : (lcS[k] !== undefined ? !!lcS[k] : false);
         });
         ['lastWebhookTestAt'].forEach(k => {
@@ -45136,9 +45138,14 @@ function initERPWhenReady() {
         if (mergedSettings.slackWebhookUrl) {
           console.log('🔔 [APP-SETTINGS] Slack Webhook URL 복원됨 (출처:', fsS.slackWebhookUrl ? 'Firestore' : 'localStorage', ')');
         }
+        // v2.3.18: drive URL 도 복원 로그
+        if (mergedSettings.slackDriveWebhookUrl) {
+          console.log('📁 [APP-SETTINGS] Slack Drive Webhook URL 복원됨 (출처:', fsS.slackDriveWebhookUrl ? 'Firestore' : 'localStorage', ')');
+        }
       } catch(e) {
         console.warn('⚠️ appSettings 병합 실패:', e.message);
-        merged.appSettings = localDB.appSettings || firestoreDB.appSettings || { slackWebhookUrl:'', slackEnabled:false, lastWebhookTestAt:0, geminiApiKey:'' };
+        // v2.3.18: fallback object 에도 drive 필드
+        merged.appSettings = localDB.appSettings || firestoreDB.appSettings || { slackWebhookUrl:'', slackEnabled:false, slackDriveWebhookUrl:'', slackDriveEnabled:false, lastWebhookTestAt:0, geminiApiKey:'' };
       }
       // v1.9.228 — 삭제 Tombstone 은 UNION(합집합). 기기간 삭제 의도가 모두 보존되도록.
       try {
