@@ -5450,7 +5450,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.11';
+const ERP_VERSION = 'v2.3.12';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -11822,6 +11822,7 @@ function saveRecurringPayment() {
     note: ((document.getElementById('rp-note')||{}).value || '').trim(),
     updatedAt: Date.now()
   };
+  var _isNewEntry = (id == null);
   if (id != null) {
     var idx = (_rpData.items||[]).findIndex(function(x){ return x && String(x.id) === String(id); });
     if (idx >= 0) _rpData.items[idx] = Object.assign({}, _rpData.items[idx], data);
@@ -11833,6 +11834,10 @@ function saveRecurringPayment() {
   closeRecurringModal();
   _rpRender();
   try { showNotif('✅ 저장 완료', 'success'); } catch(_){}
+  // v2.3.12: 신규 등록 시 슬랙 알림
+  if (_isNewEntry) {
+    try { slackNotify('recurring_added', data); } catch(_){}
+  }
 }
 function deleteRecurringPayment(id) {
   if (!_rpData) return;
@@ -33870,24 +33875,53 @@ function _detectWebhookKind(url) {
 
 function _buildWebhookPayload(kind, type, payload) {
   // 공통 텍스트
+  // v2.3.12: 알림 종류별 명확한 제목 (발주서/일반결재/정기결제 구분)
+  const _isPo = payload && payload.type === 'po_approval';
+  const _isNonPo = payload && payload.type === 'non_po_approval';
   const titleMap = {
-    approval_request: '🖋️ 결재 요청',
+    approval_request: _isPo ? '📄 발주서 결재 요청'
+                     : _isNonPo ? '📝 결재 요청 (품의서/기안서)'
+                     : '🖋️ 결재 요청',
     approval_done:    '✅ 결재 완료',
-    pay_request:      '💳 지급 요청',
-    pay_reminder:     '🔔 지급 독촉',
+    pay_request:      '💳 지출결의서 등록',
+    pay_reminder:     '⏰ 지급예정일 경과',
     pay_done:         '💰 지급 완료',
+    recurring_added:  '🔁 정기 결제 등록',
     test:             '🧪 연결 테스트',
   };
   const title = titleMap[type] || '르니브 ERP 알림';
-  const urgentTag = payload && (payload.priority === 'urgent' || payload.urgent) ? ' 🚨 응급' : '';
-  // v1.9.260: pay_reminder — 지급 예정일 경과 건에 대한 슬랙 독촉 메시지 커스텀
+  const isUrgent = !!(payload && (payload.priority === 'urgent' || payload.urgent));
+  const urgentTag = isUrgent ? ' 🚨 응급' : '';
+  // v2.3.12: 응급 시 메시지 상단에 강조 prefix
+  const urgentPrefix = isUrgent ? '🚨 *응급 — 빠른 결재 부탁드립니다* 🚨\n\n' : '';
   let bodyText;
   if (type === 'pay_reminder' && payload && payload.title) {
-    const overdueLine = payload.overdueDays ? `\n• ${payload.overdueDays}일 경과` : '';
-    bodyText = `${payload.title}\n지급 예정일이 지나 지급을 요청 드립니다.\n• 업체: ${payload.vendor||'-'}\n• 금액: ${fmtWon(payload.amount||0)}${payload.dueDate?`\n• 결제예정일: ${payload.dueDate}`:''}${overdueLine}`;
+    // 지급예정일 경과
+    const overdueLine = payload.overdueDays ? `\n• 경과: ${payload.overdueDays}일` : '';
+    bodyText = `${urgentPrefix}${payload.title}\n지급예정일이 지났습니다. 빠른 지급 부탁드립니다.\n• 거래처: ${payload.vendor||'-'}\n• 금액: ${fmtWon(payload.amount||0)}${payload.dueDate?`\n• 예정일: ${payload.dueDate}`:''}${overdueLine}`;
+  } else if (type === 'pay_request' && payload && payload.title) {
+    // 지출결의서 등록
+    bodyText = `${urgentPrefix}${payload.title}${urgentTag}\n지급 금액 ${fmtWon(payload.amount||0)} 의 지출결의서가 등록되었습니다.\n결재 부탁드립니다.${payload.vendor?`\n• 거래처: ${payload.vendor}`:''}${payload.dueDate?`\n• 결제예정일: ${payload.dueDate}`:''}`;
+  } else if (type === 'approval_request' && payload && payload.title) {
+    if (_isPo) {
+      bodyText = `${urgentPrefix}${payload.title}${urgentTag}\n발주서를 결재해 주세요.${payload.amount?`\n• 금액: ${fmtWon(payload.amount)}`:''}${payload.vendor?`\n• 거래처: ${payload.vendor}`:''}`;
+    } else if (_isNonPo) {
+      const cat = payload.category ? ` (${payload.category})` : '';
+      bodyText = `${urgentPrefix}${payload.title}${cat}${urgentTag}\n품의서 또는 기안서를 결재해 주세요.`;
+    } else {
+      bodyText = `${urgentPrefix}${payload.title}${urgentTag}\n결재를 부탁드립니다.${payload.amount?`\n• 금액: ${fmtWon(payload.amount)}`:''}`;
+    }
+  } else if (type === 'recurring_added' && payload) {
+    // 정기 결제 등록
+    const site = payload.site || payload.title || '-';
+    const amount = payload.amount ? fmtWon(payload.amount) + (payload.currency && payload.currency !== 'KRW' ? ' ('+payload.currency+')' : '') : '-';
+    const dayLine = payload.autoPayDate ? `\n• 결제일: 매월 ${payload.autoPayDate}일` : '';
+    const applicantLine = payload.applicant ? `\n• 신청자: ${payload.applicant}` : '';
+    const purposeLine = payload.purpose ? `\n• 용도: ${payload.purpose}` : '';
+    bodyText = `${site} 정기 결제가 등록되었습니다.\n• 금액: ${amount}${dayLine}${applicantLine}${purposeLine}`;
   } else {
     bodyText = payload && payload.title
-      ? `${payload.title}${urgentTag}\n• 금액: ${fmtWon(payload.amount||0)}${payload.dueDate?`\n• 결제예정일: ${payload.dueDate}`:''}${payload.paidDate?`\n• 지급일: ${payload.paidDate}`:''}`
+      ? `${urgentPrefix}${payload.title}${urgentTag}\n• 금액: ${fmtWon(payload.amount||0)}${payload.dueDate?`\n• 결제예정일: ${payload.dueDate}`:''}${payload.paidDate?`\n• 지급일: ${payload.paidDate}`:''}`
       : (payload && payload.text ? payload.text : '르니브 ERP 테스트 알림');
   }
 
@@ -33899,6 +33933,7 @@ function _buildWebhookPayload(kind, type, payload) {
       pay_request:      '#F59E0B',
       pay_reminder:     '#DC2626',
       pay_done:         '#2563EB',
+      recurring_added:  '#8B5CF6',
       test:             '#64748B',
     };
     return {
