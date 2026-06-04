@@ -5553,7 +5553,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.59';
+const ERP_VERSION = 'v2.3.60';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -40814,6 +40814,25 @@ function openPmProductModal(pid, rowIdx, colIdx) {
     + '<button type="button" onclick="document.getElementById(\'pm-photo-input\').click()" style="flex:1;padding:5px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">사진 선택</button>'
     + '<button type="button" id="pm-photo-remove" onclick="_pmRemovePhoto()" style="' + (_pmModalPhoto?'':'display:none;') + 'padding:5px 8px;background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">제거</button>'
     + '</div></div>';
+  // v2.3.60 Phase 2: 기존 제품 선택 (완제품 / 신제품 개발) — 신규일 때만
+  const _finItems = (DB.items||[]).filter(function(i){ return i && i.name && i.type === '완제품'; })
+    .sort(function(a,b){ return String(a.name).localeCompare(String(b.name)); });
+  const _devItems = (DB.newProducts||[]).filter(function(x){ return x && x.name && (x.stage==='idea'||x.stage==='develop'||x.stage==='developing'); })
+    .sort(function(a,b){ return String(a.name).localeCompare(String(b.name)); });
+  const _finOpt = _finItems.map(function(i){ return '<option value="fin:' + escapeHtml(String(i.id)) + '">' + _esc(i.name) + (i.price?' · ₩' + Number(i.price).toLocaleString():'') + '</option>'; }).join('');
+  const _devOpt = _devItems.map(function(x){ return '<option value="np:' + escapeHtml(String(x.id)) + '">' + _esc(x.name) + '</option>'; }).join('');
+  const _isNew = !p;
+  const _selectorHtml = _isNew ? (
+    '<div style="background:linear-gradient(135deg,#eef2ff 0%,#fef3c7 100%);border:1px solid #c7d2fe;border-radius:10px;padding:12px 14px;margin-bottom:14px">'
+    + '<div style="font-size:11.5px;font-weight:700;color:#4338ca;margin-bottom:8px">💡 기존 제품에서 빠르게 추가 (선택)</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + '<div style="flex:1;min-width:160px"><label style="font-size:10.5px;font-weight:700;color:#475569;display:block;margin-bottom:3px">📦 완제품</label>'
+    + '<select id="pm-existing-fin" onchange="_pmFillFromExisting(this.value)" style="' + inp + ';font-size:12.5px"><option value="">— 선택 —</option>' + _finOpt + '</select></div>'
+    + '<div style="flex:1;min-width:160px"><label style="font-size:10.5px;font-weight:700;color:#475569;display:block;margin-bottom:3px">🌱 신제품 개발 (아이디어/개발중)</label>'
+    + '<select id="pm-existing-np" onchange="_pmFillFromExisting(this.value)" style="' + inp + ';font-size:12.5px"><option value="">— 선택 —</option>' + _devOpt + '</select></div>'
+    + '</div></div>'
+  ) : '';
+  h += _selectorHtml;
   h += '<div style="flex:1;min-width:210px">'
     + '<label style="' + lbl + '">제품명 *</label>'
     + '<input id="pm-f-name" style="' + inp + '" placeholder="제품명을 입력하세요" value="' + (p?escapeHtml(p.name||''):'') + '">'
@@ -40891,6 +40910,56 @@ function _pmRemovePhoto() {
   if (rm) rm.style.display = 'none';
 }
 
+// v2.3.60: 기존 완제품/신제품에서 모달 입력 자동 채움
+window._pmFillFromExisting = function(value) {
+  if (!value) return;
+  const [kind, rid] = value.split(':');
+  if (kind === 'fin') {
+    const it = (DB.items||[]).find(function(x){ return String(x.id) === String(rid); });
+    if (!it) return;
+    const nameEl = document.getElementById('pm-f-name');
+    if (nameEl) nameEl.value = it.name || '';
+    const priceEl = document.getElementById('pm-f-price');
+    if (priceEl && it.price) priceEl.value = it.price;
+    // 다른 셀렉트도 리셋
+    const other = document.getElementById('pm-existing-np');
+    if (other) other.value = '';
+    // 연동 ID 저장
+    window._pmLinkedItemId = rid;
+    window._pmLinkedNewProductId = null;
+    showNotif('📦 완제품 정보 자동 채움 — ' + (it.name||''), 'success');
+  } else if (kind === 'np') {
+    const np = (DB.newProducts||[]).find(function(x){ return String(x.id) === String(rid); });
+    if (!np) return;
+    const nameEl = document.getElementById('pm-f-name');
+    if (nameEl) nameEl.value = np.name || '';
+    // 신제품의 첫 번째 이미지를 사진으로 (있고 base64 일 때만)
+    if (Array.isArray(np.images) && np.images.length) {
+      const img0 = np.images[0];
+      const photo = (typeof img0 === 'string' && img0 !== '__idb__' && img0.indexOf('data:') === 0) ? img0
+                  : (img0 && typeof img0 === 'object' && img0.data && img0.data.indexOf('data:') === 0) ? img0.data : '';
+      if (photo) {
+        _pmModalPhoto = photo;
+        const prev = document.getElementById('pm-photo-preview');
+        if (prev) prev.innerHTML = '<img src="' + escapeHtml(photo) + '" style="width:100%;height:100%;object-fit:cover">';
+        const rm = document.getElementById('pm-photo-remove');
+        if (rm) rm.style.display = '';
+      }
+    }
+    // 가격 — 신제품에 없을 수도. 단가 / sellPrice / launchPrice 등 시도
+    const priceEl = document.getElementById('pm-f-price');
+    const candidatePrice = np.price || np.sellPrice || np.launchPrice || '';
+    if (priceEl && candidatePrice) priceEl.value = candidatePrice;
+    // 다른 셀렉트도 리셋
+    const other = document.getElementById('pm-existing-fin');
+    if (other) other.value = '';
+    // 연동 ID 저장
+    window._pmLinkedNewProductId = rid;
+    window._pmLinkedItemId = null;
+    showNotif('🌱 신제품 정보 자동 채움 — ' + (np.name||''), 'success');
+  }
+};
+
 function savePmProduct() {
   const d = _ensureProductMap();
   const nameEl = document.getElementById('pm-f-name');
@@ -40919,13 +40988,47 @@ function savePmProduct() {
   p.photo = _pmModalPhoto || '';
   if (!Array.isArray(p.comments)) p.comments = [];
   p.updatedAt = Date.now();
-  _pmSave();
+  // v2.3.60 Phase 2: 연동 ID 저장 (양방향)
+  if (window._pmLinkedItemId) p.linkedItemId = window._pmLinkedItemId;
+  if (window._pmLinkedNewProductId) p.linkedNewProductId = window._pmLinkedNewProductId;
   const wasEdit = !!_pmEditingProductId;
+  // v2.3.60: 새 제품이면서 완제품/신제품 둘 다 미연동 시 → 신제품 개발 페이지에 아이디어로 자동 추가
+  if (!wasEdit && !window._pmLinkedItemId && !window._pmLinkedNewProductId) {
+    try {
+      if (!Array.isArray(DB.newProducts)) DB.newProducts = [];
+      const newNpId = ((DB._nextId && DB._nextId.newProduct) || (DB.newProducts.reduce(function(m,x){return Math.max(m, Number(x.id)||0);}, 0)+1));
+      if (DB._nextId) DB._nextId.newProduct = newNpId + 1;
+      const newNp = {
+        id: newNpId,
+        name: p.name,
+        stage: 'idea',
+        status: 'DOING',
+        progress: 0,
+        price: p.price || 0,
+        images: _pmModalPhoto ? [_pmModalPhoto] : [],
+        productType: p.productType,
+        skinConcern: p.skinConcern,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        comments: []
+      };
+      DB.newProducts.push(newNp);
+      p.linkedNewProductId = String(newNpId);
+      showNotif('🌱 신제품 개발 아이디어 단계에도 자동 추가됨', 'success');
+    } catch(e) { console.warn('신제품 자동 추가 실패:', e); }
+  }
+  _pmSave();
+  // localStorage 즉시 플러시 + Firestore 동기화
+  try { if (typeof saveDataNow === 'function') saveDataNow(); else if (typeof saveData === 'function') saveData(); } catch(_){}
   const savedId = p.id;
   _pmEditingProductId = null;
   _pmModalPhoto = '';
+  window._pmLinkedItemId = null;
+  window._pmLinkedNewProductId = null;
   _pmCloseOverlay();
   renderProductMap();
+  try { if (typeof renderNewProductKanban === 'function') renderNewProductKanban(); } catch(_){}
+  try { if (typeof renderProductTimeline === 'function') renderProductTimeline(); } catch(_){}
   showNotif('제품이 저장되었습니다', 'success');
   if (wasEdit) openPmDetail(savedId);
 }
