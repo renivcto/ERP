@@ -5553,7 +5553,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.37';
+const ERP_VERSION = 'v2.3.38';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42657,8 +42657,9 @@ function renderProductTimeline() {
 
   // 각 제품 행
   const rowsHtml = products.map(p => {
-    // v2.3.34: 실제 마일스톤 + 가상 마일스톤 (펀딩 오픈/배송 시작)
+    // v2.3.34: 실제 마일스톤 + 가상 마일스톤 (펀딩 오픈/배송 시작/런칭)
     // v2.3.36: 같은 카테고리의 일반 마일스톤이 있으면 가상 만들지 않음 (중복 방지)
+    // v2.3.38: launch 도 가상 마일스톤으로 → lane 알고리즘 통합 (겹침 방지)
     const realMs = (p.milestones || []).filter(m => m && (m.plannedDate || m.actualDate));
     const _hasCat = (catId) => realMs.some(m => m.category === catId);
     const virtualMs = [];
@@ -42672,6 +42673,12 @@ function renderProductTimeline() {
       virtualMs.push({
         id: 'v_ship_' + p.id, category: 'shipping', label: '배송 시작',
         plannedDate: p.wadizShip, _virtual: 'wadizShip'
+      });
+    }
+    if (p.launchDate && !_hasCat('launch')) {
+      virtualMs.push({
+        id: 'v_launch_' + p.id, category: 'launch', label: '런칭',
+        plannedDate: p.launchDate, _virtual: 'launchDate'
       });
     }
     const milestones = [...realMs, ...virtualMs];
@@ -42705,7 +42712,10 @@ function renderProductTimeline() {
       const statusIcon = status === 'done' ? '✅' : status === 'in_progress' ? '🌀' : status === 'delayed' ? '🚨' : '⏳';
       const statusLabel = status==='done'?'완료':status==='in_progress'?'진행중':status==='delayed'?'지연':'예정';
       const opacity = status === 'done' ? 0.85 : 1;
-      const ringClass = status === 'delayed' ? 'tlPulse' : '';
+      // v2.3.38: D-7 이내 런칭/펀딩/배송도 펄스 (긴급 표시)
+      const _dday = m.plannedDate ? getDday(m.plannedDate) : null;
+      const _isUrgentCat = (m.category === 'launch' || m.category === 'wadiz' || m.category === 'shipping') && _dday != null && _dday >= 0 && _dday <= 7;
+      const ringClass = (status === 'delayed' || _isUrgentCat) ? 'tlPulse' : '';
       const tooltip = `${cat.icon} ${cat.label}\n${statusIcon} ${statusLabel}\n📅 시작: ${m.plannedDate}${m.endDate ? '\n📅 종료: ' + m.endDate : ''}${m.actualDate ? '\n✅ 완료: ' + m.actualDate : ''}${m.memo ? '\n📝 ' + m.memo : ''}`;
       const escTooltip = _esc(tooltip);
       // v2.3.34: 가상 마일스톤은 신제품 모달 열기 (날짜 필드 수정용)
@@ -42734,15 +42744,8 @@ function renderProductTimeline() {
       return `<div onclick="${onclick}" title="${escTooltip}" style="position:absolute;left:${startLeft - ICON_SIZE/2}px;top:${top - 2}px;width:${ICON_SIZE}px;height:${ICON_SIZE}px;display:flex;align-items:center;justify-content:center;font-size:${ICON_FS}px;line-height:1;cursor:pointer;opacity:${opacity};z-index:3" class="${ringClass}">${cat.icon}</div>`;
     }).join('');
 
-    // 런칭일 마커 (오른쪽 끝 🚀)
-    // v2.3.36: 일반 launch 마일스톤이 있으면 🚀 마커 숨김 (막대로 표시)
-    let launchMarker = '';
-    const _hasLaunchMs = realMs.some(m => m.category === 'launch');
-    if (p.launchDate && !_hasLaunchMs) {
-      const offset = Math.round((new Date(p.launchDate) - range.start) / (24*60*60*1000));
-      const left = (offset / totalDays) * totalW;
-      launchMarker = `<div onclick="event.stopPropagation();openNewProductModal('${_esc(p.id)}')" title="🚀 런칭일: ${p.launchDate}${launchD != null ? ' (D-' + launchD + ')' : ''}\n클릭하여 수정" style="position:absolute;left:${left - 13}px;top:5px;width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#dc2626 0%,#fca5a5 100%);border:2px solid #fff;box-shadow:0 3px 8px rgba(220,38,38,.4);display:flex;align-items:center;justify-content:center;font-size:14px;z-index:5;cursor:pointer;${launchUrgent ? 'animation:tlPulse 1.2s infinite;' : ''}">🚀</div>`;
-    }
+    // v2.3.38: launchMarker 별도 표시 제거 — 가상 마일스톤이 lane 안에서 처리
+    const launchMarker = '';
 
     // v2.3.32: 라인 연결 제거 — lane 분리로 시각적 혼란 제거
     const lineHtml = '';
