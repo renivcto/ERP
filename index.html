@@ -5512,7 +5512,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.20';
+const ERP_VERSION = 'v2.3.22';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6246,6 +6246,23 @@ async function _doSaveDataInner() {
           return { ...doc, data: '__idb__' };
         }
         return doc;
+      });
+    }
+    // v2.3.21: 해외 PO 의 invoiceFile (단일) IDB 오프로드 — Firestore 1MB 한도 회피
+    if (o.invoiceFile && o.invoiceFile.data && typeof o.invoiceFile.data === 'string'
+        && o.invoiceFile.data !== '__idb__' && o.invoiceFile.data.length > 100) {
+      try { idbSet('order_invoice_' + o.id, o.invoiceFile.data); } catch(e) { console.warn('IDB save invoiceFile 실패:', e); }
+      dbToSave.orders[i].invoiceFile = { ...o.invoiceFile, data: '__idb__' };
+    }
+    // v2.3.21: 해외 PO 의 otherFiles (다중) IDB 오프로드
+    if (Array.isArray(o.otherFiles) && o.otherFiles.length > 0) {
+      dbToSave.orders[i].otherFiles = o.otherFiles.map((f, fi) => {
+        if (!f) return f;
+        if (f.data && typeof f.data === 'string' && f.data !== '__idb__' && f.data.length > 100) {
+          try { idbSet('order_other_' + o.id + '_' + fi, f.data); } catch(e) { console.warn('IDB save otherFile 실패:', e); }
+          return { ...f, data: '__idb__' };
+        }
+        return f;
       });
     }
   });
@@ -7160,6 +7177,21 @@ async function restoreIDBData() {
       if (stamp) DB.orders[i].stampData = stamp;
       // else: keep marker intact
     }
+    // v2.3.21: 해외 PO invoiceFile / otherFiles 복원 — 마커 보존
+    if (DB.orders[i].invoiceFile && DB.orders[i].invoiceFile.data === '__idb__') {
+      const d = await idbGet('order_invoice_' + DB.orders[i].id);
+      if (d) DB.orders[i].invoiceFile.data = d;
+      // else: 마커 유지 — UI 에서 '데이터 없음' 으로 처리
+    }
+    if (Array.isArray(DB.orders[i].otherFiles)) {
+      for (let fi = 0; fi < DB.orders[i].otherFiles.length; fi++) {
+        const f = DB.orders[i].otherFiles[fi];
+        if (f && f.data === '__idb__') {
+          const d = await idbGet('order_other_' + DB.orders[i].id + '_' + fi);
+          if (d) DB.orders[i].otherFiles[fi].data = d;
+        }
+      }
+    }
   }
   // 업체 견적서/첨부파일/통장사본 복원 — 마커 보존
   for (let vi = 0; vi < (DB.vendors||[]).length; vi++) {
@@ -7416,6 +7448,34 @@ async function _v280MigrateInlineToIdb() {
             await idbSet('expense_quote_' + ex.id + '_' + qi, q.data);
             freed += q.data.length;
             ex.quotes[qi] = { ...q, data: '__idb__' };
+            moved++;
+          } catch(e) { failed++; }
+        }
+      }
+    }
+
+    // v2.3.21: orders 의 invoiceFile / otherFiles 마이그레이션 (옛 inline 데이터 처리)
+    for (const o of (DB.orders||[])) {
+      if (!o || o.id == null) continue;
+      if (o.invoiceFile && typeof o.invoiceFile.data === 'string'
+          && o.invoiceFile.data !== '__idb__' && o.invoiceFile.data.length > 100) {
+        try {
+          await idbSet('order_invoice_' + o.id, o.invoiceFile.data);
+          freed += o.invoiceFile.data.length;
+          o.invoiceFile = { ...o.invoiceFile, data: '__idb__' };
+          moved++;
+        } catch(e) { failed++; }
+      }
+      if (Array.isArray(o.otherFiles)) {
+        for (let fi = 0; fi < o.otherFiles.length; fi++) {
+          const f = o.otherFiles[fi];
+          if (!f || typeof f.data !== 'string') continue;
+          if (f.data === '__idb__') { skipped++; continue; }
+          if (f.data.length < 100) continue;
+          try {
+            await idbSet('order_other_' + o.id + '_' + fi, f.data);
+            freed += f.data.length;
+            o.otherFiles[fi] = { ...f, data: '__idb__' };
             moved++;
           } catch(e) { failed++; }
         }
@@ -35065,34 +35125,83 @@ async function openPoApprovalPage(orderId) {
         </div>
         ${noteBlock}
         ${(function(){
-          // v2.2.60: 발주서 첨부파일 (해외 PO 의 Invoice/OtherFiles + 옛 발주서의 pdfData)
+          // v2.3.22: 발주품의서 첨부파일 — blob URL 방식 (v2.3.1 지출결의서 패턴 차용)
+          // - 옛 방식 (href=dataUrl) 은 큰 파일 시 about:blank, __idb__ 마커는 404
+          // - 새 창 내부에서 _poOpenFile() 호출 → blob URL 변환 후 열기
           const _files = [];
           if (o.isOverseas) {
             if (o.invoiceFile && o.invoiceFile.name) _files.push({...o.invoiceFile, kind:'Invoice'});
             if (Array.isArray(o.otherFiles)) o.otherFiles.forEach(f => { if (f && f.name) _files.push({...f, kind:'PO 첨부'}); });
           }
           if (o.pdfData && o.pdfName) _files.push({ name: o.pdfName, data: o.pdfData, type:'application/pdf', size: 0, kind:'견적/원본' });
+          // v2.3.22: 마감자료도 발주품의서 첨부파일에 포함
+          if (Array.isArray(o.closingDocs)) o.closingDocs.forEach(f => { if (f && f.name) _files.push({...f, kind:'마감자료'}); });
           if (_files.length === 0) return '';
           const _fmtSize2 = n => n ? (n < 1024 ? n + 'B' : n < 1024*1024 ? Math.round(n/1024) + 'KB' : (n/1024/1024).toFixed(1) + 'MB') : '';
-          const _escA = s => String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
           const _escH = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
           let h = '<div style="margin-top:18px">';
           h += '<div style="font-size:12px;font-weight:800;color:#475569;margin-bottom:8px;letter-spacing:1px">■ 첨 부 파 일 <span style="color:#94a3b8;font-weight:500">(' + _files.length + ')</span></div>';
+          // v2.3.22: 새 창 내부에서 blob URL 생성 — _poOpenFile (지출결의서의 _openFile 과 prefix 분리)
+          h += '<' + 'script>';
+          h += 'window._poFileData = window._poFileData || {};';
+          _files.forEach((f, i) => {
+            const _dataJs = JSON.stringify(typeof f.data === 'string' ? f.data : '');
+            const _nameJs = JSON.stringify(f.name || 'file');
+            const _typeJs = JSON.stringify(f.type || 'application/octet-stream');
+            h += 'window._poFileData["pf' + i + '"] = {data:' + _dataJs + ', name:' + _nameJs + ', type:' + _typeJs + '};';
+          });
+          h += 'window._poOpenFile = function(key) {';
+          h += '  const f = window._poFileData[key];';
+          h += '  if (!f || !f.data || f.data === "__idb__" || f.data.indexOf("data:") !== 0) {';
+          h += '    alert("⚠️ 파일 데이터 없음 또는 손실됨\\n\\n원본을 다시 첨부하거나, 다른 기기에서 확인 필요.");';
+          h += '    console.warn("[v2.3.22] 파일 데이터 없음:", key, f);';
+          h += '    return false;';
+          h += '  }';
+          h += '  try {';
+          h += '    const arr = f.data.split(",");';
+          h += '    const mime = (arr[0].match(/:(.*?);/) || [null, f.type])[1] || "application/octet-stream";';
+          h += '    const bstr = atob(arr[1] || "");';
+          h += '    const u8 = new Uint8Array(bstr.length);';
+          h += '    for (let i = 0; i < bstr.length; i++) u8[i] = bstr.charCodeAt(i);';
+          h += '    const blob = new Blob([u8], {type: mime});';
+          h += '    const url = URL.createObjectURL(blob);';
+          h += '    const isImage = mime.indexOf("image/") === 0;';
+          h += '    const isPdf = mime === "application/pdf";';
+          h += '    if (isImage || isPdf) {';
+          h += '      window.open(url, "_blank");';
+          h += '    } else {';
+          h += '      const a = document.createElement("a");';
+          h += '      a.href = url; a.download = f.name;';
+          h += '      document.body.appendChild(a); a.click(); document.body.removeChild(a);';
+          h += '    }';
+          h += '    setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 60000);';
+          h += '    return false;';
+          h += '  } catch(e) { alert("파일 열기 실패: " + e.message); console.error(e); return false; }';
+          h += '};';
+          h += '<' + '/script>';
           h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:5px">';
           h += _files.map((f, i) => {
-            const kindBg = f.kind === 'Invoice' ? '#dbeafe' : f.kind === '견적/원본' ? '#fef3c7' : '#e0e7ff';
-            const kindFg = f.kind === 'Invoice' ? '#1e40af' : f.kind === '견적/원본' ? '#92400e' : '#3730a3';
+            const kindBg = f.kind === 'Invoice' ? '#dbeafe' : f.kind === '견적/원본' ? '#fef3c7' : f.kind === '마감자료' ? '#dcfce7' : '#e0e7ff';
+            const kindFg = f.kind === 'Invoice' ? '#1e40af' : f.kind === '견적/원본' ? '#92400e' : f.kind === '마감자료' ? '#166534' : '#3730a3';
             const sz = _fmtSize2(f.size||0);
             const dataUrl = f.data || '';
-            const downloadName = _escA(f.name);
             const fileName = _escH(f.name);
             const type = (f.type||'').toLowerCase();
             const canPreview = type.indexOf('image/') === 0 || type === 'application/pdf' || type === 'text/plain' || type === 'text/html';
-            const linkAttrs = canPreview ? 'target="_blank"' : 'download="' + downloadName + '"';
             const icon = canPreview ? '👁️ ' : '⬇️ ';
+            // v2.3.22: 데이터 유효성 사전 검증
+            const _isValidDataUrl = typeof dataUrl === 'string' && dataUrl.length > 100 && dataUrl !== '__idb__' && dataUrl.indexOf('data:') === 0;
+            if (!_isValidDataUrl) {
+              return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0">'
+                + '<span style="display:inline-block;background:' + kindBg + ';color:' + kindFg + ';padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700">' + f.kind + '</span>'
+                + '<span style="flex:1;color:#94a3b8;font-size:12.5px;font-style:italic" title="원본 데이터가 IDB/Firestore 어디에도 없음">⚠️ ' + fileName + ' — 데이터 손실</span>'
+                + (sz ? '<span style="font-size:10.5px;color:#cbd5e1;flex-shrink:0">- - -</span>' : '')
+                + '</div>';
+            }
+            // v2.3.22: 옛 href=dataUrl → onclick=_poOpenFile()
             return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0">'
               + '<span style="display:inline-block;background:' + kindBg + ';color:' + kindFg + ';padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700">' + f.kind + '</span>'
-              + '<a href="' + dataUrl + '" ' + linkAttrs + ' style="flex:1;color:#1e40af;text-decoration:underline;font-size:12.5px;cursor:pointer" title="' + (canPreview ? '클릭하여 새 창에서 보기' : '클릭하여 다운로드') + '">' + icon + '📄 ' + fileName + '</a>'
+              + '<a href="javascript:void(0)" onclick="return _poOpenFile(\'pf' + i + '\')" style="flex:1;color:#1e40af;text-decoration:underline;font-size:12.5px;cursor:pointer" title="' + (canPreview ? '클릭하여 새 창에서 보기' : '클릭하여 다운로드') + '">' + icon + '📄 ' + fileName + '</a>'
               + (sz ? '<span style="font-size:10.5px;color:#94a3b8;flex-shrink:0">' + sz + '</span>' : '')
               + '</div>';
           }).join('');
