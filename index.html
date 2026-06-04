@@ -5553,7 +5553,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.35';
+const ERP_VERSION = 'v2.3.36';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42658,15 +42658,17 @@ function renderProductTimeline() {
   // 각 제품 행
   const rowsHtml = products.map(p => {
     // v2.3.34: 실제 마일스톤 + 가상 마일스톤 (펀딩 오픈/배송 시작)
+    // v2.3.36: 같은 카테고리의 일반 마일스톤이 있으면 가상 만들지 않음 (중복 방지)
     const realMs = (p.milestones || []).filter(m => m && (m.plannedDate || m.actualDate));
+    const _hasCat = (catId) => realMs.some(m => m.category === catId);
     const virtualMs = [];
-    if (p.wadizOpen) {
+    if (p.wadizOpen && !_hasCat('wadiz')) {
       virtualMs.push({
         id: 'v_wadiz_' + p.id, category: 'wadiz', label: '펀딩 오픈',
         plannedDate: p.wadizOpen, _virtual: 'wadizOpen'
       });
     }
-    if (p.wadizShip) {
+    if (p.wadizShip && !_hasCat('shipping')) {
       virtualMs.push({
         id: 'v_ship_' + p.id, category: 'shipping', label: '배송 시작',
         plannedDate: p.wadizShip, _virtual: 'wadizShip'
@@ -42734,8 +42736,10 @@ function renderProductTimeline() {
     }).join('');
 
     // 런칭일 마커 (오른쪽 끝 🚀)
+    // v2.3.36: 일반 launch 마일스톤이 있으면 🚀 마커 숨김 (막대로 표시)
     let launchMarker = '';
-    if (p.launchDate) {
+    const _hasLaunchMs = realMs.some(m => m.category === 'launch');
+    if (p.launchDate && !_hasLaunchMs) {
       const offset = Math.round((new Date(p.launchDate) - range.start) / (24*60*60*1000));
       const left = (offset / totalDays) * totalW;
       launchMarker = `<div onclick="event.stopPropagation();openNewProductModal('${_esc(p.id)}')" title="🚀 런칭일: ${p.launchDate}${launchD != null ? ' (D-' + launchD + ')' : ''}\n클릭하여 수정" style="position:absolute;left:${left - 13}px;top:5px;width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#dc2626 0%,#fca5a5 100%);border:2px solid #fff;box-shadow:0 3px 8px rgba(220,38,38,.4);display:flex;align-items:center;justify-content:center;font-size:14px;z-index:5;cursor:pointer;${launchUrgent ? 'animation:tlPulse 1.2s infinite;' : ''}">🚀</div>`;
@@ -42845,9 +42849,11 @@ function _openMilestoneModal(productId, milestoneId) {
         <div>
           <label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">카테고리 *</label>
           <div style="display:flex;gap:6px">
-            <select id="ms-category" style="flex:1;padding:8px 10px;border:1px solid #cbd5e1;border-radius:7px;font-size:13px;background:#fff">${catOptions}</select>
+            <select id="ms-category" onchange="_updateMsCategorySyncHint(this.value)" style="flex:1;padding:8px 10px;border:1px solid #cbd5e1;border-radius:7px;font-size:13px;background:#fff">${catOptions}</select>
             <button onclick="_openCategoryManager()" style="padding:8px 14px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;color:#475569;white-space:nowrap" title="카테고리 추가/관리">관리</button>
           </div>
+          <!-- v2.3.36: 연동 안내 -->
+          <div id="ms-cat-sync-hint" style="display:none;margin-top:6px;padding:7px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:11.5px;color:#1e40af;line-height:1.5"></div>
         </div>
         <div>
           <label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">상세 라벨</label>
@@ -42892,7 +42898,26 @@ function _openMilestoneModal(productId, milestoneId) {
     </div>
   `;
   document.body.appendChild(overlay);
+  // v2.3.36: 모달 열림 직후 연동 안내 초기 표시 (수정 모드 시 현재 카테고리 기준)
+  try { setTimeout(() => _updateMsCategorySyncHint(document.getElementById('ms-category').value), 30); } catch(_){}
 }
+
+// v2.3.36: 카테고리 선택 시 연동 안내 갱신
+window._updateMsCategorySyncHint = function(catId) {
+  const hint = document.getElementById('ms-cat-sync-hint');
+  if (!hint) return;
+  const map = {
+    launch:   { field: '런칭 예정일' },
+    wadiz:    { field: '펀딩 오픈' },
+    shipping: { field: '배송 시작' },
+  };
+  if (map[catId]) {
+    hint.style.display = '';
+    hint.innerHTML = '💡 이 카테고리는 신제품 카드의 <strong>' + map[catId].field + '</strong> 필드와 양방향 연동됩니다.<br>시작일이 신제품 카드에 자동으로 반영되며, 삭제 시 필드도 함께 비워집니다.';
+  } else {
+    hint.style.display = 'none';
+  }
+};
 
 window._saveMilestone = function(productId, milestoneId) {
   const p = (DB.newProducts || []).find(x => x && String(x.id) === String(productId));
@@ -42927,6 +42952,10 @@ window._saveMilestone = function(productId, milestoneId) {
       memo, status
     });
   }
+  // v2.3.36: 양방향 연동 — launch/wadiz/shipping 카테고리 → 신제품 필드 동기화
+  if (cat === 'launch') p.launchDate = planned;
+  else if (cat === 'wadiz') p.wadizOpen = planned;
+  else if (cat === 'shipping') p.wadizShip = planned;
   p.updatedAt = Date.now();
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
   document.getElementById('milestone-overlay')?.remove();
@@ -42941,6 +42970,12 @@ window._deleteMilestoneQuick = function(productId, milestoneId) {
   const m = (p.milestones || []).find(x => String(x.id) === String(milestoneId));
   const name = m ? ((m.label || (getMilestoneCat(m.category).label)) || '마일스톤') : '마일스톤';
   if (!confirm(`'${name}' 을(를) 삭제할까요?`)) return;
+  // v2.3.36: launch/wadiz/shipping 카테고리 → 신제품 필드도 비움
+  if (m) {
+    if (m.category === 'launch') p.launchDate = '';
+    else if (m.category === 'wadiz') p.wadizOpen = '';
+    else if (m.category === 'shipping') p.wadizShip = '';
+  }
   p.milestones = (p.milestones || []).filter(x => String(x.id) !== String(milestoneId));
   p.updatedAt = Date.now();
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
@@ -42955,6 +42990,13 @@ window._deleteMilestone = function(productId, milestoneId) {
   if (!confirm('이 마일스톤을 삭제할까요?')) return;
   const p = (DB.newProducts || []).find(x => x && String(x.id) === String(productId));
   if (!p) return;
+  // v2.3.36: 삭제 전 — launch/wadiz/shipping 이면 신제품 필드도 비움 (양방향)
+  const targetM = (p.milestones || []).find(x => String(x.id) === String(milestoneId));
+  if (targetM) {
+    if (targetM.category === 'launch') p.launchDate = '';
+    else if (targetM.category === 'wadiz') p.wadizOpen = '';
+    else if (targetM.category === 'shipping') p.wadizShip = '';
+  }
   p.milestones = (p.milestones || []).filter(x => String(x.id) !== String(milestoneId));
   p.updatedAt = Date.now();
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
@@ -43182,6 +43224,12 @@ window._deleteMilestoneQuick = function(productId, milestoneId) {
   const m = (p.milestones || []).find(x => String(x.id) === String(milestoneId));
   const name = m ? ((m.label || (getMilestoneCat(m.category).label)) || '마일스톤') : '마일스톤';
   if (!confirm(`'${name}' 을(를) 삭제할까요?`)) return;
+  // v2.3.36: launch/wadiz/shipping 카테고리 → 신제품 필드도 비움
+  if (m) {
+    if (m.category === 'launch') p.launchDate = '';
+    else if (m.category === 'wadiz') p.wadizOpen = '';
+    else if (m.category === 'shipping') p.wadizShip = '';
+  }
   p.milestones = (p.milestones || []).filter(x => String(x.id) !== String(milestoneId));
   p.updatedAt = Date.now();
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
