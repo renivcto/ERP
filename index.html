@@ -5553,7 +5553,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.28';
+const ERP_VERSION = 'v2.3.29';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42425,16 +42425,16 @@ function saveNewProduct() {
 
 // 마일스톤 카테고리 — 사전 정의 10개 (사용자 추가는 DB.customMilestoneCats)
 const NP_MILESTONE_CATS = [
-  { id: 'container',  label: '용기',         icon: '🧴', color: '#3b82f6' },
-  { id: 'singlebox',  label: '단상자',       icon: '📦', color: '#a16207' },
-  { id: 'print',      label: '용기 인쇄',    icon: '🎨', color: '#db2777' },
-  { id: 'oem',        label: 'OEM',          icon: '🏭', color: '#ea580c' },
-  { id: 'ingredient', label: '임상시험',     icon: '🧪', color: '#16a34a' },
-  { id: 'receiving',  label: '입고',         icon: '📥', color: '#0891b2' },
-  { id: 'launch',     label: '런칭',         icon: '🚀', color: '#dc2626' },
-  { id: 'wadiz',      label: '와디즈 펀딩',  icon: '💎', color: '#7c3aed' },
-  { id: 'shooting',   label: '촬영',         icon: '📸', color: '#475569' },
-  { id: 'detailpage', label: '상세페이지',   icon: '📝', color: '#0ea5e9' },
+  { id: 'container',  label: '용기',         icon: '🧴', color: '#fbbf24' }, // 노란색
+  { id: 'singlebox',  label: '단상자',       icon: '📦', color: '#92400e' }, // 갈색
+  { id: 'print',      label: '용기 인쇄',    icon: '🎨', color: '#ec4899' }, // 핑크
+  { id: 'oem',        label: 'OEM',          icon: '🏭', color: '#f97316' }, // 주황
+  { id: 'ingredient', label: '임상시험',     icon: '🧪', color: '#84cc16' }, // 연두
+  { id: 'receiving',  label: '입고',         icon: '📥', color: '#38bdf8' }, // 하늘
+  { id: 'launch',     label: '런칭',         icon: '🚀', color: '#ef4444' }, // 빨강
+  { id: 'wadiz',      label: '와디즈 펀딩',  icon: '💎', color: '#a78bfa' }, // 라벤더
+  { id: 'shooting',   label: '촬영',         icon: '📸', color: '#64748b' }, // 슬레이트
+  { id: 'detailpage', label: '상세페이지',   icon: '📝', color: '#06b6d4' }, // 청록
 ];
 
 function getMilestoneCategories() {
@@ -42582,9 +42582,9 @@ function renderProductTimeline() {
     <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;padding:10px 14px;background:#fafbfc;border:1px solid #e5e7eb;border-radius:8px">
       <span style="font-size:11px;color:#64748b;font-weight:700;margin-right:6px">범례:</span>
       ${getMilestoneCategories().map(c => `
-        <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#475569">
-          <span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:${c.color}"></span>
-          ${c.icon} ${_esc(c.label)}
+        <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#475569">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:${c.color};color:#fff;font-size:11px;box-shadow:0 1px 2px rgba(0,0,0,.1)">${c.icon}</span>
+          ${_esc(c.label)}
         </span>
       `).join('')}
     </div>
@@ -42623,20 +42623,36 @@ function renderProductTimeline() {
     const launchD = p.launchDate ? getDday(p.launchDate) : null;
     const launchUrgent = launchD != null && launchD >= 0 && launchD <= 7;
 
-    // 마일스톤 점들
+    // v2.3.29: 마일스톤 — endDate 있으면 막대(기간), 없으면 단일 점
     const dots = milestones.map((m, mi) => {
-      const useDate = m.actualDate || m.plannedDate;
-      const dateD = new Date(useDate);
-      const offset = Math.round((dateD - range.start) / (24*60*60*1000));
-      const left = (offset / totalDays) * totalW;
+      const startD = new Date(m.plannedDate);
+      const startOffset = Math.round((startD - range.start) / (24*60*60*1000));
+      const startLeft = (startOffset / totalDays) * totalW;
       const cat = getMilestoneCat(m.category);
       const status = getMilestoneStatus(m);
       const statusIcon = status === 'done' ? '✅' : status === 'in_progress' ? '🌀' : status === 'delayed' ? '🚨' : '⏳';
+      const statusLabel = status==='done'?'완료':status==='in_progress'?'진행중':status==='delayed'?'지연':'예정';
       const opacity = status === 'done' ? 0.85 : 1;
       const ringClass = status === 'delayed' ? 'tlPulse' : '';
       const dotSize = 22;
-      const tooltip = `${cat.icon} ${cat.label}${m.label ? ' · ' + m.label : ''}\n${statusIcon} ${status==='done'?'완료':status==='in_progress'?'진행중':status==='delayed'?'지연':'예정'}\n📅 ${useDate}${m.memo ? '\n📝 ' + m.memo : ''}`;
-      return `<div onclick="event.stopPropagation();_editMilestone(${JSON.stringify(p.id).replace(/"/g,'&quot;')},'${m.id}')" title="${_esc(tooltip)}" style="position:absolute;left:${left - dotSize/2}px;top:${(38 - dotSize)/2}px;width:${dotSize}px;height:${dotSize}px;border-radius:50%;background:${cat.color};border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.15);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;opacity:${opacity};z-index:3" class="${ringClass}">${cat.icon}</div>`;
+      // 호버 툴팁 (시작/종료/완료/메모)
+      const tooltip = `${cat.icon} ${cat.label}${m.label ? ' · ' + m.label : ''}\n${statusIcon} ${statusLabel}\n📅 시작: ${m.plannedDate}${m.endDate ? '\n📅 종료: ' + m.endDate : ''}${m.actualDate ? '\n✅ 완료: ' + m.actualDate : ''}${m.memo ? '\n📝 ' + m.memo : ''}`;
+      const escTooltip = _esc(tooltip);
+      const onclick = `event.stopPropagation();_editMilestone(${JSON.stringify(p.id).replace(/"/g,'&quot;')},'${m.id}')`;
+
+      // 막대 (기간 있음)
+      if (m.endDate && m.endDate !== m.plannedDate) {
+        const endD = new Date(m.endDate);
+        const endOffset = Math.round((endD - range.start) / (24*60*60*1000));
+        const endLeft = (endOffset / totalDays) * totalW;
+        const barWidth = Math.max(endLeft - startLeft, dotSize);
+        return `<div onclick="${onclick}" title="${escTooltip}" style="position:absolute;left:${startLeft}px;top:8px;height:22px;width:${barWidth}px;cursor:pointer;z-index:3;opacity:${opacity}" class="${ringClass}">
+          <div style="position:absolute;left:${dotSize/2}px;right:0;top:7px;height:8px;background:linear-gradient(90deg,${cat.color} 0%,${cat.color}aa 100%);border-radius:0 99px 99px 0;box-shadow:0 1px 3px rgba(0,0,0,.12)"></div>
+          <div style="position:absolute;left:0;top:0;width:${dotSize}px;height:${dotSize}px;border-radius:50%;background:${cat.color};border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff">${cat.icon}</div>
+        </div>`;
+      }
+      // 단일 점 (기간 없음)
+      return `<div onclick="${onclick}" title="${escTooltip}" style="position:absolute;left:${startLeft - dotSize/2}px;top:${(38 - dotSize)/2}px;width:${dotSize}px;height:${dotSize}px;border-radius:50%;background:${cat.color};border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.15);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;opacity:${opacity};z-index:3" class="${ringClass}">${cat.icon}</div>`;
     }).join('');
 
     // 런칭일 마커 (오른쪽 끝 🚀)
@@ -42766,16 +42782,21 @@ function _openMilestoneModal(productId, milestoneId) {
           <label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">상세 라벨</label>
           <input id="ms-label" type="text" value="${_esc(m ? m.label : '')}" placeholder="예: 나이아신아마이드 100kg, 30ml 펌프 용기" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:7px;font-size:13px">
         </div>
-        <div style="display:flex;gap:10px">
-          <div style="flex:1">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div style="flex:1;min-width:120px">
             <label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">시작일 *</label>
             <input id="ms-planned" type="date" value="${m ? (m.plannedDate||'') : ''}" style="width:100%;padding:7px 9px;border:1px solid #cbd5e1;border-radius:7px;font-size:13px">
           </div>
-          <div style="flex:1">
+          <div style="flex:1;min-width:120px">
+            <label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">종료일 <span style="color:#94a3b8;font-weight:500">(선택)</span></label>
+            <input id="ms-end" type="date" value="${m ? (m.endDate||'') : ''}" style="width:100%;padding:7px 9px;border:1px solid #cbd5e1;border-radius:7px;font-size:13px">
+          </div>
+          <div style="flex:1;min-width:120px">
             <label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">완료일 <span style="color:#94a3b8;font-weight:500">(선택)</span></label>
             <input id="ms-actual" type="date" value="${m ? (m.actualDate||'') : ''}" style="width:100%;padding:7px 9px;border:1px solid #cbd5e1;border-radius:7px;font-size:13px">
           </div>
         </div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:-4px">💡 시작일~종료일 입력 시 타임라인에 기간 막대로 표시</div>
         <div>
           <label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">상태</label>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -42809,22 +42830,28 @@ window._saveMilestone = function(productId, milestoneId) {
   const cat = document.getElementById('ms-category').value;
   const label = (document.getElementById('ms-label').value || '').trim();
   const planned = document.getElementById('ms-planned').value;
+  const endDate = (document.getElementById('ms-end') || {}).value || '';
   const actual = document.getElementById('ms-actual').value;
   const memo = (document.getElementById('ms-memo').value || '').trim();
   const stBtn = document.querySelector('.ms-st-btn[data-sel="1"]');
   const status = stBtn ? stBtn.dataset.status : 'planned';
   if (!planned) { showNotif('시작일을 입력하세요', 'warning'); return; }
+  // v2.3.29: 종료일이 시작일보다 빠르면 경고
+  if (endDate && endDate < planned) { showNotif('종료일은 시작일 이후여야 합니다', 'warning'); return; }
 
   if (milestoneId) {
     const m = p.milestones.find(x => String(x.id) === String(milestoneId));
     if (m) {
       m.category = cat; m.label = label; m.plannedDate = planned;
+      m.endDate = endDate || null; // v2.3.29
       m.actualDate = actual || null; m.memo = memo; m.status = status;
     }
   } else {
     p.milestones.push({
       id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
-      category: cat, label, plannedDate: planned, actualDate: actual || null,
+      category: cat, label, plannedDate: planned,
+      endDate: endDate || null, // v2.3.29
+      actualDate: actual || null,
       memo, status
     });
   }
@@ -42954,7 +42981,7 @@ function renderMilestonesInProductModal(productId) {
             <span style="width:22px;height:22px;border-radius:50%;background:${cat.color};display:inline-flex;align-items:center;justify-content:center;font-size:11px;color:#fff;flex-shrink:0">${cat.icon}</span>
             <div style="flex:1;min-width:0">
               <div style="font-size:12.5px;font-weight:700;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(cat.label)}${m.label ? ' · ' + _esc(m.label) : ''}${ddayHtml}</div>
-              <div style="font-size:10.5px;color:#64748b;margin-top:1px">${stIcon} ${m.plannedDate || '-'}${m.actualDate ? ' → ✅ ' + m.actualDate : ''}</div>
+              <div style="font-size:10.5px;color:#64748b;margin-top:1px">${stIcon} ${m.plannedDate || '-'}${m.endDate ? ' ~ ' + m.endDate : ''}${m.actualDate ? ' → ✅ ' + m.actualDate : ''}</div>
             </div>
           </div>
         `;
