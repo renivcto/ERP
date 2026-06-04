@@ -5553,7 +5553,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.25';
+const ERP_VERSION = 'v2.3.26';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42490,7 +42490,8 @@ function renderProductTimeline() {
   const host = document.getElementById('insight-sub-timeline');
   if (!host) return;
 
-  const products = (DB.newProducts || []).filter(p => p && p.status !== 'DROP' && p.stage !== 'done');
+  // v2.3.26: 제품개발 중 (developing) 단계만 — 아이디어 / 발전시키기 제외
+  const products = (DB.newProducts || []).filter(p => p && p.status !== 'DROP' && p.stage === 'developing');
   const range = _tlGetRange();
 
   // 시간축 마커 (월별)
@@ -42560,6 +42561,7 @@ function renderProductTimeline() {
         <button onclick="window._tlZoom='month';renderProductTimeline()" style="padding:5px 12px;background:${window._tlZoom==='month'?'#0f172a':'#fff'};color:${window._tlZoom==='month'?'#fff':'#475569'};border:1px solid ${window._tlZoom==='month'?'#0f172a':'#cbd5e1'};border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">월</button>
         <button onclick="window._tlZoom='quarter';renderProductTimeline()" style="padding:5px 12px;background:${window._tlZoom==='quarter'?'#0f172a':'#fff'};color:${window._tlZoom==='quarter'?'#fff':'#475569'};border:1px solid ${window._tlZoom==='quarter'?'#0f172a':'#cbd5e1'};border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">분기</button>
         <button onclick="_openCategoryManager()" style="padding:6px 12px;background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">⚙️ 카테고리 관리</button>
+        <button onclick="_addProductFromTimeline()" style="padding:6px 14px;background:#0f172a;color:#fff;border:1px solid #0f172a;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">＋ 제품 추가</button>
       </div>
     </div>
     ${nextLaunch ? `
@@ -42592,7 +42594,8 @@ function renderProductTimeline() {
       <div style="text-align:center;padding:60px 20px;background:#fafbfc;border:2px dashed #cbd5e1;border-radius:12px;color:#94a3b8">
         <div style="font-size:32px;margin-bottom:10px">🌱</div>
         <div style="font-size:14px;font-weight:600">아직 등록된 신제품이 없습니다</div>
-        <div style="font-size:11.5px;color:#cbd5e1;margin-top:6px">신제품 개발 탭에서 추가해주세요</div>
+        <div style="font-size:11.5px;color:#cbd5e1;margin-top:6px">"제품개발 중" 단계의 신제품이 여기 표시됩니다</div>
+        <button onclick="_addProductFromTimeline()" style="margin-top:14px;padding:8px 18px;background:#0f172a;color:#fff;border:0;border-radius:7px;font-size:12.5px;font-weight:700;cursor:pointer">＋ 첫 신제품 추가</button>
       </div>`;
     return;
   }
@@ -42661,7 +42664,10 @@ function renderProductTimeline() {
             <div style="font-size:13px;font-weight:700;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(p.name || '제품명 없음')}</div>
             ${p.launchDate ? `<div style="font-size:10.5px;color:${launchUrgent?'#dc2626':'#64748b'};font-weight:${launchUrgent?'800':'500'};margin-top:1px">🚀 ${p.launchDate}${launchD != null && launchD >= 0 ? ' · D-'+launchD : (launchD != null && launchD < 0 ? ' · 출시완료' : '')}</div>` : ''}
           </div>
-          <button onclick="event.stopPropagation();_addMilestone('${_esc(p.id)}')" title="마일스톤 추가" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:700;cursor:pointer">＋</button>
+          <div style="display:flex;flex-direction:column;gap:3px">
+            <button onclick="event.stopPropagation();_addMilestone('${_esc(p.id)}')" title="마일스톤 추가" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:700;cursor:pointer">＋</button>
+            <button onclick="event.stopPropagation();_removeProductFromTimeline('${_esc(p.id)}')" title="타임라인에서 제외 (개발 단계 변경)" style="background:#fff;color:#94a3b8;border:1px solid #e5e7eb;border-radius:5px;padding:2px 7px;font-size:10px;font-weight:600;cursor:pointer">🗑️</button>
+          </div>
         </div>
         <div style="position:relative;flex:1;min-width:0;height:38px">
           <div style="position:absolute;inset:0;display:flex">
@@ -42763,7 +42769,7 @@ function _openMilestoneModal(productId, milestoneId) {
         </div>
         <div style="display:flex;gap:10px">
           <div style="flex:1">
-            <label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">예정일 *</label>
+            <label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">시작일 *</label>
             <input id="ms-planned" type="date" value="${m ? (m.plannedDate||'') : ''}" style="width:100%;padding:7px 9px;border:1px solid #cbd5e1;border-radius:7px;font-size:13px">
           </div>
           <div style="flex:1">
@@ -42808,7 +42814,7 @@ window._saveMilestone = function(productId, milestoneId) {
   const memo = (document.getElementById('ms-memo').value || '').trim();
   const stBtn = document.querySelector('.ms-st-btn[data-sel="1"]');
   const status = stBtn ? stBtn.dataset.status : 'planned';
-  if (!planned) { showNotif('예정일을 입력하세요', 'warning'); return; }
+  if (!planned) { showNotif('시작일을 입력하세요', 'warning'); return; }
 
   if (milestoneId) {
     const m = p.milestones.find(x => String(x.id) === String(milestoneId));
@@ -43010,6 +43016,54 @@ window._deleteMilestone = function(productId, milestoneId) {
   `;
   document.head.appendChild(st);
 })();
+
+// v2.3.26: 타임라인에서 제품 추가 — 새 신제품 모달 + stage='developing' 자동 설정
+window._addProductFromTimeline = function() {
+  if (typeof openNewProductModal === 'function') {
+    openNewProductModal();
+    // 모달 열린 직후 stage 를 '제품개발 중' 으로 설정
+    setTimeout(() => {
+      try { if (typeof setNpStage === 'function') setNpStage('developing'); } catch(_){}
+      try { showNotif('💡 "제품개발 중" 단계로 자동 설정되었습니다', 'success'); } catch(_){}
+    }, 50);
+  }
+};
+
+// v2.3.26: 타임라인에서 제품 제외 — stage 를 'idea' 로 되돌리기 (DROP 이 아님)
+window._removeProductFromTimeline = function(productId) {
+  const p = (DB.newProducts || []).find(x => x && String(x.id) === String(productId));
+  if (!p) return;
+  const choice = prompt(
+    '"' + p.name + '" 을(를) 타임라인에서 어떻게 제외할까요?\n\n' +
+    '1 → 아이디어 단계로 되돌리기\n' +
+    '2 → DROP LIST 로 보내기\n' +
+    '3 → 완전 삭제 (되돌릴 수 없음)\n\n' +
+    '번호 입력 (1/2/3), 또는 취소',
+    '1'
+  );
+  if (!choice) return;
+  const ch = String(choice).trim();
+  if (ch === '1') {
+    p.stage = 'idea';
+    p.updatedAt = Date.now();
+    try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+    if (typeof renderProductTimeline === 'function') renderProductTimeline();
+    showNotif('↩️ "' + p.name + '" 을(를) 아이디어 단계로 되돌렸습니다', 'success');
+  } else if (ch === '2') {
+    p.status = 'DROP';
+    p.updatedAt = Date.now();
+    try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+    if (typeof renderProductTimeline === 'function') renderProductTimeline();
+    showNotif('🗑️ "' + p.name + '" 을(를) DROP LIST 로 이동했습니다', 'success');
+  } else if (ch === '3') {
+    if (!confirm('⚠️ "' + p.name + '" 을(를) 완전 삭제할까요?\n\n관련 마일스톤도 함께 삭제됩니다. 이 작업은 되돌릴 수 없습니다.')) return;
+    DB.newProducts = (DB.newProducts || []).filter(x => x && String(x.id) !== String(productId));
+    if (!Array.isArray(DB._deletedFeedPostIds)) DB._deletedFeedPostIds = [];
+    try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+    if (typeof renderProductTimeline === 'function') renderProductTimeline();
+    showNotif('🗑️ "' + p.name + '" 완전 삭제 완료', 'success');
+  }
+};
 
 // v2.3.2 — DROP 상태 제품 관리 모달
 function openDroppedProductsModal() {
