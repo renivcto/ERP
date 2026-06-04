@@ -5553,7 +5553,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.62';
+const ERP_VERSION = 'v2.3.63';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -40819,7 +40819,7 @@ function openPmProductModal(pid, rowIdx, colIdx) {
     .sort(function(a,b){ return String(a.name).localeCompare(String(b.name)); });
   const _devItems = (DB.newProducts||[]).filter(function(x){ return x && x.name && (x.stage==='idea'||x.stage==='develop'||x.stage==='developing'); })
     .sort(function(a,b){ return String(a.name).localeCompare(String(b.name)); });
-  const _finOpt = _finItems.map(function(i){ return '<option value="fin:' + escapeHtml(String(i.id)) + '">' + _esc(i.name) + (i.price?' · ₩' + Number(i.price).toLocaleString():'') + '</option>'; }).join('');
+  const _finOpt = _finItems.map(function(i){ return '<option value="fin:' + escapeHtml(String(i.id)) + '">' + _esc(i.name) + '</option>'; }).join('');
   const _devOpt = _devItems.map(function(x){ return '<option value="np:' + escapeHtml(String(x.id)) + '">' + _esc(x.name) + '</option>'; }).join('');
   const _isNew = !p;
   const _selectorHtml = _isNew ? (
@@ -40845,7 +40845,11 @@ function openPmProductModal(pid, rowIdx, colIdx) {
     + '<div style="flex:1"><label style="' + lbl + '">제품 상태</label><select id="pm-f-status" style="' + inp + '">' + stOpt + '</select></div>'
     + '</div></div>';
   h += '</div>';
-  h += '<div style="margin-bottom:12px"><label style="' + lbl + '">판매가 (원)</label><input id="pm-f-price" type="number" min="0" style="' + inp + '" placeholder="0" value="' + (p&&p.price?Number(p.price):'') + '"></div>';
+  // v2.3.63: 판매가 + 용량 한 줄에 (2 컬럼)
+  h += '<div style="display:flex;gap:8px;margin-bottom:12px">'
+    + '<div style="flex:2"><label style="' + lbl + '">판매가 (원)</label><input id="pm-f-price" type="number" min="0" style="' + inp + '" placeholder="0" value="' + (p&&p.price?Number(p.price):'') + '"></div>'
+    + '<div style="flex:1"><label style="' + lbl + '">용량</label><input id="pm-f-capacity" type="text" style="' + inp + '" placeholder="예: 30ml" value="' + (p&&p.capacity?escapeHtml(p.capacity):'') + '"></div>'
+    + '</div>';
   h += '<div style="margin-bottom:12px"><label style="' + lbl + '">제품 기능</label><textarea id="pm-f-func" rows="2" style="' + inp + '" placeholder="제품의 핵심 기능">' + (p?_esc(p.func||''):'') + '</textarea></div>';
   h += '<div style="display:flex;gap:8px;margin-bottom:12px">'
     + '<div style="flex:1"><label style="' + lbl + '">메인 성분</label><textarea id="pm-f-mainIng" rows="2" style="' + inp + '">' + (p?_esc(p.mainIng||''):'') + '</textarea></div>'
@@ -40919,8 +40923,13 @@ window._pmFillFromExisting = function(value) {
     if (!it) return;
     const nameEl = document.getElementById('pm-f-name');
     if (nameEl) nameEl.value = it.name || '';
+    // v2.3.63: 판매가는 actualSalePrice 우선 (없으면 price)
     const priceEl = document.getElementById('pm-f-price');
-    if (priceEl && it.price) priceEl.value = it.price;
+    const finPrice = (it.actualSalePrice != null && it.actualSalePrice !== '') ? it.actualSalePrice : (it.price || '');
+    if (priceEl && finPrice !== '') priceEl.value = finPrice;
+    // v2.3.63: 용량 (spec) 자동 채움
+    const capEl = document.getElementById('pm-f-capacity');
+    if (capEl && it.spec) capEl.value = it.spec;
     // 다른 셀렉트도 리셋
     const other = document.getElementById('pm-existing-np');
     if (other) other.value = '';
@@ -40946,10 +40955,14 @@ window._pmFillFromExisting = function(value) {
         if (rm) rm.style.display = '';
       }
     }
-    // 가격 — 신제품에 없을 수도. 단가 / sellPrice / launchPrice 등 시도
+    // v2.3.63: 가격 — np.price (예상 판매가) 우선
     const priceEl = document.getElementById('pm-f-price');
     const candidatePrice = np.price || np.sellPrice || np.launchPrice || '';
     if (priceEl && candidatePrice) priceEl.value = candidatePrice;
+    // v2.3.63: 용량 자동 채움 (capacity / spec / volume 시도)
+    const capEl = document.getElementById('pm-f-capacity');
+    const candidateCap = np.capacity || np.spec || np.volume || '';
+    if (capEl && candidateCap) capEl.value = candidateCap;
     // 다른 셀렉트도 리셋
     const other = document.getElementById('pm-existing-fin');
     if (other) other.value = '';
@@ -40980,6 +40993,7 @@ function savePmProduct() {
   p.channel = get('pm-f-channel');
   p.status = get('pm-f-status') || 'dev';
   p.price = Number(get('pm-f-price')) || 0;
+  p.capacity = (get('pm-f-capacity')||'').trim(); // v2.3.63
   p.func = (get('pm-f-func')||'').trim();
   p.mainIng = (get('pm-f-mainIng')||'').trim();
   p.subIng = (get('pm-f-subIng')||'').trim();
