@@ -5552,7 +5552,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.69';
+const ERP_VERSION = 'v2.3.70';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -40753,8 +40753,9 @@ function _pmProductCard(p) {
     : '<div style="width:46px;height:46px;border-radius:7px;background:#eef2f6;display:flex;align-items:center;justify-content:center;font-size:18px;flex:0 0 auto">🧴</div>';
   const cmtCnt = (Array.isArray(p.comments) && p.comments.length) ? p.comments.length : 0;
   // v2.3.68: 채널 우상단 컬러 글씨 + 좌측 용량 표시
+  // v2.3.70: 📏 아이콘 제거, 텍스트만
   const _capacityLine = (p.capacity && String(p.capacity).trim())
-    ? '<div style="font-size:10.5px;color:#64748b;margin-top:3px">📏 ' + _esc(String(p.capacity)) + '</div>'
+    ? '<div style="font-size:10.5px;color:#64748b;margin-top:3px">' + _esc(String(p.capacity)) + '</div>'
     : '';
   const _channelLabel = '<span style="font-size:10.5px;font-weight:800;color:' + col + ';letter-spacing:-.2px">' + _esc(p.channel||'-') + '</span>';
   return '<div draggable="true" ondragstart="_pmDragStart(event,\'' + p.id + '\')" ondragend="_pmDragEnd(event)" onclick="openPmDetail(\'' + p.id + '\')" class="pm-card" '
@@ -40828,18 +40829,34 @@ function openPmProductModal(pid, rowIdx, colIdx) {
     .sort(function(a,b){ return String(a.name).localeCompare(String(b.name)); });
   const _finOpt = _finItems.map(function(i){ return '<option value="fin:' + escapeHtml(String(i.id)) + '">' + _esc(i.name) + '</option>'; }).join('');
   const _devOpt = _devItems.map(function(x){ return '<option value="np:' + escapeHtml(String(x.id)) + '">' + _esc(x.name) + '</option>'; }).join('');
+  // v2.3.70: 신규/수정 모두 셀렉트 표시 — 언제든 연동 변경 가능
   const _isNew = !p;
-  const _selectorHtml = _isNew ? (
+  // 현재 연동된 ID 미리 표시
+  const _curFinId = p && p.linkedItemId ? String(p.linkedItemId) : '';
+  const _curNpId  = p && p.linkedNewProductId ? String(p.linkedNewProductId) : '';
+  const _finOptSel = _finItems.map(function(i){
+    return '<option value="fin:' + escapeHtml(String(i.id)) + '"' + (String(i.id) === _curFinId ? ' selected' : '') + '>' + _esc(i.name) + '</option>';
+  }).join('');
+  const _devOptSel = _devItems.map(function(x){
+    return '<option value="np:' + escapeHtml(String(x.id)) + '"' + (String(x.id) === _curNpId ? ' selected' : '') + '>' + _esc(x.name) + '</option>';
+  }).join('');
+  const _hintText = _isNew ? '💡 기존 제품에서 빠르게 추가 (선택)' : '🔗 연동된 제품 (변경 가능)';
+  const _selectorHtml = (
     '<div style="background:linear-gradient(135deg,#eef2ff 0%,#fef3c7 100%);border:1px solid #c7d2fe;border-radius:10px;padding:12px 14px;margin-bottom:14px">'
-    + '<div style="font-size:11.5px;font-weight:700;color:#4338ca;margin-bottom:8px">💡 기존 제품에서 빠르게 추가 (선택)</div>'
+    + '<div style="font-size:11.5px;font-weight:700;color:#4338ca;margin-bottom:8px">' + _hintText + '</div>'
     + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
     + '<div style="flex:1;min-width:160px"><label style="font-size:10.5px;font-weight:700;color:#475569;display:block;margin-bottom:3px">📦 완제품</label>'
-    + '<select id="pm-existing-fin" onchange="_pmFillFromExisting(this.value)" style="' + inp + ';font-size:12.5px"><option value="">— 선택 —</option>' + _finOpt + '</select></div>'
+    + '<select id="pm-existing-fin" onchange="_pmFillFromExisting(this.value)" style="' + inp + ';font-size:12.5px"><option value="">— 선택 —</option>' + _finOptSel + '</select></div>'
     + '<div style="flex:1;min-width:160px"><label style="font-size:10.5px;font-weight:700;color:#475569;display:block;margin-bottom:3px">🌱 신제품 개발 (아이디어/개발중)</label>'
-    + '<select id="pm-existing-np" onchange="_pmFillFromExisting(this.value)" style="' + inp + ';font-size:12.5px"><option value="">— 선택 —</option>' + _devOpt + '</select></div>'
+    + '<select id="pm-existing-np" onchange="_pmFillFromExisting(this.value)" style="' + inp + ';font-size:12.5px"><option value="">— 선택 —</option>' + _devOptSel + '</select></div>'
     + '</div></div>'
-  ) : '';
+  );
   h += _selectorHtml;
+  // 수정 모달 진입 시 기존 연동 ID 복원
+  if (p && p.linkedItemId) window._pmLinkedItemId = String(p.linkedItemId);
+  else window._pmLinkedItemId = null;
+  if (p && p.linkedNewProductId) window._pmLinkedNewProductId = String(p.linkedNewProductId);
+  else window._pmLinkedNewProductId = null;
   h += '<div style="flex:1;min-width:210px">'
     + '<label style="' + lbl + '">제품명 *</label>'
     + '<input id="pm-f-name" style="' + inp + '" placeholder="제품명을 입력하세요" value="' + (p?escapeHtml(p.name||''):'') + '">'
