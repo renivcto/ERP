@@ -5552,7 +5552,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.66';
+const ERP_VERSION = 'v2.3.67';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -40969,15 +40969,31 @@ window._pmFillFromExisting = async function(value) {
     if (!np) return;
     const nameEl = document.getElementById('pm-f-name');
     if (nameEl) nameEl.value = np.name || '';
-    // v2.3.64: 신제품 이미지 자동 채움 (images 배열 + IDB 마커 처리)
-    if (Array.isArray(np.images) && np.images.length) {
-      for (let i = 0; i < np.images.length; i++) {
+    // v2.3.67: 신제품 이미지 자동 채움 — productImgs[0] / productImg / images[0] / packagingImg
+    let _npPhoto = '';
+    // 1) productImgs 배열 시도 (IDB 키: newProduct_{id}_productImgs_{idx})
+    if (Array.isArray(np.productImgs) && np.productImgs.length) {
+      for (let i = 0; i < np.productImgs.length; i++) {
         try {
-          const photo = await _pmResolveImage(np.images[i], 'np_img_' + np.id + '_' + i);
-          if (photo) { _pmSetPhoto(photo); break; }
+          const photo = await _pmResolveImage(np.productImgs[i], 'newProduct_' + np.id + '_productImgs_' + i);
+          if (photo) { _npPhoto = photo; break; }
         } catch(_){}
       }
     }
+    // 2) 단일 productImg (레거시)
+    if (!_npPhoto && typeof np.productImg === 'string' && np.productImg.indexOf('data:') === 0) _npPhoto = np.productImg;
+    // 3) packagingImg fallback
+    if (!_npPhoto && typeof np.packagingImg === 'string' && np.packagingImg.indexOf('data:') === 0) _npPhoto = np.packagingImg;
+    // 4) 구버전 images 배열
+    if (!_npPhoto && Array.isArray(np.images) && np.images.length) {
+      for (let i = 0; i < np.images.length; i++) {
+        try {
+          const photo = await _pmResolveImage(np.images[i], 'np_img_' + np.id + '_' + i);
+          if (photo) { _npPhoto = photo; break; }
+        } catch(_){}
+      }
+    }
+    if (_npPhoto) _pmSetPhoto(_npPhoto);
     // v2.3.63: 가격 — np.price (예상 판매가) 우선
     const priceEl = document.getElementById('pm-f-price');
     const candidatePrice = np.price || np.sellPrice || np.launchPrice || '';
@@ -42936,15 +42952,27 @@ function renderProductTimeline() {
       <div style="display:flex;align-items:center;border-bottom:1px solid #f1f5f9;background:${ri % 2 === 0 ? '#fefce8' : '#fff'}" onmouseenter="this.style.background='${ri % 2 === 0 ? '#fef9c3' : '#fafbfc'}';this.querySelector('.tl-left').style.background='${ri % 2 === 0 ? '#fef9c3' : '#fafbfc'}'" onmouseleave="this.style.background='${ri % 2 === 0 ? '#fefce8' : '#fff'}';this.querySelector('.tl-left').style.background='${ri % 2 === 0 ? '#fefce8' : '#fff'}'">
         <div class="tl-left" style="position:sticky;left:0;z-index:2;background:${ri % 2 === 0 ? '#fefce8' : '#fff'};width:200px;flex-shrink:0;padding:9px 12px;border-right:1px solid #e5e7eb;display:flex;align-items:center;gap:8px;cursor:pointer" onclick="openNewProductModal('${_esc(p.id)}')">
           ${(function(){
-            // v2.3.65: 제품명 옆 작은 사진 박스
+            // v2.3.67: 신제품 이미지 필드 — productImgs[0] / productImg / images[0]
             let _photo = '';
-            if (Array.isArray(p.images) && p.images.length) {
+            // 1) productImgs 배열 (현재 신제품 모달 저장 필드)
+            if (Array.isArray(p.productImgs) && p.productImgs.length) {
+              for (let _i = 0; _i < p.productImgs.length; _i++) {
+                const _img = p.productImgs[_i];
+                if (typeof _img === 'string' && _img.indexOf('data:') === 0) { _photo = _img; break; }
+              }
+            }
+            // 2) 단일 productImg (레거시 호환)
+            if (!_photo && typeof p.productImg === 'string' && p.productImg.indexOf('data:') === 0) _photo = p.productImg;
+            // 3) images 배열 (구버전)
+            if (!_photo && Array.isArray(p.images) && p.images.length) {
               for (let _i = 0; _i < p.images.length; _i++) {
                 const _img = p.images[_i];
                 if (typeof _img === 'string' && _img.indexOf('data:') === 0) { _photo = _img; break; }
                 if (_img && typeof _img === 'object' && _img.data && String(_img.data).indexOf('data:') === 0) { _photo = _img.data; break; }
               }
             }
+            // 4) packagingImg fallback
+            if (!_photo && typeof p.packagingImg === 'string' && p.packagingImg.indexOf('data:') === 0) _photo = p.packagingImg;
             return _photo
               ? `<div style="width:30px;height:30px;border-radius:6px;flex-shrink:0;overflow:hidden;background:#f1f5f9;border:1px solid #e5e7eb"><img src="${_photo}" style="width:100%;height:100%;object-fit:cover"></div>`
               : `<div style="width:30px;height:30px;border-radius:6px;flex-shrink:0;background:#f1f5f9;border:1px solid #e5e7eb;display:flex;align-items:center;justify-content:center;font-size:14px">🧴</div>`;
