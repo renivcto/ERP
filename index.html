@@ -5553,7 +5553,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.31';
+const ERP_VERSION = 'v2.3.32';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42637,8 +42637,25 @@ function renderProductTimeline() {
     const launchD = p.launchDate ? getDday(p.launchDate) : null;
     const launchUrgent = launchD != null && launchD >= 0 && launchD <= 7;
 
-    // v2.3.29: 마일스톤 — endDate 있으면 막대(기간), 없으면 단일 점
-    const dots = milestones.map((m, mi) => {
+    // v2.3.32: 마일스톤 — lane 알고리즘 + 동그라미 제거 + 큰 아이콘
+    // 1) 시작일 순 정렬 + lane 배정 (시간 겹치면 세로로 분리)
+    const _msSorted = milestones.slice().sort((a,b) => (a.plannedDate||'').localeCompare(b.plannedDate||''));
+    const _lanes = []; // 각 lane 의 마지막 종료일 (YYYY-MM-DD)
+    _msSorted.forEach(m => {
+      const start = m.plannedDate;
+      const end = m.endDate || m.plannedDate;
+      let assignedLane = -1;
+      for (let i = 0; i < _lanes.length; i++) {
+        if (_lanes[i] < start) { assignedLane = i; _lanes[i] = end; break; }
+      }
+      if (assignedLane === -1) { assignedLane = _lanes.length; _lanes.push(end); }
+      m._lane = assignedLane;
+    });
+    const laneCount = Math.max(1, _lanes.length);
+    const LANE_H = 26; // 한 lane 의 세로 높이
+    const rowH = 14 + laneCount * LANE_H; // 행 전체 높이 (헤더+여유)
+
+    const dots = _msSorted.map((m, mi) => {
       const startD = new Date(m.plannedDate);
       const startOffset = Math.round((startD - range.start) / (24*60*60*1000));
       const startLeft = (startOffset / totalDays) * totalW;
@@ -42648,25 +42665,25 @@ function renderProductTimeline() {
       const statusLabel = status==='done'?'완료':status==='in_progress'?'진행중':status==='delayed'?'지연':'예정';
       const opacity = status === 'done' ? 0.85 : 1;
       const ringClass = status === 'delayed' ? 'tlPulse' : '';
-      const dotSize = 22;
-      // 호버 툴팁 (시작/종료/완료/메모)
       const tooltip = `${cat.icon} ${cat.label}${m.label ? ' · ' + m.label : ''}\n${statusIcon} ${statusLabel}\n📅 시작: ${m.plannedDate}${m.endDate ? '\n📅 종료: ' + m.endDate : ''}${m.actualDate ? '\n✅ 완료: ' + m.actualDate : ''}${m.memo ? '\n📝 ' + m.memo : ''}`;
       const escTooltip = _esc(tooltip);
       const onclick = `event.stopPropagation();_editMilestone(${JSON.stringify(p.id).replace(/"/g,'&quot;')},'${m.id}')`;
-
-      // 막대 (기간 있음)
+      const top = 8 + m._lane * LANE_H; // lane 별 세로 위치
+      const ICON_SIZE = 22; // 아이콘 영역 (클릭용)
+      const ICON_FS = 18;   // 아이콘 글자 크기 (더 크게)
+      // 막대 (기간)
       if (m.endDate && m.endDate !== m.plannedDate) {
         const endD = new Date(m.endDate);
         const endOffset = Math.round((endD - range.start) / (24*60*60*1000));
         const endLeft = (endOffset / totalDays) * totalW;
-        const barWidth = Math.max(endLeft - startLeft, dotSize);
-        return `<div onclick="${onclick}" title="${escTooltip}" style="position:absolute;left:${startLeft}px;top:8px;height:22px;width:${barWidth}px;cursor:pointer;z-index:3;opacity:${opacity}" class="${ringClass}">
-          <div style="position:absolute;left:${dotSize/2}px;right:0;top:7px;height:8px;background:linear-gradient(90deg,${cat.color} 0%,${cat.color}aa 100%);border-radius:0 99px 99px 0;box-shadow:0 1px 3px rgba(0,0,0,.12)"></div>
-          <div style="position:absolute;left:0;top:0;width:${dotSize}px;height:${dotSize}px;border-radius:50%;background:${cat.color};border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff">${cat.icon}</div>
+        const barWidth = Math.max(endLeft - startLeft, ICON_SIZE);
+        return `<div onclick="${onclick}" title="${escTooltip}" style="position:absolute;left:${startLeft}px;top:${top}px;height:20px;width:${barWidth}px;cursor:pointer;z-index:3;opacity:${opacity}" class="${ringClass}">
+          <div style="position:absolute;left:0;right:0;top:6px;height:8px;background:linear-gradient(90deg,${cat.color} 0%,${cat.color}cc 100%);border-radius:99px;box-shadow:0 1px 3px rgba(0,0,0,.18)"></div>
+          <div style="position:absolute;left:-2px;top:-1px;font-size:${ICON_FS}px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35)) drop-shadow(0 0 1px rgba(255,255,255,.8))">${cat.icon}</div>
         </div>`;
       }
-      // 단일 점 (기간 없음)
-      return `<div onclick="${onclick}" title="${escTooltip}" style="position:absolute;left:${startLeft - dotSize/2}px;top:${(38 - dotSize)/2}px;width:${dotSize}px;height:${dotSize}px;border-radius:50%;background:${cat.color};border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.15);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;opacity:${opacity};z-index:3" class="${ringClass}">${cat.icon}</div>`;
+      // 단일 시점 — 아이콘만 (동그라미 X)
+      return `<div onclick="${onclick}" title="${escTooltip}" style="position:absolute;left:${startLeft - ICON_SIZE/2}px;top:${top - 2}px;width:${ICON_SIZE}px;height:${ICON_SIZE}px;display:flex;align-items:center;justify-content:center;font-size:${ICON_FS}px;line-height:1;cursor:pointer;opacity:${opacity};z-index:3;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35)) drop-shadow(0 0 1px rgba(255,255,255,.8))" class="${ringClass}">${cat.icon}</div>`;
     }).join('');
 
     // 런칭일 마커 (오른쪽 끝 🚀)
@@ -42674,20 +42691,11 @@ function renderProductTimeline() {
     if (p.launchDate) {
       const offset = Math.round((new Date(p.launchDate) - range.start) / (24*60*60*1000));
       const left = (offset / totalDays) * totalW;
-      launchMarker = `<div title="🚀 런칭일: ${p.launchDate}${launchD != null ? ' (D-' + launchD + ')' : ''}" style="position:absolute;left:${left - 13}px;top:5px;width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#dc2626 0%,#fca5a5 100%);border:2px solid #fff;box-shadow:0 3px 8px rgba(220,38,38,.4);display:flex;align-items:center;justify-content:center;font-size:14px;z-index:4;${launchUrgent ? 'animation:tlPulse 1.2s infinite;' : ''}">🚀</div>`;
+      launchMarker = `<div onclick="event.stopPropagation();openNewProductModal('${_esc(p.id)}')" title="🚀 런칭일: ${p.launchDate}${launchD != null ? ' (D-' + launchD + ')' : ''}\n클릭하여 수정" style="position:absolute;left:${left - 13}px;top:5px;width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#dc2626 0%,#fca5a5 100%);border:2px solid #fff;box-shadow:0 3px 8px rgba(220,38,38,.4);display:flex;align-items:center;justify-content:center;font-size:14px;z-index:5;cursor:pointer;${launchUrgent ? 'animation:tlPulse 1.2s infinite;' : ''}">🚀</div>`;
     }
 
-    // 라인 연결 (마일스톤 사이)
-    const sortedMs = milestones.slice().sort((a,b) => (a.actualDate||a.plannedDate||'').localeCompare(b.actualDate||b.plannedDate||''));
-    let lineHtml = '';
-    if (sortedMs.length >= 2) {
-      const first = sortedMs[0]; const last = sortedMs[sortedMs.length-1];
-      const firstD = new Date(first.actualDate || first.plannedDate);
-      const lastD = new Date(last.actualDate || last.plannedDate);
-      const firstLeft = (Math.round((firstD - range.start) / (24*60*60*1000)) / totalDays) * totalW;
-      const lastLeft = (Math.round((lastD - range.start) / (24*60*60*1000)) / totalDays) * totalW;
-      lineHtml = `<div style="position:absolute;left:${firstLeft}px;top:19px;width:${lastLeft - firstLeft}px;height:1px;border-top:2px dashed #cbd5e1;z-index:1"></div>`;
-    }
+    // v2.3.32: 라인 연결 제거 — lane 분리로 시각적 혼란 제거
+    const lineHtml = '';
 
     return `
       <div style="display:flex;border-bottom:1px solid #f1f5f9;background:#fff" onmouseenter="this.style.background='#fafbfc'" onmouseleave="this.style.background='#fff'">
@@ -42698,7 +42706,7 @@ function renderProductTimeline() {
           </div>
           <button onclick="event.stopPropagation();_addMilestone('${_esc(p.id)}')" title="마일스톤 추가" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:700;cursor:pointer">＋</button>
         </div>
-        <div style="position:relative;flex:1;min-width:0;height:38px">
+        <div style="position:relative;flex:1;min-width:0;height:${rowH}px">
           <div style="position:absolute;inset:0;display:flex">
             ${months.map(() => `<div style="width:${colWidth}px;flex-shrink:0;border-right:1px solid #f1f5f9;background:linear-gradient(180deg,#fafbfc 0%,#fff 100%)"></div>`).join('')}
           </div>
@@ -42772,8 +42780,10 @@ function _openMilestoneModal(productId, milestoneId) {
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10020;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
-  const selCat = m ? m.category : (cats[0]||{}).id;
-  const catOptions = cats.map(c => `<option value="${c.id}" ${selCat === c.id ? 'selected' : ''}>${c.icon} ${_esc(c.label)}</option>`).join('');
+  // v2.3.32: 신규 추가 시 빈 값으로 시작 (수정 시는 기존 카테고리 선택)
+  const selCat = m ? m.category : '';
+  const placeholderOption = `<option value="" ${selCat === '' ? 'selected' : ''}>— 카테고리를 선택하세요 —</option>`;
+  const catOptions = placeholderOption + cats.map(c => `<option value="${c.id}" ${selCat === c.id ? 'selected' : ''}>${c.icon} ${_esc(c.label)}</option>`).join('');
 
   overlay.innerHTML = `
     <div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;max-width:480px;width:100%;box-shadow:0 24px 60px rgba(15,23,42,.3);overflow:hidden">
@@ -42789,7 +42799,7 @@ function _openMilestoneModal(productId, milestoneId) {
           <label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">카테고리 *</label>
           <div style="display:flex;gap:6px">
             <select id="ms-category" style="flex:1;padding:8px 10px;border:1px solid #cbd5e1;border-radius:7px;font-size:13px;background:#fff">${catOptions}</select>
-            <button onclick="_openCategoryManager()" style="padding:8px 10px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;color:#475569" title="카테고리 추가/관리">⚙️</button>
+            <button onclick="_openCategoryManager()" style="padding:8px 14px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;color:#475569;white-space:nowrap" title="카테고리 추가/관리">관리</button>
           </div>
         </div>
         <div>
@@ -42842,6 +42852,7 @@ window._saveMilestone = function(productId, milestoneId) {
   if (!p) return;
   if (!Array.isArray(p.milestones)) p.milestones = [];
   const cat = document.getElementById('ms-category').value;
+  if (!cat) { showNotif('카테고리를 선택하세요', 'warning'); return; }
   const label = (document.getElementById('ms-label').value || '').trim();
   const planned = document.getElementById('ms-planned').value;
   const endDate = (document.getElementById('ms-end') || {}).value || '';
