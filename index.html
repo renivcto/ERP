@@ -5553,7 +5553,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.63';
+const ERP_VERSION = 'v2.3.64';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -40914,8 +40914,31 @@ function _pmRemovePhoto() {
   if (rm) rm.style.display = 'none';
 }
 
-// v2.3.60: 기존 완제품/신제품에서 모달 입력 자동 채움
-window._pmFillFromExisting = function(value) {
+// v2.3.60/63/64: 기존 완제품/신제품에서 모달 입력 자동 채움 (async — IDB 이미지 복원)
+// v2.3.64: 이미지 helper — base64 또는 __idb__ 마커 모두 처리
+async function _pmResolveImage(rawVal, idbKey) {
+  if (!rawVal) return '';
+  if (typeof rawVal === 'string') {
+    if (rawVal.indexOf('data:') === 0) return rawVal;
+    if (rawVal === '__idb__' && idbKey) {
+      try { const v = await idbGet(idbKey); if (v && String(v).indexOf('data:') === 0) return v; } catch(_){}
+    }
+    return '';
+  }
+  if (typeof rawVal === 'object' && rawVal.data) {
+    return _pmResolveImage(rawVal.data, idbKey);
+  }
+  return '';
+}
+function _pmSetPhoto(photo) {
+  if (!photo) return;
+  _pmModalPhoto = photo;
+  const prev = document.getElementById('pm-photo-preview');
+  if (prev) prev.innerHTML = '<img src="' + escapeHtml(photo) + '" style="width:100%;height:100%;object-fit:cover">';
+  const rm = document.getElementById('pm-photo-remove');
+  if (rm) rm.style.display = '';
+}
+window._pmFillFromExisting = async function(value) {
   if (!value) return;
   const [kind, rid] = value.split(':');
   if (kind === 'fin') {
@@ -40930,6 +40953,11 @@ window._pmFillFromExisting = function(value) {
     // v2.3.63: 용량 (spec) 자동 채움
     const capEl = document.getElementById('pm-f-capacity');
     if (capEl && it.spec) capEl.value = it.spec;
+    // v2.3.64: 이미지 자동 채움 (item.image, IDB 마커 처리)
+    try {
+      const photo = await _pmResolveImage(it.image, 'item_img_' + it.id);
+      if (photo) _pmSetPhoto(photo);
+    } catch(_){}
     // 다른 셀렉트도 리셋
     const other = document.getElementById('pm-existing-np');
     if (other) other.value = '';
@@ -40942,17 +40970,13 @@ window._pmFillFromExisting = function(value) {
     if (!np) return;
     const nameEl = document.getElementById('pm-f-name');
     if (nameEl) nameEl.value = np.name || '';
-    // 신제품의 첫 번째 이미지를 사진으로 (있고 base64 일 때만)
+    // v2.3.64: 신제품 이미지 자동 채움 (images 배열 + IDB 마커 처리)
     if (Array.isArray(np.images) && np.images.length) {
-      const img0 = np.images[0];
-      const photo = (typeof img0 === 'string' && img0 !== '__idb__' && img0.indexOf('data:') === 0) ? img0
-                  : (img0 && typeof img0 === 'object' && img0.data && img0.data.indexOf('data:') === 0) ? img0.data : '';
-      if (photo) {
-        _pmModalPhoto = photo;
-        const prev = document.getElementById('pm-photo-preview');
-        if (prev) prev.innerHTML = '<img src="' + escapeHtml(photo) + '" style="width:100%;height:100%;object-fit:cover">';
-        const rm = document.getElementById('pm-photo-remove');
-        if (rm) rm.style.display = '';
+      for (let i = 0; i < np.images.length; i++) {
+        try {
+          const photo = await _pmResolveImage(np.images[i], 'np_img_' + np.id + '_' + i);
+          if (photo) { _pmSetPhoto(photo); break; }
+        } catch(_){}
       }
     }
     // v2.3.63: 가격 — np.price (예상 판매가) 우선
