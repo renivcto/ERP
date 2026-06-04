@@ -2502,11 +2502,11 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div style="font-size:13px;color:var(--gray-500)"><span id="np-count">0</span>개 프로젝트</div>
           <div style="display:flex;gap:8px;align-items:center">
             <select id="np-status-filter" onchange="renderNewProductKanban()" style="padding:5px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;color:var(--gray-600)">
-              <option value="전체">전체 상태</option><option value="DOING">DOING</option><option value="ON HOLD">ON HOLD</option><option value="DROP">DROP</option>
+              <option value="전체">전체 상태</option><option value="DOING">DOING</option><option value="ON HOLD">ON HOLD</option>
             </select>
             <button onclick="openNewProductModal()" style="padding:7px 18px;background:#0f172a;color:#fff;border:1px solid #0f172a;border-radius:7px;font-size:12.5px;font-weight:700;cursor:pointer">＋ 신제품 추가</button>
             <!-- v2.3.2: DROP 제품 관리 버튼 -->
-            <button onclick="openDroppedProductsModal()" style="padding:7px 14px;background:#fff;color:#dc2626;border:1px solid #fca5a5;border-radius:7px;font-size:12.5px;font-weight:700;cursor:pointer" onmouseenter="this.style.background='#fef2f2'" onmouseleave="this.style.background='#fff'">🗑️ 중단된 제품</button>
+            <button onclick="openDroppedProductsModal()" style="padding:7px 14px;background:#fff;color:#dc2626;border:1px solid #fca5a5;border-radius:7px;font-size:12.5px;font-weight:700;cursor:pointer" onmouseenter="this.style.background='#fef2f2'" onmouseleave="this.style.background='#fff'">🗑️ DROP LIST</button>
           </div>
         </div>
         <div id="np-kanban" style="display:flex;flex-direction:column;gap:20px;min-height:400px"></div>
@@ -5543,7 +5543,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.23';
+const ERP_VERSION = 'v2.3.24';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -41402,7 +41402,8 @@ function renderNewProductKanban() {
   let items = DB.newProducts;
   if (statusFilter !== '전체') items = items.filter(x => _migrateNpStatus(x.status) === statusFilter);
   // 제품 개발 완료(done) 단계는 화면 공간 확보를 위해 보드/카운트에서 제외 (데이터는 유지)
-  const visibleItems = items.filter(x => x.stage !== 'done');
+  // v2.3.24: DROP 상태도 보드에서 숨김 (DROP LIST 모달에서만 관리)
+  const visibleItems = items.filter(x => x.stage !== 'done' && _migrateNpStatus(x.status) !== 'DROP');
   const doneCount = items.filter(x => x.stage === 'done').length;
   document.getElementById('np-count').textContent = visibleItems.length;
 
@@ -42396,7 +42397,7 @@ function openDroppedProductsModal() {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   const esc = s => String(s==null?'':s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const rowsHtml = dropped.length === 0
-    ? '<div style="text-align:center;padding:40px 20px;color:#94a3b8;font-size:13px">중단된 제품이 없습니다</div>'
+    ? '<div style="text-align:center;padding:40px 20px;color:#94a3b8;font-size:13px">DROP LIST 가 비어있습니다</div>'
     : dropped.map(p => {
         const _date = p.updatedAt ? new Date(p.updatedAt).toISOString().slice(0,10) : '-';
         return `<div style="display:flex;align-items:center;gap:10px;padding:11px 14px;background:#fff;border:1px solid #fee2e2;border-radius:8px">
@@ -42413,7 +42414,7 @@ function openDroppedProductsModal() {
     <div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;max-width:680px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(15,23,42,.3);overflow:hidden">
       <div style="padding:16px 20px 14px;border-bottom:1px solid #f1f5f9;background:linear-gradient(135deg,#fef2f2 0%,#fee2e2 100%);display:flex;align-items:center;justify-content:space-between">
         <div>
-          <div style="font-size:11px;color:#991b1b;font-weight:700;letter-spacing:.3px;margin-bottom:3px">🗑️ 중단된 제품</div>
+          <div style="font-size:11px;color:#991b1b;font-weight:700;letter-spacing:.3px;margin-bottom:3px">🗑️ DROP LIST</div>
           <div style="font-size:15px;font-weight:800;color:#0f172a">DROP 상태 ${dropped.length}건</div>
         </div>
         <button onclick="document.getElementById('dropped-np-overlay')?.remove()" style="background:#fff;border:1px solid #fecaca;font-size:16px;color:#991b1b;cursor:pointer;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center">✕</button>
