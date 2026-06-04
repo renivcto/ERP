@@ -5553,7 +5553,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.27';
+const ERP_VERSION = 'v2.3.28';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42231,6 +42231,8 @@ function openNewProductModal(editId) {
     const it = (DB.newProducts || []).find(x => x.id === editId);
     if (it) {
       document.getElementById('np-modal-title').textContent = '🌱 신제품 수정';
+      // v2.3.28: 편집 모드 — 삭제 버튼 표시 (타임라인의 🗑️ 대신 여기서 처리)
+      if (delBtn) delBtn.style.display = '';
       const nameEl = document.getElementById('np-name'); if (nameEl) nameEl.value = it.name || '';
       _npStage = it.stage || 'idea';
       setNpStage(_npStage);
@@ -42664,10 +42666,7 @@ function renderProductTimeline() {
             <div style="font-size:13px;font-weight:700;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(p.name || '제품명 없음')}</div>
             ${p.launchDate ? `<div style="font-size:10.5px;color:${launchUrgent?'#dc2626':'#64748b'};font-weight:${launchUrgent?'800':'500'};margin-top:1px">🚀 ${p.launchDate}${launchD != null && launchD >= 0 ? ' · D-'+launchD : (launchD != null && launchD < 0 ? ' · 출시완료' : '')}</div>` : ''}
           </div>
-          <div style="display:flex;flex-direction:column;gap:3px">
-            <button onclick="event.stopPropagation();_addMilestone('${_esc(p.id)}')" title="마일스톤 추가" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:700;cursor:pointer">＋</button>
-            <button onclick="event.stopPropagation();_removeProductFromTimeline('${_esc(p.id)}')" title="타임라인에서 제외 (개발 단계 변경)" style="background:#fff;color:#94a3b8;border:1px solid #e5e7eb;border-radius:5px;padding:2px 7px;font-size:10px;font-weight:600;cursor:pointer">🗑️</button>
-          </div>
+          <button onclick="event.stopPropagation();_addMilestone('${_esc(p.id)}')" title="마일스톤 추가" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:700;cursor:pointer">＋</button>
         </div>
         <div style="position:relative;flex:1;min-width:0;height:38px">
           <div style="position:absolute;inset:0;display:flex">
@@ -43141,6 +43140,8 @@ function deleteNewProduct() {
   saveDataNow().catch(e => console.error('신제품 삭제 실패:', e));
   closeModal('add-newproduct');
   renderNewProductKanban();
+  // v2.3.28: 타임라인도 즉시 갱신
+  try { if (typeof renderProductTimeline === 'function') renderProductTimeline(); } catch(_){}
   showNotif('삭제되었습니다');
 }
 
