@@ -5553,7 +5553,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.40';
+const ERP_VERSION = 'v2.3.41';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42652,10 +42652,7 @@ function renderProductTimeline() {
     <div style="display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;margin-bottom:14px;padding:10px 14px;background:#fafbfc;border:1px solid #e5e7eb;border-radius:8px">
       <span style="font-size:11px;color:#64748b;font-weight:700;margin-right:6px">범례:</span>
       ${getMilestoneCategories().map(c => `
-        <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#475569">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:${c.color};color:#fff;font-size:11px;box-shadow:0 1px 2px rgba(0,0,0,.1)">${c.icon}</span>
-          ${_esc(c.label)}
-        </span>
+        <span title="${_esc(c.label)}" style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;background:${c.color};color:#fff;font-size:18px;box-shadow:0 1px 3px rgba(0,0,0,.15);cursor:default">${c.icon}</span>
       `).join('')}
     </div>
   `;
@@ -42789,7 +42786,10 @@ function renderProductTimeline() {
             <div style="font-size:13px;font-weight:700;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(p.name || '제품명 없음')}</div>
             ${p.launchDate ? `<div style="font-size:10.5px;color:${launchUrgent?'#dc2626':'#64748b'};font-weight:${launchUrgent?'800':'500'};margin-top:1px">🚀 ${p.launchDate}${launchD != null && launchD >= 0 ? ' · D-'+launchD : (launchD != null && launchD < 0 ? ' · 출시완료' : '')}</div>` : ''}
           </div>
-          <button onclick="event.stopPropagation();_addMilestone('${_esc(p.id)}')" title="마일스톤 추가" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:700;cursor:pointer">＋</button>
+          <div style="display:flex;flex-direction:column;gap:3px">
+            <button onclick="event.stopPropagation();_addMilestone('${_esc(p.id)}')" title="마일스톤 추가" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:700;cursor:pointer">＋</button>
+            <button onclick="event.stopPropagation();_duplicateProduct('${_esc(p.id)}')" title="제품 복사 (마일스톤·날짜 포함)" style="background:#fff;color:#475569;border:1px solid #e5e7eb;border-radius:5px;padding:2px 7px;font-size:10.5px;font-weight:600;cursor:pointer">📋</button>
+          </div>
         </div>
         <div style="position:relative;flex:1;min-width:0;height:${rowH}px">
           <div style="position:absolute;inset:0;display:flex">
@@ -43292,6 +43292,37 @@ window._deleteMilestone = function(productId, milestoneId) {
   `;
   document.head.appendChild(st);
 })();
+
+// v2.3.41: 제품 복사 (신제품 + 마일스톤 + 날짜 일체)
+window._duplicateProduct = function(productId) {
+  const p = (DB.newProducts || []).find(x => x && String(x.id) === String(productId));
+  if (!p) { showNotif('제품을 찾을 수 없습니다', 'warning'); return; }
+  const msCount = Array.isArray(p.milestones) ? p.milestones.length : 0;
+  if (!confirm(`'${p.name}' 을(를) 복사할까요?\n\n• 마일스톤 ${msCount}개\n• 런칭/펀딩/배송 날짜\n• 이미지·메모 등 모든 정보\n\n위 항목이 모두 복사됩니다.`)) return;
+
+  // deep clone (이미지/마일스톤 포함)
+  const newP = JSON.parse(JSON.stringify(p));
+  // 새 ID 생성
+  const maxId = (DB.newProducts || []).reduce((m, x) => Math.max(m, Number(x.id) || 0), 0);
+  newP.id = maxId + 1;
+  newP.name = (p.name || '제품') + ' - 복사본';
+  newP.createdAt = Date.now();
+  newP.updatedAt = Date.now();
+  // 마일스톤 ID 도 새로 (충돌 방지)
+  if (Array.isArray(newP.milestones)) {
+    newP.milestones.forEach((m, i) => {
+      if (m) m.id = Date.now() * 1000 + Math.floor(Math.random() * 1000) + i;
+    });
+  }
+  if (!Array.isArray(DB.newProducts)) DB.newProducts = [];
+  DB.newProducts.push(newP);
+  // _nextId 업데이트 (안전)
+  if (DB._nextId) DB._nextId.newProduct = Math.max((DB._nextId.newProduct||0), newP.id + 1);
+  try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  if (typeof renderProductTimeline === 'function') renderProductTimeline();
+  if (typeof renderNewProductKanban === 'function') renderNewProductKanban();
+  showNotif('📋 "' + p.name + '" 복사 완료 → "' + newP.name + '"', 'success');
+};
 
 // v2.3.26: 타임라인에서 제품 추가 — 새 신제품 모달 + stage='developing' 자동 설정
 window._addProductFromTimeline = function() {
