@@ -5553,7 +5553,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.33';
+const ERP_VERSION = 'v2.3.34';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42446,9 +42446,10 @@ const NP_MILESTONE_CATS = [
   { id: 'ingredient', label: '임상시험',     icon: '🧪', color: '#84cc16' }, // 연두
   { id: 'receiving',  label: '입고',         icon: '📥', color: '#38bdf8' }, // 하늘
   { id: 'launch',     label: '런칭',         icon: '🚀', color: '#ef4444' }, // 빨강
-  { id: 'wadiz',      label: '와디즈 펀딩',  icon: '💎', color: '#a78bfa' }, // 라벤더
+  { id: 'wadiz',      label: '펀딩 오픈',    icon: '💎', color: '#a78bfa' }, // 라벤더
   { id: 'shooting',   label: '촬영',         icon: '📸', color: '#64748b' }, // 슬레이트
   { id: 'detailpage', label: '상세페이지',   icon: '📝', color: '#06b6d4' }, // 청록
+  { id: 'shipping',   label: '배송 시작',    icon: '🚚', color: '#10b981' }, // emerald
 ];
 
 function getMilestoneCategories() {
@@ -42561,10 +42562,13 @@ function renderProductTimeline() {
       if (d >= today && d <= thisQEnd) thisQLaunch++;
       else if (d > thisQEnd && d <= nextQEnd) nextQLaunch++;
     }
+    // v2.3.34: 가상 마일스톤(펀딩/배송)도 카운트에 포함
     (p.milestones || []).forEach(m => {
       totalMilestones++;
       if (getMilestoneStatus(m) === 'delayed') delayed++;
     });
+    if (p.wadizOpen) totalMilestones++;
+    if (p.wadizShip) totalMilestones++;
   });
 
   // 다음 출시 예정 (가장 가까운)
@@ -42653,7 +42657,22 @@ function renderProductTimeline() {
 
   // 각 제품 행
   const rowsHtml = products.map(p => {
-    const milestones = (p.milestones || []).filter(m => m && (m.plannedDate || m.actualDate));
+    // v2.3.34: 실제 마일스톤 + 가상 마일스톤 (펀딩 오픈/배송 시작)
+    const realMs = (p.milestones || []).filter(m => m && (m.plannedDate || m.actualDate));
+    const virtualMs = [];
+    if (p.wadizOpen) {
+      virtualMs.push({
+        id: 'v_wadiz_' + p.id, category: 'wadiz', label: '펀딩 오픈',
+        plannedDate: p.wadizOpen, _virtual: 'wadizOpen'
+      });
+    }
+    if (p.wadizShip) {
+      virtualMs.push({
+        id: 'v_ship_' + p.id, category: 'shipping', label: '배송 시작',
+        plannedDate: p.wadizShip, _virtual: 'wadizShip'
+      });
+    }
+    const milestones = [...realMs, ...virtualMs];
     const launchD = p.launchDate ? getDday(p.launchDate) : null;
     const launchUrgent = launchD != null && launchD >= 0 && launchD <= 7;
 
@@ -42687,7 +42706,10 @@ function renderProductTimeline() {
       const ringClass = status === 'delayed' ? 'tlPulse' : '';
       const tooltip = `${cat.icon} ${cat.label}${m.label ? ' · ' + m.label : ''}\n${statusIcon} ${statusLabel}\n📅 시작: ${m.plannedDate}${m.endDate ? '\n📅 종료: ' + m.endDate : ''}${m.actualDate ? '\n✅ 완료: ' + m.actualDate : ''}${m.memo ? '\n📝 ' + m.memo : ''}`;
       const escTooltip = _esc(tooltip);
-      const onclick = `event.stopPropagation();_editMilestone(${JSON.stringify(p.id).replace(/"/g,'&quot;')},'${m.id}')`;
+      // v2.3.34: 가상 마일스톤은 신제품 모달 열기 (날짜 필드 수정용)
+      const onclick = m._virtual
+        ? `event.stopPropagation();openNewProductModal(${JSON.stringify(p.id).replace(/"/g,'&quot;')})`
+        : `event.stopPropagation();_editMilestone(${JSON.stringify(p.id).replace(/"/g,'&quot;')},'${m.id}')`;
       const top = 8 + m._lane * LANE_H; // lane 별 세로 위치
       const ICON_SIZE = 22; // 아이콘 영역 (클릭용)
       const ICON_FS = 18;   // 아이콘 글자 크기 (더 크게)
