@@ -5553,7 +5553,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.39';
+const ERP_VERSION = 'v2.3.40';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42439,20 +42439,52 @@ function saveNewProduct() {
 
 // 마일스톤 카테고리 — 사전 정의 10개 (사용자 추가는 DB.customMilestoneCats)
 const NP_MILESTONE_CATS = [
-  { id: 'container',  label: '용기 생산',    icon: '🧴', color: '#fbbf24' }, // 노란색
-  { id: 'singlebox',  label: '단상자',       icon: '📦', color: '#92400e' }, // 갈색
-  { id: 'print',      label: '용기 인쇄',    icon: '🎨', color: '#ec4899' }, // 핑크
+  { id: 'materials',  label: '부자재',       icon: '🧴', color: '#facc15' }, // 선명한 노랑
+  { id: 'ingredient', label: '임상시험',     icon: '🧪', color: '#84cc16' }, // 라임 (연두)
   { id: 'oem',        label: 'OEM',          icon: '🏭', color: '#f97316' }, // 주황
-  { id: 'ingredient', label: '임상시험',     icon: '🧪', color: '#84cc16' }, // 연두
-  { id: 'receiving',  label: '입고',         icon: '📥', color: '#38bdf8' }, // 하늘
+  { id: 'shooting',   label: '촬영',         icon: '📸', color: '#ec4899' }, // 핑크
+  { id: 'detailpage', label: '상세페이지',   icon: '📝', color: '#3b82f6' }, // 파랑
+  { id: 'wadiz',      label: '펀딩 오픈',    icon: '💎', color: '#a855f7' }, // 보라
+  { id: 'shipping',   label: '배송 시작',    icon: '🚚', color: '#14b8a6' }, // 청록 (teal)
   { id: 'launch',     label: '런칭',         icon: '🚀', color: '#ef4444' }, // 빨강
-  { id: 'wadiz',      label: '펀딩 오픈',    icon: '💎', color: '#a78bfa' }, // 라벤더
-  { id: 'shooting',   label: '촬영',         icon: '📸', color: '#64748b' }, // 슬레이트
-  { id: 'detailpage', label: '상세페이지',   icon: '📝', color: '#06b6d4' }, // 청록
-  { id: 'shipping',   label: '배송 시작',    icon: '🚚', color: '#10b981' }, // emerald
 ];
 
+// v2.3.40: 옛 카테고리 ID → 새 카테고리 ID 마이그레이션 (한 번만 실행)
+window._milestoneCategoryMigrated = window._milestoneCategoryMigrated || false;
+function _migrateMilestoneCategories() {
+  if (window._milestoneCategoryMigrated) return;
+  const map = {
+    container: 'materials',  // 용기 생산 → 부자재
+    singlebox: 'materials',  // 단상자 → 부자재
+    print:     'materials',  // 용기 인쇄 → 부자재
+    // receiving 은 매핑 없음 — 사용자가 수동 변경 또는 ⚪ 회색 표시
+  };
+  let count = 0;
+  (DB.newProducts || []).forEach(p => {
+    (p.milestones || []).forEach(m => {
+      if (m && map[m.category]) { m.category = map[m.category]; count++; }
+    });
+  });
+  // Override / Order 의 옛 ID 도 정리
+  if (DB.timelineCategoriesOverride) {
+    ['container','singlebox','print'].forEach(id => {
+      if (DB.timelineCategoriesOverride[id]) delete DB.timelineCategoriesOverride[id];
+    });
+  }
+  if (Array.isArray(DB.timelineCategoriesOrder)) {
+    DB.timelineCategoriesOrder = DB.timelineCategoriesOrder
+      .map(id => map[id] || id)
+      .filter((id, i, arr) => arr.indexOf(id) === i); // 중복 제거
+  }
+  if (count > 0) {
+    try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+    console.log('[v2.3.40] 카테고리 마이그레이션:', count, '개 마일스톤 (옛 용기/단상자/인쇄 → 부자재)');
+  }
+  window._milestoneCategoryMigrated = true;
+}
+
 function getMilestoneCategories() {
+  _migrateMilestoneCategories(); // v2.3.40: 첫 호출 시 자동 마이그레이션
   // v2.3.33: Override(라벨/아이콘/색상) + Order(순서) 적용
   const ovMap = DB.timelineCategoriesOverride || {};
   const base = NP_MILESTONE_CATS.map(c => {
