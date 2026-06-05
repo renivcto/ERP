@@ -2520,7 +2520,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <!-- Sub: 제품 포트폴리오 (v1.9.900) -->
       <div id="insight-sub-timeline" style="display:none;margin-top:14px"></div>
       <!-- v2.3.80: 완제품 생산 타임라인 (타임라인 탭 안에서 위 신제품 타임라인 아래에 함께 표시) -->
-      <div id="insight-sub-fp-timeline" style="display:none;margin-top:18px"></div>
+      <div id="insight-sub-fp-timeline" style="display:none;margin-top:32px"></div>
       <div id="insight-sub-portfolio" style="display:none;margin-top:14px"></div>
     </div>
 
@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.80';
+const ERP_VERSION = 'v2.3.81';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42808,8 +42808,13 @@ function _fpGetTimelineData() {
     });
   });
 
-  // 발주 행이 있는 완제품만
-  const products = completedProducts.filter(p => productOrders[p.id] && productOrders[p.id].length > 0)
+  // v2.3.81: 생산 중인 제품만 — 발주가 모두 '입고완료'인 완제품은 제외
+  const products = completedProducts.filter(p => {
+    const arr = productOrders[p.id];
+    if (!arr || !arr.length) return false;
+    // 적어도 한 건이라도 입고완료가 아닌 발주가 있어야 함
+    return arr.some(o => o.stockStatus !== '입고완료');
+  })
     .sort((a,b) => {
       // 가장 가까운 입고예정 기준으로 정렬
       const aMin = productOrders[a.id].reduce((m, x) => (!m || (x.inDate && x.inDate < m)) ? (x.inDate || m) : m, '');
@@ -42961,9 +42966,9 @@ function renderFinishedProductTimeline() {
   const headerHtml = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <div style="font-size:15px;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:7px">
-          <span style="font-size:18px">🏭</span>
-          완제품 생산 타임라인
+        <div style="font-size:17px;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:7px">
+          <span style="font-size:20px">🏭</span>
+          제품 생산 타임라인
         </div>
         <span style="font-size:11px;color:#64748b;background:#f1f5f9;padding:3px 8px;border-radius:99px;font-weight:600">발주서 기반 자동 생성</span>
       </div>
@@ -42975,9 +42980,9 @@ function renderFinishedProductTimeline() {
     </div>
   `;
 
-  // 범례 — 발주 타입 색상 + 마일스톤 카테고리
-  const typeKeys = ['부자재','OEM','원자재','외주가공','완제품'];
-  const legendHtml = `
+  // v2.3.81: 범례 제거 (신제품 런칭 타임라인과 공유) — legendHtml 은 빈 문자열로 둠
+  const legendHtml = '';
+  const _unusedTypeKeys = `
     <div style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-bottom:12px;padding:9px 14px;background:#fafbfc;border:1px solid #e5e7eb;border-radius:8px">
       <span style="font-size:11px;color:#64748b;font-weight:700">발주:</span>
       ${typeKeys.map(t => {
@@ -43047,14 +43052,22 @@ function renderFinishedProductTimeline() {
         data: m,
       });
     });
-    elems.sort((a,b) => (a.start||'').localeCompare(b.start||''));
+    // v2.3.81: 시작일 → 종료일 → kind 순으로 안정 정렬 (긴 막대가 먼저 자리 잡도록)
+    elems.sort((a,b) => {
+      const s = (a.start||'').localeCompare(b.start||'');
+      if (s !== 0) return s;
+      const e = (b.end||'').localeCompare(a.end||''); // 종료일 늦은 쪽 먼저 → 짧은게 위
+      if (e !== 0) return e;
+      return (a.kind||'').localeCompare(b.kind||'');
+    });
 
-    // Lane 알고리즘
+    // Lane 알고리즘 — 빈 lane 우선 재사용 (lanes[i] 가 e.start 보다 이전이면 그 lane 재활용)
     const lanes = [];
     elems.forEach(e => {
       let assigned = -1;
       for (let i = 0; i < lanes.length; i++) {
-        if (lanes[i] < e.start) { assigned = i; lanes[i] = e.end; break; }
+        // 같은 날 끝나고 같은 날 시작하면 분리(strict <) — 시각적 겹침 방지
+        if (lanes[i] && lanes[i] < e.start) { assigned = i; lanes[i] = e.end; break; }
       }
       if (assigned === -1) { assigned = lanes.length; lanes.push(e.end); }
       e._lane = assigned;
@@ -43417,6 +43430,10 @@ function renderProductTimeline() {
 
   // 헤더
   const headerHtml = `
+    <div style="font-size:17px;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:7px;margin-bottom:10px">
+      <span style="font-size:20px">🌱</span>
+      신제품 런칭 타임라인
+    </div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
       <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <div style="font-size:13px;color:#475569"><span style="font-weight:800;color:#0f172a">${products.length}</span>개 프로젝트</div>
