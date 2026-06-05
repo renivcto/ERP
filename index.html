@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.108';
+const ERP_VERSION = 'v2.3.109';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -20946,6 +20946,19 @@ function saveItem() {
       const _targetId = id || (DB.items[DB.items.length-1] && DB.items[DB.items.length-1].id);
       const _targetCode = String((data && data.code) || '').trim().toLowerCase();
       const _targetName = String((data && data.name) || '').trim().toLowerCase();
+      // v2.3.109: sentinel — localStorage 에 최근 저장 item 표시 (24h TTL)
+      try {
+        const _SENTINEL_KEY = 'reniv_item_sentinel';
+        const _TTL = 24 * 60 * 60 * 1000;
+        const _now2 = Date.now();
+        let _sentinel = [];
+        try { _sentinel = JSON.parse(localStorage.getItem(_SENTINEL_KEY) || '[]') || []; } catch(_){ _sentinel = []; }
+        _sentinel = _sentinel.filter(e => e && (_now2 - (e.ts||0)) < _TTL);
+        _sentinel.push({ id: _targetId, code: _targetCode, name: _targetName, ts: _now2 });
+        // 최근 50개만 유지
+        if (_sentinel.length > 50) _sentinel = _sentinel.slice(-50);
+        localStorage.setItem(_SENTINEL_KEY, JSON.stringify(_sentinel));
+      } catch(_){}
       if (Array.isArray(DB._deletedItemIds)) {
         const _before = DB._deletedItemIds.length;
         DB._deletedItemIds = DB._deletedItemIds.filter(t => {
@@ -21106,6 +21119,49 @@ function copyItem(id) {
   renderItemTable();
   showNotif(`[${src.name}] 복사되었습니다.`, 'success');
 }
+
+// v2.3.109: 강제 item 부활 도구 — tombstone 청소 + sentinel 등록
+window._unkillItem = function(idOrCodeOrName) {
+  const t = String(idOrCodeOrName || '').trim().toLowerCase();
+  if (!t) { console.warn('id/code/name 입력 필요'); return; }
+  // 1. tombstone 청소 (DB + localStorage)
+  let removed = 0;
+  if (Array.isArray(DB._deletedItemIds)) {
+    const b = DB._deletedItemIds.length;
+    DB._deletedItemIds = DB._deletedItemIds.filter(x => {
+      if (!x) return true;
+      if (String(x.id) === t) return false;
+      if (String((x.code||'')).trim().toLowerCase() === t) return false;
+      if (String((x.name||'')).trim().toLowerCase() === t) return false;
+      return true;
+    });
+    removed += b - DB._deletedItemIds.length;
+  }
+  try {
+    const ls = JSON.parse(localStorage.getItem('reniv_deleted_item_ids') || '[]');
+    if (Array.isArray(ls)) {
+      const kept = ls.filter(x => {
+        if (!x) return true;
+        if (String(x.id) === t) return false;
+        if (String((x.code||'')).trim().toLowerCase() === t) return false;
+        if (String((x.name||'')).trim().toLowerCase() === t) return false;
+        return true;
+      });
+      removed += ls.length - kept.length;
+      localStorage.setItem('reniv_deleted_item_ids', JSON.stringify(kept));
+    }
+  } catch(_){}
+  // 2. sentinel 등록 (24h 보호)
+  try {
+    const _SENT_KEY = 'reniv_item_sentinel';
+    const _sent = JSON.parse(localStorage.getItem(_SENT_KEY) || '[]') || [];
+    _sent.push({ id: t, code: t, name: t, ts: Date.now() });
+    localStorage.setItem(_SENT_KEY, JSON.stringify(_sent.slice(-50)));
+  } catch(_){}
+  console.log('💉 [v2.3.109] unkill: tombstone ' + removed + '건 제거 + sentinel 등록');
+  try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  return removed;
+};
 
 // v2.3.107: 콘솔 디버깅 도구 — item tombstone 확인/청소
 window._itemTombstoneList = function() {
@@ -47836,9 +47892,28 @@ function initERPWhenReady() {
         merged._deletedItemIds = Array.from(itTByKey.values()).sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
         // v2.2.22: id 외에도 code/name 매칭 — post-May22 ID 미스매치로 부활하던 버그 차단
         // v2.3.108: 최근 24시간 내 수정된 item 은 tombstone 우회 (사용자 명시적 저장 보호)
+        // v2.3.109: sentinel (localStorage 24h TTL) 도 반영 — updatedAt 없는 옛 item 도 보호
         const itTombSet = new Set(merged._deletedItemIds.map(x => String(x.id)));
         const itTombCodeSet = new Set(merged._deletedItemIds.map(x => String((x.code||'')).trim().toLowerCase()).filter(c => c));
         const itTombNameSet = new Set(merged._deletedItemIds.map(x => String((x.name||'')).trim().toLowerCase()).filter(n => n));
+        // v2.3.109: sentinel 로드
+        let _sentinelIds = new Set();
+        let _sentinelCodes = new Set();
+        let _sentinelNames = new Set();
+        try {
+          const _SENT_TTL = 24 * 60 * 60 * 1000;
+          const _now3 = Date.now();
+          const _sent = JSON.parse(localStorage.getItem('reniv_item_sentinel') || '[]') || [];
+          _sent.forEach(e => {
+            if (!e || (_now3 - (e.ts||0)) > _SENT_TTL) return;
+            if (e.id != null) _sentinelIds.add(String(e.id));
+            if (e.code) _sentinelCodes.add(String(e.code).trim().toLowerCase());
+            if (e.name) _sentinelNames.add(String(e.name).trim().toLowerCase());
+          });
+          if (_sentinelIds.size + _sentinelCodes.size + _sentinelNames.size > 0) {
+            console.log('🛡️ [v2.3.109] item sentinel 로드: id=' + _sentinelIds.size + ' code=' + _sentinelCodes.size + ' name=' + _sentinelNames.size);
+          }
+        } catch(_){}
         if (Array.isArray(merged.items) && (itTombSet.size > 0 || itTombCodeSet.size > 0 || itTombNameSet.size > 0)) {
           const before = merged.items.length;
           const _RECENT_MS = 24 * 60 * 60 * 1000;
@@ -47851,12 +47926,17 @@ function initERPWhenReady() {
             // 최근 수정 = tombstone 무시 (사용자 명시 의도 보호)
             const _ts = Number(i.updatedAt) || 0;
             const _recentlyEdited = _ts > 0 && (_now - _ts) < _RECENT_MS;
-            if (_recentlyEdited) {
-              _protectedIds.add(String(i.id));
-              const _c = String((i.code||'')).trim().toLowerCase();
-              if (_c) _protectedCodes.add(_c);
-              const _n = String((i.name||'')).trim().toLowerCase();
-              if (_n) _protectedNames.add(_n);
+            // v2.3.109: sentinel 매칭도 보호
+            const _iIdStr = String(i.id);
+            const _iCode = String((i.code||'')).trim().toLowerCase();
+            const _iName = String((i.name||'')).trim().toLowerCase();
+            const _inSentinel = _sentinelIds.has(_iIdStr) ||
+                                (_iCode && _sentinelCodes.has(_iCode)) ||
+                                (_iName && _sentinelNames.has(_iName));
+            if (_recentlyEdited || _inSentinel) {
+              _protectedIds.add(_iIdStr);
+              if (_iCode) _protectedCodes.add(_iCode);
+              if (_iName) _protectedNames.add(_iName);
               return true;
             }
             if (itTombSet.has(String(i.id))) return false;
