@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.99';
+const ERP_VERSION = 'v2.3.100';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -43247,6 +43247,7 @@ window._fpOpenProductDetail = function(productId) {
 };
 
 // v2.3.92: 제품 생산 타임라인 막대 클릭 → 해외 PO 미리보기 / 국내 결재완료 PDF
+// v2.3.100: 결재 요청 페이지의 "결재 완료" 버튼과 동일 분기 로직
 window._fpOpenOrderClick = async function(orderId) {
   try {
     const idx = (DB.orders || []).findIndex(x => x && String(x.id) === String(orderId));
@@ -43264,20 +43265,35 @@ window._fpOpenOrderClick = async function(orderId) {
       }
       return;
     }
-    // 국내 발주서 → 결재완료(stamp) PDF 우선
-    const hasStamp = !!(o.stampData && o.stampData !== '');
-    const hasPdf   = !!(o.pdfData && o.pdfData !== '');
-    if (hasStamp && typeof viewOrderPDFByIdx === 'function') {
+    // 1) stampName + stampType === 'erp_form' → ERP 양식 + 도장 팝업
+    if (o.stampName && o.stampType === 'erp_form' && typeof openPoApprovalSheet === 'function') {
+      openPoApprovalSheet(o.id);
+      return;
+    }
+    // 2) stampName + stampData (외부 업로드 결재완료 PDF) → 직접 PDF 보기
+    if (o.stampName && typeof viewOrderPDFByIdx === 'function') {
       viewOrderPDFByIdx(idx, 'stamp');
       return;
     }
-    if (hasPdf && typeof viewOrderPDFByIdx === 'function') {
-      viewOrderPDFByIdx(idx, 'pdf');
-      if (typeof showNotif === 'function') showNotif('결재완료 PDF 없음 — 원본 PDF 표시', 'info');
+    // 3) DB.approvals 에서 approved 상태 → openPoApprovalSheet
+    const _apStatusForOrder = (typeof getOrderApprovalStatus === 'function') ? getOrderApprovalStatus(o) : 'pending';
+    if (_apStatusForOrder === 'approved' && typeof openPoApprovalSheet === 'function') {
+      openPoApprovalSheet(o.id);
       return;
     }
-    // 둘 다 없으면 발주서 수정 모달
-    if (typeof showNotif === 'function') showNotif('PDF 없음 — 발주서 수정 화면을 엽니다', 'info');
+    // 4) 원본 PDF
+    const hasPdf = !!(o.pdfData && o.pdfData !== '');
+    if (hasPdf && typeof viewOrderPDFByIdx === 'function') {
+      if (typeof showNotif === 'function') showNotif('결재 진행 전 — 원본 PDF 표시', 'info');
+      viewOrderPDFByIdx(idx, 'pdf');
+      return;
+    }
+    // 5) 마지막 fallback — 결재 양식 또는 수정
+    if (typeof openPoApprovalSheet === 'function') {
+      if (typeof showNotif === 'function') showNotif('결재 양식을 엽니다', 'info');
+      openPoApprovalSheet(o.id);
+      return;
+    }
     if (typeof editOrder === 'function') editOrder(o.id);
   } catch (e) {
     console.warn('_fpOpenOrderClick 오류:', e);
