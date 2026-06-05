@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.89';
+const ERP_VERSION = 'v2.3.90';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42753,26 +42753,8 @@ window._tlZoom = window._tlZoom || 'month'; // 'month' | 'quarter'
 
 // 타임라인 렌더링 시작점 + 기간 결정
 function _tlGetRange() {
-  // 모든 마일스톤 + 런칭일 모아서 min/max 계산
-  const all = [];
-  const today = new Date();
-  all.push(today.toISOString().slice(0,10));
-  (DB.newProducts || []).forEach(p => {
-    if (!p) return;
-    if (p.status === 'DROP') return;
-    if (p.launchDate) all.push(p.launchDate);
-    (p.milestones || []).forEach(m => {
-      if (m && m.plannedDate) all.push(m.plannedDate);
-      if (m && m.actualDate) all.push(m.actualDate);
-    });
-  });
-  const sorted = all.filter(Boolean).sort();
-  // v2.3.89: 시작은 항상 현재 월 1일 (과거 빈 컬럼 제거) / 끝: 가장 늦은 날짜의 1개월 후
-  const todayD = new Date();
-  const startD = new Date(todayD.getFullYear(), todayD.getMonth(), 1);
-  const endD = new Date(sorted[sorted.length - 1] || today.toISOString().slice(0,10));
-  endD.setDate(1); endD.setMonth(endD.getMonth() + 2);
-  return { start: startD, end: endD };
+  // v2.3.90: 두 타임라인 공통 범위 사용
+  return _tlGetCombinedRange();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -42928,25 +42910,45 @@ async function _fpLoad() {
 
 // 시간 범위
 function _fpGetRange() {
-  const { productOrders } = _fpGetTimelineData();
+  // v2.3.90: 두 타임라인 공통 범위 사용
+  return _tlGetCombinedRange();
+}
+
+
+// v2.3.90: 두 타임라인 공통 범위 (NP + FP 데이터 합집합)
+function _tlGetCombinedRange() {
   const all = [];
-  const today = new Date();
-  all.push(today.toISOString().slice(0,10));
-  Object.keys(productOrders).forEach(pid => {
-    productOrders[pid].forEach(o => {
-      if (o.orderDate) all.push(o.orderDate);
-      if (o.inDate) all.push(o.inDate);
-    });
-    (_fpGetMs(pid) || []).forEach(m => {
+  const todayD = new Date();
+  all.push(todayD.toISOString().slice(0,10));
+  // NP 데이터
+  (DB.newProducts || []).forEach(p => {
+    if (!p || p.status === 'DROP') return;
+    if (p.launchDate) all.push(p.launchDate);
+    (p.milestones || []).forEach(m => {
       if (m && m.plannedDate) all.push(m.plannedDate);
-      if (m && m.endDate) all.push(m.endDate);
+      if (m && m.actualDate) all.push(m.actualDate);
     });
   });
+  // FP 데이터
+  try {
+    if (typeof _fpGetTimelineData === 'function') {
+      const { productOrders } = _fpGetTimelineData();
+      Object.keys(productOrders).forEach(pid => {
+        (productOrders[pid] || []).forEach(o => {
+          if (o.orderDate) all.push(o.orderDate);
+          if (o.inDate) all.push(o.inDate);
+        });
+        (_fpGetMs(pid) || []).forEach(m => {
+          if (m && m.plannedDate) all.push(m.plannedDate);
+          if (m && m.endDate) all.push(m.endDate);
+        });
+      });
+    }
+  } catch (_e) {}
   const sorted = all.filter(Boolean).sort();
-  // v2.3.89: 시작은 항상 현재 월 1일
-  const todayD = new Date();
+  // 시작 = 현재 월 1일 / 끝 = 가장 늦은 날짜 + 2개월 (월 1일 기준)
   const startD = new Date(todayD.getFullYear(), todayD.getMonth(), 1);
-  const endD = new Date(sorted[sorted.length - 1] || today.toISOString().slice(0,10));
+  const endD = new Date(sorted[sorted.length - 1] || todayD.toISOString().slice(0,10));
   endD.setDate(1); endD.setMonth(endD.getMonth() + 2);
   return { start: startD, end: endD };
 }
@@ -42959,10 +42961,11 @@ function renderFinishedProductTimeline() {
   const { products, productOrders } = _fpGetTimelineData();
   const range = _fpGetRange();
 
+  // v2.3.90: KST 타임존 버그 회피 (로컬 YYYY-MM)
   const months = [];
   const cur = new Date(range.start);
   while (cur <= range.end) {
-    months.push({ y: cur.getFullYear(), m: cur.getMonth() + 1, key: cur.toISOString().slice(0, 7) });
+    months.push({ y: cur.getFullYear(), m: cur.getMonth() + 1, key: cur.getFullYear() + '-' + String(cur.getMonth() + 1).padStart(2, '0') });
     cur.setMonth(cur.getMonth() + 1);
   }
   const totalDays = Math.round((range.end - range.start) / (24*60*60*1000));
@@ -43396,14 +43399,14 @@ function renderProductTimeline() {
   const products = (DB.newProducts || []).filter(p => p && p.status !== 'DROP' && p.stage === 'developing');
   const range = _tlGetRange();
 
-  // 시간축 마커 (월별)
+  // 시간축 마커 (월별) — v2.3.90: KST 타임존 버그 회피 (로컬 YYYY-MM)
   const months = [];
   const cur = new Date(range.start);
   while (cur <= range.end) {
     months.push({
       y: cur.getFullYear(),
       m: cur.getMonth() + 1,
-      key: cur.toISOString().slice(0, 7)
+      key: cur.getFullYear() + '-' + String(cur.getMonth() + 1).padStart(2, '0')
     });
     cur.setMonth(cur.getMonth() + 1);
   }
