@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.102';
+const ERP_VERSION = 'v2.3.103';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -46736,31 +46736,75 @@ function init() {
   try { _resyncOrphanSampleExpenses(); } catch(e) { console.warn('샘플 expense 동기화 실패:', e); }
   // v1.9.529: 자동 수집 주문 재고 자동 차감 (앱 시작 시 1회)
   try { _autoDeductStockForOrders(); } catch(e) { console.warn('자동 재고 차감 실패:', e); }
+  // v2.3.103: 3초 뒤 다시 한번 (Firestore 머지가 지연된 경우 대비)
+  setTimeout(() => { try { _autoDeductStockForOrders({ verbose: false }); } catch(_){} }, 3000);
   updateBadges();
   renderDashboard();
 }
+
+// v2.3.103: 콘솔에서 강제 복구 — source/stockDeducted 무관, manualEntry==true 만 제외
+window._stockRecover = function() {
+  if (!Array.isArray(DB.shopOrders) || !Array.isArray(DB.items)) {
+    console.warn('데이터 미준비');
+    return;
+  }
+  let processed = 0, skipped = 0;
+  (DB.shopOrders||[]).forEach(o => {
+    if (!o || !o.itemId) { skipped++; return; }
+    if (o.manualEntry === true) { skipped++; return; }
+    if (o.status === '취소' || o.status === '반품') { skipped++; return; }
+    const item = (DB.items||[]).find(i => i && i.id === o.itemId);
+    if (!item) { skipped++; return; }
+    const qty = parseInt(o.qty) || 1;
+    // 이미 차감된 양만큼은 제외 (재차감 방지)
+    const already = parseInt(o.stockDeductedQty) || 0;
+    const delta = qty - already;
+    if (delta <= 0) { skipped++; return; }
+    const oldStock = item.stock || 0;
+    item.stock = oldStock - delta;
+    DB.stockHistory = DB.stockHistory || [];
+    DB.stockHistory.push({
+      id: nextId('stock'), itemId: o.itemId, type: 'out', qty: delta,
+      price: item.price || 0,
+      date: new Date().toISOString().slice(0, 10),
+      lot: item.lot || '',
+      note: `[강제복구] 주문 [${o.orderNo}] ${o.shopName||'-'} / ${o.customerName||'-'}`
+    });
+    o.stockDeducted = true;
+    o.stockDeductedQty = qty;
+    o.stockDeductedAt = Date.now();
+    processed++;
+  });
+  console.log(`🔧 [강제 복구] ${processed}건 차감, ${skipped}건 스킵`);
+  if (processed > 0) {
+    try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+    try { showNotif(`🔧 강제 복구: ${processed}건 차감 완료`, 'success'); } catch(_){}
+  }
+  return { processed, skipped };
+};
 
 // v1.9.529: 매핑된 주문 중 stockDeducted=false 인 주문에 대해 일괄 재고 차감
 //   - 송장번호/배송완료 처리 없이도 주문 등록 즉시 재고 반영
 //   - stockDeducted 플래그로 중복 차감 방지
 function _autoDeductStockForOrders(opts = {}) {
-  if (!Array.isArray(DB.shopOrders) || !Array.isArray(DB.items)) return { processed: 0 };
+  if (!Array.isArray(DB.shopOrders) || !Array.isArray(DB.items)) {
+    console.warn('⚠️ _autoDeductStockForOrders: DB.shopOrders 또는 DB.items 미준비 — 스킵');
+    return { processed: 0 };
+  }
   const verbose = opts.verbose !== false; // 기본은 알림 표시
   let processed = 0;
   let insufficient = 0;
+  let skip_noItemId = 0, skip_alreadyDeducted = 0, skip_canceled = 0, skip_manual = 0;
   const summaries = [];
 
   (DB.shopOrders||[]).forEach(o => {
-    if (!o || !o.itemId) return;
-    if (o.stockDeducted === true) return; // 이미 차감됨
-    if (o.status === '취소' || o.status === '반품') return; // 취소/반품은 차감 안 함
-    // v1.9.566 — 수동 입력 주문은 자동 차감 대상이 아님 (배달원/와디즈 수동 등)
-    //   사용자가 직접 입력한 주문은 사용자가 재고를 알아서 처리. _auto 로 끝나는 source 만 차감
-    //   (Cloud Functions: source: 'coupang_auto' / 'cafe24_auto')
-    // v2.3.102 — 파일 업로드(source:'upload') 는 대량 임포트이므로 자동 차감 대상에 포함
-    const src = String(o.source || '').toLowerCase();
-    const _allowedSrc = src.endsWith('_auto') || src === 'upload' || src === 'wadiz' || src === 'cafe24' || src === 'coupang' || src === 'naver';
-    if (!_allowedSrc) return;
+    if (!o) return;
+    if (!o.itemId) { skip_noItemId++; return; }
+    if (o.stockDeducted === true) { skip_alreadyDeducted++; return; }
+    if (o.status === '취소' || o.status === '반품') { skip_canceled++; return; }
+    // v2.3.103 — manualEntry 플래그가 명시적으로 true 인 경우만 제외 (그 외 모두 차감)
+    //   파일 업로드(source:'upload'), Cloud Functions 자동수집(source:'*_auto'), 자사몰/와디즈 등 모두 자동 차감
+    if (o.manualEntry === true) return;
 
     const item = (DB.items||[]).find(i => i && i.id === o.itemId);
     if (!item) return;
@@ -46786,6 +46830,15 @@ function _autoDeductStockForOrders(opts = {}) {
     summaries.push(`${item.name}: ${oldStock} → ${item.stock} (-${qty})`);
   });
 
+  console.log('📦 [v2.3.103] 재고 차감 진단:', {
+    총주문수: (DB.shopOrders||[]).length,
+    차감처리: processed,
+    재고부족: insufficient,
+    스킵_itemId없음: skip_noItemId,
+    스킵_이미차감: skip_alreadyDeducted,
+    스킵_취소반품: skip_canceled,
+    스킵_수동입력: skip_manual,
+  });
   if (processed > 0) {
     try {
       if (typeof saveDataNow === 'function') saveDataNow().catch(e => console.warn('재고 차감 저장 실패:', e));
