@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.107';
+const ERP_VERSION = 'v2.3.108';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -47835,13 +47835,30 @@ function initERPWhenReady() {
         });
         merged._deletedItemIds = Array.from(itTByKey.values()).sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
         // v2.2.22: id 외에도 code/name 매칭 — post-May22 ID 미스매치로 부활하던 버그 차단
+        // v2.3.108: 최근 24시간 내 수정된 item 은 tombstone 우회 (사용자 명시적 저장 보호)
         const itTombSet = new Set(merged._deletedItemIds.map(x => String(x.id)));
         const itTombCodeSet = new Set(merged._deletedItemIds.map(x => String((x.code||'')).trim().toLowerCase()).filter(c => c));
         const itTombNameSet = new Set(merged._deletedItemIds.map(x => String((x.name||'')).trim().toLowerCase()).filter(n => n));
         if (Array.isArray(merged.items) && (itTombSet.size > 0 || itTombCodeSet.size > 0 || itTombNameSet.size > 0)) {
           const before = merged.items.length;
+          const _RECENT_MS = 24 * 60 * 60 * 1000;
+          const _now = Date.now();
+          const _protectedIds = new Set();
+          const _protectedCodes = new Set();
+          const _protectedNames = new Set();
           merged.items = merged.items.filter(i => {
             if (!i) return false;
+            // 최근 수정 = tombstone 무시 (사용자 명시 의도 보호)
+            const _ts = Number(i.updatedAt) || 0;
+            const _recentlyEdited = _ts > 0 && (_now - _ts) < _RECENT_MS;
+            if (_recentlyEdited) {
+              _protectedIds.add(String(i.id));
+              const _c = String((i.code||'')).trim().toLowerCase();
+              if (_c) _protectedCodes.add(_c);
+              const _n = String((i.name||'')).trim().toLowerCase();
+              if (_n) _protectedNames.add(_n);
+              return true;
+            }
             if (itTombSet.has(String(i.id))) return false;
             const c = String((i.code||'')).trim().toLowerCase();
             if (c && itTombCodeSet.has(c)) return false;
@@ -47851,6 +47868,21 @@ function initERPWhenReady() {
           });
           const removed = before - merged.items.length;
           if (removed > 0) console.warn('🪦 [v2.2.22] item tombstone 으로 ' + removed + '건 부활 차단');
+          // v2.3.108: 보호된 item 매칭 tombstone 영구 제거 (다음 머지 부활 차단)
+          if (_protectedIds.size > 0 || _protectedCodes.size > 0 || _protectedNames.size > 0) {
+            const _tBefore = merged._deletedItemIds.length;
+            merged._deletedItemIds = merged._deletedItemIds.filter(t => {
+              if (!t) return true;
+              if (_protectedIds.has(String(t.id))) return false;
+              const _tc = String((t.code||'')).trim().toLowerCase();
+              if (_tc && _protectedCodes.has(_tc)) return false;
+              const _tn = String((t.name||'')).trim().toLowerCase();
+              if (_tn && _protectedNames.has(_tn)) return false;
+              return true;
+            });
+            const _tRemoved = _tBefore - merged._deletedItemIds.length;
+            if (_tRemoved > 0) console.log('🪦→♻️ [v2.3.108] 보호된 item 매칭 tombstone ' + _tRemoved + '건 영구 제거');
+          }
         }
         // v1.9.691: 쇼핑몰 tombstone 머지
         const fsShT = Array.isArray(firestoreDB._deletedShopIds) ? firestoreDB._deletedShopIds : [];
