@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.84';
+const ERP_VERSION = 'v2.3.85';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -44187,8 +44187,23 @@ window._tlStartDrag = function(ev, prefix) {
     if (xInContent < 200) xInContent = 200;
     if (xInContent > innerWidth - 10) xInContent = innerWidth - 10;
     line.style.left = xInContent + 'px';
-    // v2.3.84: 라벨은 항상 '오늘' (날짜 표시 X)
-    label.textContent = '오늘';
+    // v2.3.85: 드래그 위치의 날짜 계산 → 오늘이면 '오늘', 아니면 MM-DD
+    const rangeStart = prefix === 'fp-' ? window._fpTlRangeStart : window._tlRangeStart;
+    const totalW = prefix === 'fp-' ? window._fpTlTotalW : window._tlTotalW;
+    const totalDays = prefix === 'fp-' ? window._fpTlTotalDays : window._tlTotalDays;
+    if (rangeStart && totalW && totalDays) {
+      const offset = (xInContent - 200) / totalW * totalDays;
+      const ms = rangeStart.getTime() + offset * 24*60*60*1000;
+      const d = new Date(ms); d.setHours(0,0,0,0);
+      const today = new Date(); today.setHours(0,0,0,0);
+      if (d.getTime() === today.getTime()) {
+        label.textContent = '오늘';
+      } else {
+        const mm = String(d.getMonth()+1).padStart(2,'0');
+        const dd = String(d.getDate()).padStart(2,'0');
+        label.textContent = mm + '-' + dd;
+      }
+    }
   };
   const _onUp = () => {
     document.removeEventListener('mousemove', _onMove);
