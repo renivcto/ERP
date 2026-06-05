@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.82';
+const ERP_VERSION = 'v2.3.83';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -22980,7 +22980,7 @@ function renderProdTable() {
       <td class="lnk" style="text-align:center" onclick="showItemDetail(${p.productId})">${displayName}</td>
       <td style="text-align:center">
         ${(p.status==='생산중'||p.status==='지연'||p.status==='QC검사')
-          ? `<button class="btn btn-xs" style="background:#fdf0f6;border:1px solid #f5c4de;color:#b04070;font-size:11px;font-weight:400;cursor:pointer;border-radius:20px;padding:2px 10px" onclick="completeProd(${p.id})" title="클릭하면 생산완료 처리">생산중</button>`
+          ? `<span style="display:inline-block;background:#fdf0f6;border:1px solid #f5c4de;color:#b04070;font-size:11px;font-weight:400;border-radius:20px;padding:2px 10px" title="발주서가 입고완료되면 자동으로 생산완료 처리됩니다">${p.status==='생산중' ? '생산중' : p.status==='지연' ? '지연' : 'QC검사'}</span>`
           : p.status==='생산완료'
             ? `<span style="display:inline-block;background:#edf3fe;border:1px solid #b8d4f8;color:#2a5a90;font-size:11px;font-weight:400;border-radius:20px;padding:2px 10px">생산완료</span>`
             : statusBadge(p.status)
@@ -26308,7 +26308,8 @@ function confirmStockInQty(orderId) {
   o.updatedAt = Date.now();  // v1.9.405 머지 보호
   DB.orders[idx] = o;
   try { processOrderStockIn(receivedRows, o.inDate || today(), o.serial || '', o.vendorId, o.id); } catch(e) { console.error('입고 재고반영 실패:', e); }
-  try { completeRelatedProductions(o.rows, o.serial || '', o.id); } catch(_){}
+  // v2.3.83: receivedRows 전달 (qty 가 실제 입고수량으로 덮어씌워짐) → production.qty 동기화
+  try { completeRelatedProductions(receivedRows, o.serial || '', o.id); } catch(_){}
   // v1.9.982: 즉시 저장 — 디바운스 saveData() 는 다음 머지 전 미저장 위험
   try { if (typeof _doSaveData === 'function') _doSaveData().catch(function(e){ console.warn('입고완료 저장 실패:', e); }); else saveData(); } catch(_){ try { saveData(); } catch(__){} }
   if (_m) _m.remove();
@@ -36027,7 +36028,13 @@ function completeRelatedProductions(rows, serial, orderId) {
   // v1.9.985: orderId 매칭 추가 + 타입 무관 비교 (복구 데이터 id 타입 섞임 대응)
   if (!serial && (orderId == null) && (!rows || !rows.length)) return;
   let completedCount = 0;
+  let qtyUpdatedCount = 0;
   const _rowItemIds = (rows||[]).map(r => r && r.itemId != null ? String(r.itemId) : null).filter(Boolean);
+  // v2.3.83: itemId → row 매핑 (qty 동기화용)
+  const _rowByItemId = {};
+  (rows||[]).forEach(r => {
+    if (r && r.itemId != null) _rowByItemId[String(r.itemId)] = r;
+  });
   (DB.productions||[]).forEach((p, idx) => {
     if (p.status === '생산완료') return;
     const matchSerial = serial && p.serial === serial;
@@ -36037,9 +36044,26 @@ function completeRelatedProductions(rows, serial, orderId) {
     if (matchSerial || matchOrderId || matchItem) {
       DB.productions[idx].status = '생산완료';
       DB.productions[idx].progress = 100;
+      // v2.3.83: 입고수량(receivedQty 가 qty 로 들어옴) 으로 production.qty 동기화
+      if (p.productId != null) {
+        const matchedRow = _rowByItemId[String(p.productId)];
+        if (matchedRow) {
+          const newQty = Number(matchedRow.qty);
+          if (Number.isFinite(newQty) && newQty !== p.qty) {
+            const unitPrice = matchedRow.price != null ? Number(matchedRow.price) : (p.qty ? (Number(p.amount||0) / p.qty) : 0);
+            DB.productions[idx].qty = newQty;
+            DB.productions[idx].amount = Math.round(newQty * (Number.isFinite(unitPrice) ? unitPrice : 0));
+            qtyUpdatedCount++;
+          }
+        }
+      }
+      DB.productions[idx].updatedAt = Date.now();
       completedCount++;
     }
   });
+  if (qtyUpdatedCount > 0) {
+    console.log('📦 [v2.3.83] 생산 레코드 ' + qtyUpdatedCount + '건의 수량을 실제 입고수량으로 동기화');
+  }
   if (completedCount > 0) {
     showNotif('생산관리 ' + completedCount + '건이 생산완료로 변경되었습니다', 'success');
   }
