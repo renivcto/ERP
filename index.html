@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.91';
+const ERP_VERSION = 'v2.3.92';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42799,8 +42799,9 @@ function _fpGetTimelineData() {
         if (!productOrders[pid]) productOrders[pid] = [];
         productOrders[pid].push({
           orderId: o.id,
-          orderDate: o.orderDate || '',
-          inDate: o.inDate || '',
+          orderDate: o.orderDate || (o.isOverseas ? (o.poDate || '') : ''),
+          // v2.3.92: 해외 PO 는 inDate 가 없으므로 deliveryDate(요청 납기) 를 입고예정으로 사용
+          inDate: o.inDate || (o.isOverseas ? (o.deliveryDate || '') : ''),
           itemId: r.itemId,
           itemName: r.name || (it ? it.name : ''),
           itemType: itemType,
@@ -42809,6 +42810,8 @@ function _fpGetTimelineData() {
           stockStatus: o.stockStatus || '입고전',
           vendorId: o.vendorId,
           serial: o.serial,
+          isOverseas: !!o.isOverseas,
+          poNumber: o.poNumber || '',
         });
       });
     });
@@ -43108,7 +43111,8 @@ function renderFinishedProductTimeline() {
         const escTipHtml = encodeURIComponent(tipHtml);
         // 완료 발주는 살짝 흐리게
         const opacity = (o.stockStatus === '입고완료') ? 0.55 : 1;
-        const onclick = `event.stopPropagation();editOrder(${o.orderId})`;
+        // v2.3.92: 해외/국내 분기 + PDF 열기
+        const onclick = `event.stopPropagation();_fpOpenOrderClick(${o.orderId})`;
         const labelText = _esc(o.itemType);
         return `<div onclick="${onclick}" onmouseenter="_tlShowTip(event,'${escTipHtml}','${c.color}')" onmousemove="_tlMoveTip(event)" onmouseleave="_tlHideTip()" style="position:absolute;left:${startLeft}px;top:${top - 2}px;height:24px;width:${barWidth}px;cursor:pointer;z-index:3;opacity:${opacity}">
           <div style="position:absolute;left:0;right:0;top:2px;height:20px;background:${c.color};border-radius:99px;display:flex;align-items:center;padding:0 4px 0 22px;overflow:hidden">
@@ -43249,6 +43253,44 @@ window._fpOpenProductDetail = function(productId) {
   }
   if (typeof editItem === 'function') {
     try { editItem(p.id); return; } catch(_){}
+  }
+};
+
+// v2.3.92: 제품 생산 타임라인 막대 클릭 → 해외 PO 미리보기 / 국내 결재완료 PDF
+window._fpOpenOrderClick = async function(orderId) {
+  try {
+    const idx = (DB.orders || []).findIndex(x => x && String(x.id) === String(orderId));
+    if (idx < 0) {
+      if (typeof showNotif === 'function') showNotif('발주서를 찾을 수 없습니다', 'warning');
+      return;
+    }
+    const o = DB.orders[idx];
+    // 해외 PO → 해외 PO 미리보기 모달
+    if (o.isOverseas) {
+      if (typeof previewOverseasPo === 'function') {
+        previewOverseasPo(o.id);
+      } else if (typeof openOverseasPoModal === 'function') {
+        openOverseasPoModal(o.id);
+      }
+      return;
+    }
+    // 국내 발주서 → 결재완료(stamp) PDF 우선
+    const hasStamp = !!(o.stampData && o.stampData !== '');
+    const hasPdf   = !!(o.pdfData && o.pdfData !== '');
+    if (hasStamp && typeof viewOrderPDFByIdx === 'function') {
+      viewOrderPDFByIdx(idx, 'stamp');
+      return;
+    }
+    if (hasPdf && typeof viewOrderPDFByIdx === 'function') {
+      viewOrderPDFByIdx(idx, 'pdf');
+      if (typeof showNotif === 'function') showNotif('결재완료 PDF 없음 — 원본 PDF 표시', 'info');
+      return;
+    }
+    // 둘 다 없으면 발주서 수정 모달
+    if (typeof showNotif === 'function') showNotif('PDF 없음 — 발주서 수정 화면을 엽니다', 'info');
+    if (typeof editOrder === 'function') editOrder(o.id);
+  } catch (e) {
+    console.warn('_fpOpenOrderClick 오류:', e);
   }
 };
 
