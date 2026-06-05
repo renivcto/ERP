@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.90';
+const ERP_VERSION = 'v2.3.91';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42980,29 +42980,23 @@ function renderFinishedProductTimeline() {
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   }[ch]));
 
-  // 헤더 + 통계
-  const totalOrders = products.reduce((s,p) => s + (productOrders[p.id]||[]).length, 0);
-  const incomingSoon = products.reduce((s,p) => {
-    return s + (productOrders[p.id]||[]).filter(o => {
-      if (!o.inDate || o.stockStatus === '입고완료') return false;
+  // v2.3.91: 헤더 통계 — 고유 orderId 카운트 (행 개수 X)
+  const _allOrderIdSet = new Set();
+  const _soonOrderIdSet = new Set();
+  products.forEach(p => {
+    (productOrders[p.id] || []).forEach(o => {
+      if (o.orderId != null) _allOrderIdSet.add(String(o.orderId));
+      if (!o.inDate || o.stockStatus === '입고완료') return;
       const d = new Date(o.inDate); d.setHours(0,0,0,0);
       const dd = Math.round((d - today) / (24*60*60*1000));
-      return dd >= 0 && dd <= 14;
-    }).length;
-  }, 0);
+      if (dd >= 0 && dd <= 14 && o.orderId != null) _soonOrderIdSet.add(String(o.orderId));
+    });
+  });
+  const totalOrders = _allOrderIdSet.size;
+  const incomingSoon = _soonOrderIdSet.size;
 
-  // v2.3.84: 제목은 표 바로 위로 이동
-  // v2.3.86: '발주서 기반 자동 생성' 배지는 titleHtml 안으로 이동
-  const headerHtml = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"></div>
-      <div style="display:flex;gap:14px;font-size:12px;color:#475569;flex-wrap:wrap;align-items:center">
-        <span><span style="font-weight:800;color:#0f172a">${products.length}</span>개 완제품</span>
-        <span>📦 발주 <strong style="color:#0f172a">${totalOrders}</strong>건</span>
-        ${incomingSoon > 0 ? `<span>⏰ 2주 내 입고 <strong style="color:#dc2626">${incomingSoon}</strong></span>` : ''}
-      </div>
-    </div>
-  `;
+  // v2.3.91: 헤더 비움 (통계는 titleHtml 안으로 이동)
+  const headerHtml = '';
 
   // v2.3.81: 범례 제거 (신제품 런칭 타임라인과 공유)
   // v2.3.82: unused template literal 의 ${typeKeys} 평가 에러로 인해 통째 삭제
@@ -43157,16 +43151,16 @@ function renderFinishedProductTimeline() {
       ? `<div style="width:30px;height:30px;border-radius:6px;flex-shrink:0;overflow:hidden;background:#f1f5f9;border:1px solid #e5e7eb"><img src="${_img}" style="width:100%;height:100%;object-fit:cover"></div>`
       : `<div style="width:30px;height:30px;border-radius:6px;flex-shrink:0;background:#f1f5f9;border:1px solid #e5e7eb;display:flex;align-items:center;justify-content:center;font-size:14px">📦</div>`;
 
-    // 가장 가까운 입고예정
-    const _activeOrds = ords.filter(o => o.inDate && o.stockStatus !== '입고완료');
-    const _nextIn = _activeOrds.sort((a,b) => (a.inDate||'').localeCompare(b.inDate||''))[0];
+    // v2.3.91: OEM 입고예정일만 (가장 가까운 것)
+    const _oemActive = ords.filter(o => o.inDate && o.stockStatus !== '입고완료' && o.itemType === 'OEM');
+    const _nextOem = _oemActive.sort((a,b) => (a.inDate||'').localeCompare(b.inDate||''))[0];
     let nextInLine = '';
-    if (_nextIn) {
-      const d = new Date(_nextIn.inDate); d.setHours(0,0,0,0);
+    if (_nextOem) {
+      const d = new Date(_nextOem.inDate); d.setHours(0,0,0,0);
       const dd = Math.round((d - today) / (24*60*60*1000));
       const ddColor = dd <= 3 ? '#dc2626' : (dd <= 14 ? '#f97316' : '#7c3aed');
       const ddTxt = dd >= 0 ? `D-${dd}` : `D+${-dd}`;
-      nextInLine = `<div style="font-size:10.5px;font-weight:500;margin-top:1px">📦 <span style="color:#64748b">${String(_nextIn.inDate).slice(5)}</span> · <strong style="color:${ddColor};font-weight:800">${ddTxt}</strong></div>`;
+      nextInLine = `<div style="font-size:10.5px;font-weight:500;margin-top:1px">🏭 <span style="color:#64748b">${String(_nextOem.inDate).slice(5)}</span> · <strong style="color:${ddColor};font-weight:800">${ddTxt}</strong></div>`;
     }
 
     const bgEven = ri % 2 === 0 ? '#f0f9ff' : '#fff';      // 라이트 스카이 zebra (신제품 타임라인의 레몬과 구분)
@@ -43221,10 +43215,16 @@ function renderFinishedProductTimeline() {
 
   // v2.3.84: 제목을 표 바로 위로 이동
   // v2.3.86: 아이콘 제거 + 배지를 제목 옆으로 (일반체)
+  // v2.3.91: 통계도 제목 옆으로 (우측 정렬)
   const titleHtml = `
     <div style="display:flex;align-items:center;gap:10px;margin:10px 0 8px 0;flex-wrap:wrap">
       <div style="font-size:17px;font-weight:800;color:#0f172a">제품 생산</div>
       <span style="font-size:11px;color:#94a3b8;font-weight:400">발주서 기반 자동 생성</span>
+      <div style="display:flex;gap:14px;font-size:12px;color:#475569;align-items:center;margin-left:auto">
+        <span><span style="font-weight:800;color:#0f172a">${products.length}</span>개 완제품</span>
+        <span>📦 발주 <strong style="color:#0f172a">${totalOrders}</strong>건</span>
+        ${incomingSoon > 0 ? `<span>⏰ 2주 내 입고 <strong style="color:#dc2626">${incomingSoon}</strong></span>` : ''}
+      </div>
     </div>
   `;
   host.innerHTML = headerHtml + legendHtml + titleHtml + bodyHtml;
@@ -43481,23 +43481,12 @@ function renderProductTimeline() {
     </div>` : ''}
   `;
 
-  // 카테고리 범례
-  const legendHtml = `
-    <div style="display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin-bottom:14px;padding:10px 14px;background:#fafbfc;border:1px solid #e5e7eb;border-radius:8px">
-      ${getMilestoneCategories().map(c => {
-        // v2.3.46: 색원 20 + 아이콘 14 + 좌측상단 1px 이동 + 우측하단 그림자
-        const _isColorfulIcon = c.id === 'wadiz' || c.id === 'shipping' || c.id === 'launch';
-        const _iconSpan = _isColorfulIcon
-          ? `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;font-size:16px;line-height:1;filter:drop-shadow(1px 1.5px 1.5px rgba(0,0,0,.3))">${c.icon}</span>`
-          : `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:${c.color}"><span style="font-size:14px;line-height:1;transform:translate(-0.5px,-0.5px);filter:drop-shadow(1.5px 1.5px 1.5px rgba(0,0,0,.4))">${c.icon}</span></span>`;
-        return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:#475569">${_iconSpan}${_esc(c.label)}</span>`;
-      }).join('')}
-    </div>
-  `;
+  // v2.3.91: 범례는 titleHtml 안으로 이동 → 별도 legendHtml 없음
+  const legendHtml = '';
 
   // 빈 상태
   if (products.length === 0) {
-    host.innerHTML = headerHtml + legendHtml + `
+    host.innerHTML = headerHtml + `
       <div style="text-align:center;padding:60px 20px;background:#fafbfc;border:2px dashed #cbd5e1;border-radius:12px;color:#94a3b8">
         <div style="font-size:32px;margin-bottom:10px">🌱</div>
         <div style="font-size:14px;font-weight:600">아직 등록된 신제품이 없습니다</div>
@@ -43702,12 +43691,21 @@ function renderProductTimeline() {
 
   // v2.3.84: 제목을 표 바로 위로 이동
   // v2.3.86: 아이콘 제거
+  // v2.3.91: 범례를 제목 옆 인라인으로 통합 → legendHtml 사용 X
+  const _legendIcons = getMilestoneCategories().map(c => {
+    const _isColorfulIcon = c.id === 'wadiz' || c.id === 'shipping' || c.id === 'launch';
+    const _iconSpan = _isColorfulIcon
+      ? `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;font-size:16px;line-height:1;filter:drop-shadow(1px 1.5px 1.5px rgba(0,0,0,.3))">${c.icon}</span>`
+      : `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:${c.color}"><span style="font-size:14px;line-height:1;transform:translate(-0.5px,-0.5px);filter:drop-shadow(1.5px 1.5px 1.5px rgba(0,0,0,.4))">${c.icon}</span></span>`;
+    return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:#475569">${_iconSpan}${_esc(c.label)}</span>`;
+  }).join('');
   const titleHtml = `
-    <div style="font-size:17px;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:7px;margin:10px 0 8px 0">
-      신제품 런칭
+    <div style="display:flex;align-items:center;gap:14px;margin:10px 0 8px 0;flex-wrap:wrap">
+      <div style="font-size:17px;font-weight:800;color:#0f172a">신제품 런칭</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center">${_legendIcons}</div>
     </div>
   `;
-  host.innerHTML = headerHtml + legendHtml + titleHtml + bodyHtml;
+  host.innerHTML = headerHtml + titleHtml + bodyHtml;
 
   // 스크롤 — 오늘 위치가 중앙에 오도록
   setTimeout(() => {
