@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.87';
+const ERP_VERSION = 'v2.3.88';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42969,8 +42969,8 @@ function renderFinishedProductTimeline() {
   const totalW = (months.length) * colWidth;
 
   const today = new Date(); today.setHours(0,0,0,0);
-  const todayOffset = Math.round((today - range.start) / (24*60*60*1000));
-  const todayLeft = (todayOffset / totalDays) * totalW;
+  // v2.3.88: 월 기반 위치
+  const todayLeft = window._tlComputeLeft(today, months, colWidth);
 
   const _esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
@@ -43088,14 +43088,10 @@ function renderFinishedProductTimeline() {
     const LANE_H = 26;
     const rowH = 14 + laneCount * LANE_H;
 
-    // 요소 렌더
+    // 요소 렌더 — v2.3.88: 월 기반 위치
     const elemsHtml = elems.map(e => {
-      const startD = new Date(e.start);
-      const startOffset = Math.round((startD - range.start) / (24*60*60*1000));
-      const startLeft = (startOffset / totalDays) * totalW;
-      const endD = new Date(e.end);
-      const endOffset = Math.round((endD - range.start) / (24*60*60*1000));
-      const endLeft = (endOffset / totalDays) * totalW;
+      const startLeft = window._tlComputeLeft(e.start, months, colWidth);
+      const endLeft = window._tlComputeLeft(e.end, months, colWidth);
       const ICON_SIZE = 22, ICON_FS = 18;
       const barWidth = Math.max(endLeft - startLeft, ICON_SIZE);
       const top = 8 + e._lane * LANE_H;
@@ -43195,10 +43191,12 @@ function renderFinishedProductTimeline() {
     `;
   }).join('');
 
-  // v2.3.84: 오늘 마커 드래그 가능
+  // v2.3.84: 오늘 마커 드래그 가능 + v2.3.88: 월 기반 정보
   window._fpTlRangeStart = range.start;
   window._fpTlTotalDays = totalDays;
   window._fpTlTotalW = totalW;
+  window._fpTlMonths = months;
+  window._fpTlColWidth = colWidth;
   const todayLineHtml = `
     <div id="fp-tl-today-line" style="position:absolute;left:${200 + todayLeft}px;top:0;bottom:0;width:2px;background:linear-gradient(180deg,#fb923c 0%,#dc2626 100%);box-shadow:0 0 8px rgba(220,38,38,.4);z-index:6;pointer-events:none">
       <div id="fp-tl-today-label" onmousedown="_tlStartDrag(event,'fp-')" style="position:absolute;top:-2px;left:-22px;width:46px;background:#dc2626;color:#fff;padding:3px 0;text-align:center;font-size:11px;font-weight:800;border-radius:5px;pointer-events:auto;cursor:ew-resize;user-select:none;box-shadow:0 2px 6px rgba(220,38,38,.35)">오늘</div>
@@ -43412,10 +43410,9 @@ function renderProductTimeline() {
   const colWidth = window._tlZoom === 'quarter' ? 90 : 130;
   const totalW = (months.length) * colWidth;
 
-  // 오늘 위치
+  // 오늘 위치 — v2.3.88: 월 기반 위치
   const today = new Date(); today.setHours(0,0,0,0);
-  const todayOffset = Math.round((today - range.start) / (24*60*60*1000));
-  const todayLeft = (todayOffset / totalDays) * totalW;
+  const todayLeft = window._tlComputeLeft(today, months, colWidth);
 
   // 통계
   const thisQuarter = Math.floor(today.getMonth() / 3);
@@ -43569,9 +43566,8 @@ function renderProductTimeline() {
     const rowH = 14 + laneCount * LANE_H; // 행 전체 높이 (헤더+여유)
 
     const dots = _msSorted.map((m, mi) => {
-      const startD = new Date(m.plannedDate);
-      const startOffset = Math.round((startD - range.start) / (24*60*60*1000));
-      const startLeft = (startOffset / totalDays) * totalW;
+      // v2.3.88: 월 기반 위치
+      const startLeft = window._tlComputeLeft(m.plannedDate, months, colWidth);
       const cat = getMilestoneCat(m.category);
       const status = getMilestoneStatus(m);
       const statusIcon = status === 'done' ? '✅' : status === 'in_progress' ? '🌀' : status === 'delayed' ? '🚨' : '⏳';
@@ -43601,9 +43597,8 @@ function renderProductTimeline() {
       const ICON_FS = 18;   // 아이콘 글자 크기 (더 크게)
       // 막대 (기간) — v2.3.35: 두께 16px + 막대 안 텍스트 라벨
       if (m.endDate && m.endDate !== m.plannedDate) {
-        const endD = new Date(m.endDate);
-        const endOffset = Math.round((endD - range.start) / (24*60*60*1000));
-        const endLeft = (endOffset / totalDays) * totalW;
+        // v2.3.88: 월 기반 위치
+        const endLeft = window._tlComputeLeft(m.endDate, months, colWidth);
         const barWidth = Math.max(endLeft - startLeft, ICON_SIZE);
         // v2.3.37: 카테고리명만 표시 (상세 라벨 입력란 제거됨)
         const escBarLabel = _esc(cat.label);
@@ -43676,10 +43671,12 @@ function renderProductTimeline() {
 
   // v2.3.57: 오늘 마커 — 호버 X, 라벨에 날짜 표시, 좌우 드래그 가능
   const _todayMD = `${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-  // 드래그를 위해 range/totalDays/totalW 전역 저장
+  // 드래그를 위해 range/totalDays/totalW 전역 저장 + v2.3.88: 월 기반 정보
   window._tlRangeStart = range.start;
   window._tlTotalDays = totalDays;
   window._tlTotalW = totalW;
+  window._tlMonths = months;
+  window._tlColWidth = colWidth;
   const todayLineHtml = `
     <div id="tl-today-line" style="position:absolute;left:${200 + todayLeft}px;top:0;bottom:0;width:2px;background:linear-gradient(180deg,#fb923c 0%,#dc2626 100%);box-shadow:0 0 8px rgba(220,38,38,.4);z-index:6;pointer-events:none">
       <div id="tl-today-label" onmousedown="_tlStartDrag(event)" style="position:absolute;top:-2px;left:-22px;width:46px;background:#dc2626;color:#fff;padding:3px 0;text-align:center;font-size:11px;font-weight:800;border-radius:5px;pointer-events:auto;cursor:ew-resize;user-select:none;box-shadow:0 2px 6px rgba(220,38,38,.35)">오늘</div>
@@ -44177,6 +44174,41 @@ window._deleteMilestone = function(productId, milestoneId) {
 })();
 
 // v2.3.57: 오늘 라벨 좌우 드래그 → 위치/날짜 실시간 업데이트
+// v2.3.88: 날짜 ↔ 픽셀 변환 (월 단위 기반)
+window._tlComputeLeft = function(dateStr, months, colWidth) {
+  if (!dateStr || !Array.isArray(months) || !months.length) return 0;
+  const d = (dateStr instanceof Date) ? dateStr : new Date(dateStr);
+  if (isNaN(d.getTime())) return 0;
+  const year = d.getFullYear();
+  const month = d.getMonth() + 1;
+  const day = d.getDate();
+  const key = year + '-' + String(month).padStart(2, '0');
+  const idx = months.findIndex(function(mm){ return mm.key === key; });
+  if (idx < 0) {
+    const first = months[0];
+    const last = months[months.length - 1];
+    if (year < first.y || (year === first.y && month < first.m)) return 0;
+    if (year > last.y || (year === last.y && month > last.m)) return months.length * colWidth;
+    return 0;
+  }
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const dayFrac = (day - 1) / daysInMonth;
+  return (idx + dayFrac) * colWidth;
+};
+window._tlComputeDate = function(leftPx, months, colWidth) {
+  if (!Array.isArray(months) || !months.length) return null;
+  let idx = Math.floor(leftPx / colWidth);
+  if (idx < 0) idx = 0;
+  if (idx >= months.length) idx = months.length - 1;
+  const frac = (leftPx - idx * colWidth) / colWidth;
+  const mm = months[idx];
+  const daysInMonth = new Date(mm.y, mm.m, 0).getDate();
+  let day = Math.round(frac * daysInMonth) + 1;
+  if (day < 1) day = 1;
+  if (day > daysInMonth) day = daysInMonth;
+  return new Date(mm.y, mm.m - 1, day);
+};
+
 window._tlStartDrag = function(ev, prefix) {
   prefix = prefix || '';
   ev.preventDefault();
@@ -44193,25 +44225,24 @@ window._tlStartDrag = function(ev, prefix) {
   const _onMove = (e) => {
     const rect = inner.getBoundingClientRect();
     let xInContent = e.clientX - rect.left;
-    // 좌측 200 (제품명 컬럼) 이후만 허용
     if (xInContent < 200) xInContent = 200;
     if (xInContent > innerWidth - 10) xInContent = innerWidth - 10;
     line.style.left = xInContent + 'px';
-    // v2.3.85: 드래그 위치의 날짜 계산 → 오늘이면 '오늘', 아니면 MM-DD
-    const rangeStart = prefix === 'fp-' ? window._fpTlRangeStart : window._tlRangeStart;
-    const totalW = prefix === 'fp-' ? window._fpTlTotalW : window._tlTotalW;
-    const totalDays = prefix === 'fp-' ? window._fpTlTotalDays : window._tlTotalDays;
-    if (rangeStart && totalW && totalDays) {
-      const offset = (xInContent - 200) / totalW * totalDays;
-      const ms = rangeStart.getTime() + offset * 24*60*60*1000;
-      const d = new Date(ms); d.setHours(0,0,0,0);
-      const today = new Date(); today.setHours(0,0,0,0);
-      if (d.getTime() === today.getTime()) {
-        label.textContent = '오늘';
-      } else {
-        const mm = String(d.getMonth()+1).padStart(2,'0');
-        const dd = String(d.getDate()).padStart(2,'0');
-        label.textContent = mm + '-' + dd;
+    // v2.3.88: 월 기반 위치 → 날짜
+    const months = prefix === 'fp-' ? window._fpTlMonths : window._tlMonths;
+    const colWidth = prefix === 'fp-' ? window._fpTlColWidth : window._tlColWidth;
+    if (months && colWidth) {
+      const d = window._tlComputeDate(xInContent - 200, months, colWidth);
+      if (d) {
+        const today = new Date(); today.setHours(0,0,0,0);
+        d.setHours(0,0,0,0);
+        if (d.getTime() === today.getTime()) {
+          label.textContent = '오늘';
+        } else {
+          const mm = String(d.getMonth()+1).padStart(2,'0');
+          const dd = String(d.getDate()).padStart(2,'0');
+          label.textContent = mm + '-' + dd;
+        }
       }
     }
   };
