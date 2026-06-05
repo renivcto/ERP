@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.106';
+const ERP_VERSION = 'v2.3.107';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -20941,6 +20941,43 @@ function saveItem() {
       // v2.3.106: 신규 등록도 updatedAt 명시
       DB.items.push({id:nextId('item'), lot:'', expiry:'', ...data, updatedAt: _now});
     }
+    // v2.3.107: 저장한 item 의 tombstone 항목 제거 — 사용자 의도적 저장이 tombstone 보다 우선
+    try {
+      const _targetId = id || (DB.items[DB.items.length-1] && DB.items[DB.items.length-1].id);
+      const _targetCode = String((data && data.code) || '').trim().toLowerCase();
+      const _targetName = String((data && data.name) || '').trim().toLowerCase();
+      if (Array.isArray(DB._deletedItemIds)) {
+        const _before = DB._deletedItemIds.length;
+        DB._deletedItemIds = DB._deletedItemIds.filter(t => {
+          if (!t) return true;
+          if (_targetId != null && String(t.id) === String(_targetId)) return false;
+          const c = String((t.code||'')).trim().toLowerCase();
+          if (c && _targetCode && c === _targetCode) return false;
+          const n = String((t.name||'')).trim().toLowerCase();
+          if (n && _targetName && n === _targetName) return false;
+          return true;
+        });
+        const _removed = _before - DB._deletedItemIds.length;
+        if (_removed > 0) console.log('🪦→♻️ [v2.3.107] item tombstone ' + _removed + '건 제거 (이번 저장 보호)');
+      }
+      // localStorage 별도 tombstone 도 함께 청소
+      try {
+        const _lsTombKey = 'reniv_deleted_item_ids';
+        const _lsTombs = JSON.parse(localStorage.getItem(_lsTombKey) || '[]');
+        if (Array.isArray(_lsTombs) && _lsTombs.length) {
+          const _kept = _lsTombs.filter(t => {
+            if (!t) return true;
+            if (_targetId != null && String(t.id) === String(_targetId)) return false;
+            const c = String((t.code||'')).trim().toLowerCase();
+            if (c && _targetCode && c === _targetCode) return false;
+            const n = String((t.name||'')).trim().toLowerCase();
+            if (n && _targetName && n === _targetName) return false;
+            return true;
+          });
+          if (_kept.length !== _lsTombs.length) localStorage.setItem(_lsTombKey, JSON.stringify(_kept));
+        }
+      } catch(_) {}
+    } catch(e) { console.warn('[v2.3.107] tombstone 청소 실패:', e); }
     closeModal('add-item'); renderItemTable(); updateBadges();
     // v1.9.951: BOM 관리 화면이 열려 있으면 품목 원가 변경을 즉시 반영 (투입원가·제조원가·마진)
     try { if ($('page-bom') && $('page-bom').classList.contains('active') && typeof renderBOM === 'function') renderBOM(); } catch(_){}
@@ -21069,6 +21106,49 @@ function copyItem(id) {
   renderItemTable();
   showNotif(`[${src.name}] 복사되었습니다.`, 'success');
 }
+
+// v2.3.107: 콘솔 디버깅 도구 — item tombstone 확인/청소
+window._itemTombstoneList = function() {
+  const ls = (() => { try { return JSON.parse(localStorage.getItem('reniv_deleted_item_ids') || '[]'); } catch(_){ return []; } })();
+  const db = Array.isArray(DB._deletedItemIds) ? DB._deletedItemIds : [];
+  console.table([...db, ...ls.map(x => Object.assign({_src:'localStorage'}, x))]);
+  return { db: db.length, localStorage: ls.length };
+};
+window._itemTombstoneClean = function(idOrCodeOrName) {
+  const t = String(idOrCodeOrName || '').trim().toLowerCase();
+  if (!t) { console.warn('id/code/name 입력 필요'); return; }
+  let removed = 0;
+  if (Array.isArray(DB._deletedItemIds)) {
+    const b = DB._deletedItemIds.length;
+    DB._deletedItemIds = DB._deletedItemIds.filter(x => {
+      if (!x) return true;
+      if (String(x.id) === t) return false;
+      if (String((x.code||'')).trim().toLowerCase() === t) return false;
+      if (String((x.name||'')).trim().toLowerCase() === t) return false;
+      return true;
+    });
+    removed += b - DB._deletedItemIds.length;
+  }
+  try {
+    const ls = JSON.parse(localStorage.getItem('reniv_deleted_item_ids') || '[]');
+    if (Array.isArray(ls)) {
+      const kept = ls.filter(x => {
+        if (!x) return true;
+        if (String(x.id) === t) return false;
+        if (String((x.code||'')).trim().toLowerCase() === t) return false;
+        if (String((x.name||'')).trim().toLowerCase() === t) return false;
+        return true;
+      });
+      removed += ls.length - kept.length;
+      localStorage.setItem('reniv_deleted_item_ids', JSON.stringify(kept));
+    }
+  } catch(_){}
+  console.log('🪦→♻️ [v2.3.107] tombstone ' + removed + '건 제거 ("' + t + '")');
+  if (removed > 0) {
+    try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  }
+  return removed;
+};
 
 function editItem(id) {
   const i = getItem(id);
