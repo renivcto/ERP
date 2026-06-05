@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.105';
+const ERP_VERSION = 'v2.3.106';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -20932,11 +20932,14 @@ function saveItem() {
   if (window._clearBarcodeImg) { data.barcodeImg = ''; window._clearBarcodeImg = false; }
   const doSave = () => {
     const isNew = !id;
+    const _now = Date.now();
     if (id) {
       const idx = DB.items.findIndex(i=>i.id===id);
-      if (idx>=0) DB.items[idx] = {...DB.items[idx], ...data};
+      // v2.3.106: updatedAt 명시 → 머지 시 local-wins (이전 Firestore 데이터가 덮어쓰는 revert 차단)
+      if (idx>=0) DB.items[idx] = {...DB.items[idx], ...data, updatedAt: _now};
     } else {
-      DB.items.push({id:nextId('item'), lot:'', expiry:'', ...data});
+      // v2.3.106: 신규 등록도 updatedAt 명시
+      DB.items.push({id:nextId('item'), lot:'', expiry:'', ...data, updatedAt: _now});
     }
     closeModal('add-item'); renderItemTable(); updateBadges();
     // v1.9.951: BOM 관리 화면이 열려 있으면 품목 원가 변경을 즉시 반영 (투입원가·제조원가·마진)
