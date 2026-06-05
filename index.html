@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.104';
+const ERP_VERSION = 'v2.3.105';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6627,8 +6627,31 @@ async function _doSaveDataInner() {
   }
 
   // localStorage 항상 저장 (백업)
+  // v2.3.105: shopOrders 가 크면 IDB 로 오프로드 (localStorage quota 회피)
+  let _lsJson;
   try {
-    const lsJson = JSON.stringify(dbToSave);
+    const _shopOrdersJson = JSON.stringify(dbToSave.shopOrders || []);
+    const _OFFLOAD_THRESHOLD = 300 * 1024; // 300KB
+    if (_shopOrdersJson.length > _OFFLOAD_THRESHOLD) {
+      try {
+        idbSet('shopOrders_offload', _shopOrdersJson);
+        // localStorage 전용 copy — shopOrders 는 빈 배열 + 마커
+        const _lsCopy = Object.assign({}, dbToSave, { shopOrders: [], _shopOrdersInIdb: true, _shopOrdersIdbCount: (dbToSave.shopOrders||[]).length, _shopOrdersIdbAt: Date.now() });
+        _lsJson = JSON.stringify(_lsCopy);
+        console.log('📦 [v2.3.105 OFFLOAD] shopOrders ' + (_shopOrdersJson.length/1024).toFixed(0) + 'KB / ' + (dbToSave.shopOrders||[]).length + '건 → IDB');
+      } catch (_e) {
+        console.warn('[v2.3.105] shopOrders IDB 오프로드 실패 — 인라인 저장 시도:', _e);
+        _lsJson = JSON.stringify(dbToSave);
+      }
+    } else {
+      _lsJson = JSON.stringify(dbToSave);
+    }
+  } catch(_) {
+    _lsJson = JSON.stringify(dbToSave);
+  }
+
+  try {
+    const lsJson = _lsJson;
     localStorage.setItem(STORE_KEY, lsJson);
     console.log('💾 [localStorage] 저장 완료:', lsJson.length, 'bytes — shopOrders:', (dbToSave.shopOrders||[]).length, '건');
   } catch(e) {
@@ -7340,6 +7363,25 @@ async function restoreIDBData() {
       if (v) DB.samples[si].receipt = v;
     }
   }
+  // v2.3.105 — shopOrders 전체 배열 IDB 복원 (다른 hydrate 작업보다 먼저)
+  try {
+    if (DB._shopOrdersInIdb === true) {
+      const j = await idbGet('shopOrders_offload');
+      if (j) {
+        const arr = JSON.parse(j);
+        if (Array.isArray(arr)) {
+          DB.shopOrders = arr;
+          console.log('📥 [v2.3.105 HYDRATE] shopOrders ' + arr.length + '건 IDB 에서 복원');
+        }
+      } else {
+        console.warn('⚠️ [v2.3.105] shopOrders IDB 미스 — Firestore 머지에서 받아옴');
+      }
+      delete DB._shopOrdersInIdb;
+      delete DB._shopOrdersIdbCount;
+      delete DB._shopOrdersIdbAt;
+    }
+  } catch (e) { console.warn('[v2.3.105 HYDRATE] shopOrders 복원 실패:', e); }
+
   // v2.2.80 — expenses/comments/newProducts 의 __idb__ 마커 복원
   try {
     for (let ei = 0; ei < (DB.expenses||[]).length; ei++) {
