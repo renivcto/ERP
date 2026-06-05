@@ -2519,6 +2519,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       </div>
       <!-- Sub: 제품 포트폴리오 (v1.9.900) -->
       <div id="insight-sub-timeline" style="display:none;margin-top:14px"></div>
+      <!-- v2.3.80: 완제품 생산 타임라인 (타임라인 탭 안에서 위 신제품 타임라인 아래에 함께 표시) -->
+      <div id="insight-sub-fp-timeline" style="display:none;margin-top:18px"></div>
       <div id="insight-sub-portfolio" style="display:none;margin-top:14px"></div>
     </div>
 
@@ -5552,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.79';
+const ERP_VERSION = 'v2.3.80';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -40476,6 +40478,7 @@ function setInsightTopTab(tab) {
     boardSub.style.display = 'none'; newprodSub.style.display = '';
     if (portfolioSub) portfolioSub.style.display = 'none';
     if (timelineSub) timelineSub.style.display = 'none';
+    { const _fp = document.getElementById('insight-sub-fp-timeline'); if (_fp) _fp.style.display = 'none'; }  // v2.3.80
     renderNewProductKanban();
   } else if (tab === 'timeline') {
     // v2.3.25: 타임라인 탭
@@ -40484,19 +40487,28 @@ function setInsightTopTab(tab) {
     boardSub.style.display = 'none'; newprodSub.style.display = 'none';
     if (portfolioSub) portfolioSub.style.display = 'none';
     if (timelineSub) timelineSub.style.display = '';
+    // v2.3.80: 완제품 생산 타임라인도 함께 표시
+    const fpTl = document.getElementById('insight-sub-fp-timeline');
+    if (fpTl) fpTl.style.display = '';
     if (typeof renderProductTimeline === 'function') renderProductTimeline();
+    if (typeof renderFinishedProductTimeline === 'function') renderFinishedProductTimeline();
+    if (typeof _fpLoad === 'function') {
+      _fpLoad().then(function(changed){ if (changed && typeof renderFinishedProductTimeline === 'function') renderFinishedProductTimeline(); }).catch(function(){});
+    }
   } else if (tab === 'portfolio') {
     _setIns(newprodBtn, false); _setIns(boardBtn, false); _setIns(portfolioBtn, true);
     if (timelineBtn) _setIns(timelineBtn, false);
     boardSub.style.display = 'none'; newprodSub.style.display = 'none';
     if (portfolioSub) portfolioSub.style.display = '';
     if (timelineSub) timelineSub.style.display = 'none';
+    { const _fp = document.getElementById('insight-sub-fp-timeline'); if (_fp) _fp.style.display = 'none'; }  // v2.3.80
     _ensureProductMap();
     renderProductMap();
     if (typeof _pmLoad === 'function') {
       _pmLoad().then(function(changed){ if (changed) renderProductMap(); }).catch(function(){});
     }
   } else {
+    { const _fp = document.getElementById('insight-sub-fp-timeline'); if (_fp) _fp.style.display = 'none'; }  // v2.3.80
     _setIns(newprodBtn, false); _setIns(boardBtn, true); _setIns(portfolioBtn, false);
     if (timelineBtn) _setIns(timelineBtn, false);
     newprodSub.style.display = 'none'; boardSub.style.display = '';
@@ -42738,6 +42750,607 @@ function _tlGetRange() {
   endD.setDate(1); endD.setMonth(endD.getMonth() + 2);
   return { start: startD, end: endD };
 }
+
+// ═══════════════════════════════════════════════════════
+// v2.3.80 — 완제품 생산 타임라인 (Finished Product Production Timeline)
+// ═══════════════════════════════════════════════════════
+
+// 데이터 — 완제품 + 발주서 매핑
+function _fpGetTimelineData() {
+  const items = (DB.items || []).filter(Boolean);
+  const completedProducts = items.filter(i => i && i.type === '완제품');
+  const orders = DB.orders || [];
+  const boms = DB.boms || {};
+
+  // itemId(부자재 등) → [완제품 id, ...] 역인덱스 구축
+  const itemToProducts = {};
+  completedProducts.forEach(p => {
+    const bom = boms[p.id] || [];
+    bom.forEach(b => {
+      if (!b || b.itemId == null) return;
+      const k = String(b.itemId);
+      if (!itemToProducts[k]) itemToProducts[k] = [];
+      if (itemToProducts[k].indexOf(p.id) === -1) itemToProducts[k].push(p.id);
+    });
+  });
+
+  // 완제품 id → [발주 행 정보] 매핑
+  const productOrders = {};
+  orders.forEach(o => {
+    if (!o || !Array.isArray(o.rows)) return;
+    o.rows.forEach(r => {
+      if (!r) return;
+      const it = items.find(x => x && String(x.id) === String(r.itemId));
+      const itemType = (it && it.type) || '부자재';
+      let targetProds = [];
+      if (itemType === '완제품') {
+        // 완제품을 직접 발주 (OEM 완제품 수령 등)
+        if (it) targetProds = [it.id];
+      } else {
+        targetProds = itemToProducts[String(r.itemId)] || [];
+      }
+      targetProds.forEach(pid => {
+        if (!productOrders[pid]) productOrders[pid] = [];
+        productOrders[pid].push({
+          orderId: o.id,
+          orderDate: o.orderDate || '',
+          inDate: o.inDate || '',
+          itemId: r.itemId,
+          itemName: r.name || (it ? it.name : ''),
+          itemType: itemType,
+          qty: r.qty,
+          status: o.status || '진행중',
+          stockStatus: o.stockStatus || '입고전',
+          vendorId: o.vendorId,
+          serial: o.serial,
+        });
+      });
+    });
+  });
+
+  // 발주 행이 있는 완제품만
+  const products = completedProducts.filter(p => productOrders[p.id] && productOrders[p.id].length > 0)
+    .sort((a,b) => {
+      // 가장 가까운 입고예정 기준으로 정렬
+      const aMin = productOrders[a.id].reduce((m, x) => (!m || (x.inDate && x.inDate < m)) ? (x.inDate || m) : m, '');
+      const bMin = productOrders[b.id].reduce((m, x) => (!m || (x.inDate && x.inDate < m)) ? (x.inDate || m) : m, '');
+      return (aMin || 'zzzz').localeCompare(bMin || 'zzzz');
+    });
+  return { products, productOrders };
+}
+
+// 발주 itemType → 색상/라벨
+function _fpTypeColor(t) {
+  if (t === '부자재') return { color: '#ff9f43', label: '부자재', icon: '🧴' };
+  if (t === 'OEM') return { color: '#38bdf8', label: 'OEM', icon: '🏭' };
+  if (t === '원자재') return { color: '#f87171', label: '원자재', icon: '🌾' };
+  if (t === '외주가공') return { color: '#a78bfa', label: '외주가공', icon: '🛠️' };
+  if (t === '완제품') return { color: '#fb7185', label: '완제품', icon: '📦' };
+  return { color: '#94a3b8', label: t || '기타', icon: '⚪' };
+}
+
+// FP 마일스톤 저장소 ─────────────────────────────────
+function _fpEnsureData() {
+  if (!window._fpMilestoneData || typeof window._fpMilestoneData !== 'object') {
+    window._fpMilestoneData = { updatedAt: 0, milestones: {} };
+  }
+  if (!window._fpMilestoneData.milestones || typeof window._fpMilestoneData.milestones !== 'object') {
+    window._fpMilestoneData.milestones = {};
+  }
+  return window._fpMilestoneData;
+}
+function _fpGetMs(productId) {
+  const d = _fpEnsureData();
+  return d.milestones[String(productId)] || [];
+}
+function _fpSave(opts) {
+  opts = opts || {};
+  try {
+    _fpEnsureData();
+    if (!opts.noTouch) window._fpMilestoneData.updatedAt = Date.now();
+    const json = JSON.stringify(window._fpMilestoneData);
+    try { localStorage.setItem('reniv_shared_fp_milestones', json); }
+    catch(e) { console.warn('🏭 fpMilestones localStorage 저장 실패:', e); }
+    if (window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
+      try {
+        const ref = window._firestoreDoc(window._firebaseDb, 'settings', 'fp_milestones');
+        window._firestoreSetDoc(ref, { value: json }, { merge:true })
+          .then(function(){ if (!opts.silent) console.log('🏭 [v2.3.80] fpMilestones Firestore 저장 완료'); })
+          .catch(function(e){ console.warn('🏭 fpMilestones Firestore 저장 실패:', e); });
+      } catch(e) { console.warn('🏭 fpMilestones Firestore 호출 실패:', e); }
+    }
+  } catch(e) { console.warn('🏭 _fpSave 오류:', e); }
+}
+async function _fpLoad() {
+  _fpEnsureData();
+  let fsData = null, lcData = null;
+  try {
+    if (window._firestoreGetDoc && window._firestoreDoc && window._firebaseDb) {
+      const ref = window._firestoreDoc(window._firebaseDb, 'settings', 'fp_milestones');
+      const snap = await window._firestoreGetDoc(ref);
+      if (snap && snap.exists()) {
+        const v = snap.data().value;
+        fsData = (typeof v === 'string') ? JSON.parse(v) : v;
+      }
+    }
+  } catch(e) { console.warn('🏭 fpMilestones Firestore 로드 실패:', e); }
+  try {
+    const s = localStorage.getItem('reniv_shared_fp_milestones');
+    if (s) lcData = JSON.parse(s);
+  } catch(e) {}
+  const curTs = Number(window._fpMilestoneData.updatedAt) || 0;
+  const fsTs = (fsData && Number(fsData.updatedAt)) || 0;
+  const lcTs = (lcData && Number(lcData.updatedAt)) || 0;
+  let best = null, bestTs = curTs;
+  if (fsData && fsTs > bestTs) { best = fsData; bestTs = fsTs; }
+  if (lcData && lcTs > bestTs) { best = lcData; bestTs = lcTs; }
+  let changed = false;
+  if (best) {
+    window._fpMilestoneData = best;
+    _fpEnsureData();
+    changed = true;
+    console.log('🏭 [v2.3.80] fpMilestones 최신본 로드 (updatedAt=' + bestTs + ')');
+  }
+  if (lcData && lcTs > fsTs) {
+    try { _fpSave({ noTouch:true, silent:true }); } catch(e) {}
+  }
+  return changed;
+}
+
+// 시간 범위
+function _fpGetRange() {
+  const { productOrders } = _fpGetTimelineData();
+  const all = [];
+  const today = new Date();
+  all.push(today.toISOString().slice(0,10));
+  Object.keys(productOrders).forEach(pid => {
+    productOrders[pid].forEach(o => {
+      if (o.orderDate) all.push(o.orderDate);
+      if (o.inDate) all.push(o.inDate);
+    });
+    (_fpGetMs(pid) || []).forEach(m => {
+      if (m && m.plannedDate) all.push(m.plannedDate);
+      if (m && m.endDate) all.push(m.endDate);
+    });
+  });
+  const sorted = all.filter(Boolean).sort();
+  const startD = new Date(sorted[0] || today.toISOString().slice(0,10));
+  startD.setDate(1); startD.setMonth(startD.getMonth() - 1);
+  const endD = new Date(sorted[sorted.length - 1] || today.toISOString().slice(0,10));
+  endD.setDate(1); endD.setMonth(endD.getMonth() + 2);
+  return { start: startD, end: endD };
+}
+
+// 메인 렌더
+function renderFinishedProductTimeline() {
+  const host = document.getElementById('insight-sub-fp-timeline');
+  if (!host) return;
+
+  const { products, productOrders } = _fpGetTimelineData();
+  const range = _fpGetRange();
+
+  const months = [];
+  const cur = new Date(range.start);
+  while (cur <= range.end) {
+    months.push({ y: cur.getFullYear(), m: cur.getMonth() + 1, key: cur.toISOString().slice(0, 7) });
+    cur.setMonth(cur.getMonth() + 1);
+  }
+  const totalDays = Math.round((range.end - range.start) / (24*60*60*1000));
+  const colWidth = window._tlZoom === 'quarter' ? 90 : 130;
+  const totalW = (months.length) * colWidth;
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayOffset = Math.round((today - range.start) / (24*60*60*1000));
+  const todayLeft = (todayOffset / totalDays) * totalW;
+
+  const _esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[ch]));
+
+  // 헤더 + 통계
+  const totalOrders = products.reduce((s,p) => s + (productOrders[p.id]||[]).length, 0);
+  const incomingSoon = products.reduce((s,p) => {
+    return s + (productOrders[p.id]||[]).filter(o => {
+      if (!o.inDate || o.stockStatus === '입고완료') return false;
+      const d = new Date(o.inDate); d.setHours(0,0,0,0);
+      const dd = Math.round((d - today) / (24*60*60*1000));
+      return dd >= 0 && dd <= 14;
+    }).length;
+  }, 0);
+
+  const headerHtml = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="font-size:15px;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:7px">
+          <span style="font-size:18px">🏭</span>
+          완제품 생산 타임라인
+        </div>
+        <span style="font-size:11px;color:#64748b;background:#f1f5f9;padding:3px 8px;border-radius:99px;font-weight:600">발주서 기반 자동 생성</span>
+      </div>
+      <div style="display:flex;gap:14px;font-size:12px;color:#475569;flex-wrap:wrap;align-items:center">
+        <span><span style="font-weight:800;color:#0f172a">${products.length}</span>개 완제품</span>
+        <span>📦 발주 <strong style="color:#0f172a">${totalOrders}</strong>건</span>
+        ${incomingSoon > 0 ? `<span>⏰ 2주 내 입고 <strong style="color:#dc2626">${incomingSoon}</strong></span>` : ''}
+      </div>
+    </div>
+  `;
+
+  // 범례 — 발주 타입 색상 + 마일스톤 카테고리
+  const typeKeys = ['부자재','OEM','원자재','외주가공','완제품'];
+  const legendHtml = `
+    <div style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-bottom:12px;padding:9px 14px;background:#fafbfc;border:1px solid #e5e7eb;border-radius:8px">
+      <span style="font-size:11px;color:#64748b;font-weight:700">발주:</span>
+      ${typeKeys.map(t => {
+        const c = _fpTypeColor(t);
+        return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:#475569">
+          <span style="display:inline-block;width:18px;height:10px;border-radius:5px;background:${c.color}"></span>${c.label}
+        </span>`;
+      }).join('')}
+      <span style="width:1px;height:14px;background:#e5e7eb;margin:0 4px"></span>
+      <span style="font-size:11px;color:#64748b;font-weight:700">마일스톤:</span>
+      ${['materials','oem','shipping','launch'].map(cid => {
+        const cat = getMilestoneCat(cid);
+        return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:#475569">
+          <span style="font-size:14px">${cat.icon}</span>${_esc(cat.label)}
+        </span>`;
+      }).join('')}
+    </div>
+  `;
+
+  if (products.length === 0) {
+    host.innerHTML = headerHtml + legendHtml + `
+      <div style="text-align:center;padding:50px 20px;background:#fafbfc;border:2px dashed #cbd5e1;border-radius:12px;color:#94a3b8">
+        <div style="font-size:32px;margin-bottom:10px">📋</div>
+        <div style="font-size:13.5px;font-weight:600">아직 발주서가 등록된 완제품이 없습니다</div>
+        <div style="font-size:11.5px;color:#cbd5e1;margin-top:6px">발주서에 등록된 부자재/OEM 등이 BOM 에 연결된 완제품이 자동으로 표시됩니다</div>
+      </div>`;
+    return;
+  }
+
+  // 시간축
+  const axisHtml = `
+    <div style="display:flex;border-bottom:2px solid #cbd5e1;background:#fafbfc;position:sticky;top:0;z-index:5">
+      <div style="position:sticky;left:0;top:0;z-index:7;width:200px;flex-shrink:0;padding:10px 12px;font-size:11.5px;font-weight:800;color:#475569;border-right:1px solid #e5e7eb;background:#fff">완제품</div>
+      <div style="display:flex;flex:1;min-width:0">
+        ${months.map(mm => `
+          <div style="width:${colWidth}px;flex-shrink:0;padding:14px 0;text-align:center;border-right:1px solid #e5e7eb;font-size:11px;color:#475569;font-weight:700">
+            <div style="font-size:13px;color:#0f172a">${String(mm.m).padStart(2,'0')}월</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+
+  // 각 완제품 행
+  const rowsHtml = products.map((p, ri) => {
+    const ords = (productOrders[p.id] || []).slice();
+    const fpMs = _fpGetMs(p.id) || [];
+
+    // 발주 바 + 마일스톤을 하나의 시각 요소 리스트로 통합 — lane 알고리즘 적용
+    // 각 요소: { type:'order'|'milestone', start, end, item }
+    const elems = [];
+    ords.forEach(o => {
+      if (!o.orderDate) return;
+      elems.push({
+        kind: 'order',
+        start: o.orderDate,
+        end: o.inDate || o.orderDate,
+        data: o,
+      });
+    });
+    fpMs.forEach(m => {
+      if (!m || !m.plannedDate) return;
+      elems.push({
+        kind: 'milestone',
+        start: m.plannedDate,
+        end: m.endDate || m.plannedDate,
+        data: m,
+      });
+    });
+    elems.sort((a,b) => (a.start||'').localeCompare(b.start||''));
+
+    // Lane 알고리즘
+    const lanes = [];
+    elems.forEach(e => {
+      let assigned = -1;
+      for (let i = 0; i < lanes.length; i++) {
+        if (lanes[i] < e.start) { assigned = i; lanes[i] = e.end; break; }
+      }
+      if (assigned === -1) { assigned = lanes.length; lanes.push(e.end); }
+      e._lane = assigned;
+    });
+    const laneCount = Math.max(1, lanes.length);
+    const LANE_H = 26;
+    const rowH = 14 + laneCount * LANE_H;
+
+    // 요소 렌더
+    const elemsHtml = elems.map(e => {
+      const startD = new Date(e.start);
+      const startOffset = Math.round((startD - range.start) / (24*60*60*1000));
+      const startLeft = (startOffset / totalDays) * totalW;
+      const endD = new Date(e.end);
+      const endOffset = Math.round((endD - range.start) / (24*60*60*1000));
+      const endLeft = (endOffset / totalDays) * totalW;
+      const ICON_SIZE = 22, ICON_FS = 18;
+      const barWidth = Math.max(endLeft - startLeft, ICON_SIZE);
+      const top = 8 + e._lane * LANE_H;
+
+      if (e.kind === 'order') {
+        const o = e.data;
+        const c = _fpTypeColor(o.itemType);
+        const _fmtMD = (s) => s ? String(s).slice(5) : '';
+        const tipLines = [];
+        tipLines.push(`<div style=\"font-weight:800;color:#0f172a;font-size:13px;margin-bottom:6px\">${c.icon} ${_esc(o.itemName)}</div>`);
+        tipLines.push(`<div style=\"font-size:11.5px;color:#1e293b\">📅 발주: <strong>${_fmtMD(o.orderDate)}</strong></div>`);
+        if (o.inDate) tipLines.push(`<div style=\"font-size:11.5px;color:#1e293b\">📦 입고예정: <strong>${_fmtMD(o.inDate)}</strong></div>`);
+        if (o.qty) tipLines.push(`<div style=\"font-size:11.5px;color:#1e293b\">🔢 수량: <strong>${(o.qty||0).toLocaleString()}</strong></div>`);
+        tipLines.push(`<div style=\"font-size:11px;color:#64748b;margin-top:4px;padding-top:5px;border-top:1px dashed ${c.color}66\">${_esc(o.itemType)} · ${_esc(o.stockStatus||'')}</div>`);
+        const tipHtml = tipLines.join('');
+        const escTipHtml = encodeURIComponent(tipHtml);
+        // 완료 발주는 살짝 흐리게
+        const opacity = (o.stockStatus === '입고완료') ? 0.55 : 1;
+        const onclick = `event.stopPropagation();editOrder(${o.orderId})`;
+        const labelText = _esc(o.itemType);
+        return `<div onclick="${onclick}" onmouseenter="_tlShowTip(event,'${escTipHtml}','${c.color}')" onmousemove="_tlMoveTip(event)" onmouseleave="_tlHideTip()" style="position:absolute;left:${startLeft}px;top:${top - 2}px;height:24px;width:${barWidth}px;cursor:pointer;z-index:3;opacity:${opacity}">
+          <div style="position:absolute;left:0;right:0;top:2px;height:20px;background:${c.color};border-radius:99px;display:flex;align-items:center;padding:0 4px 0 22px;overflow:hidden">
+            <span style="color:#fff;font-size:11.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:clip;letter-spacing:-.3px">${labelText}</span>
+          </div>
+          <div style="position:absolute;left:-2px;top:0;font-size:${ICON_FS}px;line-height:1">${c.icon}</div>
+        </div>`;
+      }
+
+      // 마일스톤
+      const m = e.data;
+      const cat = getMilestoneCat(m.category);
+      const status = getMilestoneStatus(m);
+      const opacity = status === 'done' ? 0.85 : 1;
+      const _fmtMD = (s) => s ? String(s).slice(5) : '';
+      const tipLines = [];
+      tipLines.push(`<div style=\"font-weight:800;color:#0f172a;font-size:13px;margin-bottom:6px\">${cat.icon} ${_esc(cat.label)}</div>`);
+      tipLines.push(`<div style=\"font-size:11.5px;color:#1e293b\">📅 시작: <strong>${_fmtMD(m.plannedDate)}</strong></div>`);
+      if (m.endDate) tipLines.push(`<div style=\"font-size:11.5px;color:#1e293b\">📅 종료: <strong>${_fmtMD(m.endDate)}</strong></div>`);
+      if (m.actualDate) tipLines.push(`<div style=\"font-size:11.5px;color:#1e293b\">✅ 완료: <strong>${_fmtMD(m.actualDate)}</strong></div>`);
+      if (m.memo) tipLines.push(`<div style=\"font-size:11.5px;color:#475569;margin-top:4px;padding-top:5px;border-top:1px dashed ${cat.color}66\">📝 ${_esc(m.memo)}</div>`);
+      const tipHtml = tipLines.join('');
+      const escTipHtml = encodeURIComponent(tipHtml);
+      const onclick = `event.stopPropagation();_fpEditMilestone('${_esc(p.id)}','${m.id}')`;
+
+      if (m.endDate && m.endDate !== m.plannedDate) {
+        return `<div onclick="${onclick}" onmouseenter="_tlShowTip(event,'${escTipHtml}','${cat.color}')" onmousemove="_tlMoveTip(event)" onmouseleave="_tlHideTip()" style="position:absolute;left:${startLeft}px;top:${top - 2}px;height:24px;width:${barWidth}px;cursor:pointer;z-index:3;opacity:${opacity}">
+          <div style="position:absolute;left:0;right:0;top:2px;height:20px;background:${cat.color};border-radius:99px;display:flex;align-items:center;padding:0 4px 0 22px;overflow:hidden">
+            <span style="color:#fff;font-size:11.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:clip;letter-spacing:-.3px">${_esc(cat.label)}</span>
+          </div>
+          <div style="position:absolute;left:-2px;top:0;font-size:${ICON_FS}px;line-height:1">${cat.icon}</div>
+        </div>`;
+      }
+      return `<div onclick="${onclick}" onmouseenter="_tlShowTip(event,'${escTipHtml}','${cat.color}')" onmousemove="_tlMoveTip(event)" onmouseleave="_tlHideTip()" style="position:absolute;left:${startLeft - ICON_SIZE/2}px;top:${top - 2}px;width:${ICON_SIZE}px;height:${ICON_SIZE}px;display:flex;align-items:center;justify-content:center;font-size:${ICON_FS}px;line-height:1;cursor:pointer;opacity:${opacity};z-index:3">${cat.icon}</div>`;
+    }).join('');
+
+    // 제품 사진 (item.image 또는 IDB 마커)
+    const _img = (typeof p.image === 'string' && p.image.indexOf('data:') === 0) ? p.image : '';
+    const photoHtml = _img
+      ? `<div style="width:30px;height:30px;border-radius:6px;flex-shrink:0;overflow:hidden;background:#f1f5f9;border:1px solid #e5e7eb"><img src="${_img}" style="width:100%;height:100%;object-fit:cover"></div>`
+      : `<div style="width:30px;height:30px;border-radius:6px;flex-shrink:0;background:#f1f5f9;border:1px solid #e5e7eb;display:flex;align-items:center;justify-content:center;font-size:14px">📦</div>`;
+
+    // 가장 가까운 입고예정
+    const _activeOrds = ords.filter(o => o.inDate && o.stockStatus !== '입고완료');
+    const _nextIn = _activeOrds.sort((a,b) => (a.inDate||'').localeCompare(b.inDate||''))[0];
+    let nextInLine = '';
+    if (_nextIn) {
+      const d = new Date(_nextIn.inDate); d.setHours(0,0,0,0);
+      const dd = Math.round((d - today) / (24*60*60*1000));
+      const ddColor = dd <= 3 ? '#dc2626' : (dd <= 14 ? '#f97316' : '#7c3aed');
+      const ddTxt = dd >= 0 ? `D-${dd}` : `D+${-dd}`;
+      nextInLine = `<div style="font-size:10.5px;font-weight:500;margin-top:1px">📦 <span style="color:#64748b">${String(_nextIn.inDate).slice(5)}</span> · <strong style="color:${ddColor};font-weight:800">${ddTxt}</strong></div>`;
+    }
+
+    const bgEven = ri % 2 === 0 ? '#f0f9ff' : '#fff';      // 라이트 스카이 zebra (신제품 타임라인의 레몬과 구분)
+    const bgHover = ri % 2 === 0 ? '#dbeafe' : '#fafbfc';
+
+    return `
+      <div style="display:flex;align-items:center;border-bottom:1px solid #f1f5f9;background:${bgEven}" onmouseenter="this.style.background='${bgHover}';this.querySelector('.fp-left').style.background='${bgHover}'" onmouseleave="this.style.background='${bgEven}';this.querySelector('.fp-left').style.background='${bgEven}'">
+        <div class="fp-left" style="position:sticky;left:0;z-index:2;background:${bgEven};width:200px;flex-shrink:0;padding:9px 4px 9px 12px;border-right:1px solid #e5e7eb;display:flex;align-items:center;gap:6px;cursor:pointer" onclick="_fpOpenProductDetail('${_esc(p.id)}')">
+          ${photoHtml}
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13.5px;font-weight:700;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(p.name || '제품명 없음')}</div>
+            ${p.spec ? `<div style="font-size:10.5px;color:#64748b;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(p.spec)}</div>` : ''}
+            ${nextInLine}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:0;align-items:center">
+            <button onclick="event.stopPropagation();_fpAddMilestone('${_esc(p.id)}')" title="마일스톤 추가" style="background:none;color:#cbd5e1;border:none;padding:0;font-size:20px;font-weight:400;cursor:pointer;line-height:1">＋</button>
+          </div>
+        </div>
+        <div style="position:relative;flex:1;min-width:0;height:${rowH}px">
+          <div style="position:absolute;inset:0;display:flex">
+            ${months.map(() => `<div style="width:${colWidth}px;flex-shrink:0;border-right:1px solid #f1f5f9"></div>`).join('')}
+          </div>
+          ${elemsHtml}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // 오늘 마커 (드래그 없는 정적)
+  const todayLineHtml = `
+    <div id="fp-tl-today-line" style="position:absolute;left:${200 + todayLeft}px;top:0;bottom:0;width:2px;background:linear-gradient(180deg,#fb923c 0%,#dc2626 100%);box-shadow:0 0 8px rgba(220,38,38,.4);z-index:6;pointer-events:none">
+      <div style="position:absolute;top:-2px;left:-22px;width:46px;background:#dc2626;color:#fff;padding:3px 0;text-align:center;font-size:11px;font-weight:800;border-radius:5px;pointer-events:none;box-shadow:0 2px 6px rgba(220,38,38,.35)">오늘</div>
+    </div>
+  `;
+
+  const bodyHtml = `
+    <div style="border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#fff">
+      <div style="overflow-x:auto;max-height:560px;overflow-y:auto;position:relative" id="fp-tl-scroll-wrap">
+        <div style="min-width:${200 + totalW}px;position:relative">
+          ${axisHtml}
+          ${rowsHtml}
+          ${todayLineHtml}
+        </div>
+      </div>
+    </div>
+  `;
+
+  host.innerHTML = headerHtml + legendHtml + bodyHtml;
+
+  // 스크롤 — 오늘 중앙
+  setTimeout(() => {
+    const sw = document.getElementById('fp-tl-scroll-wrap');
+    if (sw) {
+      const targetLeft = 200 + todayLeft - sw.clientWidth / 2;
+      sw.scrollLeft = Math.max(0, targetLeft);
+    }
+  }, 50);
+}
+
+// 완제품 행 클릭 시 — 품목 상세 (간단 알림)
+window._fpOpenProductDetail = function(productId) {
+  const p = (DB.items || []).find(x => x && String(x.id) === String(productId));
+  if (!p) return;
+  // 품목 상세 모달이 있다면 열고, 없으면 무시
+  if (typeof openItemModal === 'function') {
+    try { openItemModal(p.id); return; } catch(_){}
+  }
+  if (typeof editItem === 'function') {
+    try { editItem(p.id); return; } catch(_){}
+  }
+};
+
+// 마일스톤 추가/수정 — FP 전용
+window._fpAddMilestone = function(productId) { _fpOpenMilestoneModal(productId, null); };
+window._fpEditMilestone = function(productId, mid) { _fpOpenMilestoneModal(productId, mid); };
+
+window._fpOpenMilestoneModal = function(productId, milestoneId) {
+  const p = (DB.items || []).find(x => x && String(x.id) === String(productId));
+  if (!p) return;
+  const arr = _fpGetMs(productId);
+  const m = milestoneId ? arr.find(x => String(x.id) === String(milestoneId)) : null;
+  const isEdit = !!m;
+
+  document.getElementById('fp-milestone-overlay')?.remove();
+
+  const cats = getMilestoneCategories();
+  const _esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[ch]));
+
+  const overlay = document.createElement('div');
+  overlay.id = 'fp-milestone-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10020;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  const selCat = m ? m.category : '';
+  const placeholderOption = '<option value="" ' + (selCat === '' ? 'selected' : '') + '>— 카테고리를 선택하세요 —</option>';
+  const catOptions = placeholderOption + cats.map(c => '<option value="' + c.id + '" ' + (selCat === c.id ? 'selected' : '') + '>' + c.icon + ' ' + _esc(c.label) + '</option>').join('');
+
+  overlay.innerHTML =
+    '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;max-width:480px;width:100%;box-shadow:0 24px 60px rgba(15,23,42,.3);overflow:hidden">' +
+      '<div style="padding:16px 20px;border-bottom:1px solid #e5e7eb;background:linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%);display:flex;align-items:center;justify-content:space-between">' +
+        '<div>' +
+          '<div style="font-size:11px;color:#1e40af;font-weight:700;letter-spacing:.3px;margin-bottom:3px">🏭 ' + _esc(p.name) + '</div>' +
+          '<div style="font-size:15px;font-weight:800;color:#0f172a">' + (isEdit ? '🎯 마일스톤 수정' : '＋ 마일스톤 추가') + '</div>' +
+        '</div>' +
+        '<button onclick="document.getElementById(\'fp-milestone-overlay\')?.remove()" style="background:#fff;border:1px solid #bfdbfe;font-size:16px;color:#1e40af;cursor:pointer;width:30px;height:30px;border-radius:50%">✕</button>' +
+      '</div>' +
+      '<div style="padding:18px 22px;display:flex;flex-direction:column;gap:12px">' +
+        '<div>' +
+          '<label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">카테고리 *</label>' +
+          '<select id="fp-ms-category" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:7px;font-size:13px;background:#fff">' + catOptions + '</select>' +
+          '<div style="margin-top:6px;padding:7px 10px;background:#fef3c7;border:1px solid #fde68a;border-radius:6px;font-size:11.5px;color:#92400e;line-height:1.5">💡 완제품 타임라인에서는 카테고리가 시각 라벨로만 사용됩니다 (신제품 카드와 연동되지 않음)</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+          '<div style="flex:1;min-width:120px">' +
+            '<label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">시작일 *</label>' +
+            '<input id="fp-ms-planned" type="date" value="' + (m ? (m.plannedDate||'') : '') + '" style="width:100%;padding:7px 9px;border:1px solid #cbd5e1;border-radius:7px;font-size:13px">' +
+          '</div>' +
+          '<div style="flex:1;min-width:120px">' +
+            '<label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">종료일 <span style="color:#94a3b8;font-weight:500">(선택)</span></label>' +
+            '<input id="fp-ms-end" type="date" value="' + (m ? (m.endDate||'') : '') + '" style="width:100%;padding:7px 9px;border:1px solid #cbd5e1;border-radius:7px;font-size:13px">' +
+          '</div>' +
+          '<div style="flex:1;min-width:120px">' +
+            '<label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">완료일 <span style="color:#94a3b8;font-weight:500">(선택)</span></label>' +
+            '<input id="fp-ms-actual" type="date" value="' + (m ? (m.actualDate||'') : '') + '" style="width:100%;padding:7px 9px;border:1px solid #cbd5e1;border-radius:7px;font-size:13px">' +
+          '</div>' +
+        '</div>' +
+        '<div style="font-size:11px;color:#94a3b8;margin-top:-4px">💡 시작일~종료일 입력 시 타임라인에 기간 막대로 표시</div>' +
+        '<div>' +
+          '<label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">상태</label>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+            ['planned','in_progress','done','delayed'].map(function(st) {
+              var lbl = {planned:'⏳ 예정', in_progress:'🌀 진행중', done:'✅ 완료', delayed:'🚨 지연'}[st];
+              var cur = m ? (m.status||'planned') : 'planned';
+              var isSel = cur === st;
+              return '<button type="button" onclick="document.querySelectorAll(\'.fp-ms-st-btn\').forEach(b=>{b.dataset.sel=\'0\';b.style.background=\'#fff\';b.style.color=\'#475569\';});this.dataset.sel=\'1\';this.style.background=\'#0f172a\';this.style.color=\'#fff\';" class="fp-ms-st-btn" data-status="' + st + '" data-sel="' + (isSel?'1':'0') + '" style="padding:6px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:11.5px;cursor:pointer;background:' + (isSel?'#0f172a':'#fff') + ';color:' + (isSel?'#fff':'#475569') + ';font-weight:600">' + lbl + '</button>';
+            }).join('') +
+          '</div>' +
+        '</div>' +
+        '<div>' +
+          '<label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">메모</label>' +
+          '<textarea id="fp-ms-memo" rows="2" placeholder="추가 메모 (선택)" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:7px;font-size:12.5px;font-family:inherit;resize:vertical">' + _esc(m ? (m.memo||'') : '') + '</textarea>' +
+        '</div>' +
+      '</div>' +
+      '<div style="padding:12px 20px;background:#fafbfc;border-top:1px solid #e5e7eb;display:flex;gap:8px;justify-content:flex-end">' +
+        (isEdit ? '<button onclick="_fpDeleteMilestone(\'' + _esc(p.id) + '\',\'' + milestoneId + '\')" style="padding:8px 14px;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;margin-right:auto">🗑️ 삭제</button>' : '') +
+        '<button onclick="document.getElementById(\'fp-milestone-overlay\')?.remove()" style="padding:8px 14px;background:#fff;color:#475569;border:1px solid #cbd5e1;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer">취소</button>' +
+        '<button onclick="_fpSaveMilestone(\'' + _esc(p.id) + '\',\'' + (isEdit ? milestoneId : '') + '\')" style="padding:8px 16px;background:#0f172a;color:#fff;border:1px solid #0f172a;border-radius:7px;font-size:12.5px;font-weight:700;cursor:pointer">💾 저장</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+};
+
+window._fpSaveMilestone = function(productId, milestoneId) {
+  const cat = (document.getElementById('fp-ms-category') || {}).value;
+  if (!cat) { if (typeof showNotif === 'function') showNotif('카테고리를 선택하세요', 'warning'); else alert('카테고리를 선택하세요'); return; }
+  const planned = (document.getElementById('fp-ms-planned') || {}).value;
+  const endDate = (document.getElementById('fp-ms-end') || {}).value || '';
+  const actual = (document.getElementById('fp-ms-actual') || {}).value || '';
+  const memo = ((document.getElementById('fp-ms-memo') || {}).value || '').trim();
+  const stBtn = document.querySelector('.fp-ms-st-btn[data-sel="1"]');
+  const status = stBtn ? stBtn.dataset.status : 'planned';
+  if (!planned) { if (typeof showNotif === 'function') showNotif('시작일을 입력하세요', 'warning'); else alert('시작일을 입력하세요'); return; }
+  if (endDate && endDate < planned) { if (typeof showNotif === 'function') showNotif('종료일은 시작일 이후여야 합니다', 'warning'); else alert('종료일은 시작일 이후여야 합니다'); return; }
+
+  _fpEnsureData();
+  const key = String(productId);
+  if (!Array.isArray(window._fpMilestoneData.milestones[key])) window._fpMilestoneData.milestones[key] = [];
+  const arr = window._fpMilestoneData.milestones[key];
+
+  if (milestoneId) {
+    const m = arr.find(x => String(x.id) === String(milestoneId));
+    if (m) {
+      m.category = cat;
+      m.plannedDate = planned;
+      m.endDate = endDate || null;
+      m.actualDate = actual || null;
+      m.memo = memo;
+      m.status = status;
+    }
+  } else {
+    arr.push({
+      id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
+      category: cat,
+      plannedDate: planned,
+      endDate: endDate || null,
+      actualDate: actual || null,
+      memo: memo,
+      status: status,
+    });
+  }
+  _fpSave();
+  document.getElementById('fp-milestone-overlay')?.remove();
+  renderFinishedProductTimeline();
+  if (typeof showNotif === 'function') showNotif(milestoneId ? '✅ 마일스톤 수정' : '🎯 마일스톤 추가', 'success');
+};
+
+window._fpDeleteMilestone = function(productId, milestoneId) {
+  if (!confirm('이 마일스톤을 삭제할까요?')) return;
+  _fpEnsureData();
+  const key = String(productId);
+  const arr = window._fpMilestoneData.milestones[key] || [];
+  window._fpMilestoneData.milestones[key] = arr.filter(x => String(x.id) !== String(milestoneId));
+  _fpSave();
+  document.getElementById('fp-milestone-overlay')?.remove();
+  renderFinishedProductTimeline();
+  if (typeof showNotif === 'function') showNotif('🗑️ 마일스톤 삭제', 'info');
+};
 
 // 메인 렌더 함수
 function renderProductTimeline() {
