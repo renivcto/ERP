@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.83';
+const ERP_VERSION = 'v2.3.84';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42987,13 +42987,10 @@ function renderFinishedProductTimeline() {
     }).length;
   }, 0);
 
+  // v2.3.84: 제목은 표 바로 위로 이동
   const headerHtml = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <div style="font-size:17px;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:7px">
-          <span style="font-size:20px">🏭</span>
-          제품 생산 타임라인
-        </div>
         <span style="font-size:11px;color:#64748b;background:#f1f5f9;padding:3px 8px;border-radius:99px;font-weight:600">발주서 기반 자동 생성</span>
       </div>
       <div style="display:flex;gap:14px;font-size:12px;color:#475569;flex-wrap:wrap;align-items:center">
@@ -43189,10 +43186,13 @@ function renderFinishedProductTimeline() {
     `;
   }).join('');
 
-  // 오늘 마커 (드래그 없는 정적)
+  // v2.3.84: 오늘 마커 드래그 가능
+  window._fpTlRangeStart = range.start;
+  window._fpTlTotalDays = totalDays;
+  window._fpTlTotalW = totalW;
   const todayLineHtml = `
     <div id="fp-tl-today-line" style="position:absolute;left:${200 + todayLeft}px;top:0;bottom:0;width:2px;background:linear-gradient(180deg,#fb923c 0%,#dc2626 100%);box-shadow:0 0 8px rgba(220,38,38,.4);z-index:6;pointer-events:none">
-      <div style="position:absolute;top:-2px;left:-22px;width:46px;background:#dc2626;color:#fff;padding:3px 0;text-align:center;font-size:11px;font-weight:800;border-radius:5px;pointer-events:none;box-shadow:0 2px 6px rgba(220,38,38,.35)">오늘</div>
+      <div id="fp-tl-today-label" onmousedown="_tlStartDrag(event,'fp-')" style="position:absolute;top:-2px;left:-22px;width:46px;background:#dc2626;color:#fff;padding:3px 0;text-align:center;font-size:11px;font-weight:800;border-radius:5px;pointer-events:auto;cursor:ew-resize;user-select:none;box-shadow:0 2px 6px rgba(220,38,38,.35)">오늘</div>
     </div>
   `;
 
@@ -43208,7 +43208,14 @@ function renderFinishedProductTimeline() {
     </div>
   `;
 
-  host.innerHTML = headerHtml + legendHtml + bodyHtml;
+  // v2.3.84: 제목을 표 바로 위로 이동
+  const titleHtml = `
+    <div style="font-size:17px;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:7px;margin:10px 0 8px 0">
+      <span style="font-size:20px">🏭</span>
+      제품 생산
+    </div>
+  `;
+  host.innerHTML = headerHtml + legendHtml + titleHtml + bodyHtml;
 
   // 스크롤 — 오늘 중앙
   setTimeout(() => {
@@ -43434,12 +43441,8 @@ function renderProductTimeline() {
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   }[ch]));
 
-  // 헤더
+  // 헤더 (제목은 표 바로 위로 이동 — v2.3.84)
   const headerHtml = `
-    <div style="font-size:17px;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:7px;margin-bottom:10px">
-      <span style="font-size:20px">🌱</span>
-      신제품 런칭 타임라인
-    </div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
       <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <div style="font-size:13px;color:#475569"><span style="font-weight:800;color:#0f172a">${products.length}</span>개 프로젝트</div>
@@ -43686,7 +43689,14 @@ function renderProductTimeline() {
     </div>
   `;
 
-  host.innerHTML = headerHtml + legendHtml + bodyHtml;
+  // v2.3.84: 제목을 표 바로 위로 이동
+  const titleHtml = `
+    <div style="font-size:17px;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:7px;margin:10px 0 8px 0">
+      <span style="font-size:20px">🌱</span>
+      신제품 런칭
+    </div>
+  `;
+  host.innerHTML = headerHtml + legendHtml + titleHtml + bodyHtml;
 
   // 스크롤 — 오늘 위치가 중앙에 오도록
   setTimeout(() => {
@@ -44157,13 +44167,14 @@ window._deleteMilestone = function(productId, milestoneId) {
 })();
 
 // v2.3.57: 오늘 라벨 좌우 드래그 → 위치/날짜 실시간 업데이트
-window._tlStartDrag = function(ev) {
+window._tlStartDrag = function(ev, prefix) {
+  prefix = prefix || '';
   ev.preventDefault();
   ev.stopPropagation();
-  const line = document.getElementById('tl-today-line');
-  const label = document.getElementById('tl-today-label');
+  const line = document.getElementById(prefix + 'tl-today-line');
+  const label = document.getElementById(prefix + 'tl-today-label');
   if (!line || !label) return;
-  const scrollWrap = document.getElementById('tl-scroll-wrap');
+  const scrollWrap = document.getElementById(prefix + 'tl-scroll-wrap');
   if (!scrollWrap) return;
   const inner = scrollWrap.querySelector(':scope > div');
   if (!inner) return;
@@ -44176,13 +44187,8 @@ window._tlStartDrag = function(ev) {
     if (xInContent < 200) xInContent = 200;
     if (xInContent > innerWidth - 10) xInContent = innerWidth - 10;
     line.style.left = xInContent + 'px';
-    // 날짜 계산
-    const offset = (xInContent - 200) / (window._tlTotalW || 1) * (window._tlTotalDays || 1);
-    const ms = window._tlRangeStart.getTime() + offset * 24*60*60*1000;
-    const d = new Date(ms);
-    const mm = String(d.getMonth()+1).padStart(2,'0');
-    const dd = String(d.getDate()).padStart(2,'0');
-    label.textContent = `${mm}-${dd}`;
+    // v2.3.84: 라벨은 항상 '오늘' (날짜 표시 X)
+    label.textContent = '오늘';
   };
   const _onUp = () => {
     document.removeEventListener('mousemove', _onMove);
