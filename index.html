@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.112';
+const ERP_VERSION = 'v2.3.113';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -15794,22 +15794,35 @@ function _periodInit(prefix) {
 
 function _mgLookupCogs(o) {
   // 주문 한 건의 COGS — 완제품 BOM/단가 또는 직접 매핑된 itemId
+  // v2.3.113: STRICT 완제품 매칭 — 부자재/OEM 등으로 잘못 매칭되어 COGS 폭증 차단
   const items = DB.items || [];
   let item = null;
   const itemId = o.itemId || o.linkedItemId;
-  if (itemId != null) item = items.find(i => i.id == itemId || i.code === itemId);
+  if (itemId != null) {
+    item = items.find(i => i && (i.id == itemId || i.code === itemId));
+    // itemId 가 완제품이 아니면 사용 안 함 (안전망)
+    if (item && item.type && item.type !== '완제품') {
+      console.warn('⚠️ [v2.3.113] 주문 매핑된 item 이 완제품 아님 — COGS 0 처리:', o.orderNo, item.name);
+      item = null;
+    }
+  }
   if (!item && o.productName) {
     const lower = String(o.productName).toLowerCase().trim();
-    // 완제품(type === '완제품') 우선, 그 다음 전체 items 에서 부분 매칭
-    item = items.find(i => i.type === '완제품' && i.name && lower.includes(i.name.toLowerCase()));
-    if (!item) item = items.find(i => i.name && lower.includes(i.name.toLowerCase()));
-    if (!item) item = items.find(i => i.name && i.name.toLowerCase().includes(lower));
+    // 완제품(type === '완제품') 만 매칭 — 두 가지 방향
+    item = items.find(i => i && i.type === '완제품' && i.name && lower.includes(i.name.toLowerCase()));
+    if (!item) item = items.find(i => i && i.type === '완제품' && i.name && i.name.toLowerCase().includes(lower));
   }
   if (!item) return { cogs: 0, item: null };
   const qty = parseInt(o.qty || o.quantity || 1, 10) || 1;
-  // bomCost(BOM 합산) 우선, 없으면 price(완제품 단가) 사용
   const unit = parseFloat(item.bomCost) || parseFloat(item.cogs) || parseFloat(item.price) || 0;
-  return { cogs: unit * qty, item };
+  let cogs = unit * qty;
+  // v2.3.113 안전망: COGS 가 주문 매출의 5배 초과하면 명백한 오류 → 0 처리
+  const _rev = parseFloat(o.paymentAmount || o.totalPrice || 0) || 0;
+  if (_rev > 0 && cogs > _rev * 5) {
+    console.warn('⚠️ [v2.3.113] COGS 폭주 감지 (cogs/rev = ' + (cogs/_rev).toFixed(1) + 'x):', o.orderNo, '제품:', o.productName, '→ COGS 0 처리');
+    cogs = 0;
+  }
+  return { cogs, item };
 }
 
 function _mgAllocateAds(order, shop) {
