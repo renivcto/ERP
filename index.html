@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.86';
+const ERP_VERSION = 'v2.3.87';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -43038,6 +43038,8 @@ function renderFinishedProductTimeline() {
     const elems = [];
     ords.forEach(o => {
       if (!o.orderDate) return;
+      // v2.3.87: 입고완료된 발주는 막대로 표시하지 않음 (지난 일정 숨김)
+      if (o.stockStatus === '입고완료') return;
       elems.push({
         kind: 'order',
         start: o.orderDate,
@@ -43063,15 +43065,23 @@ function renderFinishedProductTimeline() {
       return (a.kind||'').localeCompare(b.kind||'');
     });
 
-    // Lane 알고리즘 — 빈 lane 우선 재사용 (lanes[i] 가 e.start 보다 이전이면 그 lane 재활용)
+    // v2.3.87: Lane 알고리즘 — visual buffer 추가 (단일 시점 마커 좌우 확장 + 막대 우측 패딩)
+    const _addDays = (dateStr, n) => {
+      const d = new Date(dateStr); d.setDate(d.getDate() + n);
+      return d.toISOString().slice(0, 10);
+    };
     const lanes = [];
     elems.forEach(e => {
+      const isPoint = !e.end || e.end === e.start;
+      // 단일 시점 마커는 시작일 3일 전부터 시각 점유
+      const visualStart = isPoint ? _addDays(e.start, -3) : e.start;
+      // 막대도 종료일 + 3일까지 시각 점유 (다음 막대와 시각 분리)
+      const visualEnd = isPoint ? _addDays(e.start, 3) : _addDays(e.end, 3);
       let assigned = -1;
       for (let i = 0; i < lanes.length; i++) {
-        // 같은 날 끝나고 같은 날 시작하면 분리(strict <) — 시각적 겹침 방지
-        if (lanes[i] && lanes[i] < e.start) { assigned = i; lanes[i] = e.end; break; }
+        if (lanes[i] && lanes[i] < visualStart) { assigned = i; lanes[i] = visualEnd; break; }
       }
-      if (assigned === -1) { assigned = lanes.length; lanes.push(e.end); }
+      if (assigned === -1) { assigned = lanes.length; lanes.push(visualEnd); }
       e._lane = assigned;
     });
     const laneCount = Math.max(1, lanes.length);
@@ -43167,7 +43177,7 @@ function renderFinishedProductTimeline() {
         <div class="fp-left" style="position:sticky;left:0;z-index:2;background:${bgEven};width:200px;flex-shrink:0;padding:9px 4px 9px 12px;border-right:1px solid #e5e7eb;display:flex;align-items:center;gap:6px;cursor:pointer" onclick="_fpOpenProductDetail('${_esc(p.id)}')">
           ${photoHtml}
           <div style="flex:1;min-width:0">
-            <div style="font-size:13.5px;font-weight:700;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(p.name || '제품명 없음')}</div>
+            <div style="font-size:13px;font-weight:700;color:#0f172a;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.3;word-break:break-word">${_esc(p.name || '제품명 없음')}</div>
             ${p.spec ? `<div style="font-size:10.5px;color:#64748b;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(p.spec)}</div>` : ''}
             ${nextInLine}
           </div>
