@@ -3140,7 +3140,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <span class="card-ttl" style="font-weight:800">📋 광고비 이력</span>
           <div style="display:flex;gap:8px;margin-left:auto;align-items:center">
             <select class="fs" id="ads-page-shop-filter" onchange="renderAdsPage()" style="min-width:140px"><option value="">전체 쇼핑몰</option></select>
-            <select class="fs" id="ads-page-period-filter" onchange="renderAdsPage()" style="min-width:120px">
+            <select class="fs" id="ads-page-period-filter" onchange="renderAdsPage()" style="min-width:120px;display:none">
               <option value="all" selected>전체 기간</option>
               <option value="thisMonth">이번 달</option>
               <option value="lastMonth">지난 달</option>
@@ -5674,7 +5674,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.133';
+const ERP_VERSION = 'v2.3.134';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -19007,10 +19007,14 @@ function renderAdsPage() {
     shopFilter.dataset.populated = '1';
   }
 
-  // 필터 적용
+  // v2.3.134: 필터 적용 — 기간은 상단 KPI 필터(ads-kpi-period) 가 단일 진실
   const filterShopId = shopFilter ? shopFilter.value : '';
-  const periodEl = document.getElementById('ads-page-period-filter');
-  const periodVal = periodEl ? periodEl.value : 'all';
+  const kpiSel = document.getElementById('ads-kpi-period');
+  // 최근 24개월 옵션 자동 채움 (한 번만)
+  if (kpiSel && !kpiSel.dataset.monthsPopulated) {
+    try { _populateAdsKpiMonths(kpiSel); kpiSel.dataset.monthsPopulated = '1'; } catch(_){}
+  }
+  const periodVal = kpiSel ? (kpiSel.value || 'all') : 'all';
 
   const now = new Date();
   const yr = now.getFullYear(), mo = now.getMonth(), dy = now.getDate();
@@ -19027,6 +19031,20 @@ function renderAdsPage() {
   } else if (periodVal === 'thisYear') {
     periodStart = new Date(yr, 0, 1);
     periodEnd = new Date(yr, 11, 31, 23, 59, 59);
+  } else if (typeof periodVal === 'string' && periodVal.indexOf('month:') === 0) {
+    // v2.3.134: 특정 월 선택 (예: month:2026-05)
+    const ym = periodVal.slice(6).split('-');
+    const y = parseInt(ym[0], 10), m = parseInt(ym[1], 10);
+    if (y && m) {
+      periodStart = new Date(y, m - 1, 1);
+      periodEnd = new Date(y, m, 0, 23, 59, 59);
+    }
+  } else if (periodVal === 'range') {
+    // v2.3.134: 기간 직접 선택 — ads-kpi-from / ads-kpi-to
+    const _fromEl = document.getElementById('ads-kpi-from');
+    const _toEl = document.getElementById('ads-kpi-to');
+    if (_fromEl && _fromEl.value) periodStart = new Date(_fromEl.value);
+    if (_toEl && _toEl.value) periodEnd = new Date(_toEl.value + 'T23:59:59');
   }
 
   // 필터링 — 쇼핑몰 + 기간
@@ -19295,7 +19313,44 @@ function _fmtAdPeriodShort(start, end) {
   return s + '~' + e;
 }
 
+// v2.3.134: 광고비 KPI 기간 드롭다운 — 최근 24개월 + 직접선택 옵션 자동 생성
+function _populateAdsKpiMonths(sel) {
+  if (!sel) return;
+  const cur = sel.value || 'all';
+  const now = new Date();
+  const yr = now.getFullYear();
+  const mo = now.getMonth();
+  const pad = (n) => String(n).padStart(2, '0');
+  let html = '<option value="all">전체</option>';
+  html += '<option disabled>──── 월 선택 ────</option>';
+  for (let i = 0; i < 24; i++) {
+    const d = new Date(yr, mo - i, 1);
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    const ym = y + '-' + pad(m);
+    const sfx = i === 0 ? ' (이번 달)' : (i === 1 ? ' (지난 달)' : '');
+    html += '<option value="month:' + ym + '">' + y + '년 ' + pad(m) + '월' + sfx + '</option>';
+  }
+  html += '<option disabled>──── 기타 ────</option>';
+  html += '<option value="last3Months">최근 3개월</option>';
+  html += '<option value="thisYear">올해</option>';
+  html += '<option value="range">기간 직접 선택</option>';
+  sel.innerHTML = html;
+  // 기존 선택값 유지(없으면 전체)
+  if (cur && Array.from(sel.options).some(o => o.value === cur)) {
+    sel.value = cur;
+  } else {
+    sel.value = 'all';
+  }
+}
+
 function _periodLabel(p) {
+  if (typeof p === 'string' && p.indexOf('month:') === 0) {
+    const ym = p.slice(6).split('-');
+    const y = parseInt(ym[0], 10), m = parseInt(ym[1], 10);
+    if (y && m) return y + '년 ' + String(m).padStart(2, '0') + '월';
+  }
+  if (p === 'range') return '직접 선택';
   return ({ all:'전체', thisMonth:'이번 달', lastMonth:'지난 달', last3Months:'최근 3개월', thisYear:'올해' })[p] || p;
 }
 
