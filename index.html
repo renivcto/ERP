@@ -3119,7 +3119,37 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <input class="fi" id="ads-kpi-to" type="date" onchange="renderAdsPage()" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
       </div>
       <!-- KPI 카드 3개 (자동/수동 비중 삭제) -->
-      <div id="ads-kpi-row" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px"></div>
+      <div id="ads-kpi-row" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(195px,1fr));gap:12px;margin-bottom:14px"></div>
+      <!-- v2.3.136: 쇼핑몰별 광고 성과 순위표 -->
+      <div class="card" id="ads-shop-ranking-card" style="margin-bottom:14px;display:none">
+        <div class="card-hdr">
+          <span class="card-ttl" style="font-weight:800">🏪 쇼핑몰별 광고 성과</span>
+          <span style="font-size:11px;color:#94a3b8;font-weight:500;margin-left:auto">기간 필터 동기화 · 광고비 큰 순</span>
+        </div>
+        <div class="card-body" style="padding:0 0 6px 0">
+          <table class="tbl" style="font-size:12.5px;text-align:center;width:100%">
+            <thead>
+              <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">
+                <th style="padding:10px 18px;text-align:left;font-weight:700;color:#475569;font-size:11.5px">쇼핑몰</th>
+                <th style="padding:10px;font-weight:700;color:#475569;font-size:11.5px">광고비</th>
+                <th style="padding:10px;font-weight:700;color:#475569;font-size:11.5px">매출</th>
+                <th style="padding:10px;font-weight:700;color:#475569;font-size:11.5px">ROAS</th>
+                <th style="padding:10px;font-weight:700;color:#475569;font-size:11.5px">NET 마진</th>
+                <th style="padding:10px;font-weight:700;color:#475569;font-size:11.5px">효율</th>
+              </tr>
+            </thead>
+            <tbody id="ads-shop-ranking-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <!-- v2.3.137: 일별 광고비·매출 추세 (최근 30일) -->
+      <div class="card" id="ads-trend-chart-card" style="margin-bottom:14px;display:none">
+        <div class="card-hdr">
+          <span class="card-ttl" style="font-weight:800">📈 일별 광고비·매출 추세</span>
+          <span style="font-size:11px;color:#94a3b8;font-weight:500;margin-left:auto">최근 30일 · <span style="color:#be185d;font-weight:700">■ 광고비</span> · <span style="color:#16a34a;font-weight:700">━ 매출</span></span>
+        </div>
+        <div class="card-body" id="ads-trend-chart-host" style="padding:8px 14px 14px"></div>
+      </div>
       <!-- v1.9.872: 프로젝트 관리 토글 버튼 추가 -->
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:14px">
         <button type="button" onclick="toggleAdProjectManage()" id="ads-project-manage-btn" style="background:#fff;color:#475569;border:1px solid #cbd5e1;padding:9px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">📂 프로젝트 관리</button>
@@ -5674,7 +5704,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.134';
+const ERP_VERSION = 'v2.3.137';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -19102,12 +19132,13 @@ function renderAdsPage() {
         fee += r * feeRate / 100;
       } catch(_){}
     });
-    return { revenue, cogs, fee };
+    return { revenue, cogs, fee, count: orders.length };  // v2.3.135: 주문 건수 추가
   }
 
-  // KPI 계산
+  // KPI 계산 — v2.3.135: NET 마진 + CAC + AOV 추가
   let totalAds = 0;
   let totalRevenue = 0;
+  let totalCogs = 0, totalFee = 0, totalOrderCount = 0;
   // v1.9.867: 프로젝트별 매출 dedup — 같은 프로젝트 광고비 여러 건이면 매출 1번만
   const _revDedupSet = new Set();
   filtered.forEach(a => {
@@ -19117,9 +19148,18 @@ function renderAdsPage() {
     const dedupKey = (a.projectId ? 'proj:' + a.projectId : 'single:' + a._shopId + '|' + startDate + '|' + endDate);
     if (_revDedupSet.has(dedupKey)) return;
     _revDedupSet.add(dedupKey);
-    totalRevenue += _periodRevenue(a._shopId, startDate, endDate);
+    const _nd = _periodNetData(a._shopId, startDate, endDate);
+    totalRevenue += _nd.revenue;
+    totalCogs += _nd.cogs;
+    totalFee += _nd.fee;
+    totalOrderCount += _nd.count;
   });
   const avgRoas = totalAds > 0 ? (totalRevenue / totalAds * 100) : 0;
+  // v2.3.135: NET 마진 / CAC / AOV
+  const netMargin = totalRevenue - totalCogs - totalFee - totalAds;
+  const netMarginPct = totalRevenue > 0 ? (netMargin / totalRevenue * 100) : 0;
+  const cac = totalOrderCount > 0 ? Math.round(totalAds / totalOrderCount) : 0;
+  const aov = totalOrderCount > 0 ? Math.round(totalRevenue / totalOrderCount) : 0;
   const cntAuto = filtered.filter(a => a.expenseId).length;
   const cntManual = filtered.length - cntAuto;
 
@@ -19139,24 +19179,90 @@ function renderAdsPage() {
   const momIcon = momPct > 0 ? '▲' : (momPct < 0 ? '▼' : '·');
   const momColor = momPct > 0 ? '#dc2626' : (momPct < 0 ? '#16a34a' : '#94a3b8');
 
-  // KPI 카드 렌더
+  // v2.3.135: KPI 카드 5개 렌더 (총광고비 / 평균ROAS / NET마진 / CAC·AOV / vs전월)
+  const _netColor = netMargin > 0 ? '#16a34a' : (netMargin < 0 ? '#dc2626' : '#94a3b8');
+  const _netSign = netMargin > 0 ? '+' : '';
   kpiRow.innerHTML = `
-    <div style="background:#fdf2f8;border:1px solid #fce7f3;border-radius:14px;padding:20px 22px;text-align:center;box-shadow:0 8px 22px rgba(190,24,93,0.07),0 1px 3px rgba(15,23,42,0.04)">
-      <div style="font-size:12.5px;color:#9d174d;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px">총 광고비 <span style="color:#be185d;opacity:0.65;font-weight:500;font-size:10.5px">· ${_periodLabel(periodVal)}</span></div>
-      <div style="font-size:22px;font-weight:800;color:#be185d;letter-spacing:-0.5px;margin-top:3px">₩${totalAds.toLocaleString()}</div>
-      <div style="font-size:11.5px;color:#1e3a8a;font-weight:700;margin-top:6px">${filtered.length}건 집행</div>
+    <div style="background:#fdf2f8;border:1px solid #fce7f3;border-radius:14px;padding:18px 16px;text-align:center;box-shadow:0 8px 22px rgba(190,24,93,0.07),0 1px 3px rgba(15,23,42,0.04)">
+      <div style="font-size:12px;color:#9d174d;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px">총 광고비 <span style="color:#be185d;opacity:0.65;font-weight:500;font-size:10px">· ${_periodLabel(periodVal)}</span></div>
+      <div style="font-size:20px;font-weight:800;color:#be185d;letter-spacing:-0.5px;margin-top:3px">₩${totalAds.toLocaleString()}</div>
+      <div style="font-size:11px;color:#1e3a8a;font-weight:700;margin-top:6px">${filtered.length}건 집행</div>
     </div>
-    <div style="background:#f0fdf4;border:1px solid #dcfce7;border-radius:14px;padding:20px 22px;text-align:center;box-shadow:0 8px 22px rgba(22,163,74,0.07),0 1px 3px rgba(15,23,42,0.04)">
-      <div style="font-size:12.5px;color:#166534;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px">평균 ROAS <span style="color:#16a34a;opacity:0.65;font-weight:500;font-size:10.5px">· ${_periodLabel(periodVal)}</span></div>
-      <div style="font-size:22px;font-weight:800;color:#16a34a;letter-spacing:-0.5px;margin-top:3px">${avgRoas > 0 ? avgRoas.toFixed(0) + '%' : '-'}</div>
-      <div style="font-size:11.5px;color:#1e3a8a;font-weight:700;margin-top:6px">매출 ₩${totalRevenue.toLocaleString()}</div>
+    <div style="background:#f0fdf4;border:1px solid #dcfce7;border-radius:14px;padding:18px 16px;text-align:center;box-shadow:0 8px 22px rgba(22,163,74,0.07),0 1px 3px rgba(15,23,42,0.04)">
+      <div style="font-size:12px;color:#166534;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px">평균 ROAS <span style="color:#16a34a;opacity:0.65;font-weight:500;font-size:10px">· ${_periodLabel(periodVal)}</span></div>
+      <div style="font-size:20px;font-weight:800;color:#16a34a;letter-spacing:-0.5px;margin-top:3px">${avgRoas > 0 ? avgRoas.toFixed(0) + '%' : '-'}</div>
+      <div style="font-size:11px;color:#1e3a8a;font-weight:700;margin-top:6px">매출 ₩${totalRevenue.toLocaleString()}</div>
     </div>
-    <div style="background:#f0f9ff;border:1px solid #e0f2fe;border-radius:14px;padding:20px 22px;text-align:center;box-shadow:0 8px 22px rgba(14,165,233,0.07),0 1px 3px rgba(15,23,42,0.04)">
-      <div style="font-size:12.5px;color:#0c4a6e;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px">이번달 vs 지난달</div>
-      <div style="font-size:22px;font-weight:800;color:#0c4a6e;letter-spacing:-0.5px;margin-top:3px">₩${thisMoAds.toLocaleString()}</div>
-      <div style="font-size:11.5px;color:${momColor};margin-top:6px;font-weight:700">${momIcon} ${Math.abs(momPct).toFixed(1)}% (지난달 ₩${lastMoAds.toLocaleString()})</div>
+    <div style="background:#faf5ff;border:1px solid #ede9fe;border-radius:14px;padding:18px 16px;text-align:center;box-shadow:0 8px 22px rgba(124,58,237,0.07),0 1px 3px rgba(15,23,42,0.04)">
+      <div style="font-size:12px;color:#6b21a8;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px" title="NET 마진 = 매출 − 제품원가 − 쇼핑몰수수료 − 광고비&#10;마진율 = NET 마진 ÷ 매출 × 100">⭐ NET 마진 <span style="color:#7c3aed;opacity:0.65;font-weight:500;font-size:10px">· ${_periodLabel(periodVal)}</span></div>
+      <div style="font-size:20px;font-weight:800;color:${_netColor};letter-spacing:-0.5px;margin-top:3px">${_netSign}₩${Math.round(netMargin).toLocaleString()}</div>
+      <div style="font-size:11px;color:#1e3a8a;font-weight:700;margin-top:6px">마진율 ${totalRevenue > 0 ? netMarginPct.toFixed(1) + '%' : '-'}</div>
+    </div>
+    <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:14px;padding:18px 16px;text-align:center;box-shadow:0 8px 22px rgba(234,88,12,0.07),0 1px 3px rgba(15,23,42,0.04)">
+      <div style="font-size:12px;color:#9a3412;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px" title="CAC (고객획득비용) = 광고비 ÷ 주문 건수&#10;AOV (객단가) = 매출 ÷ 주문 건수">CAC · AOV <span style="color:#ea580c;opacity:0.65;font-weight:500;font-size:10px">· ${_periodLabel(periodVal)}</span></div>
+      <div style="font-size:18px;font-weight:800;color:#ea580c;letter-spacing:-0.5px;margin-top:3px;line-height:1.2">₩${cac.toLocaleString()}<span style="font-size:10px;font-weight:600;color:#9a3412;margin-left:3px">/주문</span></div>
+      <div style="font-size:11px;color:#1e3a8a;font-weight:700;margin-top:6px">AOV ₩${aov.toLocaleString()} · ${totalOrderCount}건</div>
+    </div>
+    <div style="background:#f0f9ff;border:1px solid #e0f2fe;border-radius:14px;padding:18px 16px;text-align:center;box-shadow:0 8px 22px rgba(14,165,233,0.07),0 1px 3px rgba(15,23,42,0.04)">
+      <div style="font-size:12px;color:#0c4a6e;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px">이번달 vs 지난달</div>
+      <div style="font-size:20px;font-weight:800;color:#0c4a6e;letter-spacing:-0.5px;margin-top:3px">₩${thisMoAds.toLocaleString()}</div>
+      <div style="font-size:11px;color:${momColor};margin-top:6px;font-weight:700">${momIcon} ${Math.abs(momPct).toFixed(1)}% (지난달 ₩${lastMoAds.toLocaleString()})</div>
     </div>
   `;
+
+  // v2.3.136: 쇼핑몰별 광고 성과 순위표 렌더
+  try {
+    const _shopAgg = new Map();
+    const _shopDedupSet = new Set();
+    filtered.forEach(a => {
+      const sid = String(a._shopId);
+      if (!_shopAgg.has(sid)) _shopAgg.set(sid, { name: a._shopName, ads: 0, revenue: 0, cogs: 0, fee: 0, count: 0 });
+      const agg = _shopAgg.get(sid);
+      agg.ads += Number(a.cost || 0);
+      const _sd = a.startDate || a.date || (a.month + '-01');
+      const _ed = a.endDate || a.startDate || a.date || (a.month + '-01');
+      const dk = sid + ':' + (a.projectId ? 'proj:' + a.projectId : 'sg:' + _sd + '|' + _ed);
+      if (_shopDedupSet.has(dk)) return;
+      _shopDedupSet.add(dk);
+      const _nd2 = _periodNetData(a._shopId, _sd, _ed);
+      agg.revenue += _nd2.revenue;
+      agg.cogs += _nd2.cogs;
+      agg.fee += _nd2.fee;
+      agg.count += _nd2.count;
+    });
+    const _shops = Array.from(_shopAgg.values()).sort((a, b) => b.ads - a.ads);
+    const _rankBody = document.getElementById('ads-shop-ranking-body');
+    const _rankCard = document.getElementById('ads-shop-ranking-card');
+    if (_rankCard && _rankBody) {
+      if (_shops.length === 0) {
+        _rankCard.style.display = 'none';
+      } else {
+        _rankCard.style.display = '';
+        _rankBody.innerHTML = _shops.map(s => {
+          const _roas = s.ads > 0 ? (s.revenue / s.ads * 100) : 0;
+          const _netM = s.revenue - s.cogs - s.fee - s.ads;
+          let _sig, _sigBg, _sigFg;
+          if (_roas >= 200) { _sig = '🟢 우수'; _sigBg = '#dcfce7'; _sigFg = '#15803d'; }
+          else if (_roas >= 100) { _sig = '🟡 보통'; _sigBg = '#fef3c7'; _sigFg = '#92400e'; }
+          else if (s.ads > 0) { _sig = '🔴 적자'; _sigBg = '#fee2e2'; _sigFg = '#b91c1c'; }
+          else { _sig = '-'; _sigBg = '#f1f5f9'; _sigFg = '#94a3b8'; }
+          const _roasColor = _roas >= 200 ? '#16a34a' : (_roas >= 100 ? '#0284c7' : '#dc2626');
+          const _netColor = _netM > 0 ? '#16a34a' : (_netM < 0 ? '#dc2626' : '#94a3b8');
+          return '<tr style="border-bottom:1px solid #f1f5f9">' +
+            '<td style="padding:10px 18px;text-align:left;font-weight:700;color:#0f172a">' + (s.name || '-') + '</td>' +
+            '<td style="padding:10px;font-weight:800;color:#be185d;font-variant-numeric:tabular-nums">₩' + Math.round(s.ads).toLocaleString() + '</td>' +
+            '<td style="padding:10px;color:#475569;font-variant-numeric:tabular-nums">' + (s.revenue > 0 ? '₩' + Math.round(s.revenue).toLocaleString() : '-') + '</td>' +
+            '<td style="padding:10px;font-weight:700;color:' + _roasColor + '">' + (s.ads > 0 ? _roas.toFixed(0) + '%' : '-') + '</td>' +
+            '<td style="padding:10px;font-weight:700;color:' + _netColor + ';font-variant-numeric:tabular-nums">' + (s.revenue > 0 ? (_netM > 0 ? '+' : '') + '₩' + Math.round(_netM).toLocaleString() : '-') + '</td>' +
+            '<td style="padding:10px"><span style="background:' + _sigBg + ';color:' + _sigFg + ';padding:3px 12px;border-radius:99px;font-size:11px;font-weight:700">' + _sig + '</span></td>' +
+            '</tr>';
+        }).join('');
+      }
+    }
+  } catch(_e136) { console.warn('shop ranking render failed:', _e136); }
+
+  // v2.3.137: 일별 광고비·매출 추세 차트 렌더
+  try { _renderAdsTrendChart(); } catch(_e137) { console.warn('trend chart render failed:', _e137); }
 
   // 이력 표 렌더 — 최신 순
   filtered.sort((a, b) => {
@@ -19352,6 +19458,103 @@ function _periodLabel(p) {
   }
   if (p === 'range') return '직접 선택';
   return ({ all:'전체', thisMonth:'이번 달', lastMonth:'지난 달', last3Months:'최근 3개월', thisYear:'올해' })[p] || p;
+}
+
+// v2.3.137: 일별 광고비·매출 추세 SVG 미니 차트 (최근 30일)
+function _renderAdsTrendChart() {
+  const host = document.getElementById('ads-trend-chart-host');
+  const card = document.getElementById('ads-trend-chart-card');
+  if (!host || !card) return;
+  const days = 30;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const buckets = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today); d.setDate(d.getDate() - i);
+    buckets.push({ date: d, ads: 0, revenue: 0 });
+  }
+  const startMs = buckets[0].date.getTime();
+  const endMs = today.getTime();
+  // 일별 광고비 — 각 광고비를 기간 일수로 균등 분배
+  (DB.shops || []).forEach(s => {
+    if (!s || !Array.isArray(s.adsCosts)) return;
+    s.adsCosts.forEach(a => {
+      if (!a) return;
+      const sd = new Date(a.startDate || a.date || (a.month + '-01')); sd.setHours(0,0,0,0);
+      const ed = new Date(a.endDate || a.startDate || a.date || (a.month + '-01')); ed.setHours(0,0,0,0);
+      if (isNaN(sd) || isNaN(ed)) return;
+      const nDays = Math.max(1, Math.floor((ed - sd) / 86400000) + 1);
+      const dailyCost = Number(a.cost || 0) / nDays;
+      for (let dt = new Date(sd); dt <= ed; dt.setDate(dt.getDate() + 1)) {
+        if (dt.getTime() < startMs || dt.getTime() > endMs) continue;
+        const idx = Math.floor((dt.getTime() - startMs) / 86400000);
+        if (idx >= 0 && idx < days) buckets[idx].ads += dailyCost;
+      }
+    });
+  });
+  // 일별 매출
+  (DB.shopOrders || []).forEach(o => {
+    if (!o || !o.orderDate) return;
+    if (o.status === '취소' || o.status === '반품') return;
+    const od = new Date(o.orderDate); od.setHours(0,0,0,0);
+    if (od.getTime() < startMs || od.getTime() > endMs) return;
+    const idx = Math.floor((od.getTime() - startMs) / 86400000);
+    if (idx >= 0 && idx < days) buckets[idx].revenue += Number(o.paymentAmount || o.totalPrice || 0);
+  });
+  const sumAds = buckets.reduce((s, b) => s + b.ads, 0);
+  const sumRev = buckets.reduce((s, b) => s + b.revenue, 0);
+  if (sumAds === 0 && sumRev === 0) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  const maxAds = Math.max(1, ...buckets.map(b => b.ads));
+  const maxRev = Math.max(1, ...buckets.map(b => b.revenue));
+  // SVG 레이아웃
+  const W = 900, H = 220;
+  const PL = 60, PR = 60, PT = 18, PB = 38;
+  const plotW = W - PL - PR;
+  const plotH = H - PT - PB;
+  const barW = plotW / days;
+  // 막대 (광고비)
+  let bars = '';
+  buckets.forEach((b, i) => {
+    if (b.ads <= 0) return;
+    const x = PL + i * barW;
+    const h = (b.ads / maxAds) * plotH;
+    const y = PT + plotH - h;
+    bars += '<rect x="' + (x + barW * 0.12).toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + (barW * 0.76).toFixed(1) + '" height="' + h.toFixed(1) + '" fill="#fbcfe8" stroke="#ec4899" stroke-width="0.6" rx="2">' +
+      '<title>' + (b.date.getMonth()+1) + '/' + b.date.getDate() + ' 광고비 ₩' + Math.round(b.ads).toLocaleString() + '</title></rect>';
+  });
+  // 선 (매출)
+  const linePts = buckets.map((b, i) => {
+    const x = PL + i * barW + barW / 2;
+    const y = PT + plotH - (b.revenue / maxRev) * plotH;
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  }).join(' ');
+  const linePath = '<polyline points="' + linePts + '" fill="none" stroke="#16a34a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>';
+  let dots = '';
+  buckets.forEach((b, i) => {
+    if (b.revenue <= 0) return;
+    const x = PL + i * barW + barW / 2;
+    const y = PT + plotH - (b.revenue / maxRev) * plotH;
+    dots += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="2.6" fill="#16a34a">' +
+      '<title>' + (b.date.getMonth()+1) + '/' + b.date.getDate() + ' 매출 ₩' + Math.round(b.revenue).toLocaleString() + '</title></circle>';
+  });
+  // Y축 라벨
+  const _fmt = (v) => v >= 1e8 ? (v/1e8).toFixed(1)+'억' : (v >= 1e4 ? Math.round(v/1e4)+'만' : Math.round(v));
+  const leftLabel = '<text x="' + (PL - 8) + '" y="' + (PT - 4) + '" text-anchor="end" font-size="10" fill="#be185d" font-weight="700">광고비</text>';
+  const rightLabel = '<text x="' + (W - PR + 8) + '" y="' + (PT - 4) + '" text-anchor="start" font-size="10" fill="#16a34a" font-weight="700">매출</text>';
+  const yTopLeft = '<text x="' + (PL - 8) + '" y="' + (PT + 10) + '" text-anchor="end" font-size="9.5" fill="#94a3b8">' + _fmt(maxAds) + '</text>';
+  const yTopRight = '<text x="' + (W - PR + 8) + '" y="' + (PT + 10) + '" text-anchor="start" font-size="9.5" fill="#94a3b8">' + _fmt(maxRev) + '</text>';
+  // X축 날짜
+  let xTicks = '';
+  for (let i = 0; i < days; i += 5) {
+    const x = PL + i * barW + barW / 2;
+    const d = buckets[i].date;
+    const label = (d.getMonth() + 1) + '/' + d.getDate();
+    xTicks += '<text x="' + x.toFixed(1) + '" y="' + (H - PB + 14) + '" text-anchor="middle" font-size="10" fill="#64748b">' + label + '</text>';
+  }
+  const bottomLine = '<line x1="' + PL + '" y1="' + (PT + plotH) + '" x2="' + (W - PR) + '" y2="' + (PT + plotH) + '" stroke="#e2e8f0" stroke-width="1"></line>';
+  host.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;max-height:240px;display:block">' +
+    bottomLine + bars + linePath + dots + leftLabel + rightLabel + yTopLeft + yTopRight + xTicks +
+    '</svg>';
 }
 
 function renderShopAdsList(shopId) {
