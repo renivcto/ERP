@@ -3196,7 +3196,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="card" id="ads-trend-chart-card" style="margin-bottom:14px;display:none">
         <div class="card-hdr">
           <span class="card-ttl" style="font-weight:800">📈 일별 광고비·매출 추세</span>
-          <span style="font-size:11px;color:#94a3b8;font-weight:500;margin-left:auto">최근 30일 · <span style="color:#be185d;font-weight:700">■ 광고비</span> · <span style="color:#16a34a;font-weight:700">━ 매출</span></span>
+          <span style="font-size:11px;color:#94a3b8;font-weight:500;margin-left:auto"><span id="ads-trend-range-label">최근 30일</span> · <span style="color:#be185d;font-weight:700">■ 광고비</span> · <span style="color:#16a34a;font-weight:700">━ 매출</span> · 기간·쇼핑몰 필터 동기화</span>
         </div>
         <div class="card-body" id="ads-trend-chart-host" style="padding:8px 14px 14px"></div>
       </div>
@@ -5708,7 +5708,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.154';
+const ERP_VERSION = 'v2.3.155';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -19526,18 +19526,43 @@ function _renderAdsTrendChart() {
   const host = document.getElementById('ads-trend-chart-host');
   const card = document.getElementById('ads-trend-chart-card');
   if (!host || !card) return;
-  const days = 30;
+  // v2.3.155: 기간 필터 동기화 — 기간 선택 시 해당 구간(최대 120일), '전체'면 최근 30일
   const today = new Date(); today.setHours(0,0,0,0);
+  let _rgS = null, _rgE = null;
+  try {
+    if (typeof _periodComputeRange === 'function') {
+      const _rg = _periodComputeRange('ad');
+      if (_rg && _rg.start && _rg.end) { _rgS = new Date(_rg.start); _rgE = new Date(_rg.end); }
+    }
+  } catch(_){}
+  let startD, endD;
+  if (_rgS && !isNaN(_rgS) && _rgE && !isNaN(_rgE)) {
+    startD = _rgS; endD = _rgE;
+    startD.setHours(0,0,0,0); endD.setHours(0,0,0,0);
+    if (Math.floor((endD - startD) / 86400000) + 1 > 120) {  // 너무 길면 마지막 120일만
+      startD = new Date(endD); startD.setDate(startD.getDate() - 119);
+    }
+  } else {
+    endD = new Date(today);
+    startD = new Date(today); startD.setDate(startD.getDate() - 29);
+  }
+  const days = Math.max(1, Math.floor((endD - startD) / 86400000) + 1);
+  try {
+    const _lbl = document.getElementById('ads-trend-range-label');
+    if (_lbl) _lbl.textContent = (_rgS && _rgE) ? ((startD.getMonth()+1) + '/' + startD.getDate() + '~' + (endD.getMonth()+1) + '/' + endD.getDate()) : '최근 30일';
+  } catch(_){}
+  const _fShop = document.getElementById('ads-page-shop-filter')?.value || '';  // v2.3.155: 쇼핑몰 필터
   const buckets = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(today); d.setDate(d.getDate() - i);
+  for (let i = 0; i < days; i++) {
+    const d = new Date(startD); d.setDate(d.getDate() + i);
     buckets.push({ date: d, ads: 0, revenue: 0 });
   }
-  const startMs = buckets[0].date.getTime();
-  const endMs = today.getTime();
+  const startMs = startD.getTime();
+  const endMs = endD.getTime();
   // 일별 광고비 — 각 광고비를 기간 일수로 균등 분배
   (DB.shops || []).forEach(s => {
     if (!s || !Array.isArray(s.adsCosts)) return;
+    if (_fShop && String(s.id) !== String(_fShop)) return;  // v2.3.155: 쇼핑몰 필터
     s.adsCosts.forEach(a => {
       if (!a) return;
       const sd = new Date(a.startDate || a.date || (a.month + '-01')); sd.setHours(0,0,0,0);
@@ -19563,6 +19588,7 @@ function _renderAdsTrendChart() {
   // 일별 매출
   (DB.shopOrders || []).forEach(o => {
     if (!o || !o.orderDate) return;
+    if (_fShop && String(o.shopId) !== String(_fShop)) return;  // v2.3.155: 쇼핑몰 필터
     if (o.status === '취소' || o.status === '반품') return;
     const od = new Date(o.orderDate); od.setHours(0,0,0,0);
     if (od.getTime() < startMs || od.getTime() > endMs) return;
@@ -19614,7 +19640,8 @@ function _renderAdsTrendChart() {
   const yTopRight = '<text x="' + (W - PR + 8) + '" y="' + (PT + 10) + '" text-anchor="start" font-size="9.5" fill="#94a3b8">' + _fmt(maxRev) + '</text>';
   // X축 날짜
   let xTicks = '';
-  for (let i = 0; i < days; i += 5) {
+  const _tickStep = Math.max(1, Math.ceil(days / 6));  // v2.3.155: 기간 길이에 맞춰 자동 간격
+  for (let i = 0; i < days; i += _tickStep) {
     const x = PL + i * barW + barW / 2;
     const d = buckets[i].date;
     const label = (d.getMonth() + 1) + '/' + d.getDate();
