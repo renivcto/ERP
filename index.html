@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.114';
+const ERP_VERSION = 'v2.3.115';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -41102,8 +41102,28 @@ function openPmProductModal(pid, rowIdx, colIdx) {
     + '</div></div>';
   h += '</div>';
   // v2.3.63: 판매가 + 용량 한 줄에 (2 컬럼)
+  // v2.3.115: 판매가 자동/수동 토글 + 비율 1:1 균형
+  var _priceMode = (p && p.priceMode) ? p.priceMode : 'auto';
+  var _autoPrice = '';
+  if (_priceMode === 'auto' && window._pmLinkedItemId) {
+    var _it = (DB.items||[]).find(function(x){ return String(x.id) === String(window._pmLinkedItemId); });
+    if (_it) _autoPrice = (_it.actualSalePrice != null && _it.actualSalePrice !== '') ? _it.actualSalePrice : (_it.price || '');
+  }
+  var _displayPrice = _priceMode === 'auto' ? (_autoPrice || '') : (p && p.price ? Number(p.price) : '');
+  var _btnON = 'padding:3px 8px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer;background:#0f172a;color:#fff;border:1px solid #0f172a;line-height:1';
+  var _btnOFF = 'padding:3px 8px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer;background:#fff;color:#475569;border:1px solid #cbd5e1;line-height:1';
   h += '<div style="display:flex;gap:8px;margin-bottom:12px">'
-    + '<div style="flex:2"><label style="' + lbl + '">판매가 (원)</label><input id="pm-f-price" type="number" min="0" style="' + inp + '" placeholder="0" value="' + (p&&p.price?Number(p.price):'') + '"></div>'
+    + '<div style="flex:1">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">'
+        + '<label style="' + lbl + ';margin:0">판매가 (원)</label>'
+        + '<div style="display:flex;gap:3px">'
+          + '<button type="button" id="pm-price-mode-auto" onclick="_pmSetPriceMode(\'auto\')" style="' + (_priceMode==='auto'?_btnON:_btnOFF) + '" title="연동 완제품 가격 자동 사용">자동</button>'
+          + '<button type="button" id="pm-price-mode-manual" onclick="_pmSetPriceMode(\'manual\')" style="' + (_priceMode==='manual'?_btnON:_btnOFF) + '" title="직접 입력">수동</button>'
+        + '</div>'
+      + '</div>'
+      + '<input id="pm-f-price" type="number" min="0" style="' + inp + (_priceMode==='auto'?';background:#f8fafc;color:#64748b':'') + '" placeholder="0" value="' + _displayPrice + '"' + (_priceMode==='auto'?' readonly':'') + '>'
+      + '<input type="hidden" id="pm-f-priceMode" value="' + _priceMode + '">'
+    + '</div>'
     + '<div style="flex:1"><label style="' + lbl + '">용량</label><input id="pm-f-capacity" type="text" style="' + inp + '" placeholder="예: 30ml" value="' + (p&&p.capacity?escapeHtml(p.capacity):'') + '"></div>'
     + '</div>';
   h += '<div style="margin-bottom:12px"><label style="' + lbl + '">제품 기능</label><textarea id="pm-f-func" rows="2" style="' + inp + '" placeholder="제품의 핵심 기능">' + (p?_esc(p.func||''):'') + '</textarea></div>';
@@ -41194,6 +41214,39 @@ function _pmSetPhoto(photo) {
   const rm = document.getElementById('pm-photo-remove');
   if (rm) rm.style.display = '';
 }
+// v2.3.115: 판매가 자동/수동 토글
+window._pmSetPriceMode = function(mode) {
+  var hidden = document.getElementById('pm-f-priceMode');
+  var inp = document.getElementById('pm-f-price');
+  var btnA = document.getElementById('pm-price-mode-auto');
+  var btnM = document.getElementById('pm-price-mode-manual');
+  if (!hidden || !inp) return;
+  hidden.value = mode;
+  var ON = 'padding:3px 8px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer;background:#0f172a;color:#fff;border:1px solid #0f172a;line-height:1';
+  var OFF = 'padding:3px 8px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer;background:#fff;color:#475569;border:1px solid #cbd5e1;line-height:1';
+  if (btnA) btnA.setAttribute('style', mode==='auto'?ON:OFF);
+  if (btnM) btnM.setAttribute('style', mode==='manual'?ON:OFF);
+  if (mode === 'auto') {
+    inp.readOnly = true;
+    inp.style.background = '#f8fafc';
+    inp.style.color = '#64748b';
+    // 자동이면 연동 완제품 가격을 그 자리에서 채움
+    if (window._pmLinkedItemId) {
+      var it = (DB.items||[]).find(function(x){ return String(x.id) === String(window._pmLinkedItemId); });
+      if (it) {
+        var v = (it.actualSalePrice != null && it.actualSalePrice !== '') ? it.actualSalePrice : (it.price || '');
+        inp.value = v;
+      } else { inp.value = ''; }
+    } else {
+      inp.value = '';
+    }
+  } else {
+    inp.readOnly = false;
+    inp.style.background = '';
+    inp.style.color = '';
+  }
+};
+
 window._pmFillFromExisting = async function(value) {
   if (!value) return;
   const [kind, rid] = value.split(':');
@@ -41288,7 +41341,16 @@ function savePmProduct() {
   p.productType = get('pm-f-type');
   p.channel = get('pm-f-channel');
   p.status = get('pm-f-status') || 'dev';
-  p.price = Number(get('pm-f-price')) || 0;
+  // v2.3.115: priceMode 저장 + 자동이면 연동 완제품 가격을 실시간 사용
+  var _pMode = get('pm-f-priceMode') || 'auto';
+  p.priceMode = _pMode;
+  if (_pMode === 'auto' && window._pmLinkedItemId) {
+    var _autoIt = (DB.items||[]).find(function(x){ return String(x.id) === String(window._pmLinkedItemId); });
+    if (_autoIt) p.price = Number((_autoIt.actualSalePrice != null && _autoIt.actualSalePrice !== '') ? _autoIt.actualSalePrice : (_autoIt.price || 0)) || 0;
+    else p.price = 0;
+  } else {
+    p.price = Number(get('pm-f-price')) || 0;
+  }
   p.capacity = (get('pm-f-capacity')||'').trim(); // v2.3.63
   p.func = (get('pm-f-func')||'').trim();
   p.mainIng = (get('pm-f-mainIng')||'').trim();
