@@ -3483,6 +3483,45 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             </div>
           </div>
         </div>
+        <!-- v2.3.127: Trello 자동화 카드 (관리자 전용) -->
+        <div class="card" id="trello-auto-card" style="display:none">
+          <div class="card-hdr">
+            <span class="card-title">🤖 Trello 자동화 — 🏢 르니브 운영 본부</span>
+            <span class="badge" id="trello-auto-status-badge" style="font-size:11px;background:#fef3c7;color:#92400e">미설정</span>
+          </div>
+          <div class="card-body">
+            <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12.5px;color:#475569;line-height:1.65">
+              📌 ERP 이벤트 발생 시 운영 본부 보드에 카드를 자동 생성·완료 처리합니다.<br>
+              • <strong>발주 생성</strong> → 📥 입고확인 카드 생성 (마감일 = 입고예정일)<br>
+              • <strong>입고 완료</strong> → 해당 카드 완료 처리 (완료 리스트로 이동)<br>
+              • <strong>재고 부족 발생</strong> → 🚨 발주필요 카드 생성, 재고 회복 시 자동 완료
+            </div>
+            <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin-bottom:12px;font-size:11.5px;color:#92400e">
+              💡 아래 Trello 연동 카드의 API Key / Token 을 그대로 사용합니다. 리스트가 비어있으면 "리스트 불러오기"를 누르세요.
+            </div>
+            <div class="fg" style="margin-bottom:10px">
+              <label>📥 입고확인 카드 생성 리스트 <span style="color:var(--red-500)">*</span></label>
+              <select class="fi" id="trello-auto-list-incoming"><option value="">— 리스트 선택 —</option></select>
+            </div>
+            <div class="fg" style="margin-bottom:10px">
+              <label>🚨 발주필요 카드 생성 리스트 <span style="color:var(--red-500)">*</span></label>
+              <select class="fi" id="trello-auto-list-restock"><option value="">— 리스트 선택 —</option></select>
+            </div>
+            <div class="fg" style="margin-bottom:10px">
+              <label>✅ 완료 카드 이동 리스트 (선택 — 비우면 마감완료 표시만)</label>
+              <select class="fi" id="trello-auto-list-done"><option value="">— 이동 안 함 —</option></select>
+            </div>
+            <div class="fg" style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+              <input type="checkbox" id="trello-auto-enabled">
+              <label for="trello-auto-enabled" style="cursor:pointer;font-weight:600">Trello 자동화 사용</label>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-outline" onclick="refreshTrelloAutoLists()">🔄 리스트 불러오기</button>
+              <button class="btn btn-primary" onclick="saveTrelloAutoSettings()" style="flex:1;min-width:120px">💾 저장</button>
+              <button class="btn btn-outline" onclick="testTrelloAutoCard()">🧪 테스트 카드 생성</button>
+            </div>
+          </div>
+        </div>
         <div class="card" id="trello-settings-card" style="display:none">
           <div class="card-hdr"><span class="card-title">🎯 Trello 연동</span><span class="badge sky" style="font-size:11px">보드 2개 설정됨</span></div>
           <div class="card-body">
@@ -5621,7 +5660,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.126';
+const ERP_VERSION = 'v2.3.127';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9321,6 +9360,7 @@ function go(page) {
         if (typeof _updateSlackBoardStatusBadge === 'function') _updateSlackBoardStatusBadge();
         if (typeof _updateSlackDigestStatusBadge === 'function') _updateSlackDigestStatusBadge();  // v2.3.125
         if (typeof _updateSlackOpsStatusBadge === 'function') _updateSlackOpsStatusBadge();  // v2.3.126
+        if (typeof _updateTrelloAutoCard === 'function') _updateTrelloAutoCard();  // v2.3.127
       } catch(_){}
       const saved = localStorage.getItem('reniv_sheets_webapp_url');
       if (saved && $('webapp-url')) $('webapp-url').value = saved;
@@ -9363,6 +9403,9 @@ function go(page) {
         if (sheetsCard) sheetsCard.style.display = canWr ? '' : 'none';
         // 관리자만 Trello 설정 표시
         const trelloCard = document.getElementById('trello-settings-card');
+        // v2.3.127: Trello 자동화 카드도 관리자 전용
+        const trelloAutoCard = document.getElementById('trello-auto-card');
+        if (trelloAutoCard) trelloAutoCard.style.display = isAdmin ? '' : 'none';
         if (trelloCard) {
           trelloCard.style.display = isAdmin ? '' : 'none';
           if (isAdmin) {
@@ -26639,6 +26682,8 @@ function confirmStockInQty(orderId) {
       '\n• 입고수량: ' + _recvTotal.toLocaleString() + '개'
     });
   } catch(_){}
+  // v2.3.127: Trello 입고확인 카드 완료 처리
+  try { if (typeof _trelloAutoCompleteOrder === 'function') _trelloAutoCompleteOrder(o.id, o.serial); } catch(_){}
 }
 
 function ensureOrderRows() {
@@ -27754,6 +27799,8 @@ function saveOrder() {
         '\n• 품목: ' + _opsRowsSummary(rows)
       });
     } catch(_){}
+    // v2.3.127: Trello 입고확인 카드 완료 처리
+    try { if (typeof _trelloAutoCompleteOrder === 'function') _trelloAutoCompleteOrder(_savedOrderId, data.serial); } catch(_){}
   }
   // ── 입고완료 → 다른 상태로 되돌릴 시 재고 차감 ──────────
   if (prevStockStatus === '입고완료' && newStockStatus !== '입고완료') {
@@ -27817,6 +27864,8 @@ function saveOrder() {
               (data.inDate ? '\n• 입고예정: ' + data.inDate : '')
             });
           } catch(_){}
+          // v2.3.127: Trello 입고확인 카드 자동 생성
+          try { if (typeof _trelloAutoOrderCard === 'function') _trelloAutoOrderCard(data, _savedOrderId, rows); } catch(_){}
         }
       } else {
         console.error('❌ [SAVE-VERIFY] 저장 검증 실패! 발주서 #' + _savedOrderId);
@@ -34779,6 +34828,251 @@ async function testSlackBoardWebhook() {
   }
 }
 
+// ═══════════ v2.3.127: ERP → Trello 카드 자동화 ═══════════
+//   대상 보드: 🏢 르니브 운영 본부 (TRELLO_BOARD_ID_2)
+//   설정: 전용 shared setting 'trello_automation' { enabled, listIncoming, listRestock, listDone }
+//   카드 매핑: 전용 shared setting 'trello_auto_cards' { orders: {orderId: cardId}, items: {itemId: cardId} }
+
+function _trelloAutoCreds() {
+  const key   = localStorage.getItem('reniv_trello_key')   || DB._trelloKey   || '';
+  const token = localStorage.getItem('reniv_trello_token') || DB._trelloToken || '';
+  return (key && token) ? { key, token } : null;
+}
+
+function _trelloAutoEnabled() {
+  const c = window._trelloAutoCfg;
+  return !!(c && c.enabled);
+}
+
+async function _trelloLoadAutoCfg(force) {
+  if (window._trelloAutoCfg && !force) return window._trelloAutoCfg;
+  try {
+    if (typeof loadSharedSetting === 'function') {
+      const cfg = await loadSharedSetting('trello_automation');
+      if (cfg && typeof cfg === 'object') window._trelloAutoCfg = cfg;
+    }
+  } catch(e) { console.warn('[TRELLO-AUTO] 설정 로드 실패:', e); }
+  return window._trelloAutoCfg || null;
+}
+
+async function _trelloLoadAutoMap() {
+  if (window._trelloAutoMap) return window._trelloAutoMap;
+  let m = null;
+  try { if (typeof loadSharedSetting === 'function') m = await loadSharedSetting('trello_auto_cards'); } catch(_){}
+  if (!m || typeof m !== 'object' || Array.isArray(m)) m = {};
+  if (!m.orders || typeof m.orders !== 'object') m.orders = {};
+  if (!m.items  || typeof m.items  !== 'object') m.items  = {};
+  window._trelloAutoMap = m;
+  return m;
+}
+
+async function _trelloSaveAutoMap() {
+  try {
+    if (window._trelloAutoMap && typeof saveSharedSetting === 'function') {
+      await saveSharedSetting('trello_auto_cards', window._trelloAutoMap);
+    }
+  } catch(e) { console.warn('[TRELLO-AUTO] 매핑 저장 실패:', e); }
+}
+
+// Trello REST API 호출 (query param 방식)
+async function _trelloApiCall(path, method, params) {
+  const creds = _trelloAutoCreds();
+  if (!creds) throw new Error('Trello API Key/Token 미설정');
+  const qs = Object.keys(params || {})
+    .filter(k => params[k] !== undefined && params[k] !== null && params[k] !== '')
+    .map(k => encodeURIComponent(k) + '=' + encodeURIComponent(params[k]))
+    .join('&');
+  const url = 'https://api.trello.com/1' + path + '?key=' + creds.key + '&token=' + creds.token + (qs ? '&' + qs : '');
+  const res = await fetch(url, { method: method || 'GET' });
+  if (!res.ok) throw new Error('Trello API ' + res.status + ' (' + path + ')');
+  return res.json();
+}
+
+// 발주 생성 → 입고확인 카드
+async function _trelloAutoOrderCard(data, orderId, rows) {
+  try {
+    const cfg = await _trelloLoadAutoCfg();
+    if (!cfg || !cfg.enabled || !cfg.listIncoming) return;
+    if (!_trelloAutoCreds()) return;
+    const serial = data.serial || ('#' + orderId);
+    const descLines = [
+      '**발주서**: ' + serial,
+      '**거래처**: ' + _opsVendorName(data.vendorId),
+      '**발주일**: ' + (data.orderDate || '-'),
+      '**입고예정**: ' + (data.inDate || '-'),
+      '',
+      '**품목**:'
+    ];
+    (Array.isArray(rows) ? rows : []).forEach(r => {
+      if (r && r.name) descLines.push('- ' + r.name + ' × ' + (Number(r.qty)||0).toLocaleString() + (r.price ? ' (' + fmtWon((Number(r.qty)||0)*(Number(r.price)||0)) + ')' : ''));
+    });
+    const amt = _opsRowsAmount(rows);
+    if (amt) descLines.push('', '**합계**: ' + fmtWon(amt));
+    descLines.push('', '_르니브 ERP 자동 생성 (' + ERP_VERSION + ')_');
+    const card = await _trelloApiCall('/cards', 'POST', {
+      idList: cfg.listIncoming,
+      name: '📥 입고확인 — ' + serial + ' ' + _opsVendorName(data.vendorId) + ' (' + _opsRowsSummary(rows) + ')',
+      desc: descLines.join('\n'),
+      due: data.inDate || '',
+      pos: 'top'
+    });
+    if (card && card.id) {
+      const m = await _trelloLoadAutoMap();
+      m.orders[String(orderId)] = card.id;
+      await _trelloSaveAutoMap();
+      console.log('🤖 [TRELLO-AUTO] 입고확인 카드 생성:', serial, '→', card.id);
+      try { showNotif('🤖 Trello 입고확인 카드가 생성되었습니다', 'success'); } catch(_){}
+    }
+  } catch(e) { console.warn('[TRELLO-AUTO] 입고확인 카드 생성 실패:', e); }
+}
+
+// 입고 완료 → 카드 완료 처리
+async function _trelloAutoCompleteOrder(orderId, serial) {
+  try {
+    const cfg = await _trelloLoadAutoCfg();
+    if (!cfg || !cfg.enabled) return;
+    if (!_trelloAutoCreds()) return;
+    const m = await _trelloLoadAutoMap();
+    const cardId = m.orders[String(orderId)];
+    if (!cardId) return;
+    const params = { dueComplete: 'true' };
+    if (cfg.listDone) params.idList = cfg.listDone;
+    await _trelloApiCall('/cards/' + cardId, 'PUT', params);
+    delete m.orders[String(orderId)];
+    await _trelloSaveAutoMap();
+    console.log('🤖 [TRELLO-AUTO] 입고확인 카드 완료:', serial || orderId);
+    try { showNotif('🤖 Trello 카드가 완료 처리되었습니다', 'success'); } catch(_){}
+  } catch(e) { console.warn('[TRELLO-AUTO] 카드 완료 처리 실패:', e); }
+}
+
+// 재고 부족 전이 → 발주필요 카드 / 회복 → 카드 완료
+async function _trelloAutoLowStockCards(newlyItems, recoveredIds) {
+  try {
+    const cfg = await _trelloLoadAutoCfg();
+    if (!cfg || !cfg.enabled || !cfg.listRestock) return;
+    if (!_trelloAutoCreds()) return;
+    const m = await _trelloLoadAutoMap();
+    let mapChanged = false;
+    // 신규 부족 → 카드 생성 (1회 실행당 최대 5건 — API 폭주 방지)
+    for (const it of (newlyItems || []).slice(0, 5)) {
+      if (m.items[String(it.id)]) continue;  // 이미 카드 있음
+      try {
+        const card = await _trelloApiCall('/cards', 'POST', {
+          idList: cfg.listRestock,
+          name: '🚨 발주필요 — ' + (it.name||'-') + (it.spec ? ' [' + it.spec + ']' : ''),
+          desc: '**현재 재고**: ' + (Number(it.stock)||0).toLocaleString() +
+                '\n**최소 재고**: ' + Number(it.minStock).toLocaleString() +
+                '\n**품목코드**: ' + (it.code||'-') +
+                '\n\n_재고 회복 시 자동 완료됩니다. 르니브 ERP 자동 생성 (' + ERP_VERSION + ')_',
+          pos: 'top'
+        });
+        if (card && card.id) { m.items[String(it.id)] = card.id; mapChanged = true; console.log('🤖 [TRELLO-AUTO] 발주필요 카드 생성:', it.name); }
+      } catch(e) { console.warn('[TRELLO-AUTO] 발주필요 카드 생성 실패:', it.name, e); }
+    }
+    // 재고 회복 → 카드 완료
+    for (const idStr of (recoveredIds || [])) {
+      const cardId = m.items[idStr];
+      if (!cardId) continue;
+      try {
+        const params = { dueComplete: 'true' };
+        if (cfg.listDone) params.idList = cfg.listDone;
+        await _trelloApiCall('/cards/' + cardId, 'PUT', params);
+        delete m.items[idStr];
+        mapChanged = true;
+        console.log('🤖 [TRELLO-AUTO] 발주필요 카드 완료 (재고 회복):', idStr);
+      } catch(e) { console.warn('[TRELLO-AUTO] 발주필요 카드 완료 실패:', idStr, e); }
+    }
+    if (mapChanged) await _trelloSaveAutoMap();
+  } catch(e) { console.warn('[TRELLO-AUTO] lowstock 카드 처리 실패:', e); }
+}
+
+// ── 설정 카드 UI ──
+function _trelloAutoFillListSelects(cfg) {
+  const lists = Array.isArray(DB._trelloLists2) ? DB._trelloLists2 : [];
+  const c = cfg || window._trelloAutoCfg || {};
+  [['trello-auto-list-incoming', c.listIncoming, '— 리스트 선택 —'],
+   ['trello-auto-list-restock',  c.listRestock,  '— 리스트 선택 —'],
+   ['trello-auto-list-done',     c.listDone,     '— 이동 안 함 —']].forEach(([elId, sel, ph]) => {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.innerHTML = '<option value="">' + ph + '</option>' + lists.map(l =>
+      '<option value="' + l.id + '"' + (l.id === sel ? ' selected' : '') + '>' + String(l.name||'').replace(/</g,'&lt;') + '</option>'
+    ).join('');
+  });
+}
+
+async function _updateTrelloAutoCard() {
+  const cfg = await _trelloLoadAutoCfg(true);
+  const badge = document.getElementById('trello-auto-status-badge');
+  if (badge) {
+    if (cfg && cfg.enabled && cfg.listIncoming && cfg.listRestock) { badge.textContent = '✅ 활성'; badge.style.background = '#dcfce7'; badge.style.color = '#166534'; }
+    else if (cfg && (cfg.listIncoming || cfg.listRestock)) { badge.textContent = '⏸️ 비활성'; badge.style.background = '#fef3c7'; badge.style.color = '#92400e'; }
+    else { badge.textContent = '미설정'; badge.style.background = '#fef3c7'; badge.style.color = '#92400e'; }
+  }
+  const enInp = document.getElementById('trello-auto-enabled');
+  if (enInp) enInp.checked = !!(cfg && cfg.enabled);
+  _trelloAutoFillListSelects(cfg);
+}
+
+// 보드2 리스트만 가볍게 새로고침 (전체 카드 로드 없이)
+async function refreshTrelloAutoLists() {
+  try {
+    if (!_trelloAutoCreds()) { showNotif('Trello API Key/Token 을 먼저 저장하세요 (아래 Trello 연동 카드)', 'warning'); return; }
+    showNotif('⏳ 운영 본부 보드 리스트 불러오는 중...', 'info');
+    const lists = await _trelloApiCall('/boards/' + TRELLO_BOARD_ID_2 + '/lists', 'GET', { filter: 'open' });
+    DB._trelloLists2 = lists;
+    try { localStorage.setItem('reniv_trello_lists2', JSON.stringify(lists)); } catch(_){}
+    _trelloAutoFillListSelects();
+    showNotif('✅ 리스트 ' + lists.length + '개 로드 완료 — 용도별 리스트를 선택하세요', 'success');
+  } catch(e) {
+    console.warn('refreshTrelloAutoLists 실패:', e);
+    showNotif('⚠️ 리스트 로드 실패: ' + e.message, 'warning');
+  }
+}
+
+async function saveTrelloAutoSettings() {
+  const cfg = {
+    enabled: !!document.getElementById('trello-auto-enabled')?.checked,
+    listIncoming: document.getElementById('trello-auto-list-incoming')?.value || '',
+    listRestock:  document.getElementById('trello-auto-list-restock')?.value || '',
+    listDone:     document.getElementById('trello-auto-list-done')?.value || '',
+    updatedAt: Date.now()
+  };
+  if (cfg.enabled && (!cfg.listIncoming || !cfg.listRestock)) {
+    showNotif('⚠️ 입고확인·발주필요 리스트를 모두 선택해야 활성화됩니다', 'warning');
+    return;
+  }
+  window._trelloAutoCfg = cfg;
+  try { if (typeof saveSharedSetting === 'function') await saveSharedSetting('trello_automation', cfg); } catch(e) { console.warn(e); }
+  if (typeof _updateTrelloAutoCard === 'function') {
+    const badge = document.getElementById('trello-auto-status-badge');
+    if (badge && cfg.enabled) { badge.textContent = '✅ 활성'; badge.style.background = '#dcfce7'; badge.style.color = '#166534'; }
+  }
+  showNotif('✅ Trello 자동화 설정 저장됨', 'success');
+}
+
+async function testTrelloAutoCard() {
+  try {
+    const cfg = await _trelloLoadAutoCfg();
+    const listId = (cfg && cfg.listIncoming) || document.getElementById('trello-auto-list-incoming')?.value;
+    if (!listId) { showNotif('입고확인 리스트를 먼저 선택·저장하세요', 'warning'); return; }
+    if (!_trelloAutoCreds()) { showNotif('Trello API Key/Token 을 먼저 저장하세요', 'warning'); return; }
+    const card = await _trelloApiCall('/cards', 'POST', {
+      idList: listId,
+      name: '🧪 르니브 ERP — Trello 자동화 테스트 (' + _kstShortTimeMin() + ')',
+      desc: '연동 테스트 카드입니다. 확인 후 삭제하세요.\n\n_르니브 ERP 자동 생성 (' + ERP_VERSION + ')_',
+      pos: 'top'
+    });
+    if (card && card.id) showNotif('✅ 테스트 카드 생성 완료 — 운영 본부 보드를 확인하세요', 'success');
+  } catch(e) {
+    console.warn('testTrelloAutoCard 실패:', e);
+    showNotif('⚠️ 테스트 카드 생성 실패: ' + e.message, 'warning');
+  }
+}
+
+// 시작 시 설정 캐시 로드 (재고부족 감지 게이트용)
+setTimeout(function(){ try { _trelloLoadAutoCfg(); } catch(_){} }, 30 * 1000);
+
 // ═══════════ v2.3.126: 슬랙 실시간 운영 알림 ═══════════
 //   이벤트: 신규 발주 / 입고 완료 / 재고 부족 발생(전이) / 생산 완료
 //   재고 부족 상태 추적: 전용 shared setting 문서 'slack_ops_lowstock' ({itemId: true})
@@ -34814,7 +35108,9 @@ function _opsRowsAmount(rows) {
 let _lowStockCheckTimer = null;
 function _scheduleLowStockCheck() {
   try {
-    if (!DB.appSettings || !DB.appSettings.slackOpsEnabled) return;
+    // v2.3.127: 슬랙 운영알림 또는 Trello 자동화 둘 중 하나라도 켜져 있으면 감지
+    const _slackOpsOn = !!(DB.appSettings && DB.appSettings.slackOpsEnabled);
+    if (!_slackOpsOn && !_trelloAutoEnabled()) return;
     if (_lowStockCheckTimer) clearTimeout(_lowStockCheckTimer);
     _lowStockCheckTimer = setTimeout(function() {
       _checkLowStockTransitions().catch(function(e){ console.warn('lowstock check 실패:', e); });
@@ -34824,9 +35120,11 @@ function _scheduleLowStockCheck() {
 
 async function _checkLowStockTransitions() {
   const sAppS = DB.appSettings || {};
-  if (!sAppS.slackOpsEnabled) return;
+  // v2.3.127: 슬랙 또는 Trello 자동화 둘 중 하나라도 활성일 때 진행
   const url = _cleanWebhookUrl(sAppS.slackOpsWebhookUrl || '');
-  if (!url) return;
+  const _slackOn = !!(sAppS.slackOpsEnabled && url);
+  const _trelloOn = _trelloAutoEnabled();
+  if (!_slackOn && !_trelloOn) return;
   if (typeof _dbFromDefault !== 'undefined' && _dbFromDefault) return;        // 빈 기본데이터 가드
   if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) return;  // 초기 로드 전 가드
   const lowNow = (DB.items||[]).filter(it => it && Number(it.minStock) > 0 && Number(it.stock||0) < Number(it.minStock));
@@ -34840,8 +35138,9 @@ async function _checkLowStockTransitions() {
   const lowIds = {};
   lowNow.forEach(it => { lowIds[String(it.id)] = true; });
   let changed = false;
-  // 회복된 품목 → 추적 제거 (재부족 시 다시 알림 가능)
-  Object.keys(st).forEach(k => { if (!lowIds[k]) { delete st[k]; changed = true; } });
+  // 회복된 품목 → 추적 제거 (재부족 시 다시 알림 가능) + v2.3.127: Trello 카드 완료용 ID 수집
+  const recoveredIds = [];
+  Object.keys(st).forEach(k => { if (!lowIds[k]) { delete st[k]; recoveredIds.push(k); changed = true; } });
   // 새로 부족해진 품목
   const newly = lowNow.filter(it => !st[String(it.id)]);
   if (newly.length) {
@@ -34855,6 +35154,10 @@ async function _checkLowStockTransitions() {
     L.push('_발주가 필요합니다 → ERP 발주 관리에서 확인_');
     await slackOpsNotify('ops_low_stock', { text: L.join('\n') });
     console.log('🚨 [OPS] 재고 부족 알림 발송:', newly.length, '건');
+  }
+  // v2.3.127: Trello 발주필요 카드 (신규 부족 → 생성 / 회복 → 완료)
+  if (_trelloOn && (newly.length || recoveredIds.length)) {
+    try { await _trelloAutoLowStockCards(newly, recoveredIds); } catch(e) { console.warn('[TRELLO-AUTO] lowstock 연동 실패:', e); }
   }
   if (changed) {
     try { if (typeof saveSharedSetting === 'function') await saveSharedSetting('slack_ops_lowstock', st); } catch(_){}
