@@ -5554,7 +5554,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.116';
+const ERP_VERSION = 'v2.3.117';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -20279,14 +20279,17 @@ function renderItemTable() {
   // v1.9.377: 총 재고평가액 — 현재 필터/검색에 적용된 목록 기준으로 계산해 표 합계와 항상 일치하도록 변경
   //   (이전에는 DB.items 전체 기준이라 분류 탭/제품 라인/검색 적용 시 숫자가 표와 불일치)
   // v2.3.116: OEM 은 실제 재고가 아니라 제조 발주이므로 평가액 계산에서 제외
-  const totalVal = filtered.reduce((s,i) => s + (i.type === 'OEM' ? 0 : (i.stock||0)*(i.price||0)), 0);
+  // v2.3.117: 외주가공도 가공 서비스라 재고 아님 → 제외
+  const _isPhantomStock = t => t === 'OEM' || t === '외주가공';
+  const totalVal = filtered.reduce((s,i) => s + (_isPhantomStock(i.type) ? 0 : (i.stock||0)*(i.price||0)), 0);
   const tvEl = $('item-total-stock-value');
   if (tvEl) tvEl.textContent = fmtW(totalVal);
   const typeRowBg = {원자재:'#fafef9', 부자재:'#fefaff', OEM:'#fafcff', 완제품:'#fffefa', 외주가공:'#fafbfc'};
   $('item-table').innerHTML = filtered.map(i => {
     const v = getVendor(i.vendorId);
     // v2.3.116: OEM 은 실제 재고가 아님 → 표시·평가액 모두 0/숨김
-    const _isOemRow = (i.type === 'OEM');
+    // v2.3.117: 외주가공도 같은 처리
+    const _isOemRow = (i.type === 'OEM' || i.type === '외주가공');
     const stockVal = _isOemRow ? 0 : (i.stock||0) * (i.price||0);
     const rowBg = typeRowBg[i.type] || '#fff';
     const _imgVal = (typeof i.image === 'string') ? i.image : '';
@@ -23724,14 +23727,16 @@ function renderStockTable() {
   items = items.slice().sort(sortByCode);
   // v1.9.384: 총 재고평가액 — 현재 표 합계와 일치하도록 검색·라인 필터 모두 반영된 items 기준
   // v2.3.116: OEM 제외 (제조 발주는 실재고 아님)
-  const totalVal = items.reduce((s,i) => s + (i.type === 'OEM' ? 0 : (i.stock||0)*(i.price||0)), 0);
+  // v2.3.117: 외주가공도 제외 (가공 서비스)
+  const totalVal = items.reduce((s,i) => s + ((i.type === 'OEM' || i.type === '외주가공') ? 0 : (i.stock||0)*(i.price||0)), 0);
   const tvEl = $('stock-total-value');
   if (tvEl) tvEl.textContent = fmtW(totalVal);
   const typeRowBg = {원자재:'#fafef9', 부자재:'#fefaff', OEM:'#fafcff', 완제품:'#fffefa', 외주가공:'#fafbfc'};
   $('stock-table').innerHTML = items.map(i => {
     const pct = stockPct(i);
     // v2.3.116: OEM 표시·평가액 제외
-    const _isOemRow2 = (i.type === 'OEM');
+    // v2.3.117: 외주가공도 제외
+    const _isOemRow2 = (i.type === 'OEM' || i.type === '외주가공');
     const stockVal = _isOemRow2 ? 0 : (i.stock||0) * (i.price||0);
     const rowBg = i._archived ? '#f5f5f5' : (typeRowBg[i.type] || '#fff');
     return `<tr style="background:${rowBg}${i._archived?';opacity:0.85':''}">
