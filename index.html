@@ -3106,17 +3106,23 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 
     <!-- ══════════════ v1.9.773: 광고비 관리 페이지 (별도 페이지) ══════════════ -->
     <div class="page" id="page-ads">
-      <!-- v1.9.811/814: KPI 기간 필터 -->
-      <div style="display:flex;justify-content:flex-start;align-items:center;gap:8px;margin-bottom:10px">
-        <span style="font-size:12px;color:#475569;font-weight:700;white-space:nowrap;flex-shrink:0">📅 기간</span>
-        <select class="fs" id="ads-kpi-period" onchange="_onAdsKpiPeriodChange()" style="width:170px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
-          <option value="all" selected>전체</option>
-          <option value="thisMonth">월간 (이번 달)</option>
-          <option value="range">기간 직접 선택</option>
+      <!-- v2.3.138: 매출 대시보드와 동일한 공용 기간 필터 (prefix='ad') -->
+      <div class="period-filter" data-prefix="ad" style="display:flex;align-items:center;gap:5px;flex-wrap:nowrap;margin-bottom:10px">
+        <span style="font-size:12px;color:#475569;font-weight:700;flex-shrink:0">📅 기간</span>
+        <select class="fs period-mode" onchange="_periodOnChange('ad')" style="width:90px;font-size:12px;height:32px;padding:5px 8px;flex-shrink:0">
+          <option value="all">전체</option>
+          <option value="month" selected>월별</option>
+          <option value="week">주별</option>
+          <option value="day">일별</option>
+          <option value="range">기간별</option>
         </select>
-        <input class="fi" id="ads-kpi-from" type="date" onchange="renderAdsPage()" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
-        <span id="ads-kpi-tilde" style="display:none;color:#94a3b8">~</span>
-        <input class="fi" id="ads-kpi-to" type="date" onchange="renderAdsPage()" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
+        <input class="fi period-month" type="month" onchange="_periodOnChange('ad')" oninput="_periodOnChange('ad')" style="width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
+        <input class="fi period-week"  type="week"  onchange="_periodOnChange('ad')" oninput="_periodOnChange('ad')" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
+        <input class="fi period-day"   type="date"  onchange="_periodOnChange('ad')" oninput="_periodOnChange('ad')" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
+        <input class="fi period-from"  type="date"  onchange="_periodOnChange('ad')" oninput="_periodOnChange('ad')" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
+        <span class="period-tilde" style="display:none;color:var(--gray-400);font-size:12px;flex-shrink:0">~</span>
+        <input class="fi period-to"    type="date"  onchange="_periodOnChange('ad')" oninput="_periodOnChange('ad')" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
+        <button class="btn btn-primary btn-sm" onclick="_periodOnChange('ad')" style="height:32px;padding:5px 12px;font-size:12px;flex-shrink:0;white-space:nowrap">🔍 조회</button>
       </div>
       <!-- KPI 카드 3개 (자동/수동 비중 삭제) -->
       <div id="ads-kpi-row" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(195px,1fr));gap:12px;margin-bottom:14px"></div>
@@ -5704,7 +5710,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.137';
+const ERP_VERSION = 'v2.3.138';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -15901,6 +15907,7 @@ function _periodOnChange(prefix) {
   else if (prefix === 'mg' && typeof renderMarginAnalysis === 'function') renderMarginAnalysis();
   else if (prefix === 'po' && typeof renderOrderTable === 'function') renderOrderTable();
   else if (prefix === 'ap' && typeof renderApprovalPage === 'function') renderApprovalPage();
+  else if (prefix === 'ad' && typeof renderAdsPage === 'function') renderAdsPage();  // v2.3.138
 }
 
 function _periodComputeRange(prefix) {
@@ -19037,45 +19044,33 @@ function renderAdsPage() {
     shopFilter.dataset.populated = '1';
   }
 
-  // v2.3.134: 필터 적용 — 기간은 상단 KPI 필터(ads-kpi-period) 가 단일 진실
+  // v2.3.138: 공용 period-filter (prefix='ad') 사용 — 매출 대시보드 등과 동일 인터페이스
   const filterShopId = shopFilter ? shopFilter.value : '';
-  const kpiSel = document.getElementById('ads-kpi-period');
-  // 최근 24개월 옵션 자동 채움 (한 번만)
-  if (kpiSel && !kpiSel.dataset.monthsPopulated) {
-    try { _populateAdsKpiMonths(kpiSel); kpiSel.dataset.monthsPopulated = '1'; } catch(_){}
-  }
-  const periodVal = kpiSel ? (kpiSel.value || 'all') : 'all';
-
+  try { if (typeof _periodInit === 'function') _periodInit('ad'); } catch(_){}
+  let periodStart = null, periodEnd = null;
+  let periodLabelStr = '전체';
+  try {
+    if (typeof _periodComputeRange === 'function') {
+      const _rg = _periodComputeRange('ad');
+      if (_rg.start) periodStart = new Date(_rg.start);
+      if (_rg.end) periodEnd = new Date(_rg.end + 'T23:59:59');
+      // 카드 부제목용 라벨 ("2026년 06월" 같은 한글 포맷)
+      const _wrap = document.querySelector('.period-filter[data-prefix="ad"]');
+      const _mode = _wrap ? ((_wrap.querySelector('.period-mode') || {}).value || 'all') : 'all';
+      if (_mode === 'all') periodLabelStr = '전체';
+      else if (_mode === 'month') {
+        const _m = ((_wrap.querySelector('.period-month') || {}).value || '');
+        const _mp = _m.split('-');
+        periodLabelStr = (_mp[0] && _mp[1]) ? (_mp[0] + '년 ' + _mp[1] + '월') : '월별';
+      }
+      else if (_mode === 'week')  periodLabelStr = ((_wrap.querySelector('.period-week') || {}).value || '주별');
+      else if (_mode === 'day')   periodLabelStr = ((_wrap.querySelector('.period-day')  || {}).value || '일별');
+      else if (_mode === 'range') periodLabelStr = (_rg.start || '...') + ' ~ ' + (_rg.end || '...');
+    }
+  } catch(_){}
   const now = new Date();
   const yr = now.getFullYear(), mo = now.getMonth(), dy = now.getDate();
-  let periodStart = null, periodEnd = null;
-  if (periodVal === 'thisMonth') {
-    periodStart = new Date(yr, mo, 1);
-    periodEnd = new Date(yr, mo + 1, 0, 23, 59, 59);
-  } else if (periodVal === 'lastMonth') {
-    periodStart = new Date(yr, mo - 1, 1);
-    periodEnd = new Date(yr, mo, 0, 23, 59, 59);
-  } else if (periodVal === 'last3Months') {
-    periodStart = new Date(yr, mo - 2, 1);
-    periodEnd = new Date(yr, mo + 1, 0, 23, 59, 59);
-  } else if (periodVal === 'thisYear') {
-    periodStart = new Date(yr, 0, 1);
-    periodEnd = new Date(yr, 11, 31, 23, 59, 59);
-  } else if (typeof periodVal === 'string' && periodVal.indexOf('month:') === 0) {
-    // v2.3.134: 특정 월 선택 (예: month:2026-05)
-    const ym = periodVal.slice(6).split('-');
-    const y = parseInt(ym[0], 10), m = parseInt(ym[1], 10);
-    if (y && m) {
-      periodStart = new Date(y, m - 1, 1);
-      periodEnd = new Date(y, m, 0, 23, 59, 59);
-    }
-  } else if (periodVal === 'range') {
-    // v2.3.134: 기간 직접 선택 — ads-kpi-from / ads-kpi-to
-    const _fromEl = document.getElementById('ads-kpi-from');
-    const _toEl = document.getElementById('ads-kpi-to');
-    if (_fromEl && _fromEl.value) periodStart = new Date(_fromEl.value);
-    if (_toEl && _toEl.value) periodEnd = new Date(_toEl.value + 'T23:59:59');
-  }
+  const periodVal = periodLabelStr;  // backward-compat alias
 
   // 필터링 — 쇼핑몰 + 기간
   const filtered = allAds.filter(a => {
@@ -19184,22 +19179,22 @@ function renderAdsPage() {
   const _netSign = netMargin > 0 ? '+' : '';
   kpiRow.innerHTML = `
     <div style="background:#fdf2f8;border:1px solid #fce7f3;border-radius:14px;padding:18px 16px;text-align:center;box-shadow:0 8px 22px rgba(190,24,93,0.07),0 1px 3px rgba(15,23,42,0.04)">
-      <div style="font-size:12px;color:#9d174d;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px">총 광고비 <span style="color:#be185d;opacity:0.65;font-weight:500;font-size:10px">· ${_periodLabel(periodVal)}</span></div>
+      <div style="font-size:12px;color:#9d174d;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px">총 광고비 <span style="color:#be185d;opacity:0.65;font-weight:500;font-size:10px">· ${periodLabelStr}</span></div>
       <div style="font-size:20px;font-weight:800;color:#be185d;letter-spacing:-0.5px;margin-top:3px">₩${totalAds.toLocaleString()}</div>
       <div style="font-size:11px;color:#1e3a8a;font-weight:700;margin-top:6px">${filtered.length}건 집행</div>
     </div>
     <div style="background:#f0fdf4;border:1px solid #dcfce7;border-radius:14px;padding:18px 16px;text-align:center;box-shadow:0 8px 22px rgba(22,163,74,0.07),0 1px 3px rgba(15,23,42,0.04)">
-      <div style="font-size:12px;color:#166534;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px">평균 ROAS <span style="color:#16a34a;opacity:0.65;font-weight:500;font-size:10px">· ${_periodLabel(periodVal)}</span></div>
+      <div style="font-size:12px;color:#166534;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px">평균 ROAS <span style="color:#16a34a;opacity:0.65;font-weight:500;font-size:10px">· ${periodLabelStr}</span></div>
       <div style="font-size:20px;font-weight:800;color:#16a34a;letter-spacing:-0.5px;margin-top:3px">${avgRoas > 0 ? avgRoas.toFixed(0) + '%' : '-'}</div>
       <div style="font-size:11px;color:#1e3a8a;font-weight:700;margin-top:6px">매출 ₩${totalRevenue.toLocaleString()}</div>
     </div>
     <div style="background:#faf5ff;border:1px solid #ede9fe;border-radius:14px;padding:18px 16px;text-align:center;box-shadow:0 8px 22px rgba(124,58,237,0.07),0 1px 3px rgba(15,23,42,0.04)">
-      <div style="font-size:12px;color:#6b21a8;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px" title="NET 마진 = 매출 − 제품원가 − 쇼핑몰수수료 − 광고비&#10;마진율 = NET 마진 ÷ 매출 × 100">⭐ NET 마진 <span style="color:#7c3aed;opacity:0.65;font-weight:500;font-size:10px">· ${_periodLabel(periodVal)}</span></div>
+      <div style="font-size:12px;color:#6b21a8;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px" title="NET 마진 = 매출 − 제품원가 − 쇼핑몰수수료 − 광고비&#10;마진율 = NET 마진 ÷ 매출 × 100">⭐ NET 마진 <span style="color:#7c3aed;opacity:0.65;font-weight:500;font-size:10px">· ${periodLabelStr}</span></div>
       <div style="font-size:20px;font-weight:800;color:${_netColor};letter-spacing:-0.5px;margin-top:3px">${_netSign}₩${Math.round(netMargin).toLocaleString()}</div>
       <div style="font-size:11px;color:#1e3a8a;font-weight:700;margin-top:6px">마진율 ${totalRevenue > 0 ? netMarginPct.toFixed(1) + '%' : '-'}</div>
     </div>
     <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:14px;padding:18px 16px;text-align:center;box-shadow:0 8px 22px rgba(234,88,12,0.07),0 1px 3px rgba(15,23,42,0.04)">
-      <div style="font-size:12px;color:#9a3412;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px" title="CAC (고객획득비용) = 광고비 ÷ 주문 건수&#10;AOV (객단가) = 매출 ÷ 주문 건수">CAC · AOV <span style="color:#ea580c;opacity:0.65;font-weight:500;font-size:10px">· ${_periodLabel(periodVal)}</span></div>
+      <div style="font-size:12px;color:#9a3412;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px" title="CAC (고객획득비용) = 광고비 ÷ 주문 건수&#10;AOV (객단가) = 매출 ÷ 주문 건수">CAC · AOV <span style="color:#ea580c;opacity:0.65;font-weight:500;font-size:10px">· ${periodLabelStr}</span></div>
       <div style="font-size:18px;font-weight:800;color:#ea580c;letter-spacing:-0.5px;margin-top:3px;line-height:1.2">₩${cac.toLocaleString()}<span style="font-size:10px;font-weight:600;color:#9a3412;margin-left:3px">/주문</span></div>
       <div style="font-size:11px;color:#1e3a8a;font-weight:700;margin-top:6px">AOV ₩${aov.toLocaleString()} · ${totalOrderCount}건</div>
     </div>
