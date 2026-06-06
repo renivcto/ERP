@@ -3530,7 +3530,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           </div>
         </div>
         <div class="card" id="trello-settings-card" style="display:none">
-          <div class="card-hdr"><span class="card-title">🎯 Trello 연동</span><span class="badge sky" style="font-size:11px">보드 2개 설정됨</span></div>
+          <div class="card-hdr"><span class="card-title">🎯 Trello 연동</span><span class="badge sky" id="trello-boards-badge" style="font-size:11px">보드 2개 설정됨</span></div>
           <div class="card-body">
             <!-- v1.9.163 — 두 보드 표시 -->
             <div style="background:var(--sky-50);border:1px solid var(--sky-200);border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:var(--sky-800)">
@@ -3544,6 +3544,13 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
               <span style="font-family:monospace;font-size:11.5px;color:var(--gray-500)">Board ID: SMzNZ6Hw</span>
               &nbsp;·&nbsp;
               <a href="https://trello.com/b/SMzNZ6Hw" target="_blank" style="color:#16a34a;font-size:11px;text-decoration:none">🔗 열기</a>
+            </div>
+            <!-- v1.9.942: 보드 3 — Trello 자동화 cfg 의 보드 (르니브 생산관리). cfg 로 동적 표시. -->
+            <div id="trello-board3-row" style="display:none;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#5b21b6">
+              📋 <strong>보드 3:</strong> 🏭 <span id="trello-board3-name">르니브 생산관리</span><br>
+              <span style="font-family:monospace;font-size:11.5px;color:var(--gray-500)">Board ID: <span id="trello-board3-id">-</span></span>
+              &nbsp;·&nbsp;
+              <a id="trello-board3-link" href="#" target="_blank" style="color:#7c3aed;font-size:11px;text-decoration:none">🔗 열기</a>
             </div>
             <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin-bottom:12px;font-size:11.5px;color:#92400e">
               💡 아래 API Key / Token 하나로 두 보드 모두 연동됩니다. (같은 Trello 계정 공유)
@@ -5667,7 +5674,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.128';
+const ERP_VERSION = 'v2.3.129';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -35048,6 +35055,7 @@ async function _updateTrelloAutoCard() {
   }
   _trelloAutoFillBoardSelect(boards || [], (cfg && cfg.boardId) || '', (cfg && cfg.boardName) || '');
   _trelloAutoFillListSelects(cfg);
+  try { _renderTrelloBoard3Row(); } catch(_){}  // v1.9.942: 보드 3 표시
 }
 
 // 내 Trello 계정의 보드 목록 불러오기
@@ -35086,6 +35094,34 @@ async function refreshTrelloAutoLists() {
   }
 }
 
+// v1.9.942: 르니브 생산관리(Trello 자동화 대상 보드) 를 Trello 연동 패널의 "보드 3" 으로 동적 표시.
+//   window._trelloAutoCfg 의 boardId 가 보드 1·2 와 다르면 row 노출 + 배지를 "보드 3개 설정됨" 으로.
+function _renderTrelloBoard3Row() {
+  try {
+    const row = document.getElementById('trello-board3-row');
+    const badge = document.getElementById('trello-boards-badge');
+    if (!row) return;
+    const cfg = window._trelloAutoCfg || null;
+    const bid = (cfg && cfg.boardId) ? String(cfg.boardId).trim() : '';
+    const b1 = (typeof TRELLO_BOARD_ID !== 'undefined') ? String(TRELLO_BOARD_ID) : 'chxG4fva';
+    const b2 = (typeof TRELLO_BOARD_ID_2 !== 'undefined') ? String(TRELLO_BOARD_ID_2) : 'SMzNZ6Hw';
+    const isDistinct = bid && bid !== b1 && bid !== b2;
+    if (!isDistinct) {
+      row.style.display = 'none';
+      if (badge) badge.textContent = '보드 2개 설정됨';
+      return;
+    }
+    const nameEl = document.getElementById('trello-board3-name');
+    const idEl = document.getElementById('trello-board3-id');
+    const linkEl = document.getElementById('trello-board3-link');
+    if (nameEl) nameEl.textContent = cfg.boardName || '르니브 생산관리';
+    if (idEl) idEl.textContent = bid;
+    if (linkEl) linkEl.href = 'https://trello.com/b/' + bid;
+    row.style.display = '';
+    if (badge) badge.textContent = '보드 3개 설정됨';
+  } catch(_){}
+}
+
 async function saveTrelloAutoSettings() {
   const boardSel = document.getElementById('trello-auto-board');
   const boardId = boardSel?.value || '';
@@ -35112,6 +35148,7 @@ async function saveTrelloAutoSettings() {
   const badge = document.getElementById('trello-auto-status-badge');
   if (badge && cfg.enabled) { badge.textContent = '✅ 활성' + (cfg.boardName ? ' — ' + cfg.boardName : ''); badge.style.background = '#dcfce7'; badge.style.color = '#166534'; }
   showNotif('✅ Trello 자동화 설정 저장됨' + (cfg.boardName ? ' (' + cfg.boardName + ')' : ''), 'success');
+  try { _renderTrelloBoard3Row(); } catch(_){}  // v1.9.942: 보드 3 표시 갱신
 }
 
 async function testTrelloAutoCard() {
@@ -35126,7 +35163,7 @@ async function testTrelloAutoCard() {
       desc: '연동 테스트 카드입니다. 확인 후 삭제하세요.\n\n_르니브 ERP 자동 생성 (' + ERP_VERSION + ')_',
       pos: 'top'
     });
-    if (card && card.id) showNotif('✅ 테스트 카드 생성 완료 — 운영 본부 보드를 확인하세요', 'success');
+    if (card && card.id) { const _bn = (cfg && cfg.boardName) ? cfg.boardName : '생산관리'; showNotif('✅ 테스트 카드 생성 완료 — ' + _bn + ' 보드를 확인하세요', 'success'); }
   } catch(e) {
     console.warn('testTrelloAutoCard 실패:', e);
     showNotif('⚠️ 테스트 카드 생성 실패: ' + e.message, 'warning');
