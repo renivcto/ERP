@@ -3444,6 +3444,19 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
               <input type="checkbox" id="slack-board-enabled">
               <label for="slack-board-enabled" style="cursor:pointer;font-weight:600">업무공유 슬랙 알림 사용</label>
             </div>
+            <!-- v2.3.173: Apps Script 릴레이(chat.postMessage) — 댓글이 원글 스레드로 묶이고, 추후 슬랙→ERP 역방향 기반 -->
+            <div style="border-top:1px dashed #e5e7eb;padding-top:12px;margin-bottom:6px">
+              <div style="font-size:11.5px;color:#475569;font-weight:700;margin-bottom:6px">🔗 고급: 스레드 묶기 릴레이 <span style="font-weight:500;color:#94a3b8">(선택 — 설정 시 본문 포함 + 댓글 스레드화)</span></div>
+              <div class="fg" style="margin-bottom:8px">
+                <label style="font-size:11px">릴레이 웹앱 URL (Apps Script)</label>
+                <input class="fi" id="slack-board-relay-url" placeholder="https://script.google.com/macros/s/.../exec">
+              </div>
+              <div class="fg" style="margin-bottom:4px">
+                <label style="font-size:11px">공유 비밀키 (Apps Script 와 동일)</label>
+                <input class="fi" id="slack-board-relay-secret" placeholder="아무 문자열 (예: reniv-board-2026)">
+              </div>
+              <div style="font-size:11px;color:#94a3b8;line-height:1.5">릴레이를 비워두면 기존 Webhook 방식으로 동작합니다.</div>
+            </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <button class="btn btn-primary" onclick="saveSlackBoardSettings()" style="flex:1;min-width:120px">💾 저장</button>
               <button class="btn btn-outline" onclick="testSlackBoardWebhook()">🧪 연결 테스트</button>
@@ -5711,7 +5724,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.172';
+const ERP_VERSION = 'v2.3.173';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -8202,6 +8215,8 @@ const DEFAULT_DB = {
     slackDriveEnabled: false,
     slackBoardWebhookUrl: '',
     slackBoardEnabled: false,
+    slackBoardRelayUrl: '',      // v2.3.173: Apps Script 릴레이(chat.postMessage)
+    slackBoardRelaySecret: '',   // v2.3.173
     slackOpsWebhookUrl: '',      // v2.3.126: 실시간 운영 알림
     slackOpsEnabled: false,      // v2.3.126
     slackDigestWebhookUrl: '',   // v2.3.125: 데일리 브리핑
@@ -29192,6 +29207,7 @@ async function saveFeedPost(){
       comments: [],
     });
     _feedMainPostId = null; // v1.9.244: 새 글이 메인 슬롯에 바로 뜨도록
+    try { window._lastSavedFeedPostId = newId; } catch(_){}  // v2.3.173: 릴레이 매핑용 글ID 캡처
   }
   // v1.9.267/337 — localStorage 즉시 플러시 → 저장 전 닫힘/새로고침 방지
   //   이미지가 raw base64 채로 들어가면 quota 초과(5MB)로 silent fail → 새로고침 시 글이 사라지는 버그.
@@ -29230,8 +29246,13 @@ async function saveFeedPost(){
       const _catLabel = _feedCatLabel(_feedEditingCategory);
       const _author = (u && u.name) ? u.name : '익명';
       const _time = _kstShortTimeMin();
-      const _msg = `📝 *르니브 운영 업무 공유 — 새 글*\n*${_catLabel}*  ${title}\n👤 ${_author}  ·  ⏰ ${_time}`;
-      slackBoardNotify('board_post', { text: _msg });
+      // v2.3.173: 본문 포함(평문·길이제한) + 릴레이 경유(스레드 매핑)
+      const _plain = String(content || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+      const _bodyLine = _plain ? ('\n\n' + (_plain.length > 700 ? _plain.slice(0, 700) + ' …' : _plain)) : '';
+      const _msg = `📝 *르니브 운영 업무 공유 — 새 글*\n*${_catLabel}*  ${title}${_bodyLine}\n\n👤 ${_author}  ·  ⏰ ${_time}`;
+      const _pid = (typeof window !== 'undefined' && window._lastSavedFeedPostId) || '';
+      if (_pid) _boardDispatch(_pid, 'post', _msg);
+      else slackBoardNotify('board_post', { text: _msg });
     } catch(e) { console.warn('[v2.3.23] board_post 알림 실패:', e); }
   }
   try { closeModal('feed-post'); } catch(_){}
@@ -29571,8 +29592,9 @@ function addFeedComment(postId){
     const _author = (u && u.name) ? u.name : '익명';
     const _time = _kstShortTimeMin();
     const _postTitle = (p && p.title) ? p.title : '(제목 없음)';
-    const _msg = `💬 *르니브 운영 업무 공유 — ${_kind}*\n"${_postTitle}" 에 ${_kind}이 달렸습니다.\n👤 ${_author}  ·  ⏰ ${_time}`;
-    slackBoardNotify(_isReply ? 'board_reply' : 'board_comment', { text: _msg });
+    const _ctext = (text && text.length > 500) ? (text.slice(0, 500) + ' …') : (text || '');
+    const _msg = `💬 *${_kind}* · ${_author}  _( ${_time} )_\n${_ctext}`;  // v2.3.173: 스레드용 — 본문 위주
+    _boardDispatch(p.id, _isReply ? 'reply' : 'comment', _msg);
   } catch(e) { console.warn('[v2.3.23] board_comment 알림 실패:', e); }
   input.value = '';
   input.style.height = '36px';
@@ -35258,6 +35280,26 @@ async function slackNotify(type, payload) {
   } catch(e) { console.warn('slackNotify 실패:', e); }
 }
 
+// v2.3.173: 업무공유 → 슬랙 릴레이(Apps Script chat.postMessage). 설정 시 스레드/본문 지원.
+function _boardRelaySend(postId, kind, text) {
+  try {
+    const s = DB.appSettings || {};
+    const url = (s.slackBoardRelayUrl || '').trim();
+    if (!url) return false;  // 릴레이 미설정 → fallback
+    const body = JSON.stringify({ postId: String(postId), kind: kind, text: text, secret: s.slackBoardRelaySecret || '' });
+    fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body: body });
+    return true;
+  } catch(e) { console.warn('[board relay] 실패:', e); return false; }
+}
+// 새 글/댓글/대댓글을 릴레이(있으면) 또는 기존 webhook(없으면)으로 전송
+function _boardDispatch(postId, kind, text) {
+  try {
+    if (_boardRelaySend(postId, kind, text)) return;  // chat.postMessage 경유
+  } catch(_){}
+  const type = (kind === 'post') ? 'board_post' : (kind === 'reply' ? 'board_reply' : 'board_comment');
+  try { slackBoardNotify(type, { text: text }); } catch(_){}
+}
+
 // v2.3.23: 운영 업무 공유 슬랙 알림 — 전용 채널 #업무공유-게시판
 //   payload: { type: 'board_post' | 'board_comment' | 'board_reply', text }
 async function slackBoardNotify(type, payload) {
@@ -35304,6 +35346,11 @@ function _updateSlackBoardStatusBadge() {
   if (urlInp) urlInp.value = url;
   const enInp = document.getElementById('slack-board-enabled');
   if (enInp) enInp.checked = enabled;
+  // v2.3.173: 릴레이 필드
+  const _ru = document.getElementById('slack-board-relay-url');
+  if (_ru) _ru.value = (DB.appSettings && DB.appSettings.slackBoardRelayUrl) || '';
+  const _rs = document.getElementById('slack-board-relay-secret');
+  if (_rs) _rs.value = (DB.appSettings && DB.appSettings.slackBoardRelaySecret) || '';
 }
 
 function saveSlackBoardSettings() {
@@ -35312,6 +35359,9 @@ function saveSlackBoardSettings() {
   if (!DB.appSettings) DB.appSettings = {};
   DB.appSettings.slackBoardWebhookUrl = url;
   DB.appSettings.slackBoardEnabled = enabled;
+  // v2.3.173: 릴레이 URL/Secret 저장
+  DB.appSettings.slackBoardRelayUrl = (document.getElementById('slack-board-relay-url')?.value || '').trim();
+  DB.appSettings.slackBoardRelaySecret = (document.getElementById('slack-board-relay-secret')?.value || '').trim();
   try { localStorage.setItem('reniv_slack_board_webhook_backup', url); } catch(_){}
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
   _updateSlackBoardStatusBadge();
@@ -49176,7 +49226,7 @@ function initERPWhenReady() {
         const mergedSettings = {};
         // string 필드: 비어있지 않은 값 우선 (Firestore > localStorage, 둘 다 있으면 Firestore)
         // v2.3.18: slackDriveWebhookUrl 추가 / v2.3.23: slackBoardWebhookUrl 추가
-        const strKeys = ['slackWebhookUrl','geminiApiKey','slackDriveWebhookUrl','slackBoardWebhookUrl','slackDigestWebhookUrl','slackDigestTime','slackOpsWebhookUrl'];  // v2.3.126: ops 추가
+        const strKeys = ['slackWebhookUrl','geminiApiKey','slackDriveWebhookUrl','slackBoardWebhookUrl','slackDigestWebhookUrl','slackDigestTime','slackOpsWebhookUrl','slackBoardRelayUrl','slackBoardRelaySecret'];  // v2.3.173: board relay 추가
         strKeys.forEach(k => {
           const fs = (typeof fsS[k] === 'string' && fsS[k].trim()) ? fsS[k] : '';
           const lc = (typeof lcS[k] === 'string' && lcS[k].trim()) ? lcS[k] : '';
