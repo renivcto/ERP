@@ -5711,7 +5711,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.169';
+const ERP_VERSION = 'v2.3.170';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -31986,31 +31986,26 @@ function confirmPayDate(expenseId, orderId, category) {
   e.paidDate = d;
   // v1.9.653: updatedAt 명시 — 머지 로직(v1.9.405)이 어느 쪽이 최신인지 판정해서 Firestore 옛 데이터로 revert 되는 것 방지
   e.updatedAt = Date.now();
-  // v2.3.167: 같은 (orderId, category) 의 다른 '미지급' 중복 자동 제거 (togglePayStatus 와 동일)
-  //   해외 PO 선급금/잔금 등에서 동기화로 생긴 쌍둥이 미지급 행이 남아 '지급완료로 안 바뀌는' 버그 해결
+  // v2.3.170: 같은 (orderId, category) 의 모든 쌍둥이도 함께 '지급완료' 처리.
+  //   제거하지 않는다 — 개수가 줄면 COUNT-GUARD(서버가 더 많으면 재병합)가 작동해
+  //   삭제한 미지급 쌍둥이를 서버에서 다시 끌어와 '지급완료 → 지급요청' 으로 되돌리던 버그 차단.
+  //   모든 복사본을 paid 로 맞춰 두면 어느 레코드가 살아남아도 화면은 지급완료로 표시되고,
+  //   다음 로드 시 dedupExpensesV211 이 paid 1건으로 자동 collapse 한다.
   try {
-    if (e.orderId && e.category) {
+    if (e.orderId && e.category && (e.category === 'po_prepay' || e.category === 'po_balance')) {
       const _oidN = Number(e.orderId);
-      // v2.3.169: 발주 선급금/잔금은 발주 1건당 1행이 정상 → 방금 지급한 e 1건만 남기고
-      //   같은 (orderId, category) 의 다른 모든 중복(미지급 쌍둥이 + 이전 paid 중복)을 제거
-      const _dedupCats = (e.category === 'po_prepay' || e.category === 'po_balance');
-      const _dupReq = (DB.expenses||[]).filter(x => x
+      const _twins = (DB.expenses||[]).filter(x => x
         && x.category === e.category
         && (x.orderId === e.orderId || Number(x.orderId) === _oidN)
-        && String(x.id) !== String(e.id)
-        && (_dedupCats || x.paidStatus !== 'paid'));
-      if (_dupReq.length) {
-        const _rm = new Set(_dupReq.map(x => String(x.id)));
-        DB.expenses = (DB.expenses||[]).filter(x => x && !_rm.has(String(x.id)));
-        // 삭제 tombstone 기록 (다른 기기/Firestore 머지 시 부활 차단)
-        try {
-          if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
-          _dupReq.forEach(x => { if (DB._deletedExpenseIds.indexOf(x.id) === -1) DB._deletedExpenseIds.push(x.id); });
-        } catch(_){}
-        console.log('🧹 [confirmPayDate v167] 미지급 중복 ' + _dupReq.length + '건 제거 (paid 보존 id=' + e.id + ')');
+        && String(x.id) !== String(e.id));
+      if (_twins.length) {
+        const _now170 = Date.now();
+        _twins.forEach(x => { x.paidStatus = 'paid'; x.paidDate = d; x.updatedAt = _now170; });
+        DB._expenseDedupV211 = false;  // 다음 로드에서 paid 1건으로 collapse 예약
+        console.log('💳 [confirmPayDate v170] 같은 발주 쌍둥이 ' + _twins.length + '건도 지급완료 처리 (collapse 예약)');
       }
     }
-  } catch(_dupErr) { console.warn('[confirmPayDate] 중복 정리 실패:', _dupErr); }
+  } catch(_twErr) { console.warn('[confirmPayDate] 쌍둥이 동기화 실패:', _twErr); }
   console.log('[confirmPayDate] 저장 전/후:', {id: e.id, title: e.title, orderId: e.orderId, category: e.category, before: _before, after: { paidStatus: e.paidStatus, paidDate: e.paidDate, updatedAt: e.updatedAt }, calledWith:{expenseId, orderId, category}});
   // v1.9.639: 즉시 persist (await) — 디바운스 우회 + 새로고침 race 방지
   try {
