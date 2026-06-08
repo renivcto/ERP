@@ -5708,7 +5708,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.160';
+const ERP_VERSION = 'v2.3.161';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -25296,6 +25296,12 @@ function _syncOverseasPoApprovalExpense(orderId) {
       approvedAt: (o.stampData || o.stampNotRequired) ? Date.now() : 0,
     };
     DB.approvals.push(ap);
+    // v2.3.161: 해외 PO 발주서 결재 슬랙 알림 (신규 생성 시 1회)
+    try {
+      const _amtTxt161 = currency === 'KRW' ? null : (currency + ' ' + grandTotal.toLocaleString(undefined, { maximumFractionDigits: 2 }));
+      slackNotify(ap.status === 'approved' ? 'approval_done' : 'approval_request',
+        Object.assign({}, ap, { vendor: vendorName, amountText: _amtTxt161 }));
+    } catch(_){}
   } else {
     // 업데이트
     ap.title = `[해외 PO] ${vendorName}`;
@@ -25331,6 +25337,11 @@ function _syncOverseasPoApprovalExpense(orderId) {
         note: noteP,
       };
       DB.expenses.push(expPre);
+      // v2.3.161: 해외 PO 선급금 지출결의서 슬랙 알림 (신규 생성 시 1회)
+      try {
+        const _amtTxtP161 = currency === 'KRW' ? null : (currency + ' ' + _prepayAmt.toFixed(2));
+        slackNotify('pay_request', Object.assign({}, expPre, { amountText: _amtTxtP161 }));
+      } catch(_){}
     } else if (expPre.paidStatus === 'paid') {
       // 지급완료는 보존
     } else if (expPre.__krwConverted) {
@@ -25382,6 +25393,11 @@ function _syncOverseasPoApprovalExpense(orderId) {
       note: note,
     };
     DB.expenses.push(exp);
+    // v2.3.161: 해외 PO 잔금 지출결의서 슬랙 알림 (신규 생성 시 1회)
+    try {
+      const _amtTxtB161 = currency === 'KRW' ? null : (currency + ' ' + _balanceAmt.toFixed(2));
+      slackNotify('pay_request', Object.assign({}, exp, { amountText: _amtTxtB161 }));
+    } catch(_){}
   } else if (exp.paidStatus === 'paid') {
     // v1.9.861: 지급완료 expense 는 절대 update 하지 않음 (부활 차단)
   } else if (exp.__krwConverted) {
@@ -34968,10 +34984,10 @@ function _buildWebhookPayload(kind, type, payload) {
     bodyText = `${urgentPrefix}${payload.title}\n지급예정일이 지났습니다. 빠른 지급 부탁드립니다.\n• 거래처: ${payload.vendor||'-'}\n• 금액: ${fmtWon(payload.amount||0)}${payload.dueDate?`\n• 예정일: ${payload.dueDate}`:''}${overdueLine}`;
   } else if (type === 'pay_request' && payload && payload.title) {
     // 지출결의서 등록
-    bodyText = `${urgentPrefix}${payload.title}${urgentTag}\n지급 금액 ${fmtWon(payload.amount||0)} 의 지출결의서가 등록되었습니다.\n결재 부탁드립니다.${payload.vendor?`\n• 거래처: ${payload.vendor}`:''}${payload.dueDate?`\n• 결제예정일: ${payload.dueDate}`:''}`;
+    bodyText = `${urgentPrefix}${payload.title}${urgentTag}\n지급 금액 ${payload.amountText || fmtWon(payload.amount||0)} 의 지출결의서가 등록되었습니다.\n결재 부탁드립니다.${payload.vendor?`\n• 거래처: ${payload.vendor}`:''}${payload.dueDate?`\n• 결제예정일: ${payload.dueDate}`:''}`;  // v2.3.161: amountText(외화) 지원
   } else if (type === 'approval_request' && payload && payload.title) {
     if (_isPo) {
-      bodyText = `${urgentPrefix}${payload.title}${urgentTag}\n발주서를 결재해 주세요.${payload.amount?`\n• 금액: ${fmtWon(payload.amount)}`:''}${payload.vendor?`\n• 거래처: ${payload.vendor}`:''}`;
+      bodyText = `${urgentPrefix}${payload.title}${urgentTag}\n발주서를 결재해 주세요.${payload.amountText ? `\n• 금액: ${payload.amountText}` : (payload.amount?`\n• 금액: ${fmtWon(payload.amount)}`:'')}${payload.vendor?`\n• 거래처: ${payload.vendor}`:''}`;  // v2.3.161: amountText(외화) 지원
     } else if (_isNonPo) {
       const cat = payload.category ? ` (${payload.category})` : '';
       bodyText = `${urgentPrefix}${payload.title}${cat}${urgentTag}\n품의서 또는 기안서를 결재해 주세요.`;
