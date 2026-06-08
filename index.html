@@ -5711,7 +5711,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.171';
+const ERP_VERSION = 'v2.3.172';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6816,17 +6816,37 @@ async function _doSaveDataInner() {
   } catch(e) {
     const _sz = JSON.stringify(dbToSave).length;
     console.error('❌ [localStorage] 저장 실패!', e.message, '— 크기:', _sz);
-    // v2.2.80 — Quota 초과는 사용자에게 즉시 알림 (silent fail 방지)
+    // v2.3.172: Quota 초과 — 무거운 Firestore-백업 컬렉션을 localStorage 사본에서 점진 제외 후 재시도.
+    //   메모리 DB / Firestore 는 그대로 유지(데이터 손실 없음). 로드 시 Firestore 머지가 자동 복원.
     if (e && e.name === 'QuotaExceededError') {
+      const _heavyKeys = ['feedPosts','stockHistory','approvalComments','archivedItems','cs','insights','newProducts','qcs','partSpecs','quotes'];
+      let _slimSaved = false;
       try {
-        if (!window._v280QuotaWarned) {
-          window._v280QuotaWarned = true;
-          if (typeof showNotif === 'function') {
-            showNotif('⚠️ 브라우저 저장 공간 초과 — Firestore 에는 저장됩니다. 새 탭으로 재로딩 권장', 'warning');
-          }
-          setTimeout(()=>{ window._v280QuotaWarned = false; }, 30000);
+        const _base172 = JSON.parse(_lsJson);  // shopOrders 오프로드가 반영된 사본
+        for (let _i = 1; _i <= _heavyKeys.length; _i++) {
+          const _slim = Object.assign({}, _base172);
+          for (let _j = 0; _j < _i; _j++) { _slim[_heavyKeys[_j]] = []; }
+          _slim._lsTrimmedV172 = _heavyKeys.slice(0, _i);
+          try {
+            localStorage.setItem(STORE_KEY, JSON.stringify(_slim));
+            console.warn('💾 [v172] localStorage 슬림 저장 성공 — 캐시에서 제외(Firestore 보존):', _heavyKeys.slice(0, _i).join(', '));
+            _slimSaved = true;
+            break;
+          } catch(_qe2) { /* 더 제거하고 재시도 */ }
         }
-      } catch(_){}
+      } catch(_pe) { console.warn('[v172] 슬림 저장 준비 실패:', _pe); }
+      if (!_slimSaved) {
+        console.error('❌ [v172] 슬림 저장도 실패 — Firestore/IDB 만으로 동작');
+        try {
+          if (!window._v280QuotaWarned) {
+            window._v280QuotaWarned = true;
+            if (typeof showNotif === 'function') {
+              showNotif('⚠️ 브라우저 저장 공간 부족 — Firestore/IDB 에 저장됩니다. 새 탭으로 재로딩 권장', 'warning');
+            }
+            setTimeout(()=>{ window._v280QuotaWarned = false; }, 30000);
+          }
+        } catch(_){}
+      }
     }
   }
 
