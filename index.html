@@ -5711,7 +5711,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.170';
+const ERP_VERSION = 'v2.3.171';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -31862,6 +31862,8 @@ async function togglePayStatus(expenseId, orderId, category) {
     slackNotify('pay_done', e);
   }
   e.updatedAt = Date.now();
+  // v2.3.171: override 동기화 (paid → 기록 / requested → 해제) — 새로고침 후에도 상태 유지
+  try { _setExpensePaidOverride(e, e.paidDate || '', e.paidStatus === 'paid'); } catch(_){}
   // v1.9.863: await 로 race condition 차단 — 두 토글 연속 시 첫 저장 완료 대기
   console.log('💳 [PAY TOGGLE] expense id=' + e.id + ' status=' + e.paidStatus + ' date=' + (e.paidDate||''));
   try {
@@ -31966,6 +31968,52 @@ function openPayDatePicker(expenseId, orderId, category) {
   setTimeout(() => { const inp = document.getElementById('pay-date-picker-input'); if (inp) inp.focus(); }, 50);
 }
 
+// ═══════════ v2.3.171: 지급완료 영속 override (전용 shared setting) ═══════════
+//   메인 DB expenses 의 paidStatus 가 머지/COUNT-GUARD 로 되돌아가도,
+//   이 override 가 로드 후 마지막에 강제로 paid 를 다시 입혀 영구 보장.
+function _expensePaidKey(e) {
+  if (!e) return null;
+  if (e.orderId && (e.category === 'po_prepay' || e.category === 'po_balance')) {
+    return 'po:' + e.orderId + ':' + e.category;   // 발주 단위 키 → 중복 id 무관
+  }
+  return 'id:' + e.id;
+}
+async function _setExpensePaidOverride(e, paidDate, isPaid) {
+  try {
+    const key = _expensePaidKey(e);
+    if (!key) return;
+    let map = window._expensePaidOverrides;
+    if (!map || typeof map !== 'object') {
+      map = (typeof loadSharedSetting === 'function') ? await loadSharedSetting('expense_paid_overrides') : null;
+      map = (map && typeof map === 'object' && !Array.isArray(map)) ? map : {};
+      window._expensePaidOverrides = map;
+    }
+    if (isPaid) map[key] = { paidDate: paidDate || '', ts: Date.now() };
+    else delete map[key];
+    if (typeof saveSharedSetting === 'function') await saveSharedSetting('expense_paid_overrides', map);
+    console.log('💾 [override] ' + (isPaid ? '지급완료' : '해제') + ' 기록: ' + key);
+  } catch(err) { console.warn('[expense override] 저장 실패:', err); }
+}
+function _applyExpensePaidOverrides() {
+  try {
+    const map = window._expensePaidOverrides;
+    if (!map || typeof map !== 'object') return 0;
+    let applied = 0;
+    (DB.expenses||[]).forEach(e => {
+      if (!e) return;
+      const key = _expensePaidKey(e);
+      if (key && map[key] && e.paidStatus !== 'paid') {
+        e.paidStatus = 'paid';
+        if (map[key].paidDate && !e.paidDate) e.paidDate = map[key].paidDate;
+        e.updatedAt = Date.now();
+        applied++;
+      }
+    });
+    if (applied > 0) console.log('💳 [override] 지급완료 상태 ' + applied + '건 강제 복원');
+    return applied;
+  } catch(err) { console.warn('[expense override] 적용 실패:', err); return 0; }
+}
+
 // v1.9.212: 지급 완료 처리 — strict id 비교 + 디바운스 우회 + 검증 + 2차 재렌더
 // v1.9.214: (orderId, category) 복합키 우선 사용 — 중복 id 시에도 정확한 레코드만 업데이트
 function confirmPayDate(expenseId, orderId, category) {
@@ -32006,6 +32054,8 @@ function confirmPayDate(expenseId, orderId, category) {
       }
     }
   } catch(_twErr) { console.warn('[confirmPayDate] 쌍둥이 동기화 실패:', _twErr); }
+  // v2.3.171: 전용 shared setting 에 지급완료 영속 기록 (머지/가드 되돌림 방지)
+  try { _setExpensePaidOverride(e, d, true); } catch(_){}
   console.log('[confirmPayDate] 저장 전/후:', {id: e.id, title: e.title, orderId: e.orderId, category: e.category, before: _before, after: { paidStatus: e.paidStatus, paidDate: e.paidDate, updatedAt: e.updatedAt }, calledWith:{expenseId, orderId, category}});
   // v1.9.639: 즉시 persist (await) — 디바운스 우회 + 새로고침 race 방지
   try {
@@ -49755,6 +49805,21 @@ function initERPWhenReady() {
       _dbFromDefault = false;  // v1.9.955: Firestore 머지 성공 → 실제 데이터 확보 → 쓰기 차단 해제
       _firestoreDataLoaded = true;  // ✅ Firestore 쓰기 허용
       console.log('✅ Firestore 데이터 로드 완료 — Firestore 쓰기 활성화');
+      // v2.3.171: 지급완료 override 적용 (머지 후 마지막에 강제 — paid 되돌림 영구 차단)
+      try {
+        if (typeof loadSharedSetting === 'function') {
+          loadSharedSetting('expense_paid_overrides').then(function(_m){
+            window._expensePaidOverrides = (_m && typeof _m === 'object' && !Array.isArray(_m)) ? _m : {};
+            const _n = (typeof _applyExpensePaidOverrides === 'function') ? _applyExpensePaidOverrides() : 0;
+            if (_n > 0) {
+              try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+              try { if (typeof renderApprovalPage === 'function') renderApprovalPage(); } catch(_){}
+              try { if (typeof updateApprovalBadges === 'function') updateApprovalBadges(); } catch(_){}
+              try { if (typeof saveData === 'function') saveData(); } catch(_){}
+            }
+          }).catch(function(){});
+        }
+      } catch(_){}
       // v1.9.772: fast-path 시점에 사용자가 작업했던 변경 사항을 자동 재저장
       if (window._pendingSaveAfterFsLoad) {
         window._pendingSaveAfterFsLoad = false;
