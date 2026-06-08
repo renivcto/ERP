@@ -5711,7 +5711,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.168';
+const ERP_VERSION = 'v2.3.169';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -31991,11 +31991,14 @@ function confirmPayDate(expenseId, orderId, category) {
   try {
     if (e.orderId && e.category) {
       const _oidN = Number(e.orderId);
+      // v2.3.169: 발주 선급금/잔금은 발주 1건당 1행이 정상 → 방금 지급한 e 1건만 남기고
+      //   같은 (orderId, category) 의 다른 모든 중복(미지급 쌍둥이 + 이전 paid 중복)을 제거
+      const _dedupCats = (e.category === 'po_prepay' || e.category === 'po_balance');
       const _dupReq = (DB.expenses||[]).filter(x => x
         && x.category === e.category
         && (x.orderId === e.orderId || Number(x.orderId) === _oidN)
         && String(x.id) !== String(e.id)
-        && x.paidStatus !== 'paid');
+        && (_dedupCats || x.paidStatus !== 'paid'));
       if (_dupReq.length) {
         const _rm = new Set(_dupReq.map(x => String(x.id)));
         DB.expenses = (DB.expenses||[]).filter(x => x && !_rm.has(String(x.id)));
