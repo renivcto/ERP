@@ -5708,7 +5708,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.162';
+const ERP_VERSION = 'v2.3.164';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -8183,7 +8183,7 @@ const DEFAULT_DB = {
     slackOpsEnabled: false,      // v2.3.126
     slackDigestWebhookUrl: '',   // v2.3.125: 데일리 브리핑
     slackDigestEnabled: false,   // v2.3.125
-    slackDigestTime: '09:00',    // v2.3.125 (KST)
+    slackDigestTime: '07:00',    // v2.3.164: 매일 오전 7시 (KST)
     slackEnabled: false,
     lastWebhookTestAt: 0,
     geminiApiKey: '',
@@ -8255,7 +8255,9 @@ if (DB == null) {
       // v2.3.125: 데일리 브리핑 기본값
       if (typeof DB.appSettings.slackDigestWebhookUrl !== 'string') DB.appSettings.slackDigestWebhookUrl = '';
       if (typeof DB.appSettings.slackDigestEnabled !== 'boolean') DB.appSettings.slackDigestEnabled = false;
-      if (typeof DB.appSettings.slackDigestTime !== 'string') DB.appSettings.slackDigestTime = '09:00';
+      if (typeof DB.appSettings.slackDigestTime !== 'string') DB.appSettings.slackDigestTime = '07:00';
+      // v2.3.164: 데일리 브리핑 시각을 오전 7시로 1회 강제 리셋 (사용자 요청)
+      if (!DB.appSettings.__digest7amV164) { DB.appSettings.slackDigestTime = '07:00'; DB.appSettings.__digest7amV164 = true; }
       // v2.3.126: 운영 알림 기본값
       if (typeof DB.appSettings.slackOpsWebhookUrl !== 'string') DB.appSettings.slackOpsWebhookUrl = '';
       if (typeof DB.appSettings.slackOpsEnabled !== 'boolean') DB.appSettings.slackOpsEnabled = false;
@@ -35725,16 +35727,20 @@ function _buildDailyDigestText() {
   L.push('*☀️ 르니브 데일리 브리핑 — ' + today + ' (' + dow + ')*');
   let hasIssue = false;
 
-  // 1) 재고 부족 (minStock 설정된 품목만)
-  const low = (DB.items||[]).filter(it => it && Number(it.minStock) > 0 && Number(it.stock||0) < Number(it.minStock));
-  if (low.length) {
+  // 1) 완제품 재고 (type === '완제품') — 재고 적은 순, 최소재고 미달이면 🚨 표시
+  const finished = (DB.items||[]).filter(it => it && it.type === '완제품')
+    .sort((a,b) => (Number(a.stock)||0) - (Number(b.stock)||0));
+  if (finished.length) {
     hasIssue = true;
     L.push('');
-    L.push('🚨 *재고 부족 ' + low.length + '개*');
-    low.slice(0, 8).forEach(it => {
-      L.push('• ' + (it.name||'-') + (it.spec ? ' [' + it.spec + ']' : '') + ' — 재고 ' + (Number(it.stock)||0) + ' / 최소 ' + Number(it.minStock));
+    L.push('📦 *완제품 재고 ' + finished.length + '종*');
+    finished.slice(0, 12).forEach(it => {
+      const stk = Number(it.stock)||0;
+      const min = Number(it.minStock)||0;
+      const low = min > 0 && stk < min;
+      L.push('• ' + (low ? '🚨 ' : '') + (it.name||'-') + (it.spec ? ' [' + it.spec + ']' : '') + ' — 재고 ' + stk.toLocaleString() + (min > 0 ? ' / 최소 ' + min.toLocaleString() : ''));
     });
-    if (low.length > 8) L.push('  … 외 ' + (low.length - 8) + '개');
+    if (finished.length > 12) L.push('  … 외 ' + (finished.length - 12) + '종');
   }
 
   // 2) 입고 지연 / 입고 예정 (입고전 발주 기준)
@@ -35801,7 +35807,7 @@ function _buildDailyDigestText() {
 
   if (!hasIssue) {
     L.push('');
-    L.push('✅ 특이사항 없음 — 재고·입고·생산·지급 모두 정상입니다.');
+    L.push('✅ 특이사항 없음 — 완제품·입고·생산·지급 모두 정상입니다.');
   }
   return L.join('\n');
 }
@@ -35820,7 +35826,7 @@ function _updateSlackDigestStatusBadge() {
   const urlInp = document.getElementById('slack-digest-url');
   if (urlInp) urlInp.value = url;
   const timeInp = document.getElementById('slack-digest-time');
-  if (timeInp) timeInp.value = (s.slackDigestTime && /^\d{2}:\d{2}$/.test(s.slackDigestTime)) ? s.slackDigestTime : '09:00';
+  if (timeInp) timeInp.value = (s.slackDigestTime && /^\d{2}:\d{2}$/.test(s.slackDigestTime)) ? s.slackDigestTime : '07:00';
   const enInp = document.getElementById('slack-digest-enabled');
   if (enInp) enInp.checked = enabled;
 }
@@ -35831,7 +35837,7 @@ function saveSlackDigestSettings() {
   const enabled = !!document.getElementById('slack-digest-enabled')?.checked;
   if (!DB.appSettings) DB.appSettings = {};
   DB.appSettings.slackDigestWebhookUrl = url;
-  DB.appSettings.slackDigestTime = /^\d{2}:\d{2}$/.test(time) ? time : '09:00';
+  DB.appSettings.slackDigestTime = /^\d{2}:\d{2}$/.test(time) ? time : '07:00';
   DB.appSettings.slackDigestEnabled = enabled;
   try { localStorage.setItem('reniv_slack_digest_webhook_backup', url); } catch(_){}
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
@@ -35890,8 +35896,10 @@ async function _maybeSendDailyDigest() {
     const url = _cleanWebhookUrl(s.slackDigestWebhookUrl || '');
     if (!url) return;
     if (typeof _dbFromDefault !== 'undefined' && _dbFromDefault) return;  // 빈 기본데이터 상태 — 발송 금지
+    // v2.3.163: Firestore 로드 완료 전엔 발송 금지 (기기간 중복발송 방지 — 공유 상태 가드가 신뢰성 있어야 함)
+    if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) return;
     const today = _kstDateStr(0);
-    const sendTime = (s.slackDigestTime && /^\d{2}:\d{2}$/.test(s.slackDigestTime)) ? s.slackDigestTime : '09:00';
+    const sendTime = (s.slackDigestTime && /^\d{2}:\d{2}$/.test(s.slackDigestTime)) ? s.slackDigestTime : '07:00';
     if (_kstNowHM() < sendTime) return;
     // 1차: 로컬 가드 (같은 기기 중복 방지)
     try { if (localStorage.getItem('reniv_digest_last_sent') === today) return; } catch(_){}
@@ -49058,7 +49066,7 @@ function initERPWhenReady() {
       } catch(e) {
         console.warn('⚠️ appSettings 병합 실패:', e.message);
         // v2.3.18: fallback object 에도 drive 필드 / v2.3.23: board 필드
-        merged.appSettings = localDB.appSettings || firestoreDB.appSettings || { slackWebhookUrl:'', slackEnabled:false, slackDriveWebhookUrl:'', slackDriveEnabled:false, slackBoardWebhookUrl:'', slackBoardEnabled:false, slackDigestWebhookUrl:'', slackDigestEnabled:false, slackDigestTime:'09:00', slackOpsWebhookUrl:'', slackOpsEnabled:false, lastWebhookTestAt:0, geminiApiKey:'' };
+        merged.appSettings = localDB.appSettings || firestoreDB.appSettings || { slackWebhookUrl:'', slackEnabled:false, slackDriveWebhookUrl:'', slackDriveEnabled:false, slackBoardWebhookUrl:'', slackBoardEnabled:false, slackDigestWebhookUrl:'', slackDigestEnabled:false, slackDigestTime:'07:00', slackOpsWebhookUrl:'', slackOpsEnabled:false, lastWebhookTestAt:0, geminiApiKey:'' };
       }
       // v1.9.228 — 삭제 Tombstone 은 UNION(합집합). 기기간 삭제 의도가 모두 보존되도록.
       try {
