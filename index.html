@@ -5711,7 +5711,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.166';
+const ERP_VERSION = 'v2.3.167';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -31971,9 +31971,11 @@ function openPayDatePicker(expenseId, orderId, category) {
 function confirmPayDate(expenseId, orderId, category) {
   // 클릭 시점 중복 id 자동 재할당 (혹시 모달 열린 사이 중복이 생겼더라도)
   try { _autoHealExpenseIdCollisions(expenseId); } catch(_){}
-  // 1순위: (orderId, category) 복합키 — 가장 안전
-  let e = _findExpenseByOrderAndCategory(orderId, category);
-  // 2순위: 레거시 id 기반 (orderId/category 없이 호출된 경우)
+  // v2.3.167: 클릭한 expense id 우선 매칭 (paid-first 선택이 다른 행을 잡는 것 방지)
+  const _eidStr167 = String(expenseId);
+  let e = (DB.expenses||[]).find(x => x && String(x.id) === _eidStr167);
+  // fallback: (orderId, category) 복합키 → 레거시 id
+  if (!e) e = _findExpenseByOrderAndCategory(orderId, category);
   if (!e) e = _findExpenseByIdStrict(expenseId);
   if (!e) { console.warn('[confirmPayDate] expense not found:', {expenseId, orderId, category}); showNotif('지출결의서를 찾을 수 없습니다 (id=' + expenseId + ')', 'warning'); return; }
   const inp = document.getElementById('pay-date-picker-input');
@@ -31984,6 +31986,28 @@ function confirmPayDate(expenseId, orderId, category) {
   e.paidDate = d;
   // v1.9.653: updatedAt 명시 — 머지 로직(v1.9.405)이 어느 쪽이 최신인지 판정해서 Firestore 옛 데이터로 revert 되는 것 방지
   e.updatedAt = Date.now();
+  // v2.3.167: 같은 (orderId, category) 의 다른 '미지급' 중복 자동 제거 (togglePayStatus 와 동일)
+  //   해외 PO 선급금/잔금 등에서 동기화로 생긴 쌍둥이 미지급 행이 남아 '지급완료로 안 바뀌는' 버그 해결
+  try {
+    if (e.orderId && e.category) {
+      const _oidN = Number(e.orderId);
+      const _dupReq = (DB.expenses||[]).filter(x => x
+        && x.category === e.category
+        && (x.orderId === e.orderId || Number(x.orderId) === _oidN)
+        && String(x.id) !== String(e.id)
+        && x.paidStatus !== 'paid');
+      if (_dupReq.length) {
+        const _rm = new Set(_dupReq.map(x => String(x.id)));
+        DB.expenses = (DB.expenses||[]).filter(x => x && !_rm.has(String(x.id)));
+        // 삭제 tombstone 기록 (다른 기기/Firestore 머지 시 부활 차단)
+        try {
+          if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
+          _dupReq.forEach(x => { if (DB._deletedExpenseIds.indexOf(x.id) === -1) DB._deletedExpenseIds.push(x.id); });
+        } catch(_){}
+        console.log('🧹 [confirmPayDate v167] 미지급 중복 ' + _dupReq.length + '건 제거 (paid 보존 id=' + e.id + ')');
+      }
+    }
+  } catch(_dupErr) { console.warn('[confirmPayDate] 중복 정리 실패:', _dupErr); }
   console.log('[confirmPayDate] 저장 전/후:', {id: e.id, title: e.title, orderId: e.orderId, category: e.category, before: _before, after: { paidStatus: e.paidStatus, paidDate: e.paidDate, updatedAt: e.updatedAt }, calledWith:{expenseId, orderId, category}});
   // v1.9.639: 즉시 persist (await) — 디바운스 우회 + 새로고침 race 방지
   try {
