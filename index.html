@@ -5724,7 +5724,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.173';
+const ERP_VERSION = 'v2.3.174';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6800,24 +6800,32 @@ async function _doSaveDataInner() {
 
   // localStorage 항상 저장 (백업)
   // v2.3.105: shopOrders 가 크면 IDB 로 오프로드 (localStorage quota 회피)
+  // v2.3.174: stockHistory 도 선제 오프로드 — 동일 패턴 일반화 (둘 다 Firestore-backed → IDB miss 시 머지로 복원).
+  //   마커 키 규칙: '_'+col+'InIdb' / col+'_offload' (기존 shopOrders 키와 정확히 일치 → hydrate 호환).
   let _lsJson;
   try {
-    const _shopOrdersJson = JSON.stringify(dbToSave.shopOrders || []);
     const _OFFLOAD_THRESHOLD = 300 * 1024; // 300KB
-    if (_shopOrdersJson.length > _OFFLOAD_THRESHOLD) {
+    const _OFFLOAD_COLS = ['shopOrders', 'stockHistory'];
+    let _lsCopy = null; // 오프로드가 실제 발생할 때만 lazy 복사
+    for (const _col of _OFFLOAD_COLS) {
+      const _colJson = JSON.stringify(dbToSave[_col] || []);
+      if (_colJson.length <= _OFFLOAD_THRESHOLD) continue;
       try {
-        idbSet('shopOrders_offload', _shopOrdersJson);
-        // localStorage 전용 copy — shopOrders 는 빈 배열 + 마커
-        const _lsCopy = Object.assign({}, dbToSave, { shopOrders: [], _shopOrdersInIdb: true, _shopOrdersIdbCount: (dbToSave.shopOrders||[]).length, _shopOrdersIdbAt: Date.now() });
-        _lsJson = JSON.stringify(_lsCopy);
-        console.log('📦 [v2.3.105 OFFLOAD] shopOrders ' + (_shopOrdersJson.length/1024).toFixed(0) + 'KB / ' + (dbToSave.shopOrders||[]).length + '건 → IDB');
+        idbSet(_col + '_offload', _colJson);
+        if (!_lsCopy) _lsCopy = Object.assign({}, dbToSave);
+        // localStorage 전용 copy — 해당 컬렉션은 빈 배열 + 마커
+        const _cnt = (dbToSave[_col] || []).length;
+        _lsCopy[_col] = [];
+        _lsCopy['_' + _col + 'InIdb'] = true;
+        _lsCopy['_' + _col + 'IdbCount'] = _cnt;
+        _lsCopy['_' + _col + 'IdbAt'] = Date.now();
+        console.log('📦 [v2.3.174 OFFLOAD] ' + _col + ' ' + (_colJson.length / 1024).toFixed(0) + 'KB / ' + _cnt + '건 → IDB');
       } catch (_e) {
-        console.warn('[v2.3.105] shopOrders IDB 오프로드 실패 — 인라인 저장 시도:', _e);
-        _lsJson = JSON.stringify(dbToSave);
+        console.warn('[v2.3.174] ' + _col + ' IDB 오프로드 실패 — 인라인 저장 시도:', _e);
+        // 실패한 컬렉션은 _lsCopy 에 원본(dbToSave)이 그대로 남아 인라인 저장됨
       }
-    } else {
-      _lsJson = JSON.stringify(dbToSave);
     }
+    _lsJson = JSON.stringify(_lsCopy || dbToSave);
   } catch(_) {
     _lsJson = JSON.stringify(dbToSave);
   }
@@ -7555,24 +7563,28 @@ async function restoreIDBData() {
       if (v) DB.samples[si].receipt = v;
     }
   }
-  // v2.3.105 — shopOrders 전체 배열 IDB 복원 (다른 hydrate 작업보다 먼저)
-  try {
-    if (DB._shopOrdersInIdb === true) {
-      const j = await idbGet('shopOrders_offload');
-      if (j) {
-        const arr = JSON.parse(j);
-        if (Array.isArray(arr)) {
-          DB.shopOrders = arr;
-          console.log('📥 [v2.3.105 HYDRATE] shopOrders ' + arr.length + '건 IDB 에서 복원');
+  // v2.3.105/174 — shopOrders·stockHistory 전체 배열 IDB 복원 (다른 hydrate 작업보다 먼저)
+  //   저장 측(v2.3.174 OFFLOAD)과 동일 키 규칙: '_'+col+'InIdb' / col+'_offload'.
+  //   IDB 미스 시 빈 배열 유지 → 이후 Firestore 머지가 복원(둘 다 erp_data 백업 컬렉션).
+  for (const _col of ['shopOrders', 'stockHistory']) {
+    try {
+      if (DB['_' + _col + 'InIdb'] === true) {
+        const j = await idbGet(_col + '_offload');
+        if (j) {
+          const arr = JSON.parse(j);
+          if (Array.isArray(arr)) {
+            DB[_col] = arr;
+            console.log('📥 [v2.3.174 HYDRATE] ' + _col + ' ' + arr.length + '건 IDB 에서 복원');
+          }
+        } else {
+          console.warn('⚠️ [v2.3.174] ' + _col + ' IDB 미스 — Firestore 머지에서 받아옴');
         }
-      } else {
-        console.warn('⚠️ [v2.3.105] shopOrders IDB 미스 — Firestore 머지에서 받아옴');
+        delete DB['_' + _col + 'InIdb'];
+        delete DB['_' + _col + 'IdbCount'];
+        delete DB['_' + _col + 'IdbAt'];
       }
-      delete DB._shopOrdersInIdb;
-      delete DB._shopOrdersIdbCount;
-      delete DB._shopOrdersIdbAt;
-    }
-  } catch (e) { console.warn('[v2.3.105 HYDRATE] shopOrders 복원 실패:', e); }
+    } catch (e) { console.warn('[v2.3.174 HYDRATE] ' + _col + ' 복원 실패:', e); }
+  }
 
   // v2.2.80 — expenses/comments/newProducts 의 __idb__ 마커 복원
   try {
