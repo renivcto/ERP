@@ -5724,7 +5724,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.175';
+const ERP_VERSION = 'v2.3.176';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7877,6 +7877,48 @@ window.v280Status = async function() {
       },0));
     console.log('============================');
   } catch(e) { console.error(e); }
+};
+
+// v2.3.176 — localStorage 용량 분해 진단. STORE_KEY 스냅샷을 컬렉션별 byte 로 나눠
+//   어떤 컬렉션이 캐시 용량을 차지하는지 큰 순으로 출력. 오프로드(v2.3.105/174/175)
+//   효과 측정·다음 정리(stockHistory 보존한도 등) 의사결정 근거. v280Status(IDB)와 짝.
+//   사용: 콘솔에서 _lsBreakdown()  또는  _lsBreakdown(30)
+window._lsBreakdown = function(topN) {
+  try {
+    topN = topN || 20;
+    const raw = localStorage.getItem(STORE_KEY) || '';
+    const totalBytes = raw.length;
+    let snap;
+    try { snap = JSON.parse(raw); } catch(_) { console.warn('[lsBreakdown] STORE_KEY 파싱 실패 — 슬림/오프로드 상태일 수 있음'); return; }
+    const rows = [];
+    for (const k of Object.keys(snap)) {
+      if (k.charAt(0) === '_') continue; // 마커(_xxxInIdb 등)는 컬렉션 아님
+      let bytes = 0;
+      try { bytes = JSON.stringify(snap[k]).length; } catch(_) { bytes = 0; }
+      const v = snap[k];
+      const cnt = Array.isArray(v) ? v.length : (v && typeof v === 'object' ? Object.keys(v).length : '');
+      const offloaded = snap['_' + k + 'InIdb'] === true;
+      const idbCount = snap['_' + k + 'IdbCount'];
+      rows.push({ key: k, bytes, cnt, offloaded, idbCount });
+    }
+    rows.sort((a, b) => b.bytes - a.bytes);
+    const lsAll = Object.keys(localStorage).reduce((s, k) => { try { return s + (localStorage.getItem(k) || '').length; } catch (_) { return s; } }, 0);
+    const trimmed = snap._lsTrimmedV172;
+    console.log('====== v2.3.176 localStorage BREAKDOWN ======');
+    console.log('STORE_KEY 스냅샷: ' + (totalBytes / 1024).toFixed(0) + 'KB  /  localStorage 전체: ' + (lsAll / 1024 / 1024).toFixed(2) + 'MB  (브라우저 한도 보통 5~10MB)');
+    if (trimmed) console.log('⚠️ v172 슬림저장 활성 — 캐시에서 제외된 컬렉션: ' + trimmed.join(', '));
+    console.log('컬렉션별 (큰 순, 상위 ' + topN + '):');
+    rows.slice(0, topN).forEach(r => {
+      const kb = (r.bytes / 1024).toFixed(1);
+      const pct = totalBytes ? (r.bytes / totalBytes * 100).toFixed(1) : '0';
+      const cntStr = r.offloaded ? ('IDB ' + (r.idbCount != null ? r.idbCount : '?') + '건')
+        : (r.cnt !== '' ? r.cnt + '건' : '');
+      console.log('  ' + (r.offloaded ? '📦' : '  ') + ' ' + r.key.padEnd(20) + kb.padStart(9) + 'KB ' + pct.padStart(6) + '%  ' + cntStr + (r.offloaded ? ' [전체배열 IDB 오프로드 — 캐시 비움]' : ''));
+    });
+    console.log('📦 = 전체배열 IDB 오프로드 마커 존재(캐시엔 빈 배열). 실제 데이터는 IDB/Firestore 에 보존.');
+    console.log('=============================================');
+    return rows;
+  } catch (e) { console.error(e); }
 };
 
 window.v280RunMigration = async function(force) {
