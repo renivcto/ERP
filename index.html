@@ -5747,7 +5747,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.178';
+const ERP_VERSION = 'v2.3.179';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -21600,7 +21600,25 @@ function saveItem() {
       if (idx>=0) DB.items[idx] = {...DB.items[idx], ...data, updatedAt: _now};
     } else {
       // v2.3.106: 신규 등록도 updatedAt 명시
-      DB.items.push({id:nextId('item'), lot:'', expiry:'', ...data, updatedAt: _now});
+      // v2.3.179: 충돌-안전 item id — _nextId.item 카운터가 어긋나(예: 카운터 < 실제 max id)
+      //   nextId 가 기존/삭제(tombstone) id 와 겹치는 값을 주면, 새로고침 머지에서 SYNC/EDIT
+      //   RECOVERY 가 같은 id 를 한 건으로 합쳐 한쪽(보통 기존 품목)이 소실 → 그 품목을 id 로
+      //   참조하던 BOM 행이 dangling(undefined/₩0/₩NaN) 되던 근본 버그.
+      //   item 카운터는 startup heal 이 없고 Firestore 머지(≈49760)에서만 교정돼, 머지 전
+      //   fast-path 에서 어긋난 카운터로 생성하면 충돌 가능. (결재 v1.9.918 / 의견 v1.9.671 동일 패턴)
+      let _newItemId = nextId('item');
+      try {
+        const _tombIds = Array.isArray(DB._deletedItemIds) ? DB._deletedItemIds.map(t => Number(t && t.id)).filter(n => !isNaN(n)) : [];
+        const _existIds = (DB.items||[]).map(i => Number(i && i.id)).filter(n => !isNaN(n));
+        const _maxId = Math.max(0, ..._tombIds, ..._existIds);
+        if (_newItemId <= _maxId) {
+          const _bump = _maxId + 1;
+          console.warn('🪦 [v2.3.179] item ID 충돌 회피 — ' + _newItemId + ' → ' + _bump + ' (카운터 어긋남)');
+          _newItemId = _bump;
+          DB._nextId.item = _bump + 1;
+        }
+      } catch(_){}
+      DB.items.push({id:_newItemId, lot:'', expiry:'', ...data, updatedAt: _now});
     }
     // v2.3.107: 저장한 item 의 tombstone 항목 제거 — 사용자 의도적 저장이 tombstone 보다 우선
     try {
