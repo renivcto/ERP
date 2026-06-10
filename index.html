@@ -5747,7 +5747,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.179';
+const ERP_VERSION = 'v2.3.180';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7658,18 +7658,32 @@ async function restoreIDBData() {
     for (let ni = 0; ni < (DB.newProducts||[]).length; ni++) {
       const np = DB.newProducts[ni];
       if (!np || !np.id) continue;
+      // 단일 필드: 이미지 3종은 공유 Firestore fallback, note 는 IDB 전용(텍스트)
       for (const field of ['productImg','formulationImg','packagingImg','note']) {
-        if (np[field] === '__idb__') {
-          const v = await idbGet('newProduct_' + np.id + '_' + field);
-          if (v) DB.newProducts[ni][field] = v;
+        if (np[field] !== '__idb__') continue;
+        const _k = 'newProduct_' + np.id + '_' + field;
+        const v = await idbGet(_k);
+        if (v) {
+          DB.newProducts[ni][field] = v;
+          // v2.3.180: 이 기기 IDB→공유 Firestore 백필(이미지만) → 다른 쓰기권한 사용자도 보이게
+          if (field !== 'note') _npBackfillShared(_k, v);
+        } else if (field !== 'note') {
+          // v2.3.180: IDB 미스(다른 사용자) → 공유 Firestore 에서 복원 + IDB 캐시
+          try { const sv = (typeof _loadSharedNpImage === 'function') ? await _loadSharedNpImage(_k) : null; if (sv) { DB.newProducts[ni][field] = sv; try { idbSet(_k, sv); } catch(_){} } } catch(_){}
         }
       }
+      // 배열 이미지 필드 (productImgs/formulationImgs) — 동일 공유 fallback/백필
       for (const field of ['productImgs','formulationImgs']) {
         if (!Array.isArray(np[field])) continue;
         for (let idx = 0; idx < np[field].length; idx++) {
-          if (np[field][idx] === '__idb__') {
-            const v = await idbGet('newProduct_' + np.id + '_' + field + '_' + idx);
-            if (v) DB.newProducts[ni][field][idx] = v;
+          if (np[field][idx] !== '__idb__') continue;
+          const _k = 'newProduct_' + np.id + '_' + field + '_' + idx;
+          const v = await idbGet(_k);
+          if (v) {
+            DB.newProducts[ni][field][idx] = v;
+            _npBackfillShared(_k, v);
+          } else {
+            try { const sv = (typeof _loadSharedNpImage === 'function') ? await _loadSharedNpImage(_k) : null; if (sv) { DB.newProducts[ni][field][idx] = sv; try { idbSet(_k, sv); } catch(_){} } } catch(_){}
           }
         }
       }
@@ -43790,6 +43804,9 @@ Gross 마진 ${estMarginNum !== null ? estMarginNum.toLocaleString()+'원' : '-'
 
   // 공통 이미지 캐러셀 렌더 — 'product' / 'formula' 등 kind 로 구분, 클릭 시 라이트박스 확대
   const _buildNpImgEl = (imgs, kind) => {
+    // v2.3.180: 미해결('__idb__' 등 비-URL) 이미지는 깨진 <img> 대신 숨김. 하이드레이션이
+    //   공유 Firestore 에서 못 받아온 잔여 케이스 방어 (인덱스 일관성 위해 저장 배열도 필터본 사용).
+    imgs = (imgs || []).filter(s => typeof s === 'string' && (s.indexOf('data:') === 0 || s.indexOf('http') === 0));
     const key = kind + '-' + it.id;
     window._npCardImgs = window._npCardImgs || {};
     window._npCardImgs[key] = imgs.slice();
@@ -44576,6 +44593,13 @@ function saveNewProduct() {
   } else {
     DB.newProducts.push({ id: 'np_' + Date.now() + '_' + Math.floor(Math.random()*999), createdAt: Date.now(), ...data, updatedAt: Date.now() });
   }
+
+  // v2.3.180: 이미지 첨부를 공유 Firestore(newProductImages)에도 저장 → 다른 쓰기권한 사용자도 표시.
+  //   (기기-로컬 IDB 만으론 다른 사람이 못 봐서 이미지가 안 보이던 문제 해결)
+  try {
+    const _savedNp = _npEditId ? DB.newProducts.find(x => x && x.id === _npEditId) : DB.newProducts[DB.newProducts.length - 1];
+    if (_savedNp && typeof _npSaveAllSharedImages === 'function') _npSaveAllSharedImages(_savedNp);
+  } catch(_){}
 
   // v2.3.2: localStorage 동기 즉시 저장 (Firestore 안 끝나도 새로고침 시 유지)
   try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) { console.warn('localStorage 저장 실패:', e); }
@@ -48532,6 +48556,62 @@ async function _loadSharedItemImage(itemId) {
     if (snap.exists()) return snap.data().data || null;
   } catch(e) { console.warn('itemImage Firestore 로드 실패:', e); }
   return null;
+}
+
+// v2.3.180: 신제품(개발) 이미지 공유 저장소 — Firestore newProductImages 컬렉션.
+//   신제품 이미지는 기기-로컬 IDB(newProduct_*)로만 오프로드돼, 다른 쓰기권한 사용자에겐
+//   '__idb__' 마커만 보여 이미지가 안 보이던 문제 해결. (item/feed/comment 이미지와 동일 패턴)
+//   doc id = IDB 키와 동일: 'newProduct_<id>_<field>' / 'newProduct_<id>_<field>_<idx>'.
+//   Firestore 1MB 문서 한계 → 900KB 미만만 저장.
+async function _saveSharedNpImage(idbKey, dataUrl) {
+  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return;
+  if (!idbKey || !dataUrl || dataUrl === '__idb__' || typeof dataUrl !== 'string' || dataUrl.length > 900000) return;
+  try {
+    const ref = window._firestoreDoc(window._firebaseDb, 'newProductImages', idbKey);
+    await window._firestoreSetDoc(ref, { data: dataUrl, ts: Date.now() });
+  } catch(e) { console.warn('newProductImage Firestore 저장 실패:', e); }
+}
+async function _loadSharedNpImage(idbKey) {
+  if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return null;
+  if (!idbKey) return null;
+  try {
+    const ref = window._firestoreDoc(window._firebaseDb, 'newProductImages', idbKey);
+    const snap = await window._firestoreGetDoc(ref);
+    if (snap.exists()) return snap.data().data || null;
+  } catch(e) { console.warn('newProductImage Firestore 로드 실패:', e); }
+  return null;
+}
+// 이 기기 IDB 에서 복원한 이미지를 공유 Firestore 에 1회(세션·키별) 백필 — fire&forget.
+//   → 이번 수정 이전에 업로드된 이미지도 소유자가 한 번 열람하면 다른 사용자에게 보이게 됨.
+window._npImgBackfilled = window._npImgBackfilled || new Set();
+function _npBackfillShared(idbKey, dataUrl) {
+  try {
+    if (!idbKey || window._npImgBackfilled.has(idbKey)) return;
+    window._npImgBackfilled.add(idbKey);
+    if (typeof _saveSharedNpImage === 'function') _saveSharedNpImage(idbKey, dataUrl);
+  } catch(_){}
+}
+// 한 신제품 레코드의 모든 이미지 필드를 공유 Firestore 에 저장 (저장 시 호출). 키는 IDB/하이드레이션과 동일.
+function _npSaveAllSharedImages(np) {
+  if (!np || !np.id || typeof _saveSharedNpImage !== 'function') return;
+  ['productImg','formulationImg','packagingImg'].forEach(f => {
+    const v = np[f];
+    if (typeof v === 'string' && v.indexOf('data:') === 0 && v.length > 100) {
+      const k = 'newProduct_' + np.id + '_' + f;
+      window._npImgBackfilled.add(k);
+      _saveSharedNpImage(k, v);
+    }
+  });
+  ['productImgs','formulationImgs'].forEach(f => {
+    if (!Array.isArray(np[f])) return;
+    np[f].forEach((src, idx) => {
+      if (typeof src === 'string' && src.indexOf('data:') === 0 && src.length > 100) {
+        const k = 'newProduct_' + np.id + '_' + f + '_' + idx;
+        window._npImgBackfilled.add(k);
+        _saveSharedNpImage(k, src);
+      }
+    });
+  });
 }
 
 function saveCompanyInfo() {
