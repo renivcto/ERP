@@ -5747,7 +5747,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.182';
+const ERP_VERSION = 'v2.3.183';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -35417,6 +35417,88 @@ function _boardDispatch(postId, kind, text) {
   try { slackBoardNotify(type, { text: text }); } catch(_){}
 }
 
+// ═══════════════════════════════════════════════════════
+// v2.3.183: 슬랙 → ERP 역방향 동기화 (업무공유 댓글/대댓글)
+//   Apps Script(업무공유릴레이 v2)가 Slack Events 로 받은 스레드 답글을
+//   settings/slack_board_inbox(전용 shared setting)에 적재 → ERP 가 로드 후 +
+//   3분 간격으로 inbox 를 읽어 feedPosts 댓글/대댓글로 적용.
+//   - 멱등: comment.slackTs(슬랙 메시지 ts) + 결정적 comment id(ts 기반) →
+//     여러 탭/사용자가 동시에 처리해도 FEED UNION 머지에서 중복 안 생김.
+//   - 루프 방지: 여기서 push 하는 댓글은 addFeedComment 를 거치지 않아
+//     _boardDispatch(슬랙 재전송)가 호출되지 않음. (Apps Script 도 bot_id 무시)
+//   - 대댓글 규칙(설계 4-3): 답글 본문이 '↳' 또는 're:' 로 시작하면
+//     그 글의 가장 최근 최상위 댓글에 대댓글로 연결. 그 외는 일반 댓글.
+// ═══════════════════════════════════════════════════════
+// 순수 로직 — posts/inbox 를 받아 in-place 적용, { applied, remaining, added } 반환
+function _applySlackInboxEntries(posts, inbox, nowMs) {
+  const applied = [], remaining = [];
+  const MAX_AGE = 14 * 24 * 60 * 60 * 1000;  // 글을 못 찾는 엔트리 보관 한도
+  let added = 0;
+  (inbox || []).forEach(en => {
+    if (!en || !en.ts || !en.postId) { applied.push(en); return; }  // 형식 불량 → 제거
+    const p = (posts || []).find(x => x && String(x.id) === String(en.postId));
+    if (!p) {
+      // 글 없음(아직 머지 전이거나 삭제됨) — 14일 지나면 폐기, 아니면 보류
+      if ((nowMs - (Number(en.at) || 0)) > MAX_AGE) applied.push(en);
+      else remaining.push(en);
+      return;
+    }
+    if (!Array.isArray(p.comments)) p.comments = [];
+    if (p.comments.some(c => c && c.slackTs === en.ts)) { applied.push(en); return; }  // 이미 적용됨
+    let text = String(en.text || '');
+    let parentId = null;
+    const m = text.match(/^\s*(?:↳|re:)\s*/i);
+    if (m) {
+      text = text.slice(m[0].length);
+      const tops = p.comments.filter(c => c && !c.parentId && c.id != null)
+        .slice().sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+      if (tops.length) parentId = tops[tops.length - 1].id;
+    }
+    // 결정적 id: 슬랙 ts(초.마이크로초) × 1e6 → 정수. 어느 클라이언트가 적용해도 같은 id.
+    const cid = Math.round((parseFloat(en.ts) || 0) * 1000000) || (nowMs * 1000 + Math.floor(Math.random() * 1000));
+    p.comments.push({
+      id: cid,
+      text: text,
+      parentId: parentId,
+      reactions: {},
+      authorName: (en.author || '슬랙 사용자') + ' (Slack)',
+      authorEmail: '',
+      createdAt: new Date(Math.round((parseFloat(en.ts) || 0) * 1000) || (Number(en.at) || nowMs)).toISOString(),
+      origin: 'slack',
+      slackTs: en.ts,
+    });
+    added++;
+    applied.push(en);
+  });
+  return { applied, remaining, added };
+}
+
+async function _processSlackBoardInbox() {
+  try {
+    if (window._slackInboxBusy) return;
+    if (typeof loadSharedSetting !== 'function' || typeof saveSharedSetting !== 'function') return;
+    window._slackInboxBusy = true;
+    const inbox = await loadSharedSetting('slack_board_inbox');
+    if (!Array.isArray(inbox) || !inbox.length) return;
+    const r = _applySlackInboxEntries(DB.feedPosts || [], inbox, Date.now());
+    if (r.added > 0) {
+      console.log('💬 [v2.3.183 SLACK→ERP] 슬랙 답글 ' + r.added + '건을 업무공유 댓글로 적용');
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+      try { if (typeof saveData === 'function') saveData(); } catch(_){}
+      try { if (typeof renderFeed === 'function') renderFeed(); } catch(_){}
+      try { showNotif('💬 슬랙 답글 ' + r.added + '건이 업무공유 댓글로 등록되었습니다', 'info'); } catch(_){}
+    }
+    // 처리(적용/중복/폐기)된 엔트리는 inbox 에서 제거 — 보류분만 남김
+    if (r.applied.length > 0 && r.remaining.length !== inbox.length) {
+      await saveSharedSetting('slack_board_inbox', r.remaining);
+    }
+  } catch (e) {
+    console.warn('[v2.3.183] slack inbox 처리 실패:', e);
+  } finally {
+    window._slackInboxBusy = false;
+  }
+}
+
 // v2.3.23: 운영 업무 공유 슬랙 알림 — 전용 채널 #업무공유-게시판
 //   payload: { type: 'board_post' | 'board_comment' | 'board_reply', text }
 async function slackBoardNotify(type, payload) {
@@ -50179,6 +50261,13 @@ function initERPWhenReady() {
               try { if (typeof saveData === 'function') saveData(); } catch(_){}
             }
           }).catch(function(){});
+        }
+      } catch(_){}
+      // v2.3.183: 슬랙→ERP 역방향 — 슬랙 스레드 답글 inbox 적용 (머지 5초 후 1회 + 3분 주기)
+      try {
+        setTimeout(() => { try { _processSlackBoardInbox(); } catch(_){} }, 5000);
+        if (!window._slackInboxTimer) {
+          window._slackInboxTimer = setInterval(() => { try { _processSlackBoardInbox(); } catch(_){} }, 180000);
         }
       } catch(_){}
       // v1.9.772: fast-path 시점에 사용자가 작업했던 변경 사항을 자동 재저장
