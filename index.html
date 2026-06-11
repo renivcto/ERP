@@ -5747,7 +5747,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.183';
+const ERP_VERSION = 'v2.3.184';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29309,7 +29309,21 @@ async function saveFeedPost(){
       return;
     }
   } else {
-    const newId = (DB._nextId && DB._nextId.feedPost) || ((DB.feedPosts.reduce((m,p)=>Math.max(m,p.id||0),0))+1);
+    // v2.3.184: 충돌-안전 feedPost id — _nextId.feedPost 카운터가 어긋나면(카운터 ≤ 실제 max id
+    //   또는 tombstone id) 기존 글과 겹치는 id 가 부여되고, 새로고침 머지가 같은 id 를 한 건으로
+    //   합치거나 tombstone 필터가 지워서 "슬랙엔 게시됐는데 ERP 에선 새 글이 사라지는" 버그.
+    //   품목 v2.3.179 와 동일 클래스·동일 가드. (startup heal 은 카운터가 숫자면 재교정 안 함)
+    let newId = (DB._nextId && DB._nextId.feedPost) || ((DB.feedPosts.reduce((m,p)=>Math.max(m,p.id||0),0))+1);
+    try {
+      const _tombIds = Array.isArray(DB._deletedFeedPostIds) ? DB._deletedFeedPostIds.map(t => Number(t && (t.id != null ? t.id : t))).filter(n => !isNaN(n)) : [];
+      const _existIds = (DB.feedPosts||[]).map(p => Number(p && p.id)).filter(n => !isNaN(n));
+      const _maxId = Math.max(0, ..._tombIds, ..._existIds);
+      if (newId <= _maxId) {
+        const _bump = _maxId + 1;
+        console.warn('🪦 [v2.3.184] feedPost ID 충돌 회피 — ' + newId + ' → ' + _bump + ' (카운터 어긋남)');
+        newId = _bump;
+      }
+    } catch(_){}
     if (DB._nextId) DB._nextId.feedPost = newId + 1;
     DB.feedPosts.push({
       id: newId,
