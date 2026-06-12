@@ -75,24 +75,10 @@
             lastLogin: new Date().toLocaleString('ko-KR',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).replace(/\. /g,'-').replace(/\./g,'').replace(' ',' ').trim(),
             isAdmin: isAdminByEmail,
           };
-          // v2.3.185: 관리자가 '+ 사용자 추가'로 사전 등록(manual_*)한 이메일이면
-          //   role/상태/권한을 승계하고 사전등록 문서는 '삭제됨' 처리(중복 행 방지).
-          try {
-            const _all = await getDocs(collection(db, 'users'));
-            const _em = String(user.email || '').toLowerCase();
-            for (const _d of _all.docs) {
-              const _dd = _d.data() || {};
-              if (String(_d.id).indexOf('manual_') === 0
-                  && String(_dd.email || '').toLowerCase() === _em
-                  && _dd.status !== '삭제됨') {
-                userData.role = _dd.role || userData.role;
-                userData.status = _dd.status || userData.status;
-                userData.permission = _dd.permission || userData.permission;
-                try { await setDoc(doc(db, 'users', _d.id), { status: '삭제됨' }, { merge: true }); } catch(_){}
-                break;
-              }
-            }
-          } catch(_){}
+          // v2.3.188: 사전등록(manual_*) 승계는 여기(첫 로그인)서 하지 않음 — 보안 규칙상
+          //   비관리자는 users 목록 조회/타인 문서 쓰기가 불가(allow list: isAdmin)라 항상 실패.
+          //   대신 관리자가 사용자 관리 화면을 열 때 renderUserTableFirestore 가 같은 이메일의
+          //   로그인 문서 ↔ 사전등록 문서를 자동 병합한다.
           try { await setDoc(userRef, userData); } catch(e) {}
           window._currentUser = userData;
         } else {
@@ -5777,7 +5763,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.187';
+const ERP_VERSION = 'v2.3.188';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -39535,10 +39521,10 @@ function renderUserTable() {
   if (window._cachedFirestoreUsers && window._cachedFirestoreUsers.length && typeof _renderUserTableFromList === 'function') {
     try { _renderUserTableFromList(window._cachedFirestoreUsers); return; } catch(_){}
   }
-  // v2.3.186: Firestore 모드인데 캐시가 아직 없으면(첫 로드 직후) 레거시 DB.users 를
-  //   잠깐 보여주지 않고 로딩 표시 — 옛 깨진 추가(v2.3.184 이하)의 잔재가 "잠깐 보였다
-  //   사라지는" 혼란 방지. Firestore 목록은 renderUserTableFirestore 가 곧 채움.
-  if (window._loadFirestoreUsers) {
+  // v2.3.186/188: 캐시가 없으면 무조건 로딩 표시 — 레거시 DB.users 는 절대 표시하지 않음.
+  //   (v2.3.186 은 _loadFirestoreUsers 정의 후에만 막았는데, 모듈 스크립트가 그걸 정의하기
+  //   전의 이른 렌더에서 레거시 잔재(king_thumb 등)가 여전히 깜빡였음 → 무조건 차단)
+  {
     const _tb = $('user-table');
     if (_tb) _tb.innerHTML = '<tr><td colspan="8" style="padding:32px;text-align:center;color:var(--gray-400);font-size:13px">사용자 목록 불러오는 중…</td></tr>';
     return;
@@ -50605,6 +50591,29 @@ async function renderUserTableFirestore() {
   try {
     const allUsers = await window._loadFirestoreUsers();
     let users = allUsers.filter(u => u && u.status !== '삭제됨');
+    // v2.3.188: 사전등록(manual_*) ↔ 실제 로그인 문서 자동 병합 — 같은 이메일의 Google uid
+    //   문서가 생겼으면 사전등록의 role/상태/권한을 옮기고 사전등록 문서는 '삭제됨' 처리.
+    //   (보안 규칙상 비관리자 첫 로그인 시점엔 승계 불가 → 관리자 세션에서 수행)
+    if (window._currentUser && window._currentUser.isAdmin) {
+      try {
+        users.filter(u => String(u.uid).indexOf('manual_') === 0 && u.email).forEach(m => {
+          const real = users.find(u => u !== m && String(u.uid).indexOf('manual_') !== 0
+            && String(u.email || '').toLowerCase() === String(m.email || '').toLowerCase());
+          if (!real) return;
+          const _adopt = { role: m.role || real.role || '멤버',
+            status: m.status || real.status || '승인대기',
+            permission: m.permission || real.permission || 'read' };
+          try {
+            window._firestoreSetDoc(window._firestoreDoc(window._firebaseDb, 'users', real.uid), _adopt, { merge: true });
+            window._firestoreSetDoc(window._firestoreDoc(window._firebaseDb, 'users', m.uid), { status: '삭제됨' }, { merge: true });
+          } catch(_){}
+          Object.assign(real, _adopt);
+          m.status = '삭제됨';
+          console.log('🔗 [v2.3.188] 사전등록 병합: ' + m.email + ' → ' + real.uid + ' (role=' + _adopt.role + ', status=' + _adopt.status + ')');
+        });
+        users = users.filter(u => u.status !== '삭제됨');
+      } catch(_){}
+    }
     // v2.3.185: ① 본인 문서가 유령(이름·이메일 빈)이면 세션 정보로 채워 표시 + 문서 복구
     //   ② 타인 유령 문서('-' 행)는 숨김 ③ 관리자 본인 행이 아예 없으면 합성 행 추가 + 문서 복구
     const _me = window._currentUser;
@@ -50622,7 +50631,10 @@ async function renderUserTableFirestore() {
       return u;
     });
     users = users.filter(u => u && (u.name || u.email));
-    if (_me && _me.isAdmin && !users.some(u => u.uid === _me.uid)) {
+    // v2.3.188: _me.uid 필수 — 빠른 로드 경로(reniv_last_user 캐시)의 _currentUser 엔 uid 가
+    //   없어서, uid 없이 비교하면 "관리자 행 없음"으로 오판 → uid 없는 합성 행이 목록 끝에
+    //   잠깐 보였다 사라지는 깜빡임 + 매 로드 경고 반복의 원인이었음.
+    if (_me && _me.uid && _me.isAdmin && !users.some(u => u.uid === _me.uid)) {
       const _selfRow = { uid: _me.uid, name: _me.name || '관리자', email: _me.email || '',
         role: _me.role || 'CTO', permission: 'write', status: '활성', isAdmin: true,
         joinDate: _me.joinDate || '-', lastLogin: _me.lastLogin || '-' };
