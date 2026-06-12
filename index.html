@@ -75,10 +75,37 @@
             lastLogin: new Date().toLocaleString('ko-KR',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).replace(/\. /g,'-').replace(/\./g,'').replace(' ',' ').trim(),
             isAdmin: isAdminByEmail,
           };
+          // v2.3.185: 관리자가 '+ 사용자 추가'로 사전 등록(manual_*)한 이메일이면
+          //   role/상태/권한을 승계하고 사전등록 문서는 '삭제됨' 처리(중복 행 방지).
+          try {
+            const _all = await getDocs(collection(db, 'users'));
+            const _em = String(user.email || '').toLowerCase();
+            for (const _d of _all.docs) {
+              const _dd = _d.data() || {};
+              if (String(_d.id).indexOf('manual_') === 0
+                  && String(_dd.email || '').toLowerCase() === _em
+                  && _dd.status !== '삭제됨') {
+                userData.role = _dd.role || userData.role;
+                userData.status = _dd.status || userData.status;
+                userData.permission = _dd.permission || userData.permission;
+                try { await setDoc(doc(db, 'users', _d.id), { status: '삭제됨' }, { merge: true }); } catch(_){}
+                break;
+              }
+            }
+          } catch(_){}
           try { await setDoc(userRef, userData); } catch(e) {}
           window._currentUser = userData;
         } else {
           const data = userSnap.data();
+          // v2.3.185: 이름/이메일이 빈 유령 문서('-' 행의 원인)면 로그인 계정 정보로 보충 — 모든 사용자 대상
+          if (!data.email || !data.name) {
+            const _fill = {
+              email: data.email || user.email || '',
+              name: data.name || user.displayName || user.email || '사용자',
+            };
+            try { await setDoc(userRef, _fill, { merge: true }); } catch(_){}
+            Object.assign(data, _fill);
+          }
           // v1.9.924: 화이트리스트 관리자(reniv.cto@gmail.com) 계정 자가복구 + 중복 정리.
           //   배경: Firebase Auth uid 가 바뀌면(계정 재생성 등) 현재 uid 의 users
           //   문서가 '승인대기'/이름없음/'삭제됨' 으로 남아, 관리자 본인이 사용자
@@ -5747,7 +5774,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.184';
+const ERP_VERSION = 'v2.3.185';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -39642,24 +39669,39 @@ function saveUser() {
 
 function addUser() {
   const name  = $('nu-name').value.trim();
-  const email = $('nu-email').value.trim();
+  const email = $('nu-email').value.trim().toLowerCase();
   if (!name)  { showNotif('이름을 입력하세요','warning'); return; }
   if (!email) { showNotif('이메일을 입력하세요','warning'); return; }
-  if (DB.users.find(u => u.email === email)) { showNotif('이미 등록된 이메일입니다','warning'); return; }
-  DB.users.push({
-    id: nextId('usr') || (Math.max(...DB.users.map(u=>u.id)) + 1),
+  // v2.3.185: 사용자 관리 화면은 Firestore users 컬렉션을 표시 — 기존 코드는 레거시 DB.users 에만
+  //   push 해서(게다가 nextId('usr') 카운터 없음 → NaN id) 추가한 사용자가 목록에 안 보였음.
+  //   → Firestore 사전등록 문서(manual_<ts>)로 생성. 해당 이메일이 Google 첫 로그인하면
+  //   로그인 문서가 이 사전등록의 role/상태/권한을 승계하고 사전등록 문서는 자동 정리됨.
+  if (!(window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb)) {
+    showNotif('Firestore 연결이 필요합니다 — 잠시 후 다시 시도해주세요', 'warning');
+    return;
+  }
+  const _dup = (window._cachedFirestoreUsers || []).find(u =>
+    u && String(u.email || '').toLowerCase() === email && u.status !== '삭제됨');
+  if (_dup) { showNotif('이미 등록된 이메일입니다', 'warning'); return; }
+  const _uid = 'manual_' + Date.now();
+  const _userData = {
+    uid: _uid,
     name, email,
-    role:      $('nu-role').value,
-    joinDate:  today(),
-    lastLogin: '-',
-    status:    $('nu-status').value,
-    memo: '',
-  });
-  saveData(); closeModal('add-user');
-  // 입력 초기화
-  ['nu-name','nu-email'].forEach(id => { if($(id)) $(id).value=''; });
-  renderUserTable(); updateBadges();
-  showNotif(name + ' 사용자가 추가되었습니다', 'success');
+    role:       $('nu-role').value,
+    status:     $('nu-status').value,
+    permission: 'read',  // 기본 보기 — 승인/편집으로 변경 가능
+    joinDate:   today(),
+    lastLogin:  '-',
+    manual:     true,
+  };
+  window._firestoreSetDoc(window._firestoreDoc(window._firebaseDb, 'users', _uid), _userData)
+    .then(() => {
+      closeModal('add-user');
+      ['nu-name','nu-email'].forEach(id => { if($(id)) $(id).value=''; });
+      renderUserTableFirestore(); updateBadges();
+      showNotif(name + ' 사용자가 사전 등록되었습니다 — 해당 이메일로 Google 로그인하면 자동 연결됩니다', 'success');
+    })
+    .catch(e => showNotif('추가 실패: ' + (e && e.message || e), 'warning'));
 }
 
 // 권한 확인 함수 — 쓰기 권한 여부
@@ -50551,7 +50593,34 @@ async function renderUserTableFirestore() {
   if (!window._loadFirestoreUsers) { renderUserTable(); return; }
   try {
     const allUsers = await window._loadFirestoreUsers();
-    const users = allUsers.filter(u => u.status !== '삭제됨');
+    let users = allUsers.filter(u => u && u.status !== '삭제됨');
+    // v2.3.185: ① 본인 문서가 유령(이름·이메일 빈)이면 세션 정보로 채워 표시 + 문서 복구
+    //   ② 타인 유령 문서('-' 행)는 숨김 ③ 관리자 본인 행이 아예 없으면 합성 행 추가 + 문서 복구
+    const _me = window._currentUser;
+    users = users.map(u => {
+      if (_me && u.uid === _me.uid && (!u.name || !u.email)) {
+        const _fixed = { ...u, name: u.name || _me.name || '관리자', email: u.email || _me.email || '',
+          role: u.role || _me.role || 'CTO', status: u.status || '활성',
+          isAdmin: u.isAdmin === true || _me.isAdmin === true,
+          permission: u.permission || _me.permission || (_me.isAdmin ? 'write' : 'read') };
+        try { window._firestoreSetDoc(window._firestoreDoc(window._firebaseDb, 'users', u.uid),
+          { name: _fixed.name, email: _fixed.email, role: _fixed.role, status: _fixed.status,
+            isAdmin: _fixed.isAdmin, permission: _fixed.permission }, { merge: true }); } catch(_){}
+        return _fixed;
+      }
+      return u;
+    });
+    users = users.filter(u => u && (u.name || u.email));
+    if (_me && _me.isAdmin && !users.some(u => u.uid === _me.uid)) {
+      const _selfRow = { uid: _me.uid, name: _me.name || '관리자', email: _me.email || '',
+        role: _me.role || 'CTO', permission: 'write', status: '활성', isAdmin: true,
+        joinDate: _me.joinDate || '-', lastLogin: _me.lastLogin || '-' };
+      users.unshift(_selfRow);
+      try { window._firestoreSetDoc(window._firestoreDoc(window._firebaseDb, 'users', _me.uid),
+        { uid: _me.uid, name: _selfRow.name, email: _selfRow.email, role: _selfRow.role,
+          permission: 'write', status: '활성', isAdmin: true }, { merge: true }); } catch(_){}
+      console.warn('🛡️ [v2.3.185] 관리자 본인 행 누락 감지 — 합성 표시 + Firestore 문서 복구');
+    }
     // 저장된 순서 불러오기 (loadSharedSetting 사용 - 더 안정적)
     let savedOrder = null;
     try {
