@@ -5763,7 +5763,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.189';
+const ERP_VERSION = 'v2.3.190';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -39525,6 +39525,7 @@ function renderUserTable() {
   //   (v2.3.186 은 _loadFirestoreUsers 정의 후에만 막았는데, 모듈 스크립트가 그걸 정의하기
   //   전의 이른 렌더에서 레거시 잔재(king_thumb 등)가 여전히 깜빡였음 → 무조건 차단)
   {
+    console.log('🖌️ [USERS PAINT] (로딩 placeholder)');  // v2.3.190 진단
     const _tb = $('user-table');
     if (_tb) _tb.innerHTML = '<tr><td colspan="8" style="padding:32px;text-align:center;color:var(--gray-400);font-size:13px">사용자 목록 불러오는 중…</td></tr>';
     return;
@@ -50568,6 +50569,7 @@ function initERPWhenReady() {
 // ─── 사용자 관리 페이지 — Firestore 연동 ────────────────
 // v1.9.927: 비관리자(멤버)에게 '사용자 관리' 진입 시 안내문만 표시
 function _renderUsersAdminOnlyNotice() {
+  console.log('🖌️ [USERS PAINT] (관리자 전용 안내) | isAdmin=' + !!(window._currentUser && window._currentUser.isAdmin));  // v2.3.190 진단
   const _h = document.getElementById('user-table-head');
   const _b = document.getElementById('user-table');
   const _a = document.getElementById('add-user-btn');
@@ -50675,16 +50677,28 @@ async function renderUserTableFirestore() {
       saveSharedSetting('user_order', window._firestoreUserUids).catch(()=>{});
     }
     // v2.3.189: 더 새 렌더가 이미 시작됐으면 이 (낡은) 결과는 폐기
-    if (_renderSeq !== window._userTableRenderSeq) return;
+    if (_renderSeq !== window._userTableRenderSeq) {
+      console.log('🗑️ [USERS] 낡은 렌더 폐기 seq=' + _renderSeq + '/' + window._userTableRenderSeq + ' [' + users.map(u => u && u.name).join(', ') + ']');  // v2.3.190 진단
+      return;
+    }
     window._cachedFirestoreUsers = [...users];
     _renderUserTableFromList(users);
   } catch(e) {
+    console.warn('⚠️ [USERS] renderUserTableFirestore 실패 → 레거시 폴백:', e && (e.code || e.message || e));  // v2.3.190 진단
     if (_renderSeq !== window._userTableRenderSeq) return;
     renderUserTable();
   }
 }
 
 function _renderUserTableFromList(users) {
+  // v2.3.190 진단: 모든 사용자 테이블 페인트를 기록 — 관리자 행 소실 호출자 특정용 (안정화 후 제거)
+  try {
+    const _meD = window._currentUser || {};
+    console.log('🖌️ [USERS PAINT] [' + (users || []).map(u => (u && u.name) || '-').join(', ') + ']'
+      + ' | me.uid=' + (_meD.uid ? String(_meD.uid).slice(0, 8) : '(없음)')
+      + ' | isAdmin=' + (_meD.isAdmin === true)
+      + ' | 호출: ' + String((new Error().stack || '').split('\n').slice(2, 4).join(' ← ')).replace(/https?:\S+/g, ''));
+  } catch (_) {}
   // v2.3.189: 최종 방어 — 어떤 호출 경로(캐시 렌더·경합 등)로 그려지든, 관리자 본인 행이
   //   목록에 없으면 그리기 직전에 보정 표시. (uid 있는 정식 세션만 — 빠른경로 오판 방지)
   try {
