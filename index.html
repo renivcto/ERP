@@ -5763,7 +5763,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.188';
+const ERP_VERSION = 'v2.3.189';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -50588,6 +50588,10 @@ async function renderUserTableFirestore() {
   const addUserBtn = document.getElementById('add-user-btn');
   if (addUserBtn) addUserBtn.style.display = (window._currentUser && window._currentUser.isAdmin) ? '' : 'none';
   if (!window._loadFirestoreUsers) { renderUserTable(); return; }
+  // v2.3.189: 렌더 순번 가드 — 이 함수는 로드 중 여러 번 비동기 호출되는데(초기 렌더·페이지
+  //   진입·인증 후 갱신), 먼저 시작했지만 늦게 끝난 "낡은" 호출이 최신 렌더를 덮어써
+  //   관리자 행이 "잠깐 보였다 사라지는" 경합이 있었음. 항상 가장 최근 호출만 그린다.
+  const _renderSeq = (window._userTableRenderSeq = (window._userTableRenderSeq || 0) + 1);
   try {
     const allUsers = await window._loadFirestoreUsers();
     let users = allUsers.filter(u => u && u.status !== '삭제됨');
@@ -50670,14 +50674,28 @@ async function renderUserTableFirestore() {
     if (!savedOk) {
       saveSharedSetting('user_order', window._firestoreUserUids).catch(()=>{});
     }
+    // v2.3.189: 더 새 렌더가 이미 시작됐으면 이 (낡은) 결과는 폐기
+    if (_renderSeq !== window._userTableRenderSeq) return;
     window._cachedFirestoreUsers = [...users];
     _renderUserTableFromList(users);
   } catch(e) {
+    if (_renderSeq !== window._userTableRenderSeq) return;
     renderUserTable();
   }
 }
 
 function _renderUserTableFromList(users) {
+  // v2.3.189: 최종 방어 — 어떤 호출 경로(캐시 렌더·경합 등)로 그려지든, 관리자 본인 행이
+  //   목록에 없으면 그리기 직전에 보정 표시. (uid 있는 정식 세션만 — 빠른경로 오판 방지)
+  try {
+    const _meF = window._currentUser;
+    if (_meF && _meF.uid && _meF.isAdmin && Array.isArray(users) && !users.some(u => u && u.uid === _meF.uid)) {
+      users = users.concat([{ uid: _meF.uid, name: _meF.name || '관리자', email: _meF.email || '',
+        role: _meF.role || 'CTO', permission: 'write', status: '활성', isAdmin: true,
+        joinDate: '-', lastLogin: '-' }]);
+      console.warn('🛡️ [v2.3.189] 렌더 직전 관리자 행 누락 — 보정 표시');
+    }
+  } catch(_){}
   const isAdmin = window._currentUser && window._currentUser.isAdmin;
   const mgmtTh = document.getElementById('user-mgmt-th');
   if (mgmtTh) mgmtTh.style.display = isAdmin ? '' : 'none';
