@@ -219,7 +219,10 @@
   window._loadFirestoreUsers = async function() {
     const snap = await getDocs(collection(db, 'users'));
     const users = snap.docs.map(d => ({ ...d.data(), uid: d.id }));
-    window._cachedFirestoreUsers = users;
+    // v2.3.187: 여기서 _cachedFirestoreUsers 를 덮어쓰지 않음 — updateBadges 등이 주기 호출할 때
+    //   원시 목록(유령 행 포함·정렬 안 됨·낙관적 쓰기 포함)이 보정된 캐시를 덮어써, 레거시 렌더가
+    //   잘못된 행을 "잠깐 보였다 사라지게" 하던 원인. 캐시는 renderUserTableFirestore 가
+    //   가드(유령 숨김·관리자 보장·정렬) 적용 후에만 갱신한다.
     return users;
   };
 
@@ -5774,7 +5777,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.186';
+const ERP_VERSION = 'v2.3.187';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
