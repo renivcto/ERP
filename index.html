@@ -5772,7 +5772,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.193';
+const ERP_VERSION = 'v2.3.194';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29387,8 +29387,30 @@ async function saveFeedPost(){
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(snapshot));
     } catch(e) {
-      console.error('❌ localStorage 저장 실패(quota 초과 가능):', e && e.message);
-      try { showNotif('⚠️ 로컬 저장 실패 — 클라우드 동기화에 의존합니다', 'warning'); } catch(_){}
+      // v2.3.194: 이 즉시 플러시는 오프로드를 안 거치는 전체 DB 통짜 쓰기라, localStorage 가
+      //   한도에 근접하면 quota 초과로 실패하며 불필요한 경고 토스트를 띄웠음.
+      //   → 무거운 Firestore-백업 컬렉션을 캐시에서 점진 제외하고 재시도(feedPosts 는 유지해
+      //   방금 쓴 글이 로컬에도 남게). 메모리/Firestore 데이터는 그대로(손실 없음).
+      //   글의 durable 저장은 직후 saveDataNow(_doSaveDataInner: 오프로드+슬림) 가 담당하므로
+      //   여기서 슬림이 성공하면 사용자에게 경고를 띄우지 않는다.
+      let _flushed = false;
+      if (e && e.name === 'QuotaExceededError') {
+        const _heavy = ['stockHistory','shopOrders','archivedItems','approvalComments','cs','insights','qcs','partSpecs','quotes','newProducts','orders','productions'];
+        for (let _i = 1; _i <= _heavy.length && !_flushed; _i++) {
+          try {
+            const _slim = Object.assign({}, snapshot);
+            for (let _j = 0; _j < _i; _j++) _slim[_heavy[_j]] = [];
+            _slim._lsTrimmedV172 = _heavy.slice(0, _i);  // 로드 시 Firestore 머지가 자동 복원
+            localStorage.setItem(STORE_KEY, JSON.stringify(_slim));
+            _flushed = true;
+            console.warn('💾 [v2.3.194] feedPost 즉시 플러시 슬림 저장 — 캐시 제외(Firestore 보존):', _heavy.slice(0, _i).join(', '));
+          } catch(_qe) { /* 더 제외 후 재시도 */ }
+        }
+      }
+      if (!_flushed) {
+        // 슬림 저장도 실패 — 글은 Firestore(직후 saveDataNow)로 저장되므로 콘솔만 기록(토스트 X)
+        console.error('❌ [v2.3.194] localStorage 즉시 플러시 실패(quota) — Firestore 동기화로 보존:', e && e.message);
+      }
     }
   } catch(e) { console.warn('saveFeedPost 즉시 플러시 실패:', e); }
   // v1.9.283 — UX 개선: localStorage 저장은 이미 끝났으니 모달을 즉시 닫고 Firestore 동기화는 백그라운드로.
