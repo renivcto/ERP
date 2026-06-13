@@ -5772,7 +5772,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.195';
+const ERP_VERSION = 'v2.3.196';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -5857,7 +5857,16 @@ function _backupNpIns() {
       try { if (typeof idbSet === 'function') idbSet('reniv_newProducts_backup', _p); } catch(_){}
     }
     if (Array.isArray(DB.insights) && DB.insights.length) {
-      const _q = JSON.stringify(DB.insights);
+      // v2.3.196: 썸네일 base64 제거 — 백업은 메타 복구용(원본은 Firestore/IDB 오프로드).
+      //   (이걸 안 빼서 reniv_insights_backup 이 ~428KB → localStorage 압박)
+      const _liteIns = DB.insights.map(function(it){
+        if (!it) return it;
+        const c = Object.assign({}, it);
+        if (Array.isArray(c.thumbs)) c.thumbs = c.thumbs.map(function(t){ return (typeof t === 'string' && t.length > 100) ? '__stripped__' : t; });
+        if (typeof c.thumb === 'string' && c.thumb.length > 100) c.thumb = '__stripped__';
+        return c;
+      });
+      const _q = JSON.stringify(_liteIns);
       try { localStorage.setItem('reniv_insights_backup', _q); } catch(_){}
       try { if (typeof idbSet === 'function') idbSet('reniv_insights_backup', _q); } catch(_){}
     }
@@ -6894,7 +6903,9 @@ async function _doSaveDataInner() {
   let _lsJson;
   try {
     const _OFFLOAD_THRESHOLD = 300 * 1024; // 300KB
-    const _OFFLOAD_COLS = ['shopOrders', 'stockHistory', 'feedPosts'];
+    // v2.3.196: insights 추가 — 썸네일(thumbs base64)이 누적돼 무거운 컬렉션(3건에 ~428KB).
+    //   Firestore(erp_data/insights)에 인라인 보관되므로 IDB 미스 시 머지로 복원. newer-wins 단순 머지.
+    const _OFFLOAD_COLS = ['shopOrders', 'stockHistory', 'feedPosts', 'insights'];
     let _lsCopy = null; // 오프로드가 실제 발생할 때만 lazy 복사
     for (const _col of _OFFLOAD_COLS) {
       const _colJson = JSON.stringify(dbToSave[_col] || []);
@@ -7619,7 +7630,7 @@ async function restoreIDBData() {
   //   IDB 미스 시 빈 배열 유지 → 이후 Firestore 머지가 복원(모두 erp_data 백업 컬렉션).
   //   v2.3.175: feedPosts 추가 — 반드시 아래 피드 이미지(__idb__) 마커 복원보다 '먼저' 실행돼야
   //   IDB 사본 속 이미지 마커가 정상 복원됨(그래서 이 블록을 이미지 복원 앞으로 옮김).
-  for (const _col of ['shopOrders', 'stockHistory', 'feedPosts']) {
+  for (const _col of ['shopOrders', 'stockHistory', 'feedPosts', 'insights']) {
     try {
       if (DB['_' + _col + 'InIdb'] === true) {
         const j = await idbGet(_col + '_offload');
@@ -7627,7 +7638,7 @@ async function restoreIDBData() {
           const arr = JSON.parse(j);
           if (Array.isArray(arr)) {
             DB[_col] = arr;
-            console.log('📥 [v2.3.175 HYDRATE] ' + _col + ' ' + arr.length + '건 IDB 에서 복원');
+            console.log('📥 [v2.3.196 HYDRATE] ' + _col + ' ' + arr.length + '건 IDB 에서 복원');
           }
         } else {
           console.warn('⚠️ [v2.3.175] ' + _col + ' IDB 미스 — Firestore 머지에서 받아옴');
