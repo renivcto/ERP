@@ -5772,7 +5772,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.198';
+const ERP_VERSION = 'v2.3.199';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -35394,6 +35394,11 @@ function _buildWebhookPayload(kind, type, payload) {
       ? `${urgentPrefix}${payload.title}${urgentTag}\n• 금액: ${fmtWon(payload.amount||0)}${payload.dueDate?`\n• 결제예정일: ${payload.dueDate}`:''}${payload.paidDate?`\n• 지급일: ${payload.paidDate}`:''}`
       : (payload && payload.text ? payload.text : '르니브 ERP 테스트 알림');
   }
+  // v2.3.199: 결재 요청 알림에 ERP 딥링크 — 모바일/PC 에서 클릭하면 해당 품의서/발주서가 바로 열려 결재 가능.
+  //   (슬랙 mrkdwn <url|라벨> — incoming webhook text 에서 클릭 링크로 렌더. 잔디는 제외.)
+  if (type === 'approval_request' && kind !== 'jandi' && payload && payload.id != null) {
+    bodyText += `\n\n<https://renivcto.github.io/ERP/?approval=${encodeURIComponent(payload.id)}|🔗 결재하러 가기 (모바일에서도 바로 결재)>`;
+  }
 
   if (kind === 'jandi') {
     // 잔디 Incoming Webhook 포맷
@@ -36643,10 +36648,48 @@ function openApprovalDetail(approvalId) {
       </div>
       <!-- v2.2.75: 본문/첨부 숨김 (의견만 남기는 용도) -->
     </div>
+    ${(!_isApproved && a.refId != null && typeof canWrite === 'function' && canWrite()) ? `<button onclick="try{closeModal('ap-detail')}catch(_){};openPoApprovalSheet(${a.refId})" style="width:100%;margin-bottom:14px;padding:13px;background:#16a34a;color:#fff;border:1px solid #15803d;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer">🖋️ 발주서 결재(날인)하기</button>` : (_isApproved ? '<div style="text-align:center;color:#16a34a;font-weight:700;font-size:13px;margin-bottom:14px">✅ 결재 완료</div>' : '')}
     ${renderCommentSectionShell()}
   `;
   renderApprovalComments(approvalId);
 }
+
+// v2.3.199: 슬랙 결재 알림 딥링크(?approval=<id>) — 타입별 상세 모달로 라우팅(모바일에서 바로 결재).
+function openApprovalById(id) {
+  if (id == null || id === '') return;
+  const ap = (DB.approvals || []).find(a => a && String(a.id) === String(id));
+  if (!ap) {
+    try { go('approval'); } catch(_){}
+    try { showNotif('해당 결재 문서를 찾을 수 없습니다 (이미 처리·삭제됐거나 동기화 전).', 'warning'); } catch(_){}
+    return;
+  }
+  try { go('approval'); } catch(_){}
+  setTimeout(() => {
+    try {
+      if (ap.type === 'non_po_approval') { if (typeof openNonPoApprovalDetail === 'function') openNonPoApprovalDetail(ap.id); }
+      else { if (typeof openApprovalDetail === 'function') openApprovalDetail(ap.id); }
+    } catch (e) { console.warn('[v2.3.199] openApprovalById 실패:', e); }
+  }, 400);
+}
+window.openApprovalById = openApprovalById;
+
+// 로드 완료 + 로그인 후, URL 의 ?approval=<id> (또는 #approval=) 이 있으면 1회 자동 오픈.
+function _handleApprovalDeepLink() {
+  try {
+    if (window._approvalDeepLinkDone) return;
+    if (!window._currentUser) return;            // 로그인 후 재시도
+    if (!Array.isArray(DB.approvals)) return;
+    let id = null;
+    try { id = new URLSearchParams(location.search).get('approval'); } catch(_){}
+    if (!id) { const h = (location.hash || '').match(/approval=([^&]+)/); if (h) { try { id = decodeURIComponent(h[1]); } catch(_) { id = h[1]; } } }
+    if (!id) return;
+    window._approvalDeepLinkDone = true;
+    try { history.replaceState(null, '', location.pathname); } catch(_){}  // 새로고침 시 재오픈 방지
+    console.log('🔗 [v2.3.199] 결재 딥링크 진입 — approval=' + id);
+    openApprovalById(id);
+  } catch (e) { console.warn('[v2.3.199] 결재 딥링크 처리 실패:', e); }
+}
+window._handleApprovalDeepLink = _handleApprovalDeepLink;
 
 // v1.9.318: 일반 결재 전용 상세보기 — 타입 체크 + 정식 기안서 문서 포맷
 // 🔒 보안/정합성: 반드시 type === 'non_po_approval' 인 레코드만 노출
@@ -36760,6 +36803,7 @@ function openNonPoApprovalDetail(approvalId) {
       <div style="font-size:11px;color:var(--gray-500);font-weight:600">${_catIcon} ${(a.category||'결재 문서').replace(/</g,'&lt;')}${phaseLabel?' · '+phaseLabel:''}${urgent?' · <span style=\"color:#dc2626;font-weight:800\">🚨 응급</span>':''}</div>
       <div style="font-size:14.5px;font-weight:700;margin-top:3px">${(a.title||'-').replace(/</g,'&lt;')}</div>
     </div>
+    ${(a.status !== 'approved' && typeof canWrite === 'function' && canWrite()) ? `<button onclick="approveNonPo(${a.id})" style="width:100%;margin-bottom:12px;padding:13px;background:#16a34a;color:#fff;border:1px solid #15803d;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer">🖋️ 결재 처리하기</button>` : (a.status === 'approved' ? '<div style="text-align:center;color:#16a34a;font-weight:700;font-size:13px;margin-bottom:12px">✅ 결재 완료됨</div>' : '')}
     ${renderCommentSectionShell()}
   `;
 
@@ -50503,6 +50547,8 @@ function initERPWhenReady() {
           window._slackInboxTimer = setInterval(() => { try { _processSlackBoardInbox(); } catch(_){} }, 180000);
         }
       } catch(_){}
+      // v2.3.199: 슬랙 결재 알림 딥링크(?approval=<id>) 자동 오픈 — 데이터/로그인 준비 후
+      try { setTimeout(() => { try { _handleApprovalDeepLink(); } catch(_){} }, 900); } catch(_){}
       // v1.9.772: fast-path 시점에 사용자가 작업했던 변경 사항을 자동 재저장
       if (window._pendingSaveAfterFsLoad) {
         window._pendingSaveAfterFsLoad = false;
@@ -50729,6 +50775,8 @@ function initERPWhenReady() {
     // try { if (typeof _dedupApprovals === 'function') _dedupApprovals(); } catch(e){ console.warn('dedupApprovals 실패:', e); }
     // v1.9.762: paint 완료까지 loader 유지
     doRender();
+    // v2.3.199: 오프라인/Firestore 실패 경로에서도 결재 딥링크 자동 오픈
+    try { setTimeout(() => { try { _handleApprovalDeepLink(); } catch(_){} }, 900); } catch(_){}
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         if (!_v752FastRendered) hideLoader();
