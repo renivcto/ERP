@@ -5772,7 +5772,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.197';
+const ERP_VERSION = 'v2.3.198';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13664,10 +13664,16 @@ async function parseUploadFile() {
     const r = rows[i]; if (!r || r.length < 2) continue;
     const cell = idx => idx >= 0 ? (r[idx]||'').toString().trim() : '';
     const trackingNo = cell(colMap.tracking) || '';
+    // v2.3.198: 주문 시각 보존 — 결합 컬럼은 normalizeDate 가 시간 유지, 별도 시간 컬럼이면 합성.
+    let _orderDate = normalizeDate(cell(colMap.orderDate));
+    if (colMap.orderTime >= 0 && _orderDate && !/\d{1,2}:\d{2}/.test(_orderDate)) {
+      const _tm = String(cell(colMap.orderTime)).match(/(\d{1,2}):(\d{2})/);
+      if (_tm) _orderDate = _orderDate.slice(0, 10) + ' ' + _tm[1].padStart(2, '0') + ':' + _tm[2];
+    }
     const order = {
       id: Date.now() + i,
       orderNo: cell(colMap.orderNo) || ('MNL-' + Date.now() + '-' + i),
-      orderDate: normalizeDate(cell(colMap.orderDate)) || new Date().toISOString().slice(0,10),
+      orderDate: _orderDate || new Date().toISOString().slice(0,10),
       customerName: cell(colMap.customer) || '미입력',
       customerPhone: _fmtPhone(cell(colMap.customerPhone)).replace(/^-$/, ''),
       email: cell(colMap.email) || '',
@@ -13701,9 +13707,18 @@ async function parseUploadFile() {
 
 function detectColumns(header) {
   const find = (...keys) => header.findIndex(h => keys.some(k => h.includes(k)));
+  // v2.3.198: 주문일 — 시간 포함 컬럼(주문일시/결제일시 등) 우선, 없으면 날짜 컬럼.
+  //   쿠팡/스마트스토어 export 는 '주문일'(날짜만)과 '주문일시'(시간 포함)가 함께 있을 수 있어,
+  //   컬럼 위치상 날짜 컬럼이 먼저 잡히면 시간이 유실됐음 → 시간 컬럼을 명시적으로 먼저 탐색.
+  let _orderDate = find('주문일시','주문 일시','결제일시','결제 일시','주문일자시간','주문완료일시','order datetime','ordered_at','orderedat');
+  if (_orderDate < 0) _orderDate = find('주문일','주문날짜','주문 일자','주문일자','orderdate','order_date','결제일','결제일자','날짜','일자');
+  // 날짜와 분리된 별도 '주문시간' 컬럼(있으면) — orderDate 에 시각 합성용
+  let _orderTime = find('주문시간','주문 시간','주문시각','결제시간','결제 시간','order time','order_time');
+  if (_orderTime === _orderDate) _orderTime = -1;
   return {
     orderNo: find('주문번호','orderno','order_no','주문 번호','order no','order number'),
-    orderDate: find('주문일','주문날짜','주문 일자','orderdate','order_date','날짜','일자','주문일시'),
+    orderDate: _orderDate,
+    orderTime: _orderTime,
     customer: find('주문 고객명','고객명','고객','customer','이름','name','구매자','buyer'),
     customerPhone: find('주문자 연락처','주문자연락처','연락처','전화','phone','tel','휴대폰','핸드폰'),
     email: find('이메일','email','e-mail','메일'),
