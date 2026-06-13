@@ -5772,7 +5772,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.196';
+const ERP_VERSION = 'v2.3.197';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -35594,7 +35594,8 @@ async function _processSlackBoardInbox() {
     if (typeof loadSharedSetting !== 'function' || typeof saveSharedSetting !== 'function') return;
     window._slackInboxBusy = true;
     const inbox = await loadSharedSetting('slack_board_inbox');
-    if (!Array.isArray(inbox) || !inbox.length) return;
+    if (!Array.isArray(inbox) || !inbox.length) { if (window._slackInboxVerbose) console.log('💬 [SLACK→ERP] inbox 비어있음'); return; }
+    console.log('💬 [SLACK→ERP] inbox ' + inbox.length + '건 처리 시작');
     const r = _applySlackInboxEntries(DB.feedPosts || [], inbox, Date.now());
     if (r.added > 0) {
       console.log('💬 [v2.3.183 SLACK→ERP] 슬랙 답글 ' + r.added + '건을 업무공유 댓글로 적용');
@@ -35613,6 +35614,32 @@ async function _processSlackBoardInbox() {
     window._slackInboxBusy = false;
   }
 }
+
+// v2.3.197: 슬랙→ERP 역방향 진단 — 콘솔에서 _slackSyncTest() 실행.
+//   어느 단계에서 막혔는지 한 번에 보여줌(inbox 내용·postId 매칭·처리 결과).
+window._slackSyncTest = async function() {
+  try {
+    const me = window._currentUser || {};
+    console.log('🔎 [SLACK SYNC TEST] 로그인=' + (me.name||'?') + ' / 관리자=' + (me.isAdmin===true));
+    if (me.isAdmin !== true) console.warn('⚠️ settings 읽기는 관리자만 가능 — 관리자 계정으로 테스트하세요.');
+    const inbox = await loadSharedSetting('slack_board_inbox');
+    if (!Array.isArray(inbox)) { console.warn('❌ inbox 가 배열이 아님(null=아직 한 건도 안 옴 또는 권한 없음):', inbox); return; }
+    console.log('📥 inbox ' + inbox.length + '건:', JSON.stringify(inbox).slice(0, 500));
+    const postIds = new Set((DB.feedPosts||[]).map(p => String(p && p.id)));
+    inbox.forEach(en => {
+      if (!en) return;
+      const match = postIds.has(String(en.postId));
+      console.log('  • ts=' + en.ts + ' postId=' + en.postId + ' → 글 매칭=' + (match ? '✅' : '❌(이 글이 ERP에 없음/매핑오류)') + ' author=' + en.author + ' text="' + String(en.text||'').slice(0,30) + '"');
+    });
+    if (!inbox.length) {
+      console.log('→ inbox 비어있음. 슬랙 답글이 Apps Script→Firestore 까지 안 온 것. Apps Script 실행기록에서 \'📩 event 수신\' 로그 확인, 또는 diagSlackSync() 실행.');
+      return;
+    }
+    console.log('→ _processSlackBoardInbox() 강제 실행…');
+    await _processSlackBoardInbox();
+    console.log('✅ 처리 완료 — 업무공유에서 댓글 확인하세요.');
+  } catch (e) { console.error('[_slackSyncTest] 실패:', e); }
+};
 
 // v2.3.23: 운영 업무 공유 슬랙 알림 — 전용 채널 #업무공유-게시판
 //   payload: { type: 'board_post' | 'board_comment' | 'board_reply', text }
