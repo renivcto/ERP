@@ -5772,7 +5772,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.192';
+const ERP_VERSION = 'v2.3.193';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7122,7 +7122,8 @@ async function _doSaveDataInner() {
                 //   tombstone(의도적 삭제)된 레코드는 복원하지 않음.
                 const _tombArrName = ({
                   items:'_deletedItemIds', samples:'_deletedSampleIds', approvals:'_deletedApprovalIds',
-                  expenses:'_deletedExpenseIds', approvalComments:'_deletedCommentIds', feedPosts:'_deletedFeedPostIds'
+                  expenses:'_deletedExpenseIds', approvalComments:'_deletedCommentIds', feedPosts:'_deletedFeedPostIds',
+                  newProducts:'_deletedNewProductIds'  // v2.3.193
                 })[key];
                 if (_tombArrName) {
                   let _keepIds = onlyOnServer.slice();
@@ -7235,6 +7236,7 @@ async function _doSaveDataInner() {
       _deletedSampleIds: Array.isArray(dbToSave._deletedSampleIds) ? dbToSave._deletedSampleIds : [],  // v1.9.682
       _deletedItemIds: Array.isArray(dbToSave._deletedItemIds) ? dbToSave._deletedItemIds : [],  // v1.9.892
       _deletedShopIds: Array.isArray(dbToSave._deletedShopIds) ? dbToSave._deletedShopIds : [],  // v1.9.691
+      _deletedNewProductIds: Array.isArray(dbToSave._deletedNewProductIds) ? dbToSave._deletedNewProductIds : [],  // v2.3.193
       // v1.9.594 — 고객 등급 수동 override (key → 'vip'|'regular'|'member'|'normal')
       customerOverrides: (dbToSave.customerOverrides && typeof dbToSave.customerOverrides === 'object') ? dbToSave.customerOverrides : {},
       boms:             dbToSave.boms             || {},
@@ -8355,6 +8357,7 @@ const DEFAULT_DB = {
   _deletedSampleIds: [],  // v1.9.682
   _deletedItemIds: [],  // v1.9.892 — 품목 삭제 tombstone
   _deletedShopIds: [],  // v1.9.691
+  _deletedNewProductIds: [],  // v2.3.193 — 신제품 삭제 tombstone
   // v1.9.594 — 고객 등급 수동 override (key → tier)
   customerOverrides: {},
   // v1.9.795: 초기화 누락 방지
@@ -8393,6 +8396,7 @@ if (DB == null) {
     if (!Array.isArray(DB._deletedSampleIds)) DB._deletedSampleIds = [];  // v1.9.682
     if (!Array.isArray(DB._deletedItemIds)) DB._deletedItemIds = [];  // v1.9.892
     if (!Array.isArray(DB._deletedShopIds)) DB._deletedShopIds = [];  // v1.9.691
+    if (!Array.isArray(DB._deletedNewProductIds)) DB._deletedNewProductIds = [];  // v2.3.193
   } catch(_){}
 })();
 
@@ -46519,8 +46523,8 @@ window._removeProductFromTimeline = function(productId) {
     showNotif('🗑️ "' + p.name + '" 을(를) DROP LIST 로 이동했습니다', 'success');
   } else if (ch === '3') {
     if (!confirm('⚠️ "' + p.name + '" 을(를) 완전 삭제할까요?\n\n관련 마일스톤도 함께 삭제됩니다. 이 작업은 되돌릴 수 없습니다.')) return;
+    _tombstoneNewProduct(productId);  // v2.3.193 (이전: 무효한 _deletedFeedPostIds 초기화 코드 제거)
     DB.newProducts = (DB.newProducts || []).filter(x => x && String(x.id) !== String(productId));
-    if (!Array.isArray(DB._deletedFeedPostIds)) DB._deletedFeedPostIds = [];
     try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
     if (typeof renderProductTimeline === 'function') renderProductTimeline();
     showNotif('🗑️ "' + p.name + '" 완전 삭제 완료', 'success');
@@ -46585,6 +46589,7 @@ window._permanentDeleteDroppedProduct = async function(id) {
   const p = (DB.newProducts||[]).find(x => x && String(x.id) === String(id));
   if (!p) return;
   if (!confirm(`⚠️ '${p.name}' 을(를) 영구 삭제할까요?\n\n이 작업은 되돌릴 수 없습니다.`)) return;
+  _tombstoneNewProduct(id);  // v2.3.193
   DB.newProducts = (DB.newProducts||[]).filter(x => x && String(x.id) !== String(id));
   try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
   if (typeof saveDataNow === 'function') await saveDataNow();
@@ -46595,10 +46600,42 @@ window._permanentDeleteDroppedProduct = async function(id) {
 };
 
 // ── 삭제 ──
+// v2.3.193: 신제품 삭제 tombstone — 삭제 후 로드 머지/count-guard 가 Firestore 복사본으로
+//   되살리던 버그 차단. (items/feedPosts 와 동일 패턴) 머지 시 이 id 는 newProducts 에서 영구 제외.
+function _tombstoneNewProduct(id) {
+  try {
+    if (id == null) return;
+    const _idStr = String(id);
+    if (!Array.isArray(DB._deletedNewProductIds)) DB._deletedNewProductIds = [];
+    if (!DB._deletedNewProductIds.some(t => String(t && (t.id != null ? t.id : t)) === _idStr)) {
+      DB._deletedNewProductIds.push({ id: _idStr, ts: Date.now() });
+    }
+    if (DB._deletedNewProductIds.length > 500) {
+      DB._deletedNewProductIds = DB._deletedNewProductIds.sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 500);
+    }
+    // 전용 localStorage 백업 (메인 DB 가 머지로 날아가도 삭제 상태 유지)
+    try {
+      const _k = 'reniv_deleted_newproduct_ids';
+      let _ls = []; try { _ls = JSON.parse(localStorage.getItem(_k) || '[]') || []; } catch (_) { _ls = []; }
+      if (!_ls.some(t => String(t && (t.id != null ? t.id : t)) === _idStr)) _ls.push({ id: _idStr, ts: Date.now() });
+      localStorage.setItem(_k, JSON.stringify(_ls.slice(-500)));
+    } catch (_) {}
+    // 전용 newProducts 백업에서도 제거 → 백업 복구 경로가 되살리지 않게
+    try {
+      const _bk = JSON.parse(localStorage.getItem('reniv_newProducts_backup') || '[]');
+      if (Array.isArray(_bk)) {
+        const _kept = _bk.filter(p => p && String(p.id) !== _idStr);
+        if (_kept.length !== _bk.length) localStorage.setItem('reniv_newProducts_backup', JSON.stringify(_kept));
+      }
+    } catch (_) {}
+  } catch (e) { console.warn('[v2.3.193] newProduct tombstone 실패:', e); }
+}
+
 function deleteNewProduct() {
   if (!_npEditId) return;
   const it = (DB.newProducts || []).find(x => x.id === _npEditId);
   if (!it || !confirm(`'${it.name}' 프로젝트를 삭제합니까?`)) return;
+  _tombstoneNewProduct(_npEditId);  // v2.3.193
   DB.newProducts = DB.newProducts.filter(x => x.id !== _npEditId);
   saveDataNow().catch(e => console.error('신제품 삭제 실패:', e));
   closeModal('add-newproduct');
@@ -50194,6 +50231,25 @@ function initERPWhenReady() {
         if (!merged.newProducts.length) {
           try { const _bN = JSON.parse(localStorage.getItem('reniv_newProducts_backup') || '[]'); if (Array.isArray(_bN) && _bN.length) { merged.newProducts = _bN; console.warn('🛟 newProducts 전용 백업에서 복구 —', _bN.length, '건'); } } catch(_){}
         }
+        // v2.3.193: 신제품 삭제 tombstone 머지 + 필터 — Firestore 복사본/백업이 되살리던 버그 차단
+        try {
+          const _npTombs = new Map();
+          const _addNpT = arr => { (Array.isArray(arr) ? arr : []).forEach(t => {
+            if (!t) return; const k = String(t.id != null ? t.id : t); if (!k || k === 'undefined') return;
+            const ts = Number(t.ts) || 0; const prev = _npTombs.get(k);
+            if (!prev || ts > (prev.ts || 0)) _npTombs.set(k, { id: k, ts });
+          }); };
+          _addNpT(firestoreDB._deletedNewProductIds);
+          _addNpT(localDB._deletedNewProductIds);
+          try { _addNpT(JSON.parse(localStorage.getItem('reniv_deleted_newproduct_ids') || '[]')); } catch(_){}
+          merged._deletedNewProductIds = Array.from(_npTombs.values()).sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 500);
+          if (_npTombs.size > 0 && Array.isArray(merged.newProducts)) {
+            const _before = merged.newProducts.length;
+            merged.newProducts = merged.newProducts.filter(p => p && !_npTombs.has(String(p.id)));
+            const _removed = _before - merged.newProducts.length;
+            if (_removed > 0) console.warn('🪦 [v2.3.193] newProduct tombstone 으로 ' + _removed + '건 부활 차단');
+          }
+        } catch(e) { console.warn('[v2.3.193] newProduct tombstone 머지 실패:', e); }
         console.log('newProducts 병합 (newer-wins) —', merged.newProducts.length, '건');
       }
       // v1.9.205: 결재 그룹웨어 컬렉션 2차 복구 — 메인 병합 후에도 비어있다면 전용 localStorage 백업에서 복구
