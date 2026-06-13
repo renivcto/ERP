@@ -145,7 +145,7 @@
           window._currentUser = { ...data, uid: user.uid, permission: data.permission || 'read' };
           console.log('🔐 [AUTH] _currentUser 설정 완료 — uid=' + String(user.uid).slice(0,10) + '… name=' + data.name + ' isAdmin=' + (data.isAdmin === true));  // v2.3.191 진단
           // v1.9.771: 다음 새로고침 fast-path 를 위해 user 정보 localStorage 캐시
-          try { localStorage.setItem('reniv_last_user', JSON.stringify({ name: data.name, email: user.email, photo: user.photoURL||'', role: data.role||'멤버', isAdmin: data.isAdmin===true || (data.role==='CTO'), permission: data.permission || 'read' })); } catch(_){}
+          try { localStorage.setItem('reniv_last_user', JSON.stringify({ uid: user.uid, name: data.name, email: user.email, photo: user.photoURL||'', role: data.role||'멤버', isAdmin: data.isAdmin===true || (data.role==='CTO'), permission: data.permission || 'read' })); } catch(_){}
         }
       } catch(e) {
         // v2.0 보안 패치: Firestore 실패 시 무조건 관리자 부여하던 로직을 제거.
@@ -212,6 +212,8 @@
   window._loadFirestoreUsers = async function() {
     const snap = await getDocs(collection(db, 'users'));
     const users = snap.docs.map(d => ({ ...d.data(), uid: d.id }));
+    // v2.3.192 진단: getDocs 원본 + 캐시 응답 여부 — 관리자 행이 원본에서 빠지는지 확인
+    try { console.log('📥 [USERS LOAD] [' + users.map(u => (u.name || '-') + (u.status === '삭제됨' ? '(삭제됨)' : '')).join(', ') + '] | fromCache=' + (snap.metadata ? snap.metadata.fromCache : '?')); } catch(_){}
     // v2.3.187: 여기서 _cachedFirestoreUsers 를 덮어쓰지 않음 — updateBadges 등이 주기 호출할 때
     //   원시 목록(유령 행 포함·정렬 안 됨·낙관적 쓰기 포함)이 보정된 캐시를 덮어써, 레거시 렌더가
     //   잘못된 행을 "잠깐 보였다 사라지게" 하던 원인. 캐시는 renderUserTableFirestore 가
@@ -5770,7 +5772,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.191';
+const ERP_VERSION = 'v2.3.192';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -50706,15 +50708,25 @@ function _renderUserTableFromList(users) {
       + ' | isAdmin=' + (_meD.isAdmin === true)
       + ' | 호출: ' + String((new Error().stack || '').split('\n').slice(2, 4).join(' ← ')).replace(/https?:\S+/g, ''));
   } catch (_) {}
-  // v2.3.189: 최종 방어 — 어떤 호출 경로(캐시 렌더·경합 등)로 그려지든, 관리자 본인 행이
-  //   목록에 없으면 그리기 직전에 보정 표시. (uid 있는 정식 세션만 — 빠른경로 오판 방지)
+  // v2.3.192: 최종 방어 — 세션이 관리자면 본인 행을 무조건 보장. uid OR 이메일로 매칭하므로
+  //   fast-path(provisional, uid 없음·이메일만 있음)에서도 작동. 이게 이번 버그의 핵심:
+  //   reniv_last_user 캐시에 uid 가 없어 기존 가드(_me.uid 필수)가 provisional 페인트에서
+  //   전부 스킵 → 관리자 행이 "잠깐 보였다 사라짐". 이메일 매칭이면 중복도 안 생김.
   try {
     const _meF = window._currentUser;
-    if (_meF && _meF.uid && _meF.isAdmin && Array.isArray(users) && !users.some(u => u && u.uid === _meF.uid)) {
-      users = users.concat([{ uid: _meF.uid, name: _meF.name || '관리자', email: _meF.email || '',
-        role: _meF.role || 'CTO', permission: 'write', status: '활성', isAdmin: true,
-        joinDate: '-', lastLogin: '-' }]);
-      console.warn('🛡️ [v2.3.189] 렌더 직전 관리자 행 누락 — 보정 표시');
+    if (_meF && _meF.isAdmin && Array.isArray(users)) {
+      const _myEmail = String(_meF.email || '').toLowerCase();
+      const _present = users.some(u => u && (
+        (_meF.uid && u.uid === _meF.uid) ||
+        (_myEmail && String(u.email || '').toLowerCase() === _myEmail)
+      ));
+      if (!_present && (_meF.uid || _myEmail)) {
+        users = users.concat([{ uid: _meF.uid || ('self_' + (_myEmail || 'admin')),
+          name: _meF.name || '관리자', email: _meF.email || '',
+          role: _meF.role || 'CTO', permission: 'write', status: '활성', isAdmin: true,
+          joinDate: '-', lastLogin: '-' }]);
+        console.warn('🛡️ [v2.3.192] 렌더 직전 관리자 행 누락 — 보정 표시 (uid=' + (_meF.uid ? 'O' : 'X') + ', email매칭)');
+      }
     }
   } catch(_){}
   const isAdmin = window._currentUser && window._currentUser.isAdmin;
@@ -50830,6 +50842,7 @@ function _v770EarlyFastPath() {
     let _lastUser = {};
     try { _lastUser = JSON.parse(localStorage.getItem('reniv_last_user') || '{}'); } catch(_){}
     window._currentUser = {
+      uid: _lastUser.uid || '',  // v2.3.192: 캐시된 uid 사용 — provisional 단계 가드 정상 작동
       name: _lastUser.name || '로딩 중...',
       email: _lastUser.email || '',
       photo: _lastUser.photo || '',
