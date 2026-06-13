@@ -5772,7 +5772,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.194';
+const ERP_VERSION = 'v2.3.195';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6124,6 +6124,31 @@ function _pruneOrphanSnapshots() {
   } catch(_){ return 0; }
 }
 
+// v2.3.195: localStorage 공간 즉시 확보 — 시간별 스냅샷(복구 가능한 사본) 제거 + 발주 백업 lite 재기록.
+//   메모리/Firestore 데이터는 건드리지 않음. 콘솔에서 _freeLS() 로 즉시 실행 가능.
+window._freeLS = function() {
+  const _sum = () => { let s = 0; for (let i = 0; i < localStorage.length; i++) { try { s += (localStorage.getItem(localStorage.key(i)) || '').length; } catch(_){} } return s; };
+  const before = _sum();
+  const removed = [];
+  try {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (/^reniv_orders_snap_/.test(k) || /^reniv_items_snap_/.test(k) || /^reniv_shopOrders_snap_/.test(k))) keys.push(k);
+    }
+    keys.forEach(k => { try { const kb = Math.round((localStorage.getItem(k) || '').length / 1024); localStorage.removeItem(k); removed.push(k + '(' + kb + 'KB)'); } catch(_){} });
+    try { localStorage.removeItem('reniv_orders_snapshots_list'); } catch(_){}
+  } catch(_){}
+  // 발주 백업 lite 재기록(도장 이미지/첨부 마커화로 축소)
+  try { if (typeof _backupOrdersNow === 'function') _backupOrdersNow('free_ls'); } catch(_){}
+  const after = _sum();
+  const freedKB = Math.round((before - after) / 1024);
+  console.log('🧹 [_freeLS] ' + (before / 1024 / 1024).toFixed(2) + 'MB → ' + (after / 1024 / 1024).toFixed(2) + 'MB (' + freedKB + 'KB 확보)');
+  if (removed.length) console.log('   제거된 스냅샷:', removed.join(', '));
+  try { if (typeof showNotif === 'function') showNotif('🧹 저장공간 ' + freedKB + 'KB 확보', 'success'); } catch(_){}
+  return { freedKB: freedKB };
+};
+
 function _backupOrdersNow(tag) {
   try {
     const orders = DB.orders || [];
@@ -6135,6 +6160,20 @@ function _backupOrdersNow(tag) {
       const c = Object.assign({}, o);
       if (typeof c.pdfData === 'string' && c.pdfData.length > 10 && c.pdfData !== '__idb__') c.pdfData = '__idb__';
       if (typeof c.stampData === 'string' && c.stampData.length > 10 && c.stampData !== '__idb__') c.stampData = '__idb__';
+      // v2.3.195: 누락됐던 대용량 base64 필드도 제거 — 결재 도장 이미지/해외PO 첨부.
+      //   (이것들이 안 빠져 reniv_orders_backup·스냅샷이 ~717KB 로 비대 → localStorage 고갈)
+      //   원본은 메모리 DB·Firestore 에 그대로. 백업은 메타데이터 복구용이므로 마커만 남겨도 안전.
+      if (typeof c.approvalStampImage === 'string' && c.approvalStampImage.length > 100 && c.approvalStampImage !== '__idb__') c.approvalStampImage = '__stripped__';
+      if (typeof c.stampImage === 'string' && c.stampImage.length > 100 && c.stampImage !== '__idb__') c.stampImage = '__stripped__';
+      if (c.invoiceFile && typeof c.invoiceFile.data === 'string' && c.invoiceFile.data.length > 100 && c.invoiceFile.data !== '__idb__') {
+        c.invoiceFile = Object.assign({}, c.invoiceFile, { data: '__idb__' });
+      }
+      if (Array.isArray(c.otherFiles)) {
+        c.otherFiles = c.otherFiles.map(function(f){
+          if (f && typeof f.data === 'string' && f.data.length > 100 && f.data !== '__idb__') return Object.assign({}, f, { data: '__idb__' });
+          return f;
+        });
+      }
       if (Array.isArray(c.closingDocs)) {
         c.closingDocs = c.closingDocs.map(function(d){
           if (d && typeof d.data === 'string' && d.data.length > 100 && d.data !== '__idb__') {
