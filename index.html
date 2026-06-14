@@ -5772,7 +5772,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.199';
+const ERP_VERSION = 'v2.3.200';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -35394,11 +35394,11 @@ function _buildWebhookPayload(kind, type, payload) {
       ? `${urgentPrefix}${payload.title}${urgentTag}\n• 금액: ${fmtWon(payload.amount||0)}${payload.dueDate?`\n• 결제예정일: ${payload.dueDate}`:''}${payload.paidDate?`\n• 지급일: ${payload.paidDate}`:''}`
       : (payload && payload.text ? payload.text : '르니브 ERP 테스트 알림');
   }
-  // v2.3.199: 결재 요청 알림에 ERP 딥링크 — 모바일/PC 에서 클릭하면 해당 품의서/발주서가 바로 열려 결재 가능.
-  //   (슬랙 mrkdwn <url|라벨> — incoming webhook text 에서 클릭 링크로 렌더. 잔디는 제외.)
-  if (type === 'approval_request' && kind !== 'jandi' && payload && payload.id != null) {
-    bodyText += `\n\n<https://renivcto.github.io/ERP/?approval=${encodeURIComponent(payload.id)}|🔗 결재하러 가기 (모바일에서도 바로 결재)>`;
-  }
+  // v2.3.200: 결재 요청 알림 ERP 딥링크 — Block Kit 실제 버튼(URL 버튼)으로 노출(아래 슬랙 반환부).
+  //   클릭하면 해당 품의서/발주서가 ERP 에서 바로 열려 결재 가능(모바일 포함). 잔디는 미지원이라 제외.
+  const _apDeepUrl = (type === 'approval_request' && kind !== 'jandi' && payload && payload.id != null)
+    ? `https://renivcto.github.io/ERP/?approval=${encodeURIComponent(payload.id)}`
+    : '';
 
   if (kind === 'jandi') {
     // 잔디 Incoming Webhook 포맷
@@ -35454,6 +35454,20 @@ function _buildWebhookPayload(kind, type, payload) {
     };
   }
   // 슬랙 / 기타는 text 포맷
+  // v2.3.200: 결재 요청은 Block Kit 실제 버튼(URL 버튼) 첨부 — incoming webhook 도 blocks 지원.
+  //   text 는 알림 미리보기 + blocks 미지원 클라이언트용 폴백(링크 포함). 버튼은 url 만 가지므로
+  //   별도 인터랙티비티(Request URL) 없이도 클릭 시 ERP 딥링크가 열림.
+  if (_apDeepUrl) {
+    return {
+      text: `*${title}*\n${bodyText}\n\n<${_apDeepUrl}|🔗 결재하러 가기>`,
+      blocks: [
+        { type: 'section', text: { type: 'mrkdwn', text: `*${title}*\n${bodyText}` } },
+        { type: 'actions', elements: [
+          { type: 'button', text: { type: 'plain_text', emoji: true, text: '🖋️ 결재하러 가기' }, url: _apDeepUrl, style: 'primary' }
+        ] }
+      ],
+    };
+  }
   return {
     text: `*${title}*\n${bodyText}`,
   };
