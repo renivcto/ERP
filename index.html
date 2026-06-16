@@ -3526,6 +3526,38 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             </div>
           </div>
         </div>
+        <!-- v2.3.205: 결재 전용 슬랙 양방향 릴레이 카드 -->
+        <div class="card">
+          <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+            <span style="display:flex;align-items:center;gap:8px;font-weight:700">🧾 슬랙 — 결재 전용 채널 (양방향)</span>
+            <span class="badge" id="slack-approval-status-badge" style="font-size:11px;background:#fef3c7;color:#92400e">미설정</span>
+          </div>
+          <div class="card-body">
+            <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12.5px;color:#475569;line-height:1.65">
+              📌 결재 관리(지출·발주·일반·샘플) <strong>의견 댓글</strong>이 결재 전용 슬랙 채널의 <strong>스레드</strong>로 전송되고, 그 <strong>스레드 답글</strong>이 다시 ERP 결재 의견으로 자동 저장됩니다. (운영 업무 공유와 동일한 양방향 방식)<br>
+              슬랙 답글을 <code>↳</code> 또는 <code>re:</code> 로 시작하면 그 결재의 최근 댓글에 <strong>대댓글</strong>로 들어갑니다.
+            </div>
+            <div style="background:var(--sky-50);border:1px solid var(--sky-200);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11.5px;color:var(--sky-800)">
+              💡 이 기능은 <strong>전용 Apps Script 릴레이</strong>가 필요합니다. 같은 폴더 <strong>「결재슬랙_양방향_설치가이드.md」</strong> 를 따라 봇·채널·릴레이를 만든 뒤 아래 URL/비밀키를 입력하세요.
+            </div>
+            <div class="fg" style="margin-bottom:8px">
+              <label style="font-size:11px">릴레이 웹앱 URL (Apps Script)</label>
+              <input class="fi" id="slack-approval-relay-url" placeholder="https://script.google.com/macros/s/.../exec">
+            </div>
+            <div class="fg" style="margin-bottom:10px">
+              <label style="font-size:11px">공유 비밀키 (Apps Script 와 동일)</label>
+              <input class="fi" id="slack-approval-relay-secret" placeholder="아무 문자열 (예: reniv-appr-2026)">
+            </div>
+            <div class="fg" style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+              <input type="checkbox" id="slack-approval-enabled">
+              <label for="slack-approval-enabled" style="cursor:pointer;font-weight:600">결재 의견 슬랙 양방향 사용</label>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-primary" onclick="saveSlackApprovalSettings()" style="flex:1;min-width:120px">💾 저장</button>
+              <button class="btn btn-outline" onclick="testSlackApprovalRelay()">🧪 연결 테스트</button>
+            </div>
+          </div>
+        </div>
         <!-- v2.3.126: 슬랙 실시간 운영 알림 카드 -->
         <div class="card" id="slack-ops-settings-card">
           <div class="card-hdr">
@@ -5796,7 +5828,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.204';
+const ERP_VERSION = 'v2.3.205';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -8413,6 +8445,9 @@ const DEFAULT_DB = {
     slackBoardEnabled: false,
     slackBoardRelayUrl: '',      // v2.3.173: Apps Script 릴레이(chat.postMessage)
     slackBoardRelaySecret: '',   // v2.3.173
+    slackApprovalRelayUrl: '',   // v2.3.205: 결재 전용 양방향 릴레이
+    slackApprovalRelaySecret: '',// v2.3.205
+    slackApprovalEnabled: false, // v2.3.205
     slackOpsWebhookUrl: '',      // v2.3.126: 실시간 운영 알림
     slackOpsEnabled: false,      // v2.3.126
     slackDigestWebhookUrl: '',   // v2.3.125: 데일리 브리핑
@@ -35745,6 +35780,201 @@ async function _processSlackBoardInbox() {
   }
 }
 
+// ═══════════════════════════════════════════════════════
+// v2.3.205: 결재 관리 의견 ↔ 슬랙 양방향 (운영 업무 공유와 동일 구조, 전용 채널·전용 릴레이)
+//   - ERP→슬랙: 결재 의견 댓글 → 전용 Apps Script 릴레이(chat.postMessage)로 그 결재의
+//     스레드에 게시. 첫(비-슬랙) 댓글은 부모 메시지(결재 요약+첫 댓글)로, 이후는 스레드 답글.
+//     (부모/댓글 동시전송 레이스 회피 위해 첫 댓글을 부모 메시지에 합쳐서 1회 전송)
+//   - 슬랙→ERP: 스레드 답글 → 전용 릴레이 doPost → Firestore settings/slack_approval_inbox →
+//     ERP가 로드+3분 주기로 읽어 approvalComments(해당 approvalId)로 적용 (멱등·결정적 id).
+//   - 루프 방지: slack-origin 댓글은 addApprovalComment 를 거치지 않아 재전송되지 않음.
+// ═══════════════════════════════════════════════════════
+function _approvalRelaySend(refKey, kind, text) {
+  try {
+    const s = DB.appSettings || {};
+    if (!s.slackApprovalEnabled) return false;
+    const url = (s.slackApprovalRelayUrl || '').trim();
+    if (!url) return false;
+    const body = JSON.stringify({ postId: String(refKey), kind: kind, text: text, secret: s.slackApprovalRelaySecret || '' });
+    fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body: body });
+    return true;
+  } catch(e) { console.warn('[결재 relay] 실패:', e); return false; }
+}
+
+// 결재 refKey → 부모 메시지 요약 (지출 'exp:<id>' / 발주·일반 숫자 id)
+function _approvalSlackHeader(refKey) {
+  const key = String(refKey);
+  let label = '결재', title = '', amount = 0, vendor = '';
+  if (key.indexOf('exp:') === 0) {
+    const e = (DB.expenses||[]).find(x => String(x.id) === key.slice(4));
+    if (e) { label = '지출결의서'; title = e.title || ''; amount = Number(e.amount) || 0; vendor = e.vendor || ''; }
+  } else {
+    const a = (DB.approvals||[]).find(x => String(x.id) === key);
+    if (a) {
+      label = a.type === 'po_approval' ? '발주서 결재' : (a.type === 'non_po_approval' ? '일반 결재' : '결재');
+      title = a.title || ''; amount = Number(a.amount) || 0; vendor = a.vendor || '';
+    }
+  }
+  let head = '🧾 *[' + label + ']* ' + (title || ('#' + key));
+  if (vendor) head += '\n• 업체: ' + vendor;
+  if (amount) head += '\n• 금액: ₩' + amount.toLocaleString('ko-KR');
+  return head;
+}
+
+// 결재 의견을 슬랙으로 — 그 결재의 첫(비-슬랙) 댓글이면 부모로, 아니면 스레드 답글로
+function _dispatchApprovalCommentToSlack(refKey, authorName, text, attachCount) {
+  try {
+    const s = DB.appSettings || {};
+    if (!s.slackApprovalEnabled || !(s.slackApprovalRelayUrl || '').trim()) return;
+    let line = '*' + (authorName || '담당자') + '*: ' + (text || '');
+    if (attachCount > 0) line += '  📎(첨부 ' + attachCount + ')';
+    // 이 결재의 비-슬랙 댓글 수 — 1이면(방금 추가된 것뿐) 첫 댓글 → 부모 메시지 게시
+    const humanCount = (DB.approvalComments||[]).filter(c => c && String(c.approvalId) === String(refKey) && c.origin !== 'slack').length;
+    if (humanCount <= 1) {
+      _approvalRelaySend(refKey, 'post', _approvalSlackHeader(refKey) + '\n\n💬 ' + line);
+    } else {
+      _approvalRelaySend(refKey, 'comment', '💬 ' + line);
+    }
+  } catch(e) { console.warn('[결재→슬랙] 실패:', e); }
+}
+
+// 순수 로직 — approvalComments/inbox 를 받아 in-place 적용, { applied, remaining, added } 반환
+function _applySlackApprovalInboxEntries(comments, inbox, nowMs) {
+  const applied = [], remaining = [];
+  const MAX_AGE = 14 * 24 * 60 * 60 * 1000;
+  let added = 0;
+  (inbox || []).forEach(en => {
+    if (!en || !en.ts || !en.postId) { applied.push(en); return; }
+    const refKey = String(en.postId);
+    if (comments.some(c => c && c.slackTs === en.ts && String(c.approvalId) === refKey)) { applied.push(en); return; }  // 이미 적용
+    // 대상 결재 존재 확인 (없으면 14일 보류 후 폐기)
+    const exists = refKey.indexOf('exp:') === 0
+      ? (DB.expenses||[]).some(x => String(x.id) === refKey.slice(4))
+      : (DB.approvals||[]).some(x => String(x.id) === refKey);
+    if (!exists) {
+      if ((nowMs - (Number(en.at) || 0)) > MAX_AGE) applied.push(en); else remaining.push(en);
+      return;
+    }
+    let text = String(en.text || '');
+    let parentId = null;
+    const m = text.match(/^\s*(?:↳|re:)\s*/i);
+    if (m) {
+      text = text.slice(m[0].length);
+      const tops = comments.filter(c => c && String(c.approvalId) === refKey && !c.parentId && c.id != null)
+        .slice().sort((a, b) => (Number(a.createdAt)||0) - (Number(b.createdAt)||0));
+      if (tops.length) parentId = tops[tops.length - 1].id;
+    }
+    // 결정적 id (슬랙 ts 기반) — 어느 클라이언트가 적용해도 동일 → 머지 중복/부활 방지
+    const cid = Math.round((parseFloat(en.ts) || 0) * 1000000) || (nowMs * 1000 + Math.floor(Math.random() * 1000));
+    const cms = Math.round((parseFloat(en.ts) || 0) * 1000) || (Number(en.at) || nowMs);
+    comments.push({
+      id: cid,
+      approvalId: refKey,
+      parentId: parentId,
+      author: (en.author || '슬랙 사용자') + ' (Slack)',
+      authorEmail: '',
+      text: text,
+      attachments: [],
+      reactions: {},
+      createdAt: cms,
+      updatedAt: cms,
+      origin: 'slack',
+      slackTs: en.ts,
+    });
+    added++;
+    applied.push(en);
+  });
+  return { applied, remaining, added };
+}
+
+async function _processSlackApprovalInbox() {
+  try {
+    if (window._apprInboxBusy) return;
+    if (typeof loadSharedSetting !== 'function' || typeof saveSharedSetting !== 'function') return;
+    if (!DB.appSettings || !DB.appSettings.slackApprovalEnabled) return;
+    window._apprInboxBusy = true;
+    const inbox = await loadSharedSetting('slack_approval_inbox');
+    if (!Array.isArray(inbox) || !inbox.length) return;
+    if (!Array.isArray(DB.approvalComments)) DB.approvalComments = [];
+    const r = _applySlackApprovalInboxEntries(DB.approvalComments, inbox, Date.now());
+    if (r.added > 0) {
+      console.log('💬 [v2.3.205 SLACK→ERP 결재] 슬랙 답글 ' + r.added + '건을 결재 의견으로 적용');
+      try { localStorage.setItem('reniv_approvalComments_backup', JSON.stringify(DB.approvalComments)); } catch(_){}
+      try { if (typeof saveData === 'function') saveData(); } catch(_){}
+      try { if (typeof renderApprovalComments === 'function' && _currentApprovalDetailId != null) renderApprovalComments(_currentApprovalDetailId); } catch(_){}
+      try { if (typeof renderApprovalPage === 'function') renderApprovalPage(); } catch(_){}
+      try { if (typeof updateApprovalBadges === 'function') updateApprovalBadges(); } catch(_){}
+      try { showNotif('💬 슬랙 답글 ' + r.added + '건이 결재 의견으로 등록되었습니다', 'info'); } catch(_){}
+    }
+    if (r.applied.length > 0 && r.remaining.length !== inbox.length) {
+      await saveSharedSetting('slack_approval_inbox', r.remaining);
+    }
+  } catch (e) {
+    console.warn('[v2.3.205] 결재 inbox 처리 실패:', e);
+  } finally {
+    window._apprInboxBusy = false;
+  }
+}
+
+// 결재 슬랙 양방향 진단 — 콘솔에서 _approvalSlackSyncTest()
+window._approvalSlackSyncTest = async function() {
+  try {
+    const s = DB.appSettings || {};
+    console.log('🔎 [결재 SLACK] enabled=' + !!s.slackApprovalEnabled + ' relayUrl=' + (s.slackApprovalRelayUrl ? 'O' : 'X'));
+    const inbox = await loadSharedSetting('slack_approval_inbox');
+    console.log('📥 slack_approval_inbox:', Array.isArray(inbox) ? (inbox.length + '건') : inbox, JSON.stringify(inbox || '').slice(0, 500));
+    if (Array.isArray(inbox)) {
+      inbox.forEach(en => {
+        if (!en) return;
+        const refKey = String(en.postId);
+        const match = refKey.indexOf('exp:') === 0
+          ? (DB.expenses||[]).some(x => String(x.id) === refKey.slice(4))
+          : (DB.approvals||[]).some(x => String(x.id) === refKey);
+        console.log('  • ts=' + en.ts + ' approvalId=' + refKey + ' → 결재 매칭=' + (match ? '✅' : '❌') + ' author=' + en.author);
+      });
+    }
+    await _processSlackApprovalInbox();
+    console.log('✅ 결재 inbox 처리 완료 — 결재 의견에서 확인하세요.');
+  } catch (e) { console.error('[_approvalSlackSyncTest] 실패:', e); }
+};
+
+function saveSlackApprovalSettings() {
+  if (!DB.appSettings) DB.appSettings = {};
+  DB.appSettings.slackApprovalRelayUrl = (document.getElementById('slack-approval-relay-url')?.value || '').trim();
+  DB.appSettings.slackApprovalRelaySecret = (document.getElementById('slack-approval-relay-secret')?.value || '').trim();
+  DB.appSettings.slackApprovalEnabled = !!document.getElementById('slack-approval-enabled')?.checked;
+  try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  try { _updateSlackApprovalStatusBadge(); } catch(_){}
+  showNotif('✅ 결재 슬랙 양방향 설정 저장됨', 'success');
+}
+
+function _updateSlackApprovalStatusBadge() {
+  const s = DB.appSettings || {};
+  const url = (s.slackApprovalRelayUrl || '');
+  const enabled = !!s.slackApprovalEnabled;
+  const _u = document.getElementById('slack-approval-relay-url'); if (_u) _u.value = url;
+  const _sec = document.getElementById('slack-approval-relay-secret'); if (_sec) _sec.value = s.slackApprovalRelaySecret || '';
+  const _en = document.getElementById('slack-approval-enabled'); if (_en) _en.checked = enabled;
+  const badge = document.getElementById('slack-approval-status-badge');
+  if (badge) {
+    if (url && enabled) { badge.textContent = '✅ 활성'; badge.style.background = '#dcfce7'; badge.style.color = '#166534'; }
+    else if (url) { badge.textContent = '⏸️ 비활성'; badge.style.background = '#fef3c7'; badge.style.color = '#92400e'; }
+    else { badge.textContent = '미설정'; badge.style.background = '#fef3c7'; badge.style.color = '#92400e'; }
+  }
+}
+
+function testSlackApprovalRelay() {
+  const s = DB.appSettings || {};
+  const url = (document.getElementById('slack-approval-relay-url')?.value || s.slackApprovalRelayUrl || '').trim();
+  if (!url) { showNotif('릴레이 웹앱 URL 을 먼저 입력하세요', 'warning'); return; }
+  const secret = (document.getElementById('slack-approval-relay-secret')?.value || s.slackApprovalRelaySecret || '');
+  try {
+    const body = JSON.stringify({ postId: '__test__', kind: 'post', text: '🧪 르니브 ERP — 결재 슬랙 양방향 릴레이 연결 테스트 (' + _kstShortTimeMin() + ' KST)', secret: secret });
+    fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body: body });
+    showNotif('✅ 테스트 메시지를 전송했습니다 (결재 전용 채널 확인)', 'success');
+  } catch(e) { showNotif('⚠️ 전송 실패: ' + (e && e.message), 'warning'); }
+}
+
 // v2.3.197: 슬랙→ERP 역방향 진단 — 콘솔에서 _slackSyncTest() 실행.
 //   어느 단계에서 막혔는지 한 번에 보여줌(inbox 내용·postId 매칭·처리 결과).
 window._slackSyncTest = async function() {
@@ -35822,6 +36052,8 @@ function _updateSlackBoardStatusBadge() {
   if (_ru) _ru.value = (DB.appSettings && DB.appSettings.slackBoardRelayUrl) || '';
   const _rs = document.getElementById('slack-board-relay-secret');
   if (_rs) _rs.value = (DB.appSettings && DB.appSettings.slackBoardRelaySecret) || '';
+  // v2.3.205: 결재 전용 양방향 카드도 함께 채움
+  try { _updateSlackApprovalStatusBadge(); } catch(_){}
 }
 
 function saveSlackBoardSettings() {
@@ -38158,6 +38390,8 @@ async function addApprovalComment() {
     try { saveData(); } catch(_){}
   }
   renderApprovalComments(ref);
+  // v2.3.205: 결재 의견 → 슬랙(전용 채널) 스레드 전송 (양방향). slack-origin 댓글은 이 경로를 안 거침 → 루프 없음.
+  try { _dispatchApprovalCommentToSlack(ref, _apMyName, text, attaches.length); } catch(_){}
   // v1.9.676: 외부 표의 의견 카운트 배지 즉시 갱신
   try { if (typeof renderApprovalPage === 'function') renderApprovalPage(); } catch(_){}
   try { if (typeof updateApprovalBadges === 'function') updateApprovalBadges(); } catch(_){}
@@ -50050,7 +50284,7 @@ function initERPWhenReady() {
         const mergedSettings = {};
         // string 필드: 비어있지 않은 값 우선 (Firestore > localStorage, 둘 다 있으면 Firestore)
         // v2.3.18: slackDriveWebhookUrl 추가 / v2.3.23: slackBoardWebhookUrl 추가
-        const strKeys = ['slackWebhookUrl','geminiApiKey','slackDriveWebhookUrl','slackBoardWebhookUrl','slackDigestWebhookUrl','slackDigestTime','slackOpsWebhookUrl','slackBoardRelayUrl','slackBoardRelaySecret'];  // v2.3.173: board relay 추가
+        const strKeys = ['slackWebhookUrl','geminiApiKey','slackDriveWebhookUrl','slackBoardWebhookUrl','slackDigestWebhookUrl','slackDigestTime','slackOpsWebhookUrl','slackBoardRelayUrl','slackBoardRelaySecret','slackApprovalRelayUrl','slackApprovalRelaySecret'];  // v2.3.173: board relay / v2.3.205: approval relay 추가
         strKeys.forEach(k => {
           const fs = (typeof fsS[k] === 'string' && fsS[k].trim()) ? fsS[k] : '';
           const lc = (typeof lcS[k] === 'string' && lcS[k].trim()) ? lcS[k] : '';
@@ -50058,7 +50292,7 @@ function initERPWhenReady() {
         });
         // boolean/number 필드: Firestore 우선
         // v2.3.18: slackDriveEnabled 추가 / v2.3.23: slackBoardEnabled 추가
-        ['slackEnabled','slackDriveEnabled','slackBoardEnabled','slackDigestEnabled','slackOpsEnabled'].forEach(k => {  // v2.3.126: ops 추가
+        ['slackEnabled','slackDriveEnabled','slackBoardEnabled','slackDigestEnabled','slackOpsEnabled','slackApprovalEnabled'].forEach(k => {  // v2.3.126: ops / v2.3.205: approval 추가
           mergedSettings[k] = (fsS[k] !== undefined) ? !!fsS[k] : (lcS[k] !== undefined ? !!lcS[k] : false);
         });
         ['lastWebhookTestAt'].forEach(k => {
@@ -50736,8 +50970,13 @@ function initERPWhenReady() {
       // v2.3.183: 슬랙→ERP 역방향 — 슬랙 스레드 답글 inbox 적용 (머지 5초 후 1회 + 3분 주기)
       try {
         setTimeout(() => { try { _processSlackBoardInbox(); } catch(_){} }, 5000);
+        // v2.3.205: 결재 의견 역방향도 동일 주기로 처리
+        setTimeout(() => { try { _processSlackApprovalInbox(); } catch(_){} }, 5500);
         if (!window._slackInboxTimer) {
-          window._slackInboxTimer = setInterval(() => { try { _processSlackBoardInbox(); } catch(_){} }, 180000);
+          window._slackInboxTimer = setInterval(() => {
+            try { _processSlackBoardInbox(); } catch(_){}
+            try { _processSlackApprovalInbox(); } catch(_){}
+          }, 180000);
         }
       } catch(_){}
       // v2.3.199: 슬랙 결재 알림 딥링크(?approval=<id>) 자동 오픈 — 데이터/로그인 준비 후
