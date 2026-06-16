@@ -5772,7 +5772,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.200';
+const ERP_VERSION = 'v2.3.201';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -37796,7 +37796,7 @@ function _renderApCommentNode(c, depth) {
       const atts = rawAtts.map((a, ai) => ({ a, ai })).filter(x => x.a && x.a.name);
       if (atts.length === 0) return '';
       const imgs = atts.filter(x => (x.a.type||'').indexOf('image/') === 0);
-      const files = atts.filter(x => (x.a.type||'').indexOf('image/') !== 0).map(x => x.a);
+      const files = atts.filter(x => (x.a.type||'').indexOf('image/') !== 0);  // v2.3.201: {a,ai} 유지(복구 키용)
       let h = '<div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">';
       if (imgs.length > 0) {
         h += '<div style="display:flex;gap:5px;flex-wrap:wrap">';
@@ -37814,16 +37814,25 @@ function _renderApCommentNode(c, depth) {
         }).join('');
         h += '</div>';
       }
-      files.forEach(a => {
+      files.forEach(function(x){
+        const a = x.a, ai = x.ai;
         const sz = a.size ? (a.size < 1024*1024 ? Math.round(a.size/1024)+'KB' : (a.size/1024/1024).toFixed(1)+'MB') : '';
         const type = (a.type||'').toLowerCase();
         const canPreview = type === 'application/pdf' || type === 'text/plain';
-        const linkAttr = canPreview ? 'target="_blank"' : 'download="' + (a.name||'file').replace(/"/g,'&quot;') + '"';
-        h += '<a href="' + a.data + '" ' + linkAttr + ' style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;color:#1e40af;text-decoration:none;max-width:300px">'
-          + '<span>📄</span>'
-          + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (a.name||'?').replace(/</g,'&lt;') + '</span>'
-          + (sz ? '<span style="font-size:10.5px;color:#94a3b8">' + sz + '</span>' : '')
-          + '</a>';
+        const okData = a.data && a.data !== '__idb__' && typeof a.data === 'string' && (a.data.indexOf('data:') === 0 || a.data.indexOf('http') === 0);
+        if (okData) {
+          const linkAttr = canPreview ? 'target="_blank"' : 'download="' + (a.name||'file').replace(/"/g,'&quot;') + '"';
+          h += '<a href="' + a.data + '" ' + linkAttr + ' style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;color:#1e40af;text-decoration:none;max-width:300px">'
+            + '<span>📄</span>'
+            + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (a.name||'?').replace(/</g,'&lt;') + '</span>'
+            + (sz ? '<span style="font-size:10.5px;color:#94a3b8">' + sz + '</span>' : '')
+            + '</a>';
+        } else {
+          // v2.3.201: __idb__ 미해결 파일 → placeholder + 비동기 복구(이 기기 IDB → 공유 Firestore)
+          const ph = 'apfile_' + c.id + '_' + ai;
+          setTimeout(function(){ if (typeof _apRecoverCommentFile === 'function') _apRecoverCommentFile(c.id, ai, ph); }, 0);
+          h += '<span id="' + ph + '" style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:6px;font-size:12px;color:#94a3b8;max-width:300px">📄 ' + (a.name||'파일').replace(/</g,'&lt;') + ' 불러오는 중…</span>';
+        }
       });
       h += '</div>';
       return h;
@@ -37863,6 +37872,38 @@ async function _apRecoverCommentImage(commentId, ai, elId) {
       el.innerHTML = '🖼️ 이미지 없음';
       el.style.cursor = 'default';
       el.title = '이 이미지는 다른 기기에서 업로드되어 아직 동기화되지 않았습니다. 작성자가 다시 열람하면 자동 동기화됩니다.';
+    }
+  } catch(_){}
+}
+
+// v2.3.201: 댓글 파일 첨부 비동기 복구 — __idb__ 미해결 파일을 이 기기 IDB → 공유 Firestore 에서
+//   받아 다운로드 링크로 교체(+ IDB 에서만 찾았으면 공유소 백필 → 다른 사용자도 받게). 이미지 복구와 동일 패턴.
+async function _apRecoverCommentFile(commentId, ai, elId) {
+  try {
+    let data = null, fromIdb = false;
+    if (typeof idbGet === 'function') { try { data = await idbGet('comment_attach_' + commentId + '_' + ai); } catch(_){} }
+    if (data) fromIdb = true;
+    if (!data && typeof _loadSharedCommentImage === 'function') { try { data = await _loadSharedCommentImage(commentId, ai); } catch(_){} }
+    const el = document.getElementById(elId);
+    // 첨부 메타(이름/타입) 조회 + 메모리 DB 채움
+    let name = '파일', type = '';
+    try {
+      const c = (DB.approvalComments || []).find(x => x && String(x.id) === String(commentId));
+      const at = c && Array.isArray(c.attachments) ? c.attachments[ai] : null;
+      if (at) { name = at.name || name; type = (at.type || '').toLowerCase(); if (data) at.data = data; }
+    } catch(_){}
+    if (data) {
+      if (fromIdb && typeof _saveSharedCommentImage === 'function' && typeof data === 'string' && data.length < 900000) {
+        try { _saveSharedCommentImage(commentId, ai, data); } catch(_){}
+      }
+      if (el) {
+        const canPreview = type === 'application/pdf' || type === 'text/plain';
+        const linkAttr = canPreview ? 'target="_blank"' : 'download="' + String(name).replace(/"/g, '&quot;') + '"';
+        el.outerHTML = '<a href="' + data + '" ' + linkAttr + ' style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;color:#1e40af;text-decoration:none;max-width:300px"><span>📄</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + String(name).replace(/</g, '&lt;') + '</span></a>';
+      }
+    } else if (el) {
+      el.innerHTML = '📄 ' + String(name).replace(/</g, '&lt;') + ' (미동기화)';
+      el.title = '이 파일은 다른 기기에서 업로드되어 아직 동기화되지 않았거나 900KB 를 초과합니다. 작성자가 다시 열람하면 동기화됩니다.';
     }
   } catch(_){}
 }
@@ -37945,22 +37986,10 @@ function addApprovalComment() {
   // v1.9.671: nextId('comment') 가 이미 삭제된 ID 와 collision 가능 → tombstone 에 같은 ID 가 있으면
   //   _nextId.comment 를 max(existing) + max(tombstone) + 1 로 점프시켜 충돌 회피
   const _now = Date.now();
-  let _newCmtId = nextId('comment');
-  try {
-    const _tombIds = Array.isArray(DB._deletedCommentIds) ? DB._deletedCommentIds.map(t => Number(t && t.id)).filter(n => !isNaN(n)) : [];
-    const _existIds = (DB.approvalComments||[]).map(c => Number(c && c.id)).filter(n => !isNaN(n));
-    const _maxId = Math.max(0, ..._tombIds, ..._existIds);
-    if (_newCmtId <= _maxId) {
-      const _bump = _maxId + 1;
-      console.warn('🪦 [v1.9.671] comment ID collision 회피 — ' + _newCmtId + ' → ' + _bump);
-      _newCmtId = _bump;
-      DB._nextId.comment = _bump + 1;
-    }
-    // tombstone 에 새 ID 가 있으면 제거 (방어적)
-    if (Array.isArray(DB._deletedCommentIds)) {
-      DB._deletedCommentIds = DB._deletedCommentIds.filter(t => Number(t && t.id) !== _newCmtId);
-    }
-  } catch(_){}
+  // v2.3.201: 댓글 id 를 timestamp+random(전역 고유)으로 — 카운터(작은 id)가 다른 사용자가 과거에
+  //   삭제한 댓글의 tombstone id 와 충돌해, 로드 머지의 댓글 tombstone 필터(부활 차단)가 그 댓글을
+  //   지워서 '다른 쓰기권한자에게 댓글이 안 보이던' 버그. feedComment(v2.2.10)·발주(v1.9.918) 동일 패턴.
+  const _newCmtId = Date.now() * 1000 + Math.floor(Math.random() * 1000);
   // v2.3.177: 작성자 = 로그인 사용자 (기존 하드코딩 '담당자' 제거)
   const _apMe = (typeof feedCurrentUser === 'function') ? feedCurrentUser() : {};
   const _apMyName = _apMe.name || (window._currentUser && (window._currentUser.displayName || window._currentUser.name || window._currentUser.email)) || '담당자';
@@ -37979,10 +38008,12 @@ function addApprovalComment() {
   });
   // v2.3.177: 이미지 첨부는 공유 Firestore(commentImages)에도 저장 → 다른 기기/사용자도 표시
   //   (피드 이미지 feedImages 패턴과 동일. 기기-로컬 IDB 만으론 다른 사람이 못 봐서 깨져 보이던 문제 해결)
+  // v2.3.201: 이미지뿐 아니라 파일(PDF 등) 첨부도 공유 Firestore(commentImages)에 저장 →
+  //   다른 쓰기권한자도 다운로드 가능. 키는 commentId_ai 동일. Firestore 1MB 한계로 900KB 미만만.
   try {
     if (typeof _saveSharedCommentImage === 'function') {
       attaches.forEach((at, ai) => {
-        if (at && (at.type||'').indexOf('image/') === 0 && typeof at.data === 'string' && at.data.length > 100 && at.data.length < 900000) {
+        if (at && typeof at.data === 'string' && at.data.indexOf('data:') === 0 && at.data.length > 100 && at.data.length < 900000) {
           _saveSharedCommentImage(_newCmtId, ai, at.data);
         }
       });
