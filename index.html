@@ -5796,7 +5796,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.203';
+const ERP_VERSION = 'v2.3.204';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -39377,13 +39377,16 @@ async function openExpenseApprovalForm(expenseId) {
   }
   // 집행내역이 비어있으면 제목을 1행으로
   if (!execRows.length) {
+    // v2.3.204: 외화 지출이면 단가/금액을 외화 원본으로 표시 (원화는 아래 참고로)
+    const _rowPrice = (e.currency && e.currency !== 'KRW' && e.amountForeign != null && e.amountForeign !== '')
+      ? (Number(e.amountForeign)||0) : (Number(e.amount)||0);
     execRows = [{
       no: 1,
       name: e.title || catInfo.label,
       spec: '',
       qty: 1,
-      price: Number(e.amount)||0,
-      subtotal: Number(e.amount)||0
+      price: _rowPrice,
+      subtotal: _rowPrice
     }];
   }
 
@@ -39393,7 +39396,16 @@ async function openExpenseApprovalForm(expenseId) {
   const dueKor = e.dueDate ? `${e.dueDate.slice(0,4)}년 ${e.dueDate.slice(5,7)}월 ${e.dueDate.slice(8,10)}일` : '-';
   const amt = Number(e.amount) || 0;
   const amtKor = _numberToKoreanWon(amt);
-  const taxLabel = e.taxInvoice === '수령완료' ? '세금계산서 (수령완료)' : '세금계산서';
+  // v2.3.204: 증빙 종류 — 사용자가 고른 proofType 을 그대로 표시 (이전엔 무조건 '세금계산서' 로 잘못 나옴)
+  const _proofMap = { '세금계산서':'세금계산서', '카드전표':'카드전표', '현금영수증':'현금영수증', '영수증':'영수증 (일반)', '견적서':'견적서/계약서', '없음':'증빙 없음' };
+  let taxLabel;
+  if (e.proofType && _proofMap[e.proofType]) {
+    taxLabel = _proofMap[e.proofType];
+    if (e.proofType === '세금계산서' && e.taxInvoice === '수령완료') taxLabel = '세금계산서 (수령완료)';
+  } else {
+    // 옛 데이터(proofType 없음) — taxInvoice 기반 fallback
+    taxLabel = e.taxInvoice === '수령완료' ? '세금계산서 (수령완료)' : '세금계산서';
+  }
   // v1.9.219: 지급 방법 및 계좌정보 — expense 자체에 있으면 그대로 사용, 없으면 샘플/업체에서 조회
   let payMethod = (e.payMethod && String(e.payMethod).trim()) || '';
   let bankName    = e.bankName    || (e.bank && e.bank.name) || '';
@@ -39466,9 +39478,17 @@ async function openExpenseApprovalForm(expenseId) {
       _overseasOrder = _ord;
     }
   }
+  // v2.3.204: 외화 지출(수기 등록)도 단가/금액을 외화로 표시 (해외 PO 와 별개 경로)
+  let _expForeign = false, _expForeignCur = '';
+  if (!_isOverseasPo && e.currency && e.currency !== 'KRW' && e.amountForeign != null && e.amountForeign !== '') {
+    _expForeign = true;
+    _expForeignCur = String(e.currency).toUpperCase();
+  }
   const fmtAmt = n => _isOverseasPo
     ? (_overseasCurrency + ' ' + Number(n||0).toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
-    : fmtW(n);
+    : (_expForeign
+        ? (_expForeignCur + ' ' + Number(n||0).toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+        : fmtW(n));
 
   // 집행내역 합계
   const execTotal = execRows.reduce((s,r) => s + (Number(r.subtotal)||0), 0);
@@ -39635,10 +39655,19 @@ async function openExpenseApprovalForm(expenseId) {
         </tbody>
       </table>
 
-      ${_isOverseasPo ? _overseasAmountLineHtml : `<div class="amount-line">
+      ${_isOverseasPo ? _overseasAmountLineHtml : (_expForeign ? `<div class="amount-line" style="flex-direction:column;align-items:stretch;gap:6px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <div class="k-amt">금 액 (한글) : 일금 ${amtKor} 원정</div>
+          <div class="n-amt">${fmtW(amt)}</div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;font-size:11px;color:#92400e;border-top:1px dashed #fcd34d;padding-top:6px;flex-wrap:wrap">
+          <span>외화 <strong>${_expForeignCur} ${Number(e.amountForeign||0).toLocaleString('ko-KR',{minimumFractionDigits:2,maximumFractionDigits:2})}</strong>${e.fxRate ? ` · 1 ${_expForeignCur} = ₩${Number(e.fxRate).toLocaleString('ko-KR')}` : ''} 적용</span>
+          <span style="color:#b45309">※ 환율 변동에 따라 실제 결제액과 다를 수 있음</span>
+        </div>
+      </div>` : `<div class="amount-line">
         <div class="k-amt">금 액 (한글) : 일금 ${amtKor} 원정</div>
         <div class="n-amt">${fmtW(amt)}</div>
-      </div>`}
+      </div>`)}
 
       <div class="section-title">적   요${_isOverseasPo ? ' <span style="font-size:11px;color:#6b7280;font-weight:500;margin-left:6px">· Remark</span>' : ''}</div>
       <div class="remark">${_isOverseasPo
