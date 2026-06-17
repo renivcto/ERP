@@ -5828,7 +5828,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.207';
+const ERP_VERSION = 'v2.3.208';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -45101,6 +45101,55 @@ function addNpCardComment(id) {
 }
 
 // ── 모달 열기 (신규 / 편집) ──
+// v2.3.208: 신제품 모달 textarea 의 URL 을 칸 아래 클릭 가능한 링크 칩으로 표시
+//   (textarea 안에서는 링크 클릭이 불가능 → 입력칸 바로 아래 필드그룹에 감지된 URL 을 링크로 노출)
+//   입력 즉시 갱신. 저장 값에는 영향 없음(표시 전용).
+const NP_LINK_FIELD_IDS = ['np-product-names','np-usp','np-formulation','np-packaging','np-main-ing','np-sub-ing','np-target','np-market-note','np-date-memo'];
+function _npExtractUrls(text) {
+  var out = [];
+  String(text == null ? '' : text).replace(/(https?:\/\/[^\s<]+|www\.[^\s<]+)/g, function(m) {
+    var url = m, tm = url.match(/[)\].,;!?'"]+$/);
+    if (tm) url = url.slice(0, -tm[0].length);
+    if (url) out.push(url);
+    return m;
+  });
+  return out;
+}
+function _npRenderFieldLinks(fieldId) {
+  var ta = document.getElementById(fieldId);
+  if (!ta) return;
+  var box = document.getElementById(fieldId + '-links');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = fieldId + '-links';
+    box.style.cssText = 'display:none;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px;width:100%';
+    var container = (ta.closest && ta.closest('.fg')) || ta.parentElement;
+    if (container) container.appendChild(box);
+  }
+  var urls = _npExtractUrls(ta.value);
+  if (!urls.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  var esc = function(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
+  box.innerHTML = '<span style="font-size:11px;color:var(--gray-400);margin-right:1px">🔗 링크</span>' + urls.map(function(u){
+    var href = /^www\./i.test(u) ? ('https://' + u) : u;
+    return '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" '
+      + 'style="display:inline-flex;align-items:center;max-width:100%;background:var(--sky-50);color:var(--sky-700);border:1px solid var(--sky-200);padding:2px 9px;border-radius:6px;font-size:11.5px;text-decoration:none;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+      + esc(u) + '</a>';
+  }).join('');
+  box.style.display = 'flex';
+}
+function _npWireFieldLinks() {
+  NP_LINK_FIELD_IDS.forEach(function(id){
+    var ta = document.getElementById(id);
+    if (!ta) return;
+    _npRenderFieldLinks(id);
+    if (!ta._npLinksWired) {
+      ta.addEventListener('input', function(){ _npRenderFieldLinks(id); });
+      ta._npLinksWired = true;
+    }
+  });
+}
+window._npWireFieldLinks = _npWireFieldLinks;
+
 function openNewProductModal(editId) {
   _npEditId = editId || null;
   _npStage = 'idea';
@@ -45262,6 +45311,8 @@ function openNewProductModal(editId) {
   // 첫 번째 탭으로 리셋
   setNpModalTab('basic', document.querySelector('.np-mtab'));
   openModal('add-newproduct');
+  // v2.3.208: textarea URL → 칸 아래 클릭 링크 칩 (모달 채운 뒤)
+  setTimeout(() => { try { _npWireFieldLinks(); } catch(_){} }, 30);
 
   // v1.9.312 — 카드를 연 사용자를 viewedBy 에 추가하여 NEW 배지 숨김
   //   (기존 레코드에 viewedBy 가 없으면 배지 자체가 안 뜨므로 아무것도 안 함)
