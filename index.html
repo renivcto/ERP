@@ -5828,7 +5828,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.208';
+const ERP_VERSION = 'v2.3.209';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29504,22 +29504,22 @@ async function saveFeedPost(){
       return;
     }
   } else {
-    // v2.3.184: 충돌-안전 feedPost id — _nextId.feedPost 카운터가 어긋나면(카운터 ≤ 실제 max id
-    //   또는 tombstone id) 기존 글과 겹치는 id 가 부여되고, 새로고침 머지가 같은 id 를 한 건으로
-    //   합치거나 tombstone 필터가 지워서 "슬랙엔 게시됐는데 ERP 에선 새 글이 사라지는" 버그.
-    //   품목 v2.3.179 와 동일 클래스·동일 가드. (startup heal 은 카운터가 숫자면 재교정 안 함)
-    let newId = (DB._nextId && DB._nextId.feedPost) || ((DB.feedPosts.reduce((m,p)=>Math.max(m,p.id||0),0))+1);
+    // v2.3.209: 전역 고유 feedPost id (timestamp+random). 기존 카운터(_nextId.feedPost) 기반은
+    //   다른 사용자의 로컬 카운터가 뒤처져 있거나 동시 작성 시 같은 id 가 부여되어, 새로고침 머지의
+    //   dedup(같은 id 한 건으로 합침)·tombstone 필터가 그 글을 지워 "다른 사람이 쓴 글이 사라지는"
+    //   버그(슬랙 릴레이 매핑도 충돌). 댓글 v2.3.201·품목 v2.3.179·발주 v1.9.918 과 동일 클래스·동일 해법.
+    let newId = Date.now() * 1000 + Math.floor(Math.random() * 1000);
     try {
-      const _tombIds = Array.isArray(DB._deletedFeedPostIds) ? DB._deletedFeedPostIds.map(t => Number(t && (t.id != null ? t.id : t))).filter(n => !isNaN(n)) : [];
-      const _existIds = (DB.feedPosts||[]).map(p => Number(p && p.id)).filter(n => !isNaN(n));
-      const _maxId = Math.max(0, ..._tombIds, ..._existIds);
-      if (newId <= _maxId) {
-        const _bump = _maxId + 1;
-        console.warn('🪦 [v2.3.184] feedPost ID 충돌 회피 — ' + newId + ' → ' + _bump + ' (카운터 어긋남)');
-        newId = _bump;
-      }
+      const _used = new Set();
+      (DB.feedPosts||[]).forEach(p => { if (p && p.id != null) _used.add(String(p.id)); });
+      (Array.isArray(DB._deletedFeedPostIds) ? DB._deletedFeedPostIds : []).forEach(t => {
+        const v = t && (typeof t === 'object' ? t.id : t); if (v != null) _used.add(String(v));
+      });
+      let _guard = 0;
+      while (_used.has(String(newId)) && _guard < 1000) { newId = Date.now() * 1000 + Math.floor(Math.random() * 1000); _guard++; }
     } catch(_){}
-    if (DB._nextId) DB._nextId.feedPost = newId + 1;
+    // 카운터 호환 — 다른 코드가 _nextId.feedPost 를 참조해도 과거값 충돌이 없도록 전진만(되돌리지 않음)
+    if (DB._nextId) { const _n = Number(DB._nextId.feedPost) || 0; if (newId + 1 > _n) DB._nextId.feedPost = newId + 1; }
     DB.feedPosts.push({
       id: newId,
       title, content, category: _feedEditingCategory,
