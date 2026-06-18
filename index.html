@@ -5828,7 +5828,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.210';
+const ERP_VERSION = 'v2.3.211';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10963,6 +10963,10 @@ window._notesOpenPostDetail = function(postId) {
       : (s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
     const cat = (typeof feedCatInfo === 'function') ? feedCatInfo(p.category) : {label:p.category||'자유', icon:'📌', bg:'#f8fafc', fg:'#475569'};
     const author = p.authorName || '익명';
+    // v2.3.211: 본인 글(또는 관리자) 이면 수정/삭제 노출 — 피드 카드와 동일 판별
+    const _npMyEmail = (window._currentUser && window._currentUser.email) || '';
+    const _npIsAdmin = !!(window._currentUser && window._currentUser.isAdmin === true);
+    const _npIsMine = (p.authorEmail && p.authorEmail === _npMyEmail) || _npIsAdmin;
     const when = (typeof feedTimeAgo === 'function') ? feedTimeAgo(p.createdAt) : '';
     const createdStr = p.createdAt ? new Date(p.createdAt).toLocaleString('ko-KR') : '';
     const images = Array.isArray(p.images) ? p.images.filter(s => s && s !== '__idb__' && s !== '__stored__') : [];
@@ -11012,6 +11016,10 @@ window._notesOpenPostDetail = function(postId) {
               </div>
             </div>
           </div>
+          <!-- v2.3.211: 새 글 작성 (상세 팝업 닫고 작성 모달 열기) -->
+          <button onclick="document.getElementById('notes-post-detail-overlay')?.remove();(typeof openFeedPostModal==='function'&&openFeedPostModal())" title="새 글 작성"
+                  style="background:#0a0a0a;color:#fff;border:0;border-radius:999px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;flex-shrink:0;transition:transform .15s"
+                  onmouseenter="this.style.transform='translateY(-1px)'" onmouseleave="this.style.transform=''">✍️ 새 글 작성</button>
           <button onclick="document.getElementById('notes-post-detail-overlay')?.remove()" title="닫기 (ESC)"
                   style="background:#f1f5f9;border:0;font-size:18px;color:#64748b;cursor:pointer;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .12s"
                   onmouseenter="this.style.background='#e2e8f0';this.style.color='#0f172a'"
@@ -11019,6 +11027,10 @@ window._notesOpenPostDetail = function(postId) {
         </div>
         <!-- 본문 스크롤 -->
         <div style="overflow-y:auto;padding:20px 22px 22px;flex:1">
+          ${_npIsMine ? `<div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:12px">
+            <button onclick="document.getElementById('notes-post-detail-overlay')?.remove();(typeof editFeedPost==='function'&&editFeedPost(${p.id}))" title="수정" style="display:inline-flex;align-items:center;gap:4px;background:#eef2ff;border:1px solid #c7d2fe;color:#4338ca;border-radius:8px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;transition:all .12s" onmouseenter="this.style.background='#e0e7ff';this.style.borderColor='#a5b4fc'" onmouseleave="this.style.background='#eef2ff';this.style.borderColor='#c7d2fe'"><span style="font-size:13px">✏️</span><span>수정</span></button>
+            <button onclick="document.getElementById('notes-post-detail-overlay')?.remove();(typeof deleteFeedPost==='function'&&deleteFeedPost(${p.id}))" title="삭제" style="display:inline-flex;align-items:center;gap:4px;background:#fef2f2;border:1px solid #fecaca;color:#dc2626;border-radius:8px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;transition:all .12s" onmouseenter="this.style.background='#fee2e2';this.style.borderColor='#fca5a5'" onmouseleave="this.style.background='#fef2f2';this.style.borderColor='#fecaca'"><span style="font-size:13px">🗑️</span><span>삭제</span></button>
+          </div>` : ''}
           ${p.title ? `<h2 style="margin:0 0 14px;font-size:20px;font-weight:800;color:#0a0a0a;letter-spacing:-.3px;line-height:1.35">${escFn(p.title)}</h2>` : ''}
           ${aiSummary ? `<div style="background:linear-gradient(135deg,#eff6ff,#f5f3ff);border-left:3px solid #6366f1;padding:11px 14px;border-radius:0 10px 10px 0;margin-bottom:16px">
             <div style="font-size:10.5px;color:#4338ca;font-weight:800;letter-spacing:.3px;margin-bottom:5px;display:flex;align-items:center;gap:4px"><span>✨</span><span>AI 요약</span></div>
@@ -29012,9 +29024,10 @@ function renderFeedCardHtml(p){
   // v1.9.301: 상단 eyebrow 재구성 — [아바타+이름] · [카테고리] · [시간] [NEW]  ···  [수정][삭제 박스 버튼]
   //   (기존에는 작성자 라인이 제목 아래에 별도로 있어 공간을 차지했으나,
   //    카테고리 배지 왼쪽으로 옮겨 상단 한 줄에 모았음)
+  // v2.3.211: 수정=연한 인디고 파스텔 / 삭제=연한 레드 파스텔 (상세 팝업과 색상 통일)
   const editDeleteBtns = isMine ? `<div style="margin-left:auto;display:flex;gap:6px">
-    <button onclick="editFeedPost(${p.id})" style="display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid #e2e8f0;color:#475569;border-radius:8px;padding:5px 11px;font-size:11.5px;font-weight:700;cursor:pointer;transition:all .12s;letter-spacing:-.1px" onmouseenter="this.style.borderColor='#94a3b8';this.style.background='#f8fafc'" onmouseleave="this.style.borderColor='#e2e8f0';this.style.background='#fff'" title="수정"><span style="font-size:13px">✏️</span><span>수정</span></button>
-    <button onclick="deleteFeedPost(${p.id})" style="display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid #fecaca;color:#dc2626;border-radius:8px;padding:5px 11px;font-size:11.5px;font-weight:700;cursor:pointer;transition:all .12s;letter-spacing:-.1px" onmouseenter="this.style.borderColor='#dc2626';this.style.background='#fef2f2'" onmouseleave="this.style.borderColor='#fecaca';this.style.background='#fff'" title="삭제"><span style="font-size:13px">🗑️</span><span>삭제</span></button>
+    <button onclick="editFeedPost(${p.id})" style="display:inline-flex;align-items:center;gap:4px;background:#eef2ff;border:1px solid #c7d2fe;color:#4338ca;border-radius:8px;padding:5px 11px;font-size:11.5px;font-weight:700;cursor:pointer;transition:all .12s;letter-spacing:-.1px" onmouseenter="this.style.background='#e0e7ff';this.style.borderColor='#a5b4fc'" onmouseleave="this.style.background='#eef2ff';this.style.borderColor='#c7d2fe'" title="수정"><span style="font-size:13px">✏️</span><span>수정</span></button>
+    <button onclick="deleteFeedPost(${p.id})" style="display:inline-flex;align-items:center;gap:4px;background:#fef2f2;border:1px solid #fecaca;color:#dc2626;border-radius:8px;padding:5px 11px;font-size:11.5px;font-weight:700;cursor:pointer;transition:all .12s;letter-spacing:-.1px" onmouseenter="this.style.background='#fee2e2';this.style.borderColor='#fca5a5'" onmouseleave="this.style.background='#fef2f2';this.style.borderColor='#fecaca'" title="삭제"><span style="font-size:13px">🗑️</span><span>삭제</span></button>
   </div>` : '';
   const eyebrowLine = `
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
@@ -29664,6 +29677,9 @@ async function deleteFeedPost(id){
   } catch(_){}
   // 즉시 화면 갱신 — Firestore 동기화는 그 다음 (사용자 대기 시간 제거)
   try { renderFeed(); } catch(_){}
+  // v2.3.211: 홈 대시보드 카드/상세 팝업도 갱신·정리 (홈에서 삭제 시 즉시 반영)
+  try { if (document.getElementById('dash-stats') && typeof renderDashStats === 'function') renderDashStats(); } catch(_){}
+  try { document.getElementById('notes-post-detail-overlay')?.remove(); } catch(_){}
   showNotif('🗑️ 글이 삭제되었습니다', 'info');
   // Firestore 백그라운드 저장
   try {
