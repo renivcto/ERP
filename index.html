@@ -5828,7 +5828,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.211';
+const ERP_VERSION = 'v2.3.212';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7344,6 +7344,7 @@ async function _doSaveDataInner() {
       _deletedItemIds: Array.isArray(dbToSave._deletedItemIds) ? dbToSave._deletedItemIds : [],  // v1.9.892
       _deletedShopIds: Array.isArray(dbToSave._deletedShopIds) ? dbToSave._deletedShopIds : [],  // v1.9.691
       _deletedNewProductIds: Array.isArray(dbToSave._deletedNewProductIds) ? dbToSave._deletedNewProductIds : [],  // v2.3.193
+      _suppressedProds: Array.isArray(dbToSave._suppressedProds) ? dbToSave._suppressedProds : [],  // v2.3.212 — 생산 백필 억제
       // v1.9.594 — 고객 등급 수동 override (key → 'vip'|'regular'|'member'|'normal')
       customerOverrides: (dbToSave.customerOverrides && typeof dbToSave.customerOverrides === 'object') ? dbToSave.customerOverrides : {},
       boms:             dbToSave.boms             || {},
@@ -8467,7 +8468,8 @@ const DEFAULT_DB = {
   _deletedSampleIds: [],  // v1.9.682
   _deletedItemIds: [],  // v1.9.892 — 품목 삭제 tombstone
   _deletedShopIds: [],  // v1.9.691
-  _deletedNewProductIds: [],  // v2.3.193 — 신제품 삭제 tombstone
+  _deletedNewProductIds: [],  // v2.3.193
+  _suppressedProds: [],  // v2.3.212 — 수동 삭제한 발주서-연동 생산 레코드 (백필 재생성 차단) — 신제품 삭제 tombstone
   // v1.9.594 — 고객 등급 수동 override (key → tier)
   customerOverrides: {},
   // v1.9.795: 초기화 누락 방지
@@ -9359,6 +9361,22 @@ function applyPendingStockIn() {
   return changed;
 }
 
+// v2.3.212: 생산 억제(suppress) 헬퍼 — 사용자가 수동 삭제한 발주서-연동 생산 레코드를
+//   백필이 다시 만들지 않도록 한다. prodLike = {orderId, serial, productId, productName}.
+function _prodSuppressMatch(prodLike, s) {
+  if (!prodLike || !s) return false;
+  const orderMatch =
+    (s.orderId != null && prodLike.orderId != null && String(s.orderId) === String(prodLike.orderId)) ||
+    (s.serial && prodLike.serial && String(s.serial) === String(prodLike.serial));
+  if (!orderMatch) return false;
+  if (s.productId && prodLike.productId) return String(s.productId) === String(prodLike.productId);
+  return String(s.productName || '') === String(prodLike.productName || '');
+}
+function _isProdSuppressed(prodLike) {
+  const list = (typeof DB !== 'undefined' && Array.isArray(DB._suppressedProds)) ? DB._suppressedProds : [];
+  return list.some(s => _prodSuppressMatch(prodLike, s));
+}
+
 // 발주서 없이 남은 고아 생산 레코드 자동 정리
 function cleanOrphanProductions() {
   // v1.9.984: id 타입 무관 (String 키로 통일 — 복구 데이터에서 숫자↔문자열 섞임 대응)
@@ -9403,6 +9421,8 @@ function backfillProductionsFromOrders() {
         return (p.productName || '') === (item ? item.name : row.name);
       });
       if (exists) return;
+      // v2.3.212: 사용자가 수동 삭제한(억제된) 발주서-연동 생산은 다시 만들지 않음 → "삭제해도 부활" 차단
+      if (_isProdSuppressed({ orderId: o.id, serial: o.serial, productId: itemId, productName: item ? item.name : row.name })) return;
       const isComplete = o.stockStatus === '입고완료';
       DB.productions.push({
         id: nextId('prod'),
@@ -24320,6 +24340,13 @@ function editProd(id) {
       delBtn.onclick = () => {
         if (!confirm('이 생산 항목을 삭제합니까?\nBOM에 투입되었던 재고가 자동으로 복구됩니다.')) return;
         restoreProductionStock(p, { skipFinished: false, reason: '생산 취소' });
+        // v2.3.212: 발주서 자동생성 레코드면 백필 재생성 차단 위해 억제 기록
+        if (p && (p.orderId != null || p.serial || (p.note && String(p.note).includes('발주서 자동등록')))) {
+          if (!Array.isArray(DB._suppressedProds)) DB._suppressedProds = [];
+          const _e = { orderId: p.orderId != null ? p.orderId : null, serial: p.serial || '', productId: p.productId || 0, productName: p.productName || '', ts: Date.now() };
+          if (!DB._suppressedProds.some(s => _prodSuppressMatch(_e, s))) DB._suppressedProds.push(_e);
+          if (DB._suppressedProds.length > 500) DB._suppressedProds = DB._suppressedProds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0,500);
+        }
         DB.productions = DB.productions.filter(x => x.id !== id);
         saveData(); closeModal('add-production'); renderProdTable();
         if (typeof renderStock === 'function') renderStock();
@@ -24435,6 +24462,14 @@ function completeProd(id) {
 
 function deleteProd(id) {
   if (!confirm('이 생산 항목을 삭제합니까?')) return;
+  // v2.3.212: 발주서에서 자동 생성되는 레코드면, 삭제 후 백필이 다시 만들지 않도록 억제 목록에 기록
+  const _p = (DB.productions||[]).find(p => p && p.id === id);
+  if (_p && (_p.orderId != null || _p.serial || (_p.note && String(_p.note).includes('발주서 자동등록')))) {
+    if (!Array.isArray(DB._suppressedProds)) DB._suppressedProds = [];
+    const _entry = { orderId: _p.orderId != null ? _p.orderId : null, serial: _p.serial || '', productId: _p.productId || 0, productName: _p.productName || '', ts: Date.now() };
+    if (!DB._suppressedProds.some(s => _prodSuppressMatch(_entry, s))) DB._suppressedProds.push(_entry);
+    if (DB._suppressedProds.length > 500) DB._suppressedProds = DB._suppressedProds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0,500);
+  }
   DB.productions = (DB.productions||[]).filter(p=>p.id!==id);
   saveData(); renderProdTable(); updateBadges(); showNotif('삭제되었습니다');
 }
@@ -50507,6 +50542,27 @@ function initERPWhenReady() {
           const removed = before - merged.adProjects.length;
           if (removed > 0) console.warn(`🪦 [v1.9.880] adProject tombstone(id) 으로 ${removed}건 부활 차단`);
         }
+
+        // v2.3.212: 생산 백필 억제 목록(_suppressedProds) union 머지 + merged.productions 에서 억제분 제거
+        //   (다른 기기가 productions 에 다시 넣어둔 경우에도 부활 차단)
+        try {
+          const fsSp = Array.isArray(firestoreDB._suppressedProds) ? firestoreDB._suppressedProds : [];
+          const lcSp = Array.isArray(localDB._suppressedProds) ? localDB._suppressedProds : [];
+          const spByKey = new Map();
+          [...fsSp, ...lcSp].forEach(s => {
+            if (!s) return;
+            const k = String(s.orderId) + '|' + String(s.serial||'') + '|' + String(s.productId||'') + '|' + String(s.productName||'');
+            const prev = spByKey.get(k);
+            if (!prev || (s.ts || 0) > (prev.ts || 0)) spByKey.set(k, s);
+          });
+          merged._suppressedProds = Array.from(spByKey.values()).sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
+          if (Array.isArray(merged.productions) && merged._suppressedProds.length > 0) {
+            const before = merged.productions.length;
+            merged.productions = merged.productions.filter(p => !merged._suppressedProds.some(s => _prodSuppressMatch(p, s)));
+            const removed = before - merged.productions.length;
+            if (removed > 0) console.warn('🪦 [v2.3.212] 생산 억제 tombstone 으로 ' + removed + '건 부활 차단');
+          }
+        } catch(spErr) { console.warn('[v2.3.212] _suppressedProds 머지 실패:', spErr); }
 
         // feedPost tombstone 머지
         const fsFpT = Array.isArray(firestoreDB._deletedFeedPostIds) ? firestoreDB._deletedFeedPostIds : [];
