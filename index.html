@@ -5828,7 +5828,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.213';
+const ERP_VERSION = 'v2.3.214';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9394,12 +9394,27 @@ function cleanOrphanProductions() {
   // v1.9.984: id 타입 무관 (String 키로 통일 — 복구 데이터에서 숫자↔문자열 섞임 대응)
   const orderIds = new Set((DB.orders||[]).map(o => o && o.id != null ? String(o.id) : null).filter(Boolean));
   const orderSerials = new Set((DB.orders||[]).map(o=>o.serial).filter(Boolean));
+  // v2.3.214: orderId/serial 이 둘 다 없는 '발주서 자동등록' 레코드의 출처 판별용 —
+  //   발주서 row 의 itemId·품목명 + 그 품목의 이름(backfill 이 item.name 을 productName 으로 씀) 집합.
+  //   출처가 전혀 없으면 고아(좀비)로 보고 제거. (예: 발주서가 삭제됐는데 orderId=null 로 남은
+  //   "스파츌러 항공 운송비" — orderId·serial 이 비어 기존 로직이 영원히 못 지우던 케이스)
+  const orderRowItemIds = new Set();
+  const orderRowNames = new Set();
+  (DB.orders||[]).forEach(o => (o.rows||[]).forEach(r => {
+    if (!r) return;
+    if (r.itemId != null) orderRowItemIds.add(String(r.itemId));
+    if (r.name) orderRowNames.add(String(r.name).trim());
+  }));
+  (DB.items||[]).forEach(it => { if (it && it.id != null && orderRowItemIds.has(String(it.id)) && it.name) orderRowNames.add(String(it.name).trim()); });
   const before = (DB.productions||[]).length;
   DB.productions = (DB.productions||[]).filter(p => {
-    if (!p.note || !p.note.includes('발주서 자동등록')) return true;
-    if (p.orderId != null && !orderIds.has(String(p.orderId))) return false;
-    if (p.orderId == null && p.serial && !orderSerials.has(p.serial)) return false;
-    return true;
+    if (!p.note || !p.note.includes('발주서 자동등록')) return true;  // 수동 등록은 보존
+    if (p.orderId != null) return orderIds.has(String(p.orderId));   // orderId 있으면 그 발주서 존재 시만 유지
+    if (p.serial) return orderSerials.has(p.serial);                 // serial 있으면 그 발주서 존재 시만 유지
+    // orderId·serial 둘 다 없는 자동등록 레코드 — 발주서 row 에 출처(itemId 또는 품목명)가 있으면 유지, 없으면 고아 제거
+    if (p.productId && orderRowItemIds.has(String(p.productId))) return true;
+    if (p.productName && orderRowNames.has(String(p.productName).trim())) return true;
+    return false;  // 출처 없는 자동등록 좀비 → 제거
   });
   const removed = before - (DB.productions||[]).length;
   if (removed > 0) {
