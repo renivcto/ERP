@@ -5828,7 +5828,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.212';
+const ERP_VERSION = 'v2.3.213';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9361,16 +9361,28 @@ function applyPendingStockIn() {
   return changed;
 }
 
-// v2.3.212: 생산 억제(suppress) 헬퍼 — 사용자가 수동 삭제한 발주서-연동 생산 레코드를
-//   백필이 다시 만들지 않도록 한다. prodLike = {orderId, serial, productId, productName}.
+// v2.3.212/213: 생산 억제(suppress) 헬퍼 — 사용자가 수동 삭제한 발주서-연동 생산 레코드를
+//   백필이 다시 만들지 않도록 한다. prodLike = {orderId, serial, productId, productName, vendorId, qty}.
 function _prodSuppressMatch(prodLike, s) {
   if (!prodLike || !s) return false;
-  const orderMatch =
-    (s.orderId != null && prodLike.orderId != null && String(s.orderId) === String(prodLike.orderId)) ||
-    (s.serial && prodLike.serial && String(s.serial) === String(prodLike.serial));
-  if (!orderMatch) return false;
-  if (s.productId && prodLike.productId) return String(s.productId) === String(prodLike.productId);
-  return String(s.productName || '') === String(prodLike.productName || '');
+  const hasOrderKey = (s.orderId != null) || (s.serial && String(s.serial).trim() !== '');
+  if (hasOrderKey) {
+    // 정밀 매칭 — 발주서 식별자(orderId 또는 serial) + 품목
+    const orderMatch =
+      (s.orderId != null && prodLike.orderId != null && String(s.orderId) === String(prodLike.orderId)) ||
+      (s.serial && prodLike.serial && String(s.serial) === String(prodLike.serial));
+    if (!orderMatch) return false;
+    if (s.productId && prodLike.productId) return String(s.productId) === String(prodLike.productId);
+    return String(s.productName || '') === String(prodLike.productName || '');
+  }
+  // v2.3.213: orderId/serial 둘 다 없는 억제 엔트리(autoRegisterProduction 이 orderId=null 로 저장한 레코드).
+  //   발주서 식별자가 없으니 품목명 + 업체 + 수량(+productId)로 매칭 → backfill 이 만든 동일 항목
+  //   (orderId 는 채워짐)도 잡아낸다. 보조키(vendor/qty)까지 일치해야 하므로 과잉 억제 위험 최소.
+  if (String(s.productName || '') !== String(prodLike.productName || '')) return false;
+  if (s.productId && prodLike.productId && String(s.productId) !== String(prodLike.productId)) return false;
+  if (s.vendorId != null && prodLike.vendorId != null && String(s.vendorId) !== String(prodLike.vendorId)) return false;
+  if (s.qty != null && prodLike.qty != null && Number(s.qty) !== Number(prodLike.qty)) return false;
+  return true;
 }
 function _isProdSuppressed(prodLike) {
   const list = (typeof DB !== 'undefined' && Array.isArray(DB._suppressedProds)) ? DB._suppressedProds : [];
@@ -9422,7 +9434,7 @@ function backfillProductionsFromOrders() {
       });
       if (exists) return;
       // v2.3.212: 사용자가 수동 삭제한(억제된) 발주서-연동 생산은 다시 만들지 않음 → "삭제해도 부활" 차단
-      if (_isProdSuppressed({ orderId: o.id, serial: o.serial, productId: itemId, productName: item ? item.name : row.name })) return;
+      if (_isProdSuppressed({ orderId: o.id, serial: o.serial, productId: itemId, productName: item ? item.name : row.name, vendorId: o.vendorId, qty: row.qty })) return;
       const isComplete = o.stockStatus === '입고완료';
       DB.productions.push({
         id: nextId('prod'),
@@ -24343,7 +24355,7 @@ function editProd(id) {
         // v2.3.212: 발주서 자동생성 레코드면 백필 재생성 차단 위해 억제 기록
         if (p && (p.orderId != null || p.serial || (p.note && String(p.note).includes('발주서 자동등록')))) {
           if (!Array.isArray(DB._suppressedProds)) DB._suppressedProds = [];
-          const _e = { orderId: p.orderId != null ? p.orderId : null, serial: p.serial || '', productId: p.productId || 0, productName: p.productName || '', ts: Date.now() };
+          const _e = { orderId: p.orderId != null ? p.orderId : null, serial: p.serial || '', productId: p.productId || 0, productName: p.productName || '', vendorId: p.vendorId != null ? p.vendorId : null, qty: p.qty != null ? p.qty : null, ts: Date.now() };
           if (!DB._suppressedProds.some(s => _prodSuppressMatch(_e, s))) DB._suppressedProds.push(_e);
           if (DB._suppressedProds.length > 500) DB._suppressedProds = DB._suppressedProds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0,500);
         }
@@ -24466,7 +24478,7 @@ function deleteProd(id) {
   const _p = (DB.productions||[]).find(p => p && p.id === id);
   if (_p && (_p.orderId != null || _p.serial || (_p.note && String(_p.note).includes('발주서 자동등록')))) {
     if (!Array.isArray(DB._suppressedProds)) DB._suppressedProds = [];
-    const _entry = { orderId: _p.orderId != null ? _p.orderId : null, serial: _p.serial || '', productId: _p.productId || 0, productName: _p.productName || '', ts: Date.now() };
+    const _entry = { orderId: _p.orderId != null ? _p.orderId : null, serial: _p.serial || '', productId: _p.productId || 0, productName: _p.productName || '', vendorId: _p.vendorId != null ? _p.vendorId : null, qty: _p.qty != null ? _p.qty : null, ts: Date.now() };
     if (!DB._suppressedProds.some(s => _prodSuppressMatch(_entry, s))) DB._suppressedProds.push(_entry);
     if (DB._suppressedProds.length > 500) DB._suppressedProds = DB._suppressedProds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0,500);
   }
