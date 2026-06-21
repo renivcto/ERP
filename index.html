@@ -5836,7 +5836,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.215';
+const ERP_VERSION = 'v2.3.216';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9643,6 +9643,7 @@ async function _finEnsureLoaded(){
     window._FIN.accounts = (await loadSharedSetting('finance_accounts')) || [];
     window._FIN.cards = (await loadSharedSetting('finance_cards')) || [];
     window._FIN.recurring = (await loadSharedSetting('finance_recurring')) || [];
+    window._FIN.budget = (await loadSharedSetting('budget_targets')) || {};
     const now = new Date();
     window._FIN.year = parseInt(localStorage.getItem('reniv_fin_year')) || now.getFullYear();
     window._FIN.month = parseInt(localStorage.getItem('reniv_fin_month')) || (now.getMonth()+1);
@@ -9681,6 +9682,7 @@ function _finRender(){
   if (F.tab==='accounts') body = _finTabAccounts();
   else if (F.tab==='cards') body = _finTabCards();
   else if (F.tab==='recurring') body = _finTabRecurring();
+  else if (F.tab==='budget') body = _finTabBudget();
   else body = _finStagePlaceholder(F.tab);
   root.innerHTML =
     _finTopBarHtml() +
@@ -10056,6 +10058,102 @@ async function _finDelRecurring(id){
   if(!confirm('이 고정비를 삭제할까요?')) return;
   window._FIN.recurring=window._FIN.recurring.filter(r=>String(r.id)!==String(id)); await _finSaveRecurring(); _finRender();
 }
+// ═══ 탭: 예산 대비 실적 (Stage 2a, v2.3.216) ═══
+// 순수 집계 — 유닛테스트 대상
+function _finMonthsInPeriod(){
+  const F=window._FIN;
+  if(F.period==='year') return ['01','02','03','04','05','06','07','08','09','10','11','12'];
+  if(F.period==='quarter'){ const q=F.quarter||1; const sm=(q-1)*3+1; return [sm,sm+1,sm+2].map(m=>String(m).padStart(2,'0')); }
+  return [String(F.month||1).padStart(2,'0')];
+}
+function _finBudgetSum(targets, year, cat, months){
+  const yt = (targets && targets[String(year)]) || {};
+  const ct = yt[cat] || {};
+  return (months||[]).reduce((s,m)=> s + (Number(ct[m])||0), 0);
+}
+// expenses 중 category별 amount 합. basis='paid'(paidStatus==='paid', 기준일 paidDate) | 'due'(기준일 dueDate)
+function _finActualByCategory(expenses, range, basis){
+  const out={}; FIN_CATS.forEach(c=>out[c.key]=0);
+  (expenses||[]).forEach(e=>{
+    if(!e || !(e.category in out)) return;
+    let dateStr;
+    if(basis==='paid'){ if(e.paidStatus!=='paid') return; dateStr=e.paidDate||e.dueDate||''; }
+    else { dateStr=e.dueDate||e.paidDate||''; }
+    if(!dateStr) return;
+    const d=String(dateStr).slice(0,10);
+    if(range && (d < range.start || d > range.end)) return;
+    out[e.category]+=Number(e.amount)||0;
+  });
+  return out;
+}
+function _finTabBudget(){
+  const F=window._FIN; const year=F.year; const targets=F.budget||{};
+  const inS='border:1px solid #d1d5db;border-radius:5px;padding:4px 6px;font-size:12px;width:88px;text-align:right';
+  // 입력 그리드 (카테고리 × 12개월)
+  const yt=(targets[String(year)])||{};
+  const head='<th style="padding:6px 8px;text-align:left;position:sticky;left:0;background:#f8fafc">카테고리</th>'+
+    Array.from({length:12},(_,i)=>`<th style="padding:6px 6px;text-align:right;font-size:11px">${i+1}월</th>`).join('')+
+    '<th style="padding:6px 8px;text-align:right">연 합계</th>';
+  const gridRows=FIN_CATS.map(c=>{
+    const ct=yt[c.key]||{};
+    let yearSum=0;
+    const cells=Array.from({length:12},(_,i)=>{ const mm=String(i+1).padStart(2,'0'); const v=Number(ct[mm])||0; yearSum+=v;
+      return `<td style="padding:3px 4px"><input type="number" value="${v||''}" placeholder="0" onchange="_finSetBudget('${c.key}','${mm}',this.value)" style="${inS}"></td>`; }).join('');
+    return `<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:6px 8px;font-weight:600;white-space:nowrap;position:sticky;left:0;background:#fff">${c.label}</td>${cells}<td style="padding:6px 8px;text-align:right;font-weight:700">${_finWon(yearSum)}</td></tr>`;
+  }).join('');
+  return `
+  <div id="fin-budget-cmp">${_finBudgetCmpHtml()}</div>
+  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-top:16px">
+    <div style="font-size:14px;font-weight:800;color:#0f172a;margin-bottom:4px">🎯 ${year}년 예산 입력 <span style="font-size:12px;color:#94a3b8;font-weight:500">(카테고리 × 월, 원화)</span></div>
+    <div style="font-size:12px;color:#94a3b8;margin-bottom:10px">셀을 입력하면 자동 저장되고 위 대비표가 갱신됩니다.</div>
+    <div style="overflow-x:auto">
+      <table style="border-collapse:collapse;font-size:12px;min-width:900px">
+        <thead><tr style="background:#f8fafc;color:#475569">${head}</tr></thead>
+        <tbody>${gridRows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+function _finBudgetCmpHtml(){
+  const F=window._FIN; const r=_finRange(); const year=F.year; const months=_finMonthsInPeriod();
+  const actual=_finActualByCategory((typeof DB!=='undefined'&&DB.expenses)||[], r, F.basis);
+  let tBud=0,tAct=0;
+  const rows=FIN_CATS.map(c=>{
+    const bud=_finBudgetSum(F.budget||{}, year, c.key, months); const act=actual[c.key]||0; tBud+=bud; tAct+=act;
+    const rate=bud>0?(act/bud*100):(act>0?9999:0);
+    const color=rate>=100?'#dc2626':rate>=80?'#d97706':'#059669';
+    const pct=bud>0?Math.round(rate)+'%':(act>0?'예산없음':'—');
+    const barW=Math.min(100, bud>0?(act/bud*100):0);
+    return `<tr style="border-bottom:1px solid #f1f5f9">
+      <td style="padding:8px;font-weight:600">${c.label}</td>
+      <td style="padding:8px;text-align:right;color:#475569">${_finWon(bud)}</td>
+      <td style="padding:8px;text-align:right;font-weight:700">${_finWon(act)}</td>
+      <td style="padding:8px;text-align:right;color:${(bud-act)<0?'#dc2626':'#0f172a'}">${_finWon(bud-act)}</td>
+      <td style="padding:8px;width:160px"><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;height:8px;background:#f1f5f9;border-radius:4px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${color}"></div></div><span style="font-size:12px;font-weight:700;color:${color};min-width:42px;text-align:right">${pct}</span></div></td>
+    </tr>`;
+  }).join('');
+  const tRate=tBud>0?Math.round(tAct/tBud*100)+'%':'—';
+  return `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      <div style="font-size:14px;font-weight:800;color:#0f172a">🎯 예산 대비 실적 <span style="font-size:12px;color:#94a3b8;font-weight:500">· ${r.label} · 실적기준 ${F.basis==='paid'?'지급완료':'지급예정'}</span></div>
+      <div style="font-size:12.5px;color:#475569">합계 예산 <b>${_finWon(tBud)}</b> · 실적 <b>${_finWon(tAct)}</b> · 소진 <b>${tRate}</b></div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:8px;text-align:left">카테고리</th><th style="padding:8px;text-align:right">예산</th><th style="padding:8px;text-align:right">실적</th><th style="padding:8px;text-align:right">잔액</th><th style="padding:8px;text-align:left">소진율</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div style="margin-top:8px;font-size:11px;color:#94a3b8">소진율 80%↑ 주황 · 100%↑ 빨강. 실적 = 지출결의서(expenses) 카테고리별 합 (발주·광고·샘플이 모두 expense 로 자동 생성되므로 이중계상 없음).</div>
+  </div>`;
+}
+async function _finSetBudget(cat, mm, val){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const F=window._FIN; const y=String(F.year);
+  if(!F.budget) F.budget={}; if(!F.budget[y]) F.budget[y]={}; if(!F.budget[y][cat]) F.budget[y][cat]={};
+  F.budget[y][cat][mm]=_finNum(val);
+  await saveSharedSetting('budget_targets', F.budget);
+  const cmp=document.getElementById('fin-budget-cmp'); if(cmp) cmp.innerHTML=_finBudgetCmpHtml();
+}
+
 window.renderFinance=renderFinance;
 
 // ═══════════════════════════════════════════════════════
