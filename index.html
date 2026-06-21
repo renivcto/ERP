@@ -5836,7 +5836,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.217';
+const ERP_VERSION = 'v2.3.218';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9645,6 +9645,7 @@ async function _finEnsureLoaded(){
     window._FIN.recurring = (await loadSharedSetting('finance_recurring')) || [];
     window._FIN.budget = (await loadSharedSetting('budget_targets')) || {};
     window._FIN.planItems = (await loadSharedSetting('finance_plan_items')) || [];
+    window._FIN.planHorizon = parseInt(localStorage.getItem('reniv_fin_plan_horizon')) || 90;
     const now = new Date();
     window._FIN.year = parseInt(localStorage.getItem('reniv_fin_year')) || now.getFullYear();
     window._FIN.month = parseInt(localStorage.getItem('reniv_fin_month')) || (now.getMonth()+1);
@@ -9685,6 +9686,7 @@ function _finRender(){
   else if (F.tab==='recurring') body = _finTabRecurring();
   else if (F.tab==='budget') body = _finTabBudget();
   else if (F.tab==='dashboard') body = _finTabDashboard();
+  else if (F.tab==='plan') body = _finTabPlan();
   else body = _finStagePlaceholder(F.tab);
   root.innerHTML =
     _finTopBarHtml() +
@@ -10245,6 +10247,82 @@ function _finTabDashboard(){
     </div>
     ${shortfall?`<div style="margin-top:10px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px 12px;font-size:12.5px;font-weight:600">⚠️ ${proj.minDate} 경 예상 잔액이 <b>${_finWon(proj.minBal)}</b> 로 부족해질 수 있습니다. (미지급·고정비·예정 지출 반영)</div>`:`<div style="margin-top:10px;font-size:11.5px;color:#94a3b8">향후 90일 최저 예상 잔액 ${_finWon(proj.minBal)}${proj.minDate?(' ('+proj.minDate+')'):''} · 미지급 expense + 고정비 + 예정 입·출금 반영</div>`}
   </div>`;
+}
+
+// ═══ 탭: 자금 계획 (현금흐름 예측, Stage 2c) ═══
+function _finTabPlan(){
+  const F=window._FIN; const inS='border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px';
+  const start=_finTotalBalance();
+  const today=_finToday(); const horizon=F.planHorizon||90; const to=_finAddDays(today,horizon);
+  const events=_finBuildCashEvents(today,to);
+  const proj=_finProjectCashflow(start, events);
+  const kindColor={ '미지급':'#dc2626','고정비':'#d97706','예정':'#6366f1' };
+  const hBtn=(n)=>`<button onclick="_finSetPlanHorizon(${n})" style="background:${horizon===n?'#6366f1':'#eef2ff'};color:${horizon===n?'#fff':'#4338ca'};border:1px solid #c7d2fe;border-radius:6px;padding:4px 11px;font-size:12px;font-weight:700;cursor:pointer">${n}일</button>`;
+  const rows=proj.rows.map(r=>{ const neg=r.balance<0; const dpos=r.delta>=0;
+    return `<tr style="border-bottom:1px solid #f1f5f9;background:${neg?'#fef2f2':'transparent'}">
+      <td style="padding:6px 8px;white-space:nowrap">${r.date}</td>
+      <td style="padding:6px 8px"><span style="background:${(kindColor[r.kind]||'#64748b')}1a;color:${kindColor[r.kind]||'#64748b'};border-radius:5px;padding:1px 7px;font-size:11px;font-weight:700">${r.kind}</span></td>
+      <td style="padding:6px 8px">${_finEsc(r.name)}</td>
+      <td style="padding:6px 8px;text-align:right;color:${dpos?'#059669':'#dc2626'};font-weight:600">${dpos?'+':'−'}${_finWon(Math.abs(r.delta))}</td>
+      <td style="padding:6px 8px;text-align:right;font-weight:700;color:${neg?'#dc2626':'#0f172a'}">${_finWon(r.balance)}</td>
+    </tr>`; }).join('');
+  const items=(F.planItems||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  const itemRows=items.map(p=>`<tr style="border-bottom:1px solid #f1f5f9">
+      <td style="padding:6px 8px;white-space:nowrap">${_finEsc(p.date)}</td>
+      <td style="padding:6px 8px">${p.dir==='in'?'<span style="color:#059669">입금</span>':'<span style="color:#dc2626">출금</span>'}</td>
+      <td style="padding:6px 8px">${_finEsc(p.name||'')}</td>
+      <td style="padding:6px 8px;text-align:right;font-weight:600">${_finWon(p.amount)}</td>
+      <td style="padding:6px 8px;text-align:center"><button onclick="_finDelPlanItem('${p.id}')" style="background:none;border:0;color:#cbd5e1;cursor:pointer;font-size:14px" title="삭제">✕</button></td>
+    </tr>`).join('');
+  return `
+  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      <div style="font-size:14px;font-weight:800;color:#0f172a">📈 자금 계획 (현금흐름 예측)</div>
+      <div style="display:flex;gap:4px;align-items:center"><span style="font-size:11.5px;color:#64748b;margin-right:4px">기간</span>${hBtn(30)}${hBtn(60)}${hBtn(90)}${hBtn(180)}</div>
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px;font-size:13px">
+      <span>시작 잔액(현재 총잔액) <b>${_finWon(start)}</b></span>
+      <span>${horizon}일 후 예상 <b style="color:${proj.endBal<0?'#dc2626':'#0f172a'}">${_finWon(proj.endBal)}</b></span>
+      <span>최저 예상 잔액 <b style="color:${proj.minBal<0?'#dc2626':'#0f172a'}">${_finWon(proj.minBal)}</b>${proj.minDate?` <span style="color:#94a3b8">(${proj.minDate})</span>`:''}</span>
+    </div>
+    ${proj.minBal<0?`<div style="margin:8px 0;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px 12px;font-size:12.5px;font-weight:600">⚠️ ${proj.minDate} 경 예상 잔액이 ${_finWon(proj.minBal)} 로 마이너스가 됩니다. 입금 일정 조정·자금 확보가 필요합니다.</div>`:''}
+    <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">예정 지출 = 미지급 지출결의서(예정일 기준) + 고정비 + 아래 수동 예정 입·출금. 예정 입금 = 아래 수동 입금.</div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left">날짜</th><th style="padding:6px 8px;text-align:left">구분</th><th style="padding:6px 8px;text-align:left">내용</th><th style="padding:6px 8px;text-align:right">증감</th><th style="padding:6px 8px;text-align:right">예상 잔액</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="5" style="padding:14px;text-align:center;color:#94a3b8">향후 ${horizon}일 예정 입·출금이 없습니다</td></tr>`}</tbody>
+    </table>
+  </div>
+  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px">
+    <div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:4px">✍️ 수동 예정 입·출금</div>
+    <div style="font-size:12px;color:#94a3b8;margin-bottom:10px">ERP 데이터로 안 잡히는 예정 자금(투자금 입금, 세금 납부 등)을 직접 추가하세요. 위 예측에 자동 반영됩니다.</div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left">날짜</th><th style="padding:6px 8px;text-align:left">구분</th><th style="padding:6px 8px;text-align:left">내용</th><th style="padding:6px 8px;text-align:right">금액</th><th></th></tr></thead>
+      <tbody>${itemRows || '<tr><td colspan="5" style="padding:14px;text-align:center;color:#94a3b8">등록된 예정 항목이 없습니다</td></tr>'}</tbody>
+    </table>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;border-top:1px dashed #e5e7eb;padding-top:10px">
+      <input id="fin-pi-date" type="date" style="${inS}">
+      <select id="fin-pi-dir" style="${inS}"><option value="out">출금</option><option value="in">입금</option></select>
+      <input id="fin-pi-name" placeholder="내용(예: 부가세 납부)" style="${inS};flex:1;min-width:140px">
+      <input id="fin-pi-amount" type="number" placeholder="금액" style="${inS};width:120px;text-align:right">
+      <button onclick="_finAddPlanItem()" style="background:#0f172a;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer">+ 추가</button>
+    </div>
+  </div>`;
+}
+function _finSetPlanHorizon(n){ window._FIN.planHorizon=n; try{localStorage.setItem('reniv_fin_plan_horizon',String(n));}catch(_){} _finRender(); }
+async function _finAddPlanItem(){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const date=document.getElementById('fin-pi-date').value; const amount=_finNum(document.getElementById('fin-pi-amount').value);
+  if(!date){ showNotif('날짜를 입력하세요','warning'); return; }
+  if(!amount){ showNotif('금액을 입력하세요','warning'); return; }
+  if(!Array.isArray(window._FIN.planItems)) window._FIN.planItems=[];
+  window._FIN.planItems.push({ id:_finId('pi'), date, dir:document.getElementById('fin-pi-dir').value, name:(document.getElementById('fin-pi-name').value||'').trim(), amount, status:'expected', source:'manual' });
+  await saveSharedSetting('finance_plan_items', window._FIN.planItems);
+  showNotif('예정 항목이 추가되었습니다','success'); _finRender();
+}
+async function _finDelPlanItem(id){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  window._FIN.planItems=(window._FIN.planItems||[]).filter(p=>String(p.id)!==String(id));
+  await saveSharedSetting('finance_plan_items', window._FIN.planItems); _finRender();
 }
 
 window.renderFinance=renderFinance;
