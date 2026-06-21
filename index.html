@@ -981,6 +981,11 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="nav-item" onclick="go('stock')"><span class="ico">📦</span>재고 관리</div>
   </div>
 
+  <!-- 재무 관리 (v2.3.215) -->
+  <div class="nav-group">
+    <div class="nav-item" onclick="go('finance')"><span class="ico">💰</span>재무 관리</div>
+  </div>
+
   <!-- 5️⃣ 외부 계정 · 사용자 관리 · 설정 프로필 -->
   <div class="nav-group">
     <div class="nav-item" onclick="go('accounts')"><span class="ico">🔑</span>외부 계정</div>
@@ -1014,6 +1019,9 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 
   <!-- CONTENT -->
   <div id="content">
+
+    <!-- ══════════════ 💰 재무 관리 (v2.3.215) ══════════════ -->
+    <div class="page" id="page-finance"><div id="finance-root"></div></div>
 
     <!-- ══════════════ DASHBOARD ══════════════ -->
     <div class="page active" id="page-dashboard">
@@ -5828,7 +5836,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.214';
+const ERP_VERSION = 'v2.3.215';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9602,6 +9610,455 @@ function showNotif(msg, type='info') {
 }
 
 // ═══════════════════════════════════════════════════════
+// 💰 재무 관리 (v2.3.215~) — 브리핑: 재무관리_조사브리핑.md
+//   신규 영속 데이터는 전부 shared setting(settings/<key>). 내역(txn)은 연도별 키 분할.
+//   Stage 1: 법인 계좌·법인 카드·고정비 입력. (Stage 2: 예산대비실적·자금현황·자금계획)
+// ═══════════════════════════════════════════════════════
+window._FIN = window._FIN || { loaded:false, config:null, accounts:[], cards:[], recurring:[], acctTxns:{}, cardTxns:{}, year:null, month:null, quarter:null, period:'month', basis:'paid', tab:'accounts', acctFilter:'', cardFilter:'' };
+const FIN_CATS = [
+  { key:'po_prepay', label:'발주 선급금' }, { key:'po_balance', label:'발주 잔금' },
+  { key:'sample', label:'샘플 구매' }, { key:'ad', label:'광고비' },
+  { key:'other', label:'기타' }, { key:'cash_reimburse', label:'직원 환급' }
+];
+function _finCatLabel(k){ const c = FIN_CATS.find(x=>x.key===k); return c ? c.label : (k||'-'); }
+function _finNum(v){ const n = parseFloat(String(v==null?'':v).replace(/[^0-9.\-]/g,'')); return isNaN(n)?0:n; }
+function _finId(prefix){ return prefix + '_' + Date.now() + '_' + Math.floor(Math.random()*100000); }
+function _finEsc(s){ return (typeof escapeHtml==='function') ? escapeHtml(s) : String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function _finWon(n){ return (typeof fmtWon==='function') ? fmtWon(n) : ('₩'+(Math.round(n||0)).toLocaleString()); }
+
+// 선택 기간 [start,end] (YYYY-MM-DD 문자열 비교용)
+function _finRange(){
+  const F = window._FIN; const y = F.year || new Date().getFullYear();
+  if (F.period === 'year') return { start:`${y}-01-01`, end:`${y}-12-31`, label:`${y}년` };
+  if (F.period === 'quarter'){ const q = F.quarter||1; const sm=(q-1)*3+1, em=sm+2; return { start:`${y}-${String(sm).padStart(2,'0')}-01`, end:`${y}-${String(em).padStart(2,'0')}-31`, label:`${y}년 ${q}분기` }; }
+  const m = F.month || (new Date().getMonth()+1);
+  return { start:`${y}-${String(m).padStart(2,'0')}-01`, end:`${y}-${String(m).padStart(2,'0')}-31`, label:`${y}년 ${m}월` };
+}
+function _finInRange(dateStr, r){ const d = String(dateStr||'').slice(0,10); return d >= r.start && d <= r.end; }
+
+// ── 영속 로드/저장 ──
+async function _finEnsureLoaded(){
+  try{
+    window._FIN.config = (await loadSharedSetting('finance_config')) || { fiscalStartMonth:1, realBasisDefault:'paid' };
+    window._FIN.accounts = (await loadSharedSetting('finance_accounts')) || [];
+    window._FIN.cards = (await loadSharedSetting('finance_cards')) || [];
+    window._FIN.recurring = (await loadSharedSetting('finance_recurring')) || [];
+    const now = new Date();
+    window._FIN.year = parseInt(localStorage.getItem('reniv_fin_year')) || now.getFullYear();
+    window._FIN.month = parseInt(localStorage.getItem('reniv_fin_month')) || (now.getMonth()+1);
+    window._FIN.quarter = parseInt(localStorage.getItem('reniv_fin_quarter')) || (Math.floor(now.getMonth()/3)+1);
+    window._FIN.period = localStorage.getItem('reniv_fin_period') || 'month';
+    window._FIN.basis = localStorage.getItem('reniv_fin_basis') || (window._FIN.config.realBasisDefault || 'paid');
+    window._FIN.tab = localStorage.getItem('reniv_fin_tab') || 'accounts';
+    await _finLoadYear(window._FIN.year);
+    window._FIN.loaded = true;
+  }catch(e){ console.warn('[재무] 로드 실패:', e); window._FIN.loaded = true; }
+}
+async function _finLoadYear(y){
+  if (!window._FIN.acctTxns[y]) window._FIN.acctTxns[y] = (await loadSharedSetting('finance_account_txns_'+y)) || [];
+  if (!window._FIN.cardTxns[y]) window._FIN.cardTxns[y] = (await loadSharedSetting('finance_card_txns_'+y)) || [];
+}
+async function _finSaveAccounts(){ await saveSharedSetting('finance_accounts', window._FIN.accounts); }
+async function _finSaveCards(){ await saveSharedSetting('finance_cards', window._FIN.cards); }
+async function _finSaveRecurring(){ await saveSharedSetting('finance_recurring', window._FIN.recurring); }
+async function _finSaveAcctTxns(y){ await saveSharedSetting('finance_account_txns_'+y, window._FIN.acctTxns[y]||[]); }
+async function _finSaveCardTxns(y){ await saveSharedSetting('finance_card_txns_'+y, window._FIN.cardTxns[y]||[]); }
+
+// ── 렌더 ──
+async function renderFinance(){
+  const root = document.getElementById('finance-root'); if(!root) return;
+  if (!window._FIN.loaded){
+    root.innerHTML = '<div style="padding:48px;text-align:center;color:#94a3b8;font-size:14px">💰 재무 데이터를 불러오는 중…</div>';
+    await _finEnsureLoaded();
+  }
+  _finRender();
+}
+function _finRender(){
+  const root = document.getElementById('finance-root'); if(!root) return;
+  const F = window._FIN;
+  const tabs = [['dashboard','📊 자금 현황'],['accounts','🏦 법인 계좌'],['cards','💳 법인 카드'],['recurring','🔁 고정비'],['budget','🎯 예산 대비 실적'],['plan','📈 자금 계획']];
+  let body = '';
+  if (F.tab==='accounts') body = _finTabAccounts();
+  else if (F.tab==='cards') body = _finTabCards();
+  else if (F.tab==='recurring') body = _finTabRecurring();
+  else body = _finStagePlaceholder(F.tab);
+  root.innerHTML =
+    _finTopBarHtml() +
+    '<div style="display:flex;gap:4px;flex-wrap:wrap;margin:14px 0 18px;border-bottom:1px solid #e5e7eb">' +
+    tabs.map(([k,l])=>`<button onclick="_finSetTab('${k}')" style="background:${F.tab===k?'#0f172a':'transparent'};color:${F.tab===k?'#fff':'#64748b'};border:0;border-radius:8px 8px 0 0;padding:9px 15px;font-size:13px;font-weight:700;cursor:pointer">${l}</button>`).join('') +
+    '</div><div id="finance-tab-body">' + body + '</div>';
+}
+function _finTopBarHtml(){
+  const F = window._FIN; const yNow = new Date().getFullYear();
+  let years=''; for(let y=yNow-2;y<=yNow+1;y++) years += `<option value="${y}" ${F.year===y?'selected':''}>${y}년</option>`;
+  const pBtn=(k,l)=>`<button onclick="_finSetPeriod('${k}')" style="background:${F.period===k?'#6366f1':'#eef2ff'};color:${F.period===k?'#fff':'#4338ca'};border:1px solid #c7d2fe;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:700;cursor:pointer">${l}</button>`;
+  const bBtn=(k,l)=>`<button onclick="_finSetBasis('${k}')" style="background:${F.basis===k?'#0ea5e9':'#e0f2fe'};color:${F.basis===k?'#fff':'#0369a1'};border:1px solid #bae6fd;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:700;cursor:pointer">${l}</button>`;
+  let sub='';
+  if (F.period==='month'){ let o=''; for(let m=1;m<=12;m++) o+=`<option value="${m}" ${F.month===m?'selected':''}>${m}월</option>`; sub=`<select onchange="_finSetMonth(this.value)" style="border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px">${o}</select>`; }
+  else if (F.period==='quarter'){ let o=''; for(let q=1;q<=4;q++) o+=`<option value="${q}" ${F.quarter===q?'selected':''}>${q}분기</option>`; sub=`<select onchange="_finSetQuarter(this.value)" style="border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px">${o}</select>`; }
+  return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:10px 14px">' +
+    `<select onchange="_finSetYear(this.value)" style="border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;font-weight:600">${years}</select>` +
+    `<div style="display:flex;gap:4px">${pBtn('month','월')}${pBtn('quarter','분기')}${pBtn('year','연')}</div>` +
+    sub +
+    '<span style="flex:1"></span>' +
+    '<span style="font-size:12px;color:#64748b;font-weight:600">실적 기준</span>' +
+    `<div style="display:flex;gap:4px">${bBtn('paid','지급완료')}${bBtn('due','지급예정')}</div>` +
+    '</div>';
+}
+function _finStagePlaceholder(tab){
+  const map = { dashboard:['📊 자금 현황','계좌 총잔액·이번달 수입/지출·예산 소진율·자금계획 요약'], budget:['🎯 예산 대비 실적','카테고리별 예산 입력 + 실제 지출 자동집계 대비 소진율'], plan:['📈 자금 계획','현재 잔액 + 예정 입·출금 → 날짜별 예상 잔액·부족 경고'] };
+  const [t,d] = map[tab] || ['',''];
+  return `<div style="text-align:center;padding:56px 20px;color:#94a3b8"><div style="font-size:34px;margin-bottom:10px">${t.split(' ')[0]}</div><div style="font-size:15px;font-weight:700;color:#475569;margin-bottom:6px">${t.replace(/^\S+\s/,'')} — 준비 중</div><div style="font-size:13px;line-height:1.6">${d}<br>Stage 2에서 제공됩니다 (집계 화면).</div></div>`;
+}
+
+// ── 상단바 핸들러 ──
+function _finSetTab(k){ window._FIN.tab=k; try{localStorage.setItem('reniv_fin_tab',k);}catch(_){} _finRender(); }
+async function _finSetYear(v){ const y=parseInt(v)||new Date().getFullYear(); window._FIN.year=y; try{localStorage.setItem('reniv_fin_year',String(y));}catch(_){} await _finLoadYear(y); _finRender(); }
+function _finSetPeriod(k){ window._FIN.period=k; try{localStorage.setItem('reniv_fin_period',k);}catch(_){} _finRender(); }
+function _finSetMonth(v){ window._FIN.month=parseInt(v)||1; try{localStorage.setItem('reniv_fin_month',String(window._FIN.month));}catch(_){} _finRender(); }
+function _finSetQuarter(v){ window._FIN.quarter=parseInt(v)||1; try{localStorage.setItem('reniv_fin_quarter',String(window._FIN.quarter));}catch(_){} _finRender(); }
+function _finSetBasis(k){ window._FIN.basis=k; try{localStorage.setItem('reniv_fin_basis',k);}catch(_){} _finRender(); }
+
+// ═══ 순수 로직 — 잔액 누적 (유닛테스트 대상) ═══
+function _finRunningBalances(opening, txnsAsc){
+  let bal = Number(opening)||0; const out=[];
+  (txnsAsc||[]).forEach(t=>{ bal += (t && t.dir==='in' ? 1 : -1) * (Number(t&&t.amount)||0); out.push(bal); });
+  return out;
+}
+function _finAccountBalance(accId){
+  const F=window._FIN; const acc=(F.accounts||[]).find(a=>String(a.id)===String(accId));
+  let bal = acc ? (Number(acc.openingBalance)||0) : 0;
+  Object.keys(F.acctTxns||{}).forEach(y=>{ (F.acctTxns[y]||[]).forEach(t=>{ if(String(t.accountId)===String(accId)) bal += (t.dir==='in'?1:-1)*(Number(t.amount)||0); }); });
+  return bal;
+}
+function _finAcctTxnsAll(accId){
+  const F=window._FIN; let all=[];
+  Object.keys(F.acctTxns||{}).forEach(y=>{ (F.acctTxns[y]||[]).forEach(t=>{ if(!accId||String(t.accountId)===String(accId)) all.push(t); }); });
+  all.sort((a,b)=> String(a.date||'').localeCompare(String(b.date||'')) || (Number(a.id||0)-Number(b.id||0)));
+  return all;
+}
+
+// ── 탭: 법인 계좌 ──
+function _finTabAccounts(){
+  const F=window._FIN; const r=_finRange();
+  const accs=F.accounts||[];
+  const inS='border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px';
+  // 계좌 마스터
+  let masters = accs.map(a=>{
+    const bal=_finAccountBalance(a.id);
+    return `<tr style="border-bottom:1px solid #f1f5f9">
+      <td style="padding:6px 8px"><input value="${_finEsc(a.alias||'')}" onchange="_finUpdateAccount('${a.id}','alias',this.value)" style="${inS};width:120px"></td>
+      <td style="padding:6px 8px"><input value="${_finEsc(a.bankName||'')}" onchange="_finUpdateAccount('${a.id}','bankName',this.value)" style="${inS};width:110px"></td>
+      <td style="padding:6px 8px"><input value="${_finEsc(a.accountNo||'')}" onchange="_finUpdateAccount('${a.id}','accountNo',this.value)" style="${inS};width:120px" placeholder="끝 4자리"></td>
+      <td style="padding:6px 8px"><input type="number" value="${Number(a.openingBalance)||0}" onchange="_finUpdateAccount('${a.id}','openingBalance',this.value)" style="${inS};width:120px;text-align:right"></td>
+      <td style="padding:6px 8px;text-align:right;font-weight:700;color:${bal<0?'#dc2626':'#0f172a'}">${_finWon(bal)}</td>
+      <td style="padding:6px 8px;text-align:center"><button onclick="_finDelAccount('${a.id}')" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:6px;padding:3px 9px;font-size:11.5px;font-weight:700;cursor:pointer">삭제</button></td>
+    </tr>`;
+  }).join('');
+  const totalBal = accs.reduce((s,a)=>s+_finAccountBalance(a.id),0);
+  // 계좌 필터 select
+  const accOpts = '<option value="">전체 계좌</option>' + accs.map(a=>`<option value="${a.id}" ${String(F.acctFilter)===String(a.id)?'selected':''}>${_finEsc(a.alias||a.bankName||a.id)}</option>`).join('');
+  // 내역
+  const txnsAll = _finAcctTxnsAll(F.acctFilter);
+  const balMap={}; if(F.acctFilter){ const bs=_finRunningBalances(((accs.find(a=>String(a.id)===String(F.acctFilter))||{}).openingBalance)||0, txnsAll); txnsAll.forEach((t,i)=>balMap[t.id]=bs[i]); }
+  const inRange = txnsAll.filter(t=>_finInRange(t.date,r));
+  let inSum=0,outSum=0;
+  const rows = inRange.map(t=>{ const amt=Number(t.amount)||0; if(t.dir==='in')inSum+=amt; else outSum+=amt;
+    return `<tr style="border-bottom:1px solid #f1f5f9">
+      <td style="padding:6px 8px;white-space:nowrap">${_finEsc(t.date)}</td>
+      <td style="padding:6px 8px">${_finEsc(t.desc||'')}${F.acctFilter?'':' <span style="color:#94a3b8;font-size:11px">('+_finEsc((accs.find(a=>String(a.id)===String(t.accountId))||{}).alias||'')+')</span>'}</td>
+      <td style="padding:6px 8px;text-align:right;color:#059669">${t.dir==='in'?_finWon(amt):''}</td>
+      <td style="padding:6px 8px;text-align:right;color:#dc2626">${t.dir==='out'?_finWon(amt):''}</td>
+      <td style="padding:6px 8px;text-align:right;color:#64748b">${F.acctFilter?_finWon(balMap[t.id]||0):'-'}</td>
+      <td style="padding:6px 8px;font-size:11.5px;color:#64748b">${_finEsc(_finCatLabel(t.category)||'')}</td>
+      <td style="padding:6px 8px;text-align:center"><button onclick="_finDelAcctTxn('${t.id}')" style="background:none;border:0;color:#cbd5e1;cursor:pointer;font-size:14px" title="삭제">✕</button></td>
+    </tr>`; }).join('');
+  const catOpts = '<option value="">분류</option>'+FIN_CATS.map(c=>`<option value="${c.key}">${c.label}</option>`).join('');
+  const accSel = accs.length ? `<select id="fin-at-acc" style="${inS}">${accs.map(a=>`<option value="${a.id}">${_finEsc(a.alias||a.bankName||a.id)}</option>`).join('')}</select>` : '';
+  return `
+  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div style="font-size:14px;font-weight:800;color:#0f172a">🏦 법인 계좌</div><div style="font-size:13px;color:#475569">총잔액 <b style="color:${totalBal<0?'#dc2626':'#0f172a'}">${_finWon(totalBal)}</b></div></div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left">별칭</th><th style="padding:6px 8px;text-align:left">은행</th><th style="padding:6px 8px;text-align:left">계좌(끝4)</th><th style="padding:6px 8px;text-align:right">시작잔액</th><th style="padding:6px 8px;text-align:right">현재잔액</th><th></th></tr></thead>
+      <tbody>${masters || '<tr><td colspan="6" style="padding:14px;text-align:center;color:#94a3b8">등록된 계좌가 없습니다</td></tr>'}</tbody>
+    </table>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center">
+      <input id="fin-aac-alias" placeholder="별칭(예: 운영통장)" style="${inS}">
+      <input id="fin-aac-bank" placeholder="은행" style="${inS};width:90px">
+      <input id="fin-aac-last4" placeholder="끝 4자리" style="${inS};width:80px">
+      <input id="fin-aac-open" type="number" placeholder="시작잔액" style="${inS};width:110px;text-align:right">
+      <button onclick="_finAddAccount()" style="background:#0f172a;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer">+ 계좌 추가</button>
+    </div>
+  </div>
+  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      <div style="font-size:14px;font-weight:800;color:#0f172a">입출금 내역 <span style="font-size:12px;color:#94a3b8;font-weight:500">· ${r.label}</span></div>
+      <div style="display:flex;gap:10px;font-size:12.5px"><span style="color:#059669">입금 <b>${_finWon(inSum)}</b></span><span style="color:#dc2626">출금 <b>${_finWon(outSum)}</b></span><span style="color:#0f172a">순 <b>${_finWon(inSum-outSum)}</b></span></div>
+    </div>
+    <div style="margin-bottom:10px"><select onchange="_finSetAcctFilter(this.value)" style="${inS}">${accOpts}</select></div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left">날짜</th><th style="padding:6px 8px;text-align:left">적요</th><th style="padding:6px 8px;text-align:right">입금</th><th style="padding:6px 8px;text-align:right">출금</th><th style="padding:6px 8px;text-align:right">잔액</th><th style="padding:6px 8px;text-align:left">분류</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="7" style="padding:14px;text-align:center;color:#94a3b8">이 기간 내역이 없습니다</td></tr>'}</tbody>
+    </table>
+    ${accs.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;border-top:1px dashed #e5e7eb;padding-top:10px">
+      ${accSel}
+      <input id="fin-at-date" type="date" style="${inS}">
+      <input id="fin-at-desc" placeholder="적요" style="${inS};flex:1;min-width:120px">
+      <input id="fin-at-amount" type="number" placeholder="금액" style="${inS};width:110px;text-align:right">
+      <select id="fin-at-dir" style="${inS}"><option value="out">출금</option><option value="in">입금</option></select>
+      <select id="fin-at-cat" style="${inS}">${catOpts}</select>
+      <button onclick="_finAddAcctTxn()" style="background:#0f172a;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer">+ 추가</button>
+      <button onclick="_finToggleCsv('acct')" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:6px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer">📋 CSV 붙여넣기</button>
+    </div>
+    <div id="fin-acct-csv" style="display:none;margin-top:10px">
+      <textarea id="fin-acct-csv-ta" rows="4" placeholder="한 줄에 한 건: 날짜,적요,입금,출금  (또는 날짜,적요,금액  — 음수=출금)\n예) 2026-06-01,거래처A 송금,,500000" style="width:100%;${inS};font-family:monospace"></textarea>
+      <button onclick="_finImportAcctCsv()" style="margin-top:6px;background:#4338ca;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer">가져오기</button>
+    </div>` : '<div style="margin-top:10px;color:#94a3b8;font-size:13px">먼저 계좌를 추가하세요.</div>'}
+  </div>`;
+}
+function _finSetAcctFilter(v){ window._FIN.acctFilter=v; _finRender(); }
+async function _finAddAccount(){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const alias=(document.getElementById('fin-aac-alias').value||'').trim();
+  if(!alias){ showNotif('별칭을 입력하세요','warning'); return; }
+  window._FIN.accounts.push({ id:_finId('acc'), alias, bankName:(document.getElementById('fin-aac-bank').value||'').trim(), accountNo:(document.getElementById('fin-aac-last4').value||'').trim(), openingBalance:_finNum(document.getElementById('fin-aac-open').value), active:true });
+  await _finSaveAccounts(); showNotif('계좌가 추가되었습니다','success'); _finRender();
+}
+async function _finUpdateAccount(id,field,val){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const a=window._FIN.accounts.find(x=>String(x.id)===String(id)); if(!a) return;
+  a[field] = (field==='openingBalance') ? _finNum(val) : val;
+  await _finSaveAccounts(); if(field==='openingBalance') _finRender();
+}
+async function _finDelAccount(id){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  if(!confirm('이 계좌를 삭제할까요? (입출금 내역은 남습니다)')) return;
+  window._FIN.accounts = window._FIN.accounts.filter(x=>String(x.id)!==String(id));
+  await _finSaveAccounts(); showNotif('삭제되었습니다','info'); _finRender();
+}
+async function _finAddAcctTxn(){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const accId=document.getElementById('fin-at-acc').value;
+  const date=document.getElementById('fin-at-date').value;
+  const amount=_finNum(document.getElementById('fin-at-amount').value);
+  if(!accId){ showNotif('계좌를 선택하세요','warning'); return; }
+  if(!date){ showNotif('날짜를 입력하세요','warning'); return; }
+  if(!amount){ showNotif('금액을 입력하세요','warning'); return; }
+  const y=parseInt(String(date).slice(0,4))||window._FIN.year;
+  await _finLoadYear(y);
+  window._FIN.acctTxns[y].push({ id:_finId('at'), accountId:accId, date, desc:(document.getElementById('fin-at-desc').value||'').trim(), amount, dir:document.getElementById('fin-at-dir').value, category:document.getElementById('fin-at-cat').value||'', memo:'', source:'manual' });
+  await _finSaveAcctTxns(y); showNotif('내역이 추가되었습니다','success'); _finRender();
+}
+async function _finDelAcctTxn(id){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const F=window._FIN; let y=null;
+  Object.keys(F.acctTxns).forEach(yy=>{ if((F.acctTxns[yy]||[]).some(t=>String(t.id)===String(id))) y=yy; });
+  if(y==null) return;
+  F.acctTxns[y]=F.acctTxns[y].filter(t=>String(t.id)!==String(id));
+  await _finSaveAcctTxns(y); _finRender();
+}
+function _finToggleCsv(kind){ const el=document.getElementById('fin-'+kind+'-csv'); if(el) el.style.display = el.style.display==='none'?'block':'none'; }
+// CSV 한 줄 파싱 → {date,desc,in,out} (날짜는 normalizeDate 로 보존)
+function _finParseTxnLine(line){
+  const parts = String(line).split(/[\t,]/).map(s=>s.trim());
+  if (parts.length < 2) return null;
+  const date = (typeof normalizeDate==='function') ? normalizeDate(parts[0]) : parts[0];
+  if (!date) return null;
+  if (parts.length >= 4){ return { date, desc:parts[1], inAmt:_finNum(parts[2]), outAmt:_finNum(parts[3]) }; }
+  const amt=_finNum(parts[2]); return { date, desc:parts[1], inAmt: amt>0?amt:0, outAmt: amt<0?-amt:0 };
+}
+async function _finImportAcctCsv(){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const accId=document.getElementById('fin-at-acc') ? document.getElementById('fin-at-acc').value : (window._FIN.acctFilter||(window._FIN.accounts[0]||{}).id);
+  if(!accId){ showNotif('계좌를 먼저 선택/추가하세요','warning'); return; }
+  const raw=(document.getElementById('fin-acct-csv-ta').value||'').trim(); if(!raw){ return; }
+  const lines=raw.split(/\r?\n/).filter(l=>l.trim());
+  let added=0;
+  for(const line of lines){ const p=_finParseTxnLine(line); if(!p) continue;
+    const y=parseInt(String(p.date).slice(0,4))||window._FIN.year; await _finLoadYear(y);
+    const sig=p.date+'|'+(p.inAmt-p.outAmt)+'|'+(p.desc||'');
+    const dup=(window._FIN.acctTxns[y]||[]).some(t=>String(t.accountId)===String(accId) && (t.date+'|'+((t.dir==='in'?1:-1)*(Number(t.amount)||0))+'|'+(t.desc||''))===sig);
+    if(dup) continue;
+    if(p.inAmt>0){ window._FIN.acctTxns[y].push({id:_finId('at'),accountId:accId,date:p.date,desc:p.desc,amount:p.inAmt,dir:'in',category:'',memo:'',source:'upload'}); added++; }
+    if(p.outAmt>0){ window._FIN.acctTxns[y].push({id:_finId('at'),accountId:accId,date:p.date,desc:p.desc,amount:p.outAmt,dir:'out',category:'',memo:'',source:'upload'}); added++; }
+  }
+  const yrs=new Set(); Object.keys(window._FIN.acctTxns).forEach(y=>yrs.add(y));
+  for(const y of yrs) await _finSaveAcctTxns(y);
+  showNotif(added+'건을 가져왔습니다','success'); _finRender();
+}
+
+// ── 탭: 법인 카드 ──
+function _finTabCards(){
+  const F=window._FIN; const r=_finRange(); const cards=F.cards||[];
+  const inS='border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px';
+  let masters=cards.map(c=>`<tr style="border-bottom:1px solid #f1f5f9">
+      <td style="padding:6px 8px"><input value="${_finEsc(c.alias||'')}" onchange="_finUpdateCard('${c.id}','alias',this.value)" style="${inS};width:130px"></td>
+      <td style="padding:6px 8px"><input value="${_finEsc(c.cardName||'')}" onchange="_finUpdateCard('${c.id}','cardName',this.value)" style="${inS};width:120px"></td>
+      <td style="padding:6px 8px"><input value="${_finEsc(c.last4||'')}" onchange="_finUpdateCard('${c.id}','last4',this.value)" style="${inS};width:80px" placeholder="끝 4자리"></td>
+      <td style="padding:6px 8px;text-align:center"><button onclick="_finDelCard('${c.id}')" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:6px;padding:3px 9px;font-size:11.5px;font-weight:700;cursor:pointer">삭제</button></td>
+    </tr>`).join('');
+  let allTxn=[]; Object.keys(F.cardTxns||{}).forEach(y=>{ (F.cardTxns[y]||[]).forEach(t=>{ if(!F.cardFilter||String(t.cardId)===String(F.cardFilter)) allTxn.push(t); }); });
+  allTxn.sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  const inRange=allTxn.filter(t=>_finInRange(t.date,r));
+  let useSum=0; const byCat={};
+  const rows=inRange.map(t=>{ const amt=Number(t.amount)||0; useSum+=amt; byCat[t.category||'']=(byCat[t.category||'']||0)+amt;
+    return `<tr style="border-bottom:1px solid #f1f5f9">
+      <td style="padding:6px 8px;white-space:nowrap">${_finEsc(t.date)}</td>
+      <td style="padding:6px 8px">${_finEsc(t.merchant||'')}${F.cardFilter?'':' <span style="color:#94a3b8;font-size:11px">('+_finEsc((cards.find(c=>String(c.id)===String(t.cardId))||{}).alias||'')+')</span>'}</td>
+      <td style="padding:6px 8px;text-align:right;font-weight:600">${_finWon(amt)}</td>
+      <td style="padding:6px 8px;font-size:11.5px;color:#64748b">${_finEsc(_finCatLabel(t.category)||'')}</td>
+      <td style="padding:6px 8px;text-align:center"><button onclick="_finDelCardTxn('${t.id}')" style="background:none;border:0;color:#cbd5e1;cursor:pointer;font-size:14px" title="삭제">✕</button></td>
+    </tr>`; }).join('');
+  const catOpts='<option value="">분류</option>'+FIN_CATS.map(c=>`<option value="${c.key}">${c.label}</option>`).join('');
+  const cardOptsFilter='<option value="">전체 카드</option>'+cards.map(c=>`<option value="${c.id}" ${String(F.cardFilter)===String(c.id)?'selected':''}>${_finEsc(c.alias||c.cardName||c.id)}</option>`).join('');
+  const cardSel=cards.length?`<select id="fin-ct-card" style="${inS}">${cards.map(c=>`<option value="${c.id}">${_finEsc(c.alias||c.cardName||c.id)}</option>`).join('')}</select>`:'';
+  const catBreakdown=Object.keys(byCat).filter(k=>byCat[k]>0).map(k=>`<span style="background:#f1f5f9;border-radius:5px;padding:2px 8px;font-size:11.5px;color:#475569">${_finEsc(_finCatLabel(k)||'미분류')} ${_finWon(byCat[k])}</span>`).join(' ');
+  return `
+  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:16px">
+    <div style="font-size:14px;font-weight:800;color:#0f172a;margin-bottom:10px">💳 법인 카드</div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left">별칭</th><th style="padding:6px 8px;text-align:left">카드사</th><th style="padding:6px 8px;text-align:left">끝4자리</th><th></th></tr></thead>
+      <tbody>${masters || '<tr><td colspan="4" style="padding:14px;text-align:center;color:#94a3b8">등록된 카드가 없습니다</td></tr>'}</tbody>
+    </table>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center">
+      <input id="fin-acard-alias" placeholder="별칭(예: 법인 신한)" style="${inS}">
+      <input id="fin-acard-name" placeholder="카드사" style="${inS};width:100px">
+      <input id="fin-acard-last4" placeholder="끝 4자리" style="${inS};width:80px">
+      <button onclick="_finAddCard()" style="background:#0f172a;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer">+ 카드 추가</button>
+    </div>
+  </div>
+  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      <div style="font-size:14px;font-weight:800;color:#0f172a">카드 사용내역 <span style="font-size:12px;color:#94a3b8;font-weight:500">· ${r.label}</span></div>
+      <div style="font-size:12.5px;color:#0f172a">합계 <b>${_finWon(useSum)}</b></div>
+    </div>
+    ${catBreakdown?`<div style="margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap">${catBreakdown}</div>`:''}
+    <div style="margin-bottom:10px"><select onchange="_finSetCardFilter(this.value)" style="${inS}">${cardOptsFilter}</select></div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left">날짜</th><th style="padding:6px 8px;text-align:left">가맹점</th><th style="padding:6px 8px;text-align:right">금액</th><th style="padding:6px 8px;text-align:left">분류</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="5" style="padding:14px;text-align:center;color:#94a3b8">이 기간 내역이 없습니다</td></tr>'}</tbody>
+    </table>
+    ${cards.length?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;border-top:1px dashed #e5e7eb;padding-top:10px">
+      ${cardSel}
+      <input id="fin-ct-date" type="date" style="${inS}">
+      <input id="fin-ct-merchant" placeholder="가맹점" style="${inS};flex:1;min-width:120px">
+      <input id="fin-ct-amount" type="number" placeholder="금액" style="${inS};width:110px;text-align:right">
+      <select id="fin-ct-cat" style="${inS}">${catOpts}</select>
+      <button onclick="_finAddCardTxn()" style="background:#0f172a;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer">+ 추가</button>
+      <button onclick="_finToggleCsv('card')" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:6px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer">📋 CSV 붙여넣기</button>
+    </div>
+    <div id="fin-card-csv" style="display:none;margin-top:10px">
+      <textarea id="fin-card-csv-ta" rows="4" placeholder="한 줄에 한 건: 날짜,가맹점,금액\n예) 2026-06-03,쿠팡,32000" style="width:100%;${inS};font-family:monospace"></textarea>
+      <button onclick="_finImportCardCsv()" style="margin-top:6px;background:#4338ca;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer">가져오기</button>
+    </div>`:'<div style="margin-top:10px;color:#94a3b8;font-size:13px">먼저 카드를 추가하세요.</div>'}
+  </div>`;
+}
+function _finSetCardFilter(v){ window._FIN.cardFilter=v; _finRender(); }
+async function _finAddCard(){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const alias=(document.getElementById('fin-acard-alias').value||'').trim();
+  if(!alias){ showNotif('별칭을 입력하세요','warning'); return; }
+  window._FIN.cards.push({ id:_finId('card'), alias, cardName:(document.getElementById('fin-acard-name').value||'').trim(), last4:(document.getElementById('fin-acard-last4').value||'').trim(), active:true });
+  await _finSaveCards(); showNotif('카드가 추가되었습니다','success'); _finRender();
+}
+async function _finUpdateCard(id,field,val){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const c=window._FIN.cards.find(x=>String(x.id)===String(id)); if(!c) return; c[field]=val; await _finSaveCards();
+}
+async function _finDelCard(id){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  if(!confirm('이 카드를 삭제할까요? (사용내역은 남습니다)')) return;
+  window._FIN.cards=window._FIN.cards.filter(x=>String(x.id)!==String(id)); await _finSaveCards(); showNotif('삭제되었습니다','info'); _finRender();
+}
+async function _finAddCardTxn(){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const cardId=document.getElementById('fin-ct-card').value; const date=document.getElementById('fin-ct-date').value; const amount=_finNum(document.getElementById('fin-ct-amount').value);
+  if(!cardId){ showNotif('카드를 선택하세요','warning'); return; }
+  if(!date){ showNotif('날짜를 입력하세요','warning'); return; }
+  if(!amount){ showNotif('금액을 입력하세요','warning'); return; }
+  const y=parseInt(String(date).slice(0,4))||window._FIN.year; await _finLoadYear(y);
+  window._FIN.cardTxns[y].push({ id:_finId('ct'), cardId, date, merchant:(document.getElementById('fin-ct-merchant').value||'').trim(), amount, category:document.getElementById('fin-ct-cat').value||'', memo:'', source:'manual' });
+  await _finSaveCardTxns(y); showNotif('내역이 추가되었습니다','success'); _finRender();
+}
+async function _finDelCardTxn(id){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const F=window._FIN; let y=null; Object.keys(F.cardTxns).forEach(yy=>{ if((F.cardTxns[yy]||[]).some(t=>String(t.id)===String(id))) y=yy; });
+  if(y==null) return; F.cardTxns[y]=F.cardTxns[y].filter(t=>String(t.id)!==String(id)); await _finSaveCardTxns(y); _finRender();
+}
+async function _finImportCardCsv(){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const cardId=document.getElementById('fin-ct-card')?document.getElementById('fin-ct-card').value:(window._FIN.cardFilter||(window._FIN.cards[0]||{}).id);
+  if(!cardId){ showNotif('카드를 먼저 선택/추가하세요','warning'); return; }
+  const raw=(document.getElementById('fin-card-csv-ta').value||'').trim(); if(!raw) return;
+  let added=0;
+  for(const line of raw.split(/\r?\n/).filter(l=>l.trim())){ const parts=line.split(/[\t,]/).map(s=>s.trim()); if(parts.length<3) continue;
+    const date=(typeof normalizeDate==='function')?normalizeDate(parts[0]):parts[0]; if(!date) continue;
+    const amt=_finNum(parts[2]); if(!amt) continue;
+    const y=parseInt(String(date).slice(0,4))||window._FIN.year; await _finLoadYear(y);
+    const sig=date+'|'+amt+'|'+(parts[1]||'');
+    if((window._FIN.cardTxns[y]||[]).some(t=>String(t.cardId)===String(cardId)&&(t.date+'|'+(Number(t.amount)||0)+'|'+(t.merchant||''))===sig)) continue;
+    window._FIN.cardTxns[y].push({id:_finId('ct'),cardId,date,merchant:parts[1]||'',amount:amt,category:'',memo:'',source:'upload'}); added++;
+  }
+  const yrs=new Set(); Object.keys(window._FIN.cardTxns).forEach(y=>yrs.add(y)); for(const y of yrs) await _finSaveCardTxns(y);
+  showNotif(added+'건을 가져왔습니다','success'); _finRender();
+}
+
+// ── 탭: 고정비/정기지출 ──
+function _finTabRecurring(){
+  const F=window._FIN; const rec=F.recurring||[];
+  const inS='border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px';
+  const cycleLabel={monthly:'매월',quarterly:'분기',yearly:'매년'};
+  const monthlyTotal=rec.filter(x=>x.active!==false).reduce((s,x)=>{ const a=Number(x.amount)||0; return s + (x.cycle==='monthly'?a : x.cycle==='quarterly'?a/3 : a/12); },0);
+  const rows=rec.map(x=>`<tr style="border-bottom:1px solid #f1f5f9;opacity:${x.active===false?0.5:1}">
+      <td style="padding:6px 8px"><input value="${_finEsc(x.name||'')}" onchange="_finUpdateRecurring('${x.id}','name',this.value)" style="${inS};width:140px"></td>
+      <td style="padding:6px 8px"><input type="number" value="${Number(x.amount)||0}" onchange="_finUpdateRecurring('${x.id}','amount',this.value)" style="${inS};width:110px;text-align:right"></td>
+      <td style="padding:6px 8px"><select onchange="_finUpdateRecurring('${x.id}','cycle',this.value)" style="${inS}">${['monthly','quarterly','yearly'].map(c=>`<option value="${c}" ${x.cycle===c?'selected':''}>${cycleLabel[c]}</option>`).join('')}</select></td>
+      <td style="padding:6px 8px"><input type="number" min="1" max="31" value="${Number(x.dayOfMonth)||1}" onchange="_finUpdateRecurring('${x.id}','dayOfMonth',this.value)" style="${inS};width:60px;text-align:center"></td>
+      <td style="padding:6px 8px"><select onchange="_finUpdateRecurring('${x.id}','category',this.value)" style="${inS}"><option value="">분류</option>${FIN_CATS.map(c=>`<option value="${c.key}" ${x.category===c.key?'selected':''}>${c.label}</option>`).join('')}</select></td>
+      <td style="padding:6px 8px;text-align:center"><input type="checkbox" ${x.active!==false?'checked':''} onchange="_finUpdateRecurring('${x.id}','active',this.checked)"></td>
+      <td style="padding:6px 8px;text-align:center"><button onclick="_finDelRecurring('${x.id}')" style="background:none;border:0;color:#cbd5e1;cursor:pointer;font-size:14px" title="삭제">✕</button></td>
+    </tr>`).join('');
+  return `
+  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><div style="font-size:14px;font-weight:800;color:#0f172a">🔁 고정비 / 정기지출</div><div style="font-size:13px;color:#475569">월 환산 합계 <b>${_finWon(monthlyTotal)}</b></div></div>
+    <div style="font-size:12px;color:#94a3b8;margin-bottom:10px">등록한 고정비는 Stage 2의 자금계획·예산에 자동 반영됩니다.</div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left">항목</th><th style="padding:6px 8px;text-align:right">금액</th><th style="padding:6px 8px;text-align:left">주기</th><th style="padding:6px 8px;text-align:center">결제일</th><th style="padding:6px 8px;text-align:left">분류</th><th style="padding:6px 8px;text-align:center">사용</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="7" style="padding:14px;text-align:center;color:#94a3b8">등록된 고정비가 없습니다</td></tr>'}</tbody>
+    </table>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;border-top:1px dashed #e5e7eb;padding-top:10px">
+      <input id="fin-rec-name" placeholder="항목(예: 사무실 임대료)" style="${inS};flex:1;min-width:140px">
+      <input id="fin-rec-amount" type="number" placeholder="금액" style="${inS};width:110px;text-align:right">
+      <select id="fin-rec-cycle" style="${inS}"><option value="monthly">매월</option><option value="quarterly">분기</option><option value="yearly">매년</option></select>
+      <input id="fin-rec-day" type="number" min="1" max="31" value="1" title="결제일(일)" style="${inS};width:60px;text-align:center">
+      <select id="fin-rec-cat" style="${inS}"><option value="">분류</option>${FIN_CATS.map(c=>`<option value="${c.key}">${c.label}</option>`).join('')}</select>
+      <button onclick="_finAddRecurring()" style="background:#0f172a;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer">+ 추가</button>
+    </div>
+  </div>`;
+}
+async function _finAddRecurring(){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const name=(document.getElementById('fin-rec-name').value||'').trim();
+  const amount=_finNum(document.getElementById('fin-rec-amount').value);
+  if(!name){ showNotif('항목명을 입력하세요','warning'); return; }
+  if(!amount){ showNotif('금액을 입력하세요','warning'); return; }
+  window._FIN.recurring.push({ id:_finId('rec'), name, amount, cycle:document.getElementById('fin-rec-cycle').value, dayOfMonth:parseInt(document.getElementById('fin-rec-day').value)||1, startDate:'', endDate:'', category:document.getElementById('fin-rec-cat').value||'', accountId:'', active:true });
+  await _finSaveRecurring(); showNotif('고정비가 추가되었습니다','success'); _finRender();
+}
+async function _finUpdateRecurring(id,field,val){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const x=window._FIN.recurring.find(r=>String(r.id)===String(id)); if(!x) return;
+  if(field==='amount'||field==='dayOfMonth') x[field]=_finNum(val); else x[field]=val;
+  await _finSaveRecurring(); if(field==='cycle'||field==='active'||field==='amount') _finRender();
+}
+async function _finDelRecurring(id){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  if(!confirm('이 고정비를 삭제할까요?')) return;
+  window._FIN.recurring=window._FIN.recurring.filter(r=>String(r.id)!==String(id)); await _finSaveRecurring(); _finRender();
+}
+window.renderFinance=renderFinance;
+
+// ═══════════════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════════════
 const PAGE_TITLES = {
@@ -9612,7 +10069,8 @@ const PAGE_TITLES = {
   order:'발주서',sites:'사이트 / 계정',insight:'🌱 신제품 개발',accounts:'🔑 외부 계정',users:'사용자 관리',qc:'품질 관리',cost:'원가 분석',settings:'설정 프로필',
   cs:'CS 관리',customers:'👥 고객 정보',sales:'판매 관리',approval:'🖋️ 결재 관리',ads:'📢 광고비 관리',
   costest:'💰 생산 예상 비용',
-  recurring:'🔁 정기 결제'
+  recurring:'🔁 정기 결제',
+  finance:'💰 재무 관리'
 };
 
 function go(page) {
@@ -9724,6 +10182,7 @@ function go(page) {
     cs: renderCsPage,
     sales: renderSalesPage,
     recurring: renderRecurringPage,
+    finance: () => { try { renderFinance(); } catch(e){ console.warn('renderFinance 실패:', e); } },
     settings: () => {
       // v2.3.17: 슬랙 배지/입력란 자동 갱신 (DB 의 현재 값 반영)
       // v2.3.23: 게시판 슬랙도 갱신
