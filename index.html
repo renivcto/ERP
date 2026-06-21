@@ -5836,7 +5836,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.218';
+const ERP_VERSION = 'v2.3.219';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9620,7 +9620,17 @@ const FIN_CATS = [
   { key:'sample', label:'샘플 구매' }, { key:'ad', label:'광고비' },
   { key:'other', label:'기타' }, { key:'cash_reimburse', label:'직원 환급' }
 ];
-function _finCatLabel(k){ const c = FIN_CATS.find(x=>x.key===k); return c ? c.label : (k||'-'); }
+// v2.3.219: 예산 카테고리 — 직원환급 제거, 지적재산권·임상시험비 추가. expCats=실적(expenses) 매핑(이중계상 방지)
+const BUDGET_CATS = [
+  { key:'po_prepay', label:'발주 선급금', expCats:['po_prepay'] },
+  { key:'po_balance', label:'발주 잔금', expCats:['po_balance'] },
+  { key:'sample', label:'샘플 구매', expCats:['sample'] },
+  { key:'ad', label:'광고비', expCats:['ad'] },
+  { key:'ip', label:'지적재산권', expCats:[] },
+  { key:'clinical', label:'임상시험비', expCats:[] },
+  { key:'other', label:'기타', expCats:['other','cash_reimburse'] }
+];
+function _finCatLabel(k){ const c = FIN_CATS.find(x=>x.key===k) || BUDGET_CATS.find(x=>x.key===k); return c ? c.label : (k||'-'); }
 function _finNum(v){ const n = parseFloat(String(v==null?'':v).replace(/[^0-9.\-]/g,'')); return isNaN(n)?0:n; }
 function _finId(prefix){ return prefix + '_' + Date.now() + '_' + Math.floor(Math.random()*100000); }
 function _finEsc(s){ return (typeof escapeHtml==='function') ? escapeHtml(s) : String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -9644,6 +9654,7 @@ async function _finEnsureLoaded(){
     window._FIN.cards = (await loadSharedSetting('finance_cards')) || [];
     window._FIN.recurring = (await loadSharedSetting('finance_recurring')) || [];
     window._FIN.budget = (await loadSharedSetting('budget_targets')) || {};
+    window._FIN.budgetItems = (await loadSharedSetting('budget_items')) || {};
     window._FIN.planItems = (await loadSharedSetting('finance_plan_items')) || [];
     window._FIN.planHorizon = parseInt(localStorage.getItem('reniv_fin_plan_horizon')) || 90;
     const now = new Date();
@@ -10090,51 +10101,64 @@ function _finActualByCategory(expenses, range, basis){
   });
   return out;
 }
+// v2.3.219: 예산 = 월별 라인아이템({id,month,category,title,amount}) 모델. 카테고리별 합산 + 클릭 상세.
+function _finBudgetItems(year){ return (window._FIN.budgetItems && window._FIN.budgetItems[String(year)]) || []; }
+function _finBudgetItemsFor(year, cat, months){ const mset=new Set(months||[]); return _finBudgetItems(year).filter(it=> it && it.category===cat && mset.has(String(it.month))); }
+function _finBudgetItemSum(year, cat, months){ return _finBudgetItemsFor(year,cat,months).reduce((s,it)=>s+(Number(it.amount)||0),0); }
+// 실적 — expense category 매핑(expCats)별 합 (basis/기간 적용)
+function _finActualByExpCats(expenses, range, basis, expCats){
+  const set=new Set(expCats||[]); let sum=0;
+  (expenses||[]).forEach(e=>{ if(!e||!set.has(e.category)) return; let d; if(basis==='paid'){ if(e.paidStatus!=='paid') return; d=e.paidDate||e.dueDate||''; } else { d=e.dueDate||e.paidDate||''; } if(!d) return; d=String(d).slice(0,10); if(range&&(d<range.start||d>range.end)) return; sum+=Number(e.amount)||0; });
+  return sum;
+}
 function _finTabBudget(){
-  const F=window._FIN; const year=F.year; const targets=F.budget||{};
-  const inS='border:1px solid #d1d5db;border-radius:5px;padding:4px 6px;font-size:12px;width:88px;text-align:right';
-  // 입력 그리드 (카테고리 × 12개월)
-  const yt=(targets[String(year)])||{};
-  const head='<th style="padding:6px 8px;text-align:left;position:sticky;left:0;background:#f8fafc">카테고리</th>'+
-    Array.from({length:12},(_,i)=>`<th style="padding:6px 6px;text-align:right;font-size:11px">${i+1}월</th>`).join('')+
-    '<th style="padding:6px 8px;text-align:right">연 합계</th>';
-  const gridRows=FIN_CATS.map(c=>{
-    const ct=yt[c.key]||{};
-    let yearSum=0;
-    const cells=Array.from({length:12},(_,i)=>{ const mm=String(i+1).padStart(2,'0'); const v=Number(ct[mm])||0; yearSum+=v;
-      return `<td style="padding:3px 4px"><input type="number" value="${v||''}" placeholder="0" onchange="_finSetBudget('${c.key}','${mm}',this.value)" style="${inS}"></td>`; }).join('');
-    return `<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:6px 8px;font-weight:600;white-space:nowrap;position:sticky;left:0;background:#fff">${c.label}</td>${cells}<td style="padding:6px 8px;text-align:right;font-weight:700">${_finWon(yearSum)}</td></tr>`;
-  }).join('');
+  const F=window._FIN;
+  const inS='border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px';
+  const monthOpts=Array.from({length:12},(_,i)=>`<option value="${String(i+1).padStart(2,'0')}" ${(F.budgetFormMonth||String((F.month||1)).padStart(2,'0'))===String(i+1).padStart(2,'0')?'selected':''}>${i+1}월</option>`).join('');
+  const catOpts=BUDGET_CATS.map(c=>`<option value="${c.key}">${c.label}</option>`).join('');
   return `
   <div id="fin-budget-cmp">${_finBudgetCmpHtml()}</div>
   <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-top:16px">
-    <div style="font-size:14px;font-weight:800;color:#0f172a;margin-bottom:4px">🎯 ${year}년 예산 입력 <span style="font-size:12px;color:#94a3b8;font-weight:500">(카테고리 × 월, 원화)</span></div>
-    <div style="font-size:12px;color:#94a3b8;margin-bottom:10px">셀을 입력하면 자동 저장되고 위 대비표가 갱신됩니다.</div>
-    <div style="overflow-x:auto">
-      <table style="border-collapse:collapse;font-size:12px;min-width:900px">
-        <thead><tr style="background:#f8fafc;color:#475569">${head}</tr></thead>
-        <tbody>${gridRows}</tbody>
-      </table>
+    <div style="font-size:14px;font-weight:800;color:#0f172a;margin-bottom:4px">🎯 ${F.year}년 예산 항목 추가</div>
+    <div style="font-size:12px;color:#94a3b8;margin-bottom:12px">월 · 카테고리 · 제목 · 금액으로 한 건씩 등록하면, 위 대비표에 카테고리별로 합산됩니다. 카테고리 행을 클릭하면 상세 목록이 펼쳐집니다.</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+      <select id="fin-bi-month" style="${inS}">${monthOpts}</select>
+      <select id="fin-bi-cat" style="${inS}">${catOpts}</select>
+      <input id="fin-bi-title" placeholder="제목(예: 특허 출원비)" style="${inS};flex:1;min-width:160px">
+      <input id="fin-bi-amount" type="number" placeholder="금액" style="${inS};width:130px;text-align:right">
+      <button onclick="_finAddBudgetItem()" style="background:#0f172a;color:#fff;border:0;border-radius:6px;padding:6px 16px;font-size:13px;font-weight:700;cursor:pointer">+ 예산 추가</button>
     </div>
   </div>`;
 }
 function _finBudgetCmpHtml(){
-  const F=window._FIN; const r=_finRange(); const year=F.year; const months=_finMonthsInPeriod();
-  const actual=_finActualByCategory((typeof DB!=='undefined'&&DB.expenses)||[], r, F.basis);
+  const F=window._FIN; const r=_finRange(); const year=F.year; const months=_finMonthsInPeriod(); const open=F.budgetOpen||{};
   let tBud=0,tAct=0;
-  const rows=FIN_CATS.map(c=>{
-    const bud=_finBudgetSum(F.budget||{}, year, c.key, months); const act=actual[c.key]||0; tBud+=bud; tAct+=act;
+  const rows=BUDGET_CATS.map(c=>{
+    const bud=_finBudgetItemSum(year,c.key,months);
+    const act=_finActualByExpCats((typeof DB!=='undefined'&&DB.expenses)||[], r, F.basis, c.expCats);
+    tBud+=bud; tAct+=act;
     const rate=bud>0?(act/bud*100):(act>0?9999:0);
     const color=rate>=100?'#dc2626':rate>=80?'#d97706':'#059669';
     const pct=bud>0?Math.round(rate)+'%':(act>0?'예산없음':'—');
     const barW=Math.min(100, bud>0?(act/bud*100):0);
-    return `<tr style="border-bottom:1px solid #f1f5f9">
-      <td style="padding:8px;font-weight:600">${c.label}</td>
+    const isOpen=!!open[c.key];
+    const noExp=(!c.expCats||!c.expCats.length);
+    let detail='';
+    if(isOpen){
+      const items=_finBudgetItemsFor(year,c.key,months).slice().sort((a,b)=>String(a.month).localeCompare(String(b.month)));
+      detail=`<tr><td colspan="5" style="padding:0 8px 10px 8px;background:#fafbff"><div style="padding:6px 10px">`+
+        (items.length
+          ? `<table style="width:100%;border-collapse:collapse;font-size:12px">${items.map(it=>`<tr style="border-bottom:1px solid #eef2f7"><td style="padding:4px 6px;color:#64748b;white-space:nowrap;width:48px">${Number(it.month)}월</td><td style="padding:4px 6px">${_finEsc(it.title||'(제목 없음)')}</td><td style="padding:4px 6px;text-align:right;font-weight:600">${_finWon(it.amount)}</td><td style="padding:4px 6px;text-align:center;width:30px"><button onclick="event.stopPropagation();_finDelBudgetItem('${it.id}')" style="background:none;border:0;color:#cbd5e1;cursor:pointer;font-size:13px" title="삭제">✕</button></td></tr>`).join('')}</table>`
+          : `<div style="color:#94a3b8;font-size:12px">이 기간에 등록된 ${c.label} 예산 항목이 없습니다. 아래에서 추가하세요.</div>`)+
+        `</div></td></tr>`;
+    }
+    return `<tr onclick="_finToggleBudgetCat('${c.key}')" style="border-bottom:1px solid #f1f5f9;cursor:pointer;${isOpen?'background:#fafbff':''}">
+      <td style="padding:8px;font-weight:600"><span style="display:inline-block;width:12px;color:#94a3b8">${isOpen?'▾':'▸'}</span> ${c.label}${noExp?' <span style="font-size:10px;color:#94a3b8;font-weight:500">(실적 수기)</span>':''}</td>
       <td style="padding:8px;text-align:right;color:#475569">${_finWon(bud)}</td>
       <td style="padding:8px;text-align:right;font-weight:700">${_finWon(act)}</td>
       <td style="padding:8px;text-align:right;color:${(bud-act)<0?'#dc2626':'#0f172a'}">${_finWon(bud-act)}</td>
       <td style="padding:8px;width:160px"><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;height:8px;background:#f1f5f9;border-radius:4px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${color}"></div></div><span style="font-size:12px;font-weight:700;color:${color};min-width:42px;text-align:right">${pct}</span></div></td>
-    </tr>`;
+    </tr>${detail}`;
   }).join('');
   const tRate=tBud>0?Math.round(tAct/tBud*100)+'%':'—';
   return `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px">
@@ -10143,18 +10167,34 @@ function _finBudgetCmpHtml(){
       <div style="font-size:12.5px;color:#475569">합계 예산 <b>${_finWon(tBud)}</b> · 실적 <b>${_finWon(tAct)}</b> · 소진 <b>${tRate}</b></div>
     </div>
     <table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:8px;text-align:left">카테고리</th><th style="padding:8px;text-align:right">예산</th><th style="padding:8px;text-align:right">실적</th><th style="padding:8px;text-align:right">잔액</th><th style="padding:8px;text-align:left">소진율</th></tr></thead>
+      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:8px;text-align:left">카테고리 <span style="font-weight:400;color:#94a3b8">(클릭=상세)</span></th><th style="padding:8px;text-align:right">예산</th><th style="padding:8px;text-align:right">실적</th><th style="padding:8px;text-align:right">잔액</th><th style="padding:8px;text-align:left">소진율</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
-    <div style="margin-top:8px;font-size:11px;color:#94a3b8">소진율 80%↑ 주황 · 100%↑ 빨강. 실적 = 지출결의서(expenses) 카테고리별 합 (발주·광고·샘플이 모두 expense 로 자동 생성되므로 이중계상 없음).</div>
+    <div style="margin-top:8px;font-size:11px;color:#94a3b8">소진율 80%↑ 주황 · 100%↑ 빨강. 실적 = 지출결의서(expenses) 매핑 카테고리 합. 지적재산권·임상시험비는 expense 분류가 없어 실적이 자동 집계되지 않습니다(수기/예산만).</div>
   </div>`;
 }
-async function _finSetBudget(cat, mm, val){
+function _finToggleBudgetCat(cat){ const F=window._FIN; if(!F.budgetOpen) F.budgetOpen={}; F.budgetOpen[cat]=!F.budgetOpen[cat]; const cmp=document.getElementById('fin-budget-cmp'); if(cmp) cmp.innerHTML=_finBudgetCmpHtml(); }
+async function _finAddBudgetItem(){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const F=window._FIN;
+  const month=document.getElementById('fin-bi-month').value;
+  const cat=document.getElementById('fin-bi-cat').value;
+  const title=(document.getElementById('fin-bi-title').value||'').trim();
+  const amount=_finNum(document.getElementById('fin-bi-amount').value);
+  if(!amount){ showNotif('금액을 입력하세요','warning'); return; }
+  F.budgetFormMonth=month;
+  const y=String(F.year);
+  if(!F.budgetItems) F.budgetItems={}; if(!F.budgetItems[y]) F.budgetItems[y]=[];
+  F.budgetItems[y].push({ id:_finId('bi'), month, category:cat, title, amount });
+  await saveSharedSetting('budget_items', F.budgetItems);
+  if(!F.budgetOpen) F.budgetOpen={}; F.budgetOpen[cat]=true;
+  showNotif('예산 항목이 추가되었습니다','success'); _finRender();
+}
+async function _finDelBudgetItem(id){
   if (typeof requireWrite==='function' && !requireWrite()) return;
   const F=window._FIN; const y=String(F.year);
-  if(!F.budget) F.budget={}; if(!F.budget[y]) F.budget[y]={}; if(!F.budget[y][cat]) F.budget[y][cat]={};
-  F.budget[y][cat][mm]=_finNum(val);
-  await saveSharedSetting('budget_targets', F.budget);
+  if(F.budgetItems && F.budgetItems[y]) F.budgetItems[y]=F.budgetItems[y].filter(it=>String(it.id)!==String(id));
+  await saveSharedSetting('budget_items', F.budgetItems);
   const cmp=document.getElementById('fin-budget-cmp'); if(cmp) cmp.innerHTML=_finBudgetCmpHtml();
 }
 
@@ -10213,8 +10253,8 @@ function _finTabDashboard(){
   const totalBal=_finTotalBalance();
   let inSum=0,outSum=0; _finAcctTxnsAll('').forEach(t=>{ if(_finInRange(t.date,r)){ if(t.dir==='in')inSum+=Number(t.amount)||0; else outSum+=Number(t.amount)||0; } });
   let cardSum=0; Object.keys(F.cardTxns||{}).forEach(y=>(F.cardTxns[y]||[]).forEach(t=>{ if(_finInRange(t.date,r)) cardSum+=Number(t.amount)||0; }));
-  const months=_finMonthsInPeriod(); const actual=_finActualByCategory((typeof DB!=='undefined'&&DB.expenses)||[], r, F.basis);
-  let tBud=0,tAct=0; FIN_CATS.forEach(c=>{ tBud+=_finBudgetSum(F.budget||{},F.year,c.key,months); tAct+=actual[c.key]||0; });
+  const months=_finMonthsInPeriod();
+  let tBud=0,tAct=0; BUDGET_CATS.forEach(c=>{ tBud+=_finBudgetItemSum(F.year,c.key,months); tAct+=_finActualByExpCats((typeof DB!=='undefined'&&DB.expenses)||[], r, F.basis, c.expCats); });
   const budRate=tBud>0?Math.round(tAct/tBud*100):0; const budColor=budRate>=100?'#dc2626':budRate>=80?'#d97706':'#059669';
   // 현금흐름 90일
   const today=_finToday(); const horizon=_finAddDays(today,90);
