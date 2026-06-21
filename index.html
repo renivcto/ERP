@@ -5836,7 +5836,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.216';
+const ERP_VERSION = 'v2.3.217';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9644,6 +9644,7 @@ async function _finEnsureLoaded(){
     window._FIN.cards = (await loadSharedSetting('finance_cards')) || [];
     window._FIN.recurring = (await loadSharedSetting('finance_recurring')) || [];
     window._FIN.budget = (await loadSharedSetting('budget_targets')) || {};
+    window._FIN.planItems = (await loadSharedSetting('finance_plan_items')) || [];
     const now = new Date();
     window._FIN.year = parseInt(localStorage.getItem('reniv_fin_year')) || now.getFullYear();
     window._FIN.month = parseInt(localStorage.getItem('reniv_fin_month')) || (now.getMonth()+1);
@@ -9683,6 +9684,7 @@ function _finRender(){
   else if (F.tab==='cards') body = _finTabCards();
   else if (F.tab==='recurring') body = _finTabRecurring();
   else if (F.tab==='budget') body = _finTabBudget();
+  else if (F.tab==='dashboard') body = _finTabDashboard();
   else body = _finStagePlaceholder(F.tab);
   root.innerHTML =
     _finTopBarHtml() +
@@ -10152,6 +10154,97 @@ async function _finSetBudget(cat, mm, val){
   F.budget[y][cat][mm]=_finNum(val);
   await saveSharedSetting('budget_targets', F.budget);
   const cmp=document.getElementById('fin-budget-cmp'); if(cmp) cmp.innerHTML=_finBudgetCmpHtml();
+}
+
+// ═══ 현금흐름 예측 공용 (Stage 2b/2c, v2.3.217) — 순수함수 유닛테스트 대상 ═══
+function _finToday(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function _finAddDays(dateStr,n){ const d=new Date(dateStr+'T00:00:00'); d.setDate(d.getDate()+n); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function _finTotalBalance(){ return (window._FIN.accounts||[]).reduce((s,a)=>s+_finAccountBalance(a.id),0); }
+// 고정비를 기간 [from,to] 의 실제 발생일로 전개
+function _finExpandRecurring(recurring, fromDate, toDate){
+  const out=[]; const from=new Date(fromDate+'T00:00:00'), to=new Date(toDate+'T00:00:00');
+  (recurring||[]).forEach(x=>{
+    if(!x || x.active===false) return; const amt=Number(x.amount)||0; if(!amt) return;
+    const day=Math.min(Math.max(1, Number(x.dayOfMonth)||1), 28);
+    const anchorM = x.startDate ? (new Date(String(x.startDate)+'T00:00:00').getMonth()) : from.getMonth();
+    let y=from.getFullYear(), m=from.getMonth();
+    for(let i=0;i<72;i++){
+      const d=new Date(y,m,day);
+      const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+      if(d>to) break;
+      if(x.endDate && ds>String(x.endDate)) break;
+      if(d>=from && (!x.startDate || ds>=String(x.startDate))){
+        let inc=false;
+        if(x.cycle==='monthly') inc=true;
+        else if(x.cycle==='quarterly') inc=((((m-anchorM)%3)+3)%3)===0;
+        else if(x.cycle==='yearly') inc=(m===anchorM);
+        if(inc) out.push({ date:ds, amount:amt, name:x.name||'', category:x.category||'' });
+      }
+      m++; if(m>11){ m=0; y++; }
+    }
+  });
+  return out;
+}
+// 누적 예상 잔액
+function _finProjectCashflow(startBal, events){
+  const sorted=[...(events||[])].sort((a,b)=> String(a.date).localeCompare(String(b.date)));
+  let bal=Number(startBal)||0; const rows=[]; let minBal=bal, minDate=null;
+  sorted.forEach(ev=>{ bal += Number(ev.delta)||0; rows.push({ date:ev.date, delta:Number(ev.delta)||0, balance:bal, name:ev.name||'', kind:ev.kind||'' }); if(bal<minBal){ minBal=bal; minDate=ev.date; } });
+  return { rows, endBal:bal, minBal, minDate };
+}
+function _finBalanceAsOf(startBal, events, dateStr){
+  return (events||[]).reduce((b,ev)=> String(ev.date)<=dateStr ? b+(Number(ev.delta)||0) : b, Number(startBal)||0);
+}
+// 예정 입·출금 이벤트 수집 (미지급 expense + 고정비 + 수동 plan_items)
+function _finBuildCashEvents(fromDate, toDate){
+  const ev=[];
+  ((typeof DB!=='undefined'&&DB.expenses)||[]).forEach(e=>{ if(!e||e.paidStatus==='paid') return; const d=String(e.dueDate||'').slice(0,10); if(!d||d<fromDate||d>toDate) return; ev.push({ date:d, delta:-(Number(e.amount)||0), name:e.title||_finCatLabel(e.category), kind:'미지급' }); });
+  _finExpandRecurring(window._FIN.recurring, fromDate, toDate).forEach(r=> ev.push({ date:r.date, delta:-(Number(r.amount)||0), name:r.name, kind:'고정비' }));
+  (window._FIN.planItems||[]).forEach(p=>{ if(!p||p.status==='done') return; const d=String(p.date||'').slice(0,10); if(!d||d<fromDate||d>toDate) return; ev.push({ date:d, delta:(p.dir==='in'?1:-1)*(Number(p.amount)||0), name:p.name||'', kind:'예정' }); });
+  return ev;
+}
+
+// ═══ 탭: 자금 현황 (대시보드, Stage 2b) ═══
+function _finKpi(label, value, color, sub){ return `<div style="flex:1;min-width:150px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px"><div style="font-size:12px;color:#64748b;font-weight:600;margin-bottom:6px">${label}</div><div style="font-size:20px;font-weight:800;color:${color||'#0f172a'}">${value}</div>${sub?`<div style="font-size:11px;color:#94a3b8;margin-top:3px">${sub}</div>`:''}</div>`; }
+function _finTabDashboard(){
+  const F=window._FIN; const r=_finRange();
+  const totalBal=_finTotalBalance();
+  let inSum=0,outSum=0; _finAcctTxnsAll('').forEach(t=>{ if(_finInRange(t.date,r)){ if(t.dir==='in')inSum+=Number(t.amount)||0; else outSum+=Number(t.amount)||0; } });
+  let cardSum=0; Object.keys(F.cardTxns||{}).forEach(y=>(F.cardTxns[y]||[]).forEach(t=>{ if(_finInRange(t.date,r)) cardSum+=Number(t.amount)||0; }));
+  const months=_finMonthsInPeriod(); const actual=_finActualByCategory((typeof DB!=='undefined'&&DB.expenses)||[], r, F.basis);
+  let tBud=0,tAct=0; FIN_CATS.forEach(c=>{ tBud+=_finBudgetSum(F.budget||{},F.year,c.key,months); tAct+=actual[c.key]||0; });
+  const budRate=tBud>0?Math.round(tAct/tBud*100):0; const budColor=budRate>=100?'#dc2626':budRate>=80?'#d97706':'#059669';
+  // 현금흐름 90일
+  const today=_finToday(); const horizon=_finAddDays(today,90);
+  const events=_finBuildCashEvents(today,horizon); const proj=_finProjectCashflow(totalBal, events);
+  const b30=_finBalanceAsOf(totalBal,events,_finAddDays(today,30));
+  const b60=_finBalanceAsOf(totalBal,events,_finAddDays(today,60));
+  const b90=_finBalanceAsOf(totalBal,events,_finAddDays(today,90));
+  const shortfall = proj.minBal<0;
+  const accMinis=(F.accounts||[]).map(a=>{ const b=_finAccountBalance(a.id); return `<div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;min-width:120px"><div style="font-size:11px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px">${_finEsc(a.alias||a.bankName||'')}</div><div style="font-size:14px;font-weight:700;color:${b<0?'#dc2626':'#0f172a'}">${_finWon(b)}</div></div>`; }).join('') || '<span style="color:#94a3b8;font-size:13px">등록된 계좌 없음 (법인 계좌 탭에서 추가)</span>';
+  const projCard=(lbl,val)=>`<div style="flex:1;min-width:120px;text-align:center;padding:10px;background:#f8fafc;border-radius:8px"><div style="font-size:11px;color:#64748b">${lbl}</div><div style="font-size:16px;font-weight:800;color:${val<0?'#dc2626':'#0f172a'}">${_finWon(val)}</div></div>`;
+  return `
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+    ${_finKpi('법인계좌 총잔액', _finWon(totalBal), totalBal<0?'#dc2626':'#0f172a', (F.accounts||[]).length+'개 계좌')}
+    ${_finKpi('기간 수입', _finWon(inSum), '#059669', r.label)}
+    ${_finKpi('기간 지출', _finWon(outSum), '#dc2626', '계좌 출금')}
+    ${_finKpi('카드 사용액', _finWon(cardSum), '#0f172a', r.label)}
+    ${_finKpi('예산 소진율', tBud>0?budRate+'%':'—', budColor, '실적 '+_finWon(tAct)+' / 예산 '+_finWon(tBud))}
+  </div>
+  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:16px">
+    <div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:10px">🏦 계좌별 잔액</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">${accMinis}</div>
+  </div>
+  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      <div style="font-size:13px;font-weight:800;color:#0f172a">📈 자금 계획 요약 <span style="font-size:11.5px;color:#94a3b8;font-weight:500">· 오늘 잔액 기준 향후 예상</span></div>
+      <button onclick="_finSetTab('plan')" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:6px;padding:4px 11px;font-size:12px;font-weight:700;cursor:pointer">자금 계획 자세히 →</button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${projCard('오늘', totalBal)}${projCard('+30일', b30)}${projCard('+60일', b60)}${projCard('+90일', b90)}
+    </div>
+    ${shortfall?`<div style="margin-top:10px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px 12px;font-size:12.5px;font-weight:600">⚠️ ${proj.minDate} 경 예상 잔액이 <b>${_finWon(proj.minBal)}</b> 로 부족해질 수 있습니다. (미지급·고정비·예정 지출 반영)</div>`:`<div style="margin-top:10px;font-size:11.5px;color:#94a3b8">향후 90일 최저 예상 잔액 ${_finWon(proj.minBal)}${proj.minDate?(' ('+proj.minDate+')'):''} · 미지급 expense + 고정비 + 예정 입·출금 반영</div>`}
+  </div>`;
 }
 
 window.renderFinance=renderFinance;
