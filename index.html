@@ -5836,7 +5836,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.235';
+const ERP_VERSION = 'v2.3.236';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -32681,6 +32681,13 @@ function switchApprovalTab(tab, skipSwitch) {
   updateApprovalStats();
 }
 
+// v2.3.236: KST(UTC+9) 기준 오늘 날짜 YYYY-MM-DD.
+//   UTC 자정 기준 new Date().toISOString().slice(0,10) 은 한국 새벽(00~09시)에
+//   전날로 계산돼 D-day·지연 판정이 하루 어긋나던 버그 수정.
+function _todayKstYmd() {
+  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 function updateApprovalStats() {
   // v2.2.73: 머지 완료 전엔 stat skip (placeholder 가 표시 중)
   if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) return;
@@ -32751,7 +32758,7 @@ function updateApprovalStats() {
     // v1.9.903: 응급 카운트를 아래 표의 강조 기준(blinkAttention = urgent || isOverdue)과 일치시킴
     const unpaidExpenses = (DB.expenses||[]).filter(e => e && e.paidStatus !== 'paid');
     const payPending = unpaidExpenses.length;
-    const _payTodayMid = new Date(new Date().toISOString().slice(0,10));
+    const _payTodayMid = new Date(_todayKstYmd());  // v2.3.236: KST 기준 오늘
     const urgentPay = unpaidExpenses.filter(e => {
       if (e.urgent) return true;
       const due = e.dueDate || '';
@@ -32763,9 +32770,11 @@ function updateApprovalStats() {
     }).length;
 
     // 3) 발주 잔금: 지급 예정(미지급) po_balance 금액 합
+    // v2.3.236: 해외 PO 잔금은 외화로 저장될 수 있어 KRW 환산(_expenseTodayKrw)으로 합산
+    //   — 발주서별 표시(_balAmt)와 동일 기준. ₩ 박스에 외화가 섞이던 문제 방지.
     const balanceDue = (DB.expenses||[])
       .filter(e => e && e.category === 'po_balance' && e.paidStatus !== 'paid')
-      .reduce((s,e) => s + (Number(e.amount)||0), 0);
+      .reduce((s,e) => s + ((typeof _expenseTodayKrw === 'function') ? (Number(_expenseTodayKrw(e))||0) : (Number(e.amount)||0)), 0);
 
     // 4) 이번달 발주 금액: 발주일(orderDate)이 이번달인 발주의 VAT 포함 합계
     const now = new Date();
@@ -33023,7 +33032,7 @@ function renderApprovalPoTable() {
       (prepayPct >= 100 && !!(expPre && expPre.paidStatus === 'paid'));
     let dueCell = '<span style="color:var(--gray-400);font-size:11px">-</span>';
     if (due && !balancePaid) {
-      const daysLeft = Math.floor((new Date(due) - new Date(new Date().toISOString().slice(0,10))) / 86400000);
+      const daysLeft = Math.floor((new Date(due) - new Date(_todayKstYmd())) / 86400000);
       const color = daysLeft < 0 ? '#b91c1c' : (daysLeft <= 3 ? '#f59e0b' : 'var(--gray-700)');
       const dn = daysLeft < 0 ? ` (${Math.abs(daysLeft)}일 경과)` : (daysLeft <= 7 ? ` (D-${daysLeft})` : '');
       dueCell = `<span style="color:${color};font-weight:400;font-size:11.5px">${due}${dn}</span>`;
@@ -33648,7 +33657,7 @@ function renderApprovalExpenseTable() {
     let daysLeft = null;
     let isOverdue = false;
     if (due) {
-      daysLeft = Math.floor((new Date(due) - new Date(new Date().toISOString().slice(0,10))) / 86400000);
+      daysLeft = Math.floor((new Date(due) - new Date(_todayKstYmd())) / 86400000);
       isOverdue = !paid && daysLeft < 0;
     }
     const blinkAttention = urgent || isOverdue; // 사용자 응급 플래그 OR 지급예정일 경과
