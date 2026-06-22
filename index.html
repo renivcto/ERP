@@ -5836,7 +5836,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.234';
+const ERP_VERSION = 'v2.3.235';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26623,7 +26623,7 @@ function _syncOverseasPoApprovalExpense(orderId) {
   let ap = DB.approvals.find(a => a && a.type === 'po_approval' && (a.refId === o.id || Number(a.refId) === Number(o.id)));
   if (!ap) {
     ap = {
-      id: (typeof nextId === 'function') ? nextId('approval') : Date.now(),
+      id: (typeof nextId === 'function') ? _freshApprovalId() : Date.now(),
       type: 'po_approval',
       refId: o.id,
       title: `[해외 PO] ${vendorName}`,
@@ -26659,7 +26659,7 @@ function _syncOverseasPoApprovalExpense(orderId) {
     const noteP = `해외 PO 선급금 ${_prepayPct}% (${currency} ${_prepayAmt.toFixed(2)})`;
     if (!expPre) {
       expPre = {
-        id: (typeof nextId === 'function') ? nextId('expense') : (Date.now() + 2),
+        id: _freshExpenseId(),
         approvalId: ap.id,
         orderId: o.id,
         category: 'po_prepay',
@@ -26715,7 +26715,7 @@ function _syncOverseasPoApprovalExpense(orderId) {
   const note = `해외 PO 잔금 ${_balancePct}% (${currency} ${_balanceAmt.toFixed(2)})`;
   if (!exp) {
     exp = {
-      id: (typeof nextId === 'function') ? nextId('expense') : (Date.now() + 1),
+      id: _freshExpenseId(),
       approvalId: ap.id,
       orderId: o.id,
       category: 'po_balance',
@@ -29021,7 +29021,7 @@ function syncApprovalFromOrderStamp(orderId) {
   if (!ap) {
     // 결재 레코드가 아직 없다면(구버전 데이터) 새로 만들어 상태 맞추기
     ap = {
-      id: nextId('approval'),
+      id: _freshApprovalId(),
       type: 'po_approval',
       refId: orderId,
       title: `[발주서] ${vendorName(o.vendorId)} — ${(o.rows[0]&&o.rows[0].name)||''}${o.rows.length>1?` 외 ${o.rows.length-1}건`:''}`,
@@ -31431,7 +31431,7 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
   const hasStampProof = !!(o.stampData || o.stampName || o.stampNotRequired);
   if (!ap) {
     ap = {
-      id: nextId('approval'),
+      id: _freshApprovalId(),
       type: 'po_approval',
       refId: orderId,
       title: `[발주서] ${vendorName(o.vendorId)} — ${(o.rows[0]&&o.rows[0].name)||''}${o.rows.length>1?` 외 ${o.rows.length-1}건`:''}`,
@@ -31456,8 +31456,7 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
     if (ap.status !== 'approved' && hasStampProof) {
       ap.status = 'approved';
       ap.approvedAt = Date.now();
-  ap.updatedAt = Date.now();  // v1.9.772
-    ap.updatedAt = Date.now();  // v1.9.772
+      ap.updatedAt = Date.now();  // v1.9.772
       // v1.9.280: 수정 중 자동 승인 전이여도 슬랙 알림 발송 안 함
       if (!isEdit) {
         slackNotify('approval_done', ap);
@@ -31478,7 +31477,7 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
   if (pct > 0 && prepay > 0) {
     if (!expPre) {
       expPre = {
-        id: nextId('expense'),
+        id: _freshExpenseId(),
         approvalId: ap.id,
         orderId,
         category: 'po_prepay',
@@ -31520,7 +31519,7 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
   if (balance > 0) {
     if (!expBal) {
       expBal = {
-        id: nextId('expense'),
+        id: _freshExpenseId(),
         approvalId: ap.id,
         orderId,
         category: 'po_balance',
@@ -33152,7 +33151,7 @@ function approveOrderFromTable(orderId) {
   if (!confirm(`발주서 #${orderId} (${vendorName(o.vendorId)})을(를) 결재 완료로 처리하시겠습니까?\n\n→ 결재 완료 PDF가 필요한 경우에는 발주서 편집 화면에서 날인 PDF를 첨부해 주세요.`)) return;
   let ap = DB.approvals.find(a => a.type === 'po_approval' && String(a.refId) === String(orderId));
   if (!ap) {
-    ap = { id: nextId('approval'), type:'po_approval', refId: orderId, title:`[발주서] ${vendorName(o.vendorId)}`, amount: orderTotalVat(o), status:'pending', priority: o.urgent?'urgent':'normal', createdAt: Date.now(), approvedAt:0 };
+    ap = { id: _freshApprovalId(), type:'po_approval', refId: orderId, title:`[발주서] ${vendorName(o.vendorId)}`, amount: orderTotalVat(o), status:'pending', priority: o.urgent?'urgent':'normal', createdAt: Date.now(), approvedAt:0 };
     DB.approvals.push(ap);
   }
   ap.status = 'approved';
@@ -35751,6 +35750,23 @@ function editExpense(id) {
   renderApeAttachList();
 }
 
+// v2.3.235: 충돌 없는 approval id — 타임스탬프*1000+난수 기반 글로벌 유니크.
+//   nextId('approval') 카운터는 사용자별 로컬이라 다른 사용자와 같은 id 가 발급돼
+//   머지 dedup/tombstone 으로 결재가 사라지던 근본 버그(id 충돌)를 차단.
+//   _isApprovalTombstoned 가 id>=1e12 를 안전 경로로 처리하므로 타임스탬프 id 가 권장.
+function _freshApprovalId() {
+  const used = new Set();
+  (DB.approvals || []).forEach(a => { if (a && a.id != null) used.add(String(a.id)); });
+  (DB._deletedApprovalIds || []).forEach(x => {
+    const v = (x && typeof x === 'object') ? x.id : x;
+    if (v != null) used.add(String(v));
+  });
+  let id = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+  let guard = 0;
+  while (used.has(String(id)) && guard < 100000) { id++; guard++; }
+  return id;
+}
+
 // v1.9.941: 충돌 없는 expense id 발급 — 이미 쓰이는 id 또는 삭제(tombstone)된 id 면 건너뜀.
 //   nextId 카운터가 어떤 사고로 낮아져도 새 expense 가 옛 id 를 재사용하지 않게 함.
 //   (id 재사용 시: 머지 때 tombstone 으로 삭제되거나, 서버의 옛 레코드에 가려져 사라짐)
@@ -38242,7 +38258,7 @@ async function openPoApprovalDetail(orderId) {
   let ap = DB.approvals.find(a => a.type === 'po_approval' && (a.refId === o.id || Number(a.refId) === Number(o.id)));
   if (!ap) {
     ap = {
-      id: nextId('approval'), type:'po_approval', refId: o.id,
+      id: _freshApprovalId(), type:'po_approval', refId: o.id,
       title: `[발주서] ${vendorName(o.vendorId)}`,
       amount: orderTotalVat(o),
       status: (o.stampData || o.stampNotRequired) ? 'approved' : 'pending',
@@ -38552,7 +38568,7 @@ async function openPoApprovalPage(orderId) {
   let ap = DB.approvals.find(a => a.type === 'po_approval' && (a.refId === o.id || Number(a.refId) === Number(o.id)));
   if (!ap) {
     ap = {
-      id: nextId('approval'), type:'po_approval', refId: o.id,
+      id: _freshApprovalId(), type:'po_approval', refId: o.id,
       title: `[발주서] ${vendorName(o.vendorId)}`,
       amount: orderTotalVat(o),
       status: (o.stampData || o.stampNotRequired) ? 'approved' : 'pending',
@@ -38969,7 +38985,7 @@ function openApprovalDetailByOrder(orderId) {
     const o = DB.orders.find(x => x.id === orderId);
     if (!o) return;
     ap = {
-      id: nextId('approval'),
+      id: _freshApprovalId(),
       type: 'po_approval',
       refId: orderId,
       title: `[발주서] ${vendorName(o.vendorId)}`,
