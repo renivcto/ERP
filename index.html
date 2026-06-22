@@ -5838,7 +5838,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.240';
+const ERP_VERSION = 'v2.3.241';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -11949,11 +11949,13 @@ window._notesOpenPostDetail = function(postId) {
 
     // v2.3.238: 일반 파일(비이미지) 첨부 — 다운로드 칩
     const _npFiles = Array.isArray(p.files) ? p.files.filter(f => f && (f.url || f.data)) : [];
+    // v2.3.241: href 스킴 화이트리스트(http/https/data만) + 속성 탈출 방지 — 머지로 들어온 신뢰경계 밖 값 대비
+    const _safeHref = (u) => { const s = String(u||''); return /^(https?:|data:)/i.test(s) ? s.replace(/"/g,'%22').replace(/</g,'%3C') : '#'; };
     const filesHtml = _npFiles.length ? `
       <div style="margin-top:16px;display:flex;flex-direction:column;gap:6px">
         <div style="font-size:11px;font-weight:800;color:#64748b;letter-spacing:.3px">📎 첨부파일 ${_npFiles.length}</div>
         ${_npFiles.map(f => {
-          const href = f.url || f.data || '';
+          const href = _safeHref(f.url || f.data || '');
           const sz = f.size ? (f.size>=1024*1024 ? (f.size/1024/1024).toFixed(1)+'MB' : Math.round(f.size/1024)+'KB') : '';
           const icon = (f.type||'').indexOf('pdf')>=0 ? '📕' : ((f.type||'').indexOf('image/')===0 ? '🖼️' : '📄');
           const nm = escFn(f.name||'첨부파일');
@@ -29956,7 +29958,9 @@ function renderFeedList(){
 // v1.9.244 — 오른쪽 썸네일 카드 (클릭 시 왼쪽 메인 슬롯으로 올림)
 function renderFeedThumbHtml(p){
   const cat = feedCatInfo(p.category);
-  const thumb = (Array.isArray(p.images) && p.images[0]) || null;
+  // v2.3.241: hydrate 전/실패 시 남는 마커(__idb__/__stored__)를 src 로 렌더하면 깨진 이미지 → 필터
+  const _thumbImgs = (Array.isArray(p.images) ? p.images : []).filter(s => s && s !== '__idb__' && s !== '__stored__');
+  const thumb = _thumbImgs[0] || null;
   const isNew = p.createdAt && (Date.now() - new Date(p.createdAt).getTime()) < 48*60*60*1000;
   const pinned = !!p.pinned;
   return `
@@ -29979,7 +29983,8 @@ function renderFeedThumbHtml(p){
 
 function renderFeedCardHtml(p){
   const cat = feedCatInfo(p.category);
-  const images = Array.isArray(p.images) ? p.images : [];
+  // v2.3.241: hydrate 전/실패 시 남는 마커(__idb__/__stored__)는 제외 — 깨진 <img> 방지(상세팝업과 동일 필터)
+  const images = (Array.isArray(p.images) ? p.images : []).filter(s => s && s !== '__idb__' && s !== '__stored__');
   const isNew = p.createdAt && (Date.now() - new Date(p.createdAt).getTime()) < 48*60*60*1000;
   const authorName = p.authorName || '익명';
   const myEmail = (window._currentUser && window._currentUser.email) || '';
@@ -30562,15 +30567,14 @@ async function _feedUploadAttachments(post){
       } catch(e){ console.warn('[v2.3.238] 피드 첨부 Storage 업로드 실패:', e); }
     }
     if (!uploaded) {
-      if (d.length >= 700000) {
-        delete at.data; at.failed = true;
-        try { showNotif('⚠️ "' + (at.name||'파일') + '" 업로드 실패 — 너무 커서 저장 안 됨 (Storage 설정 확인)', 'warning'); } catch(_){}
-      } else {
-        try { showNotif('⚠️ "' + (at.name||'파일') + '" 은 이 기기에서만 보입니다 (Storage 설정 확인)', 'warning'); } catch(_){}
-      }
+      // v2.3.241: Storage 실패 시 base64 를 글에 인라인으로 남기지 않음.
+      //   (메인 DB/Firestore 1MB 한계 오염 → feedPosts 컬렉션 동기화 실패 → 글 revert 위험 차단)
+      //   파일은 저장하지 않고 경고만 — 사용자가 재시도하도록 유도.
+      delete at.data; at.failed = true;
+      try { showNotif('⚠️ "' + (at.name||'파일') + '" 업로드 실패 — 잠시 후 다시 첨부해주세요 (Storage 일시 오류)', 'warning'); } catch(_){}
     }
   }
-  post.files = post.files.filter(f => f && (f.url || f.data));
+  post.files = post.files.filter(f => f && f.url);  // url 없는(실패) 항목 제외 — durable 저장에 base64 미포함 보장
 }
 
 // v2.3.239: 큰 이미지(>=900KB base64)는 Firestore feedImages 1MB 한계로 동기화 실패 → Storage 업로드 후
@@ -30615,8 +30619,14 @@ async function saveFeedPost(){
       p.title = title;
       p.content = content;
       p.category = _feedEditingCategory;
-      p.images = [..._feedEditingImages];
-      p.files = _feedAttachments.map(f => Object.assign({}, f));  // v2.3.238
+      // v2.3.241: 이미지/파일은 '실제 변경 시에만' 변경시각 도장 → 머지가 삭제 존중 + 본문만 수정 시 보존
+      const _newImgs = [..._feedEditingImages];
+      const _newFiles = _feedAttachments.map(f => Object.assign({}, f));
+      const _sigF = arr => JSON.stringify((arr||[]).map(f => f && (f.url || f.name || '')));
+      if (JSON.stringify(p.images||[]) !== JSON.stringify(_newImgs)) p.imagesUpdatedAt = now;
+      if (_sigF(p.files) !== _sigF(_newFiles)) p.filesUpdatedAt = now;
+      p.images = _newImgs;
+      p.files = _newFiles;  // v2.3.238
       p.pinned = pinned;
       p.aiSummary = aiSummary;
       p.updatedAt = now;
@@ -30647,6 +30657,7 @@ async function saveFeedPost(){
       title, content, category: _feedEditingCategory,
       images: [..._feedEditingImages],
       files: _feedAttachments.map(f => Object.assign({}, f)),  // v2.3.238
+      imagesUpdatedAt: now, filesUpdatedAt: now,  // v2.3.241
       pinned, aiSummary,
       authorName: u.name,
       authorEmail: u.email,
@@ -51462,27 +51473,25 @@ function initERPWhenReady() {
             });
             const mergedComments = [...commentById.values()].sort((a,b) => (a.createdAt||'').localeCompare(b.createdAt||''));
             if (mergedComments.length > srvComments.length) _commentRescued += (mergedComments.length - srvComments.length);
-            // v2.3.238: 첨부파일(files)도 합집합 — 동시 편집/타 사용자 첨부가 last-writer-wins 로 사라지지 않게.
-            const _fileKey = f => f && (f.url ? 'u:'+f.url : ('n:'+(f.name||'')+':'+(f.size||0)));
-            const _mergedFilesMap = new Map();
-            [...(Array.isArray(srvPost.files)?srvPost.files:[]), ...(Array.isArray(locPost.files)?locPost.files:[])].forEach(f => {
-              const k = _fileKey(f); if (k && !_mergedFilesMap.has(k)) _mergedFilesMap.set(k, f);
-            });
-            const mergedFiles = [..._mergedFilesMap.values()];
             // 본문/제목은 updatedAt이 더 최근인 쪽 사용
             const useLoc = locT && locT > srvT;
             const base = useLoc ? locPost : srvPost;
-            const other = useLoc ? srvPost : locPost;
-            // v2.3.239: 이미지는 last-writer-wins 로 한쪽이 통째로 사라지지 않게 — 더 많은 쪽 채택
-            //   (한쪽이 이미지 없이 본문만 수정해도 상대 이미지가 보존됨). 동일 개수면 base 유지.
-            const _baseImgs = Array.isArray(base.images) ? base.images : [];
-            const _otherImgs = Array.isArray(other.images) ? other.images : [];
-            const mergedImages = _otherImgs.length > _baseImgs.length ? _otherImgs : _baseImgs;
+            // v2.3.241: 이미지/파일은 '별도 변경시각(imagesUpdatedAt/filesUpdatedAt)' 기준 last-writer-wins.
+            //   v2.3.239 의 '개수 더 많은 쪽 채택' 휴리스틱이 의도적 삭제를 되살리던 회귀 수정.
+            //   변경시각이 없으면(구버전 글) updatedAt 으로 fallback. 본문만 수정한 쪽은 변경시각이
+            //   바뀌지 않으므로 상대가 추가/삭제한 이미지·파일이 그대로 보존된다.
+            const _imgT = x => Date.parse((x && (x.imagesUpdatedAt || x.updatedAt || x.createdAt)) || 0) || 0;
+            const _filT = x => Date.parse((x && (x.filesUpdatedAt  || x.updatedAt || x.createdAt)) || 0) || 0;
+            const _imgSrc = _imgT(locPost) > _imgT(srvPost) ? locPost : srvPost;
+            const _filSrc = _filT(locPost) > _filT(srvPost) ? locPost : srvPost;
+            const mergedImages = Array.isArray(_imgSrc.images) ? _imgSrc.images : [];
+            const mergedFiles  = Array.isArray(_filSrc.files)  ? _filSrc.files  : [];
+            const _hasFilesConcept = Array.isArray(srvPost.files) || Array.isArray(locPost.files);
             return Object.assign({}, base, {
               reactions: mergedReactions,
               comments: mergedComments,
               images: mergedImages,
-            }, mergedFiles.length ? { files: mergedFiles } : {});
+            }, _hasFilesConcept ? { files: mergedFiles } : {});
           });
           if (_reactionRescued > 0 || _commentRescued > 0) {
             console.warn(`🛟 [FEED UNION] 반응 ${_reactionRescued}개, 댓글 ${_commentRescued}개 로컬에서 복구`);
