@@ -5838,7 +5838,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.238';
+const ERP_VERSION = 'v2.3.239';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30573,6 +30573,26 @@ async function _feedUploadAttachments(post){
   post.files = post.files.filter(f => f && (f.url || f.data));
 }
 
+// v2.3.239: 큰 이미지(>=900KB base64)는 Firestore feedImages 1MB 한계로 동기화 실패 → Storage 업로드 후
+//   post.images 의 base64 를 다운로드 URL 로 치환(다른 사용자도 보임). 작은 이미지는 기존 IDB+feedImages 유지.
+//   이미 URL 이거나 마커면 건너뜀(idempotent). Storage 미설정 시 기존 경로 유지(graceful).
+async function _feedUploadBigImages(post){
+  if (!post || !Array.isArray(post.images)) return;
+  if (typeof window._storageUploadDataUrl !== 'function') return;
+  for (let i = 0; i < post.images.length; i++){
+    const src = post.images[i];
+    if (typeof src !== 'string' || src.indexOf('data:') !== 0 || src.length < 900000) continue;
+    try {
+      const path = 'commentFiles/feed/' + post.id + '/img_' + i + '.jpg';
+      const url = await window._storageUploadDataUrl(path, src, 'image/jpeg');
+      if (url) {
+        try { idbSet('feed_img_' + post.id + '_' + i, src); } catch(_){}  // 로컬 빠른표시 원본 보관
+        post.images[i] = url;
+      }
+    } catch(e){ console.warn('[v2.3.239] 큰 피드 이미지 Storage 업로드 실패:', e); }
+  }
+}
+
 async function saveFeedPost(){
   const id = document.getElementById('feed-post-id').value;
   const title = (document.getElementById('feed-post-title').value||'').trim();
@@ -30643,7 +30663,7 @@ async function saveFeedPost(){
     const _savedPost = isNew
       ? DB.feedPosts.find(x => x && String(x.id) === String(window._lastSavedFeedPostId))
       : DB.feedPosts.find(x => x && String(x.id) === String(id));
-    if (_savedPost) await _feedUploadAttachments(_savedPost);
+    if (_savedPost) { await _feedUploadAttachments(_savedPost); await _feedUploadBigImages(_savedPost); }
   } catch(e){ console.warn('피드 첨부 업로드 처리 실패:', e); }
   // v1.9.267/337 — localStorage 즉시 플러시 → 저장 전 닫힘/새로고침 방지
   //   이미지가 raw base64 채로 들어가면 quota 초과(5MB)로 silent fail → 새로고침 시 글이 사라지는 버그.
@@ -50352,6 +50372,9 @@ async function loadSharedSetting(key) {
 //   doc id: '{postId}_{idx}' / field: data(base64), ts
 async function _saveSharedFeedImage(postId, idx, dataUrl) {
   if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return;
+  // v2.3.239: Firestore 1MB 문서 한계 — 900KB 초과 base64 는 저장 시도해도 reject(조용히 실패)되어
+  //   다른 사용자에게 깨진 이미지로 보였음. 큰 이미지는 _feedUploadBigImages 가 Storage 로 올린다.
+  if (!dataUrl || typeof dataUrl !== 'string' || dataUrl === '__idb__' || dataUrl.indexOf('http') === 0 || dataUrl.length > 900000) return;
   try {
     const ref = window._firestoreDoc(window._firebaseDb, 'feedImages', `${postId}_${idx}`);
     await window._firestoreSetDoc(ref, { data: dataUrl, ts: Date.now() });
@@ -51446,12 +51469,19 @@ function initERPWhenReady() {
               const k = _fileKey(f); if (k && !_mergedFilesMap.has(k)) _mergedFilesMap.set(k, f);
             });
             const mergedFiles = [..._mergedFilesMap.values()];
-            // 본문/제목/이미지는 updatedAt이 더 최근인 쪽 사용
+            // 본문/제목은 updatedAt이 더 최근인 쪽 사용
             const useLoc = locT && locT > srvT;
             const base = useLoc ? locPost : srvPost;
+            const other = useLoc ? srvPost : locPost;
+            // v2.3.239: 이미지는 last-writer-wins 로 한쪽이 통째로 사라지지 않게 — 더 많은 쪽 채택
+            //   (한쪽이 이미지 없이 본문만 수정해도 상대 이미지가 보존됨). 동일 개수면 base 유지.
+            const _baseImgs = Array.isArray(base.images) ? base.images : [];
+            const _otherImgs = Array.isArray(other.images) ? other.images : [];
+            const mergedImages = _otherImgs.length > _baseImgs.length ? _otherImgs : _baseImgs;
             return Object.assign({}, base, {
               reactions: mergedReactions,
               comments: mergedComments,
+              images: mergedImages,
             }, mergedFiles.length ? { files: mergedFiles } : {});
           });
           if (_reactionRescued > 0 || _commentRescued > 0) {
