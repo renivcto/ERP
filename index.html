@@ -5836,7 +5836,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.225';
+const ERP_VERSION = 'v2.3.226';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9908,12 +9908,23 @@ async function _finImportAcctCsv(){
 function _finTabCards(){
   const F=window._FIN; const r=_finRange(); const cards=F.cards||[];
   const inS='border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px';
-  let masters=cards.map(c=>`<tr style="border-bottom:1px solid #f1f5f9">
-      <td style="padding:6px 8px"><input value="${_finEsc(c.alias||'')}" onchange="_finUpdateCard('${c.id}','alias',this.value)" style="${inS};width:130px"></td>
-      <td style="padding:6px 8px"><input value="${_finEsc(c.cardName||'')}" onchange="_finUpdateCard('${c.id}','cardName',this.value)" style="${inS};width:120px"></td>
-      <td style="padding:6px 8px"><input value="${_finEsc(c.last4||'')}" onchange="_finUpdateCard('${c.id}','last4',this.value)" style="${inS};width:80px" placeholder="끝 4자리"></td>
-      <td style="padding:6px 8px;text-align:center"><button onclick="_finDelCard('${c.id}')" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:6px;padding:3px 9px;font-size:11.5px;font-weight:700;cursor:pointer">삭제</button></td>
-    </tr>`).join('');
+  // v2.3.226: 법인 카드는 1개만 — 표 대신 한 줄 컴팩트 위젯
+  const card=cards[0];
+  const cardMaster = card
+    ? `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-size:14px;font-weight:800;color:#0f172a;margin-right:2px">💳 법인 카드</span>
+        <input value="${_finEsc(card.alias||'')}" onchange="_finUpdateCard('${card.id}','alias',this.value)" placeholder="별칭" style="${inS};width:150px">
+        <input value="${_finEsc(card.cardName||'')}" onchange="_finUpdateCard('${card.id}','cardName',this.value)" placeholder="카드사" style="${inS};width:120px">
+        <input value="${_finEsc(card.last4||'')}" onchange="_finUpdateCard('${card.id}','last4',this.value)" placeholder="끝 4자리" style="${inS};width:90px">
+        <button onclick="_finDelCard('${card.id}')" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:700;cursor:pointer">삭제</button>
+      </div>`
+    : `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:14px;font-weight:800;color:#0f172a;margin-right:2px">💳 법인 카드 등록</span>
+        <input id="fin-acard-alias" placeholder="별칭(예: 법인 신한)" style="${inS};width:170px">
+        <input id="fin-acard-name" placeholder="카드사" style="${inS};width:110px">
+        <input id="fin-acard-last4" placeholder="끝 4자리" style="${inS};width:90px">
+        <button onclick="_finAddCard()" style="background:#0f172a;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer">+ 카드 추가</button>
+      </div>`;
   let allTxn=[]; Object.keys(F.cardTxns||{}).forEach(y=>{ (F.cardTxns[y]||[]).forEach(t=>{ if(!F.cardFilter||String(t.cardId)===String(F.cardFilter)) allTxn.push(t); }); });
   allTxn.sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
   const inRange=allTxn.filter(t=>_finInRange(t.date,r));
@@ -9931,19 +9942,7 @@ function _finTabCards(){
   const cardSel=cards.length?`<select id="fin-ct-card" style="${inS}">${cards.map(c=>`<option value="${c.id}">${_finEsc(c.alias||c.cardName||c.id)}</option>`).join('')}</select>`:'';
   const catBreakdown=Object.keys(byCat).filter(k=>byCat[k]>0).map(k=>`<span style="background:#f1f5f9;border-radius:5px;padding:2px 8px;font-size:11.5px;color:#475569">${_finEsc(_finCatLabel(k)||'미분류')} ${_finWon(byCat[k])}</span>`).join(' ');
   return `
-  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:16px">
-    <div style="font-size:14px;font-weight:800;color:#0f172a;margin-bottom:10px">💳 법인 카드</div>
-    <table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left">별칭</th><th style="padding:6px 8px;text-align:left">카드사</th><th style="padding:6px 8px;text-align:left">끝4자리</th><th></th></tr></thead>
-      <tbody>${masters || '<tr><td colspan="4" style="padding:14px;text-align:center;color:#94a3b8">등록된 카드가 없습니다</td></tr>'}</tbody>
-    </table>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center">
-      <input id="fin-acard-alias" placeholder="별칭(예: 법인 신한)" style="${inS}">
-      <input id="fin-acard-name" placeholder="카드사" style="${inS};width:100px">
-      <input id="fin-acard-last4" placeholder="끝 4자리" style="${inS};width:80px">
-      <button onclick="_finAddCard()" style="background:#0f172a;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer">+ 카드 추가</button>
-    </div>
-  </div>
+  ${cardMaster}
   <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
       <div style="font-size:14px;font-weight:800;color:#0f172a">카드 사용내역 <span style="font-size:12px;color:#94a3b8;font-weight:500">· ${r.label}</span></div>
@@ -9973,6 +9972,7 @@ function _finTabCards(){
 function _finSetCardFilter(v){ window._FIN.cardFilter=v; _finRender(); }
 async function _finAddCard(){
   if (typeof requireWrite==='function' && !requireWrite()) return;
+  if ((window._FIN.cards||[]).length >= 1){ showNotif('법인 카드는 1개만 등록할 수 있습니다','warning'); return; }
   const alias=(document.getElementById('fin-acard-alias').value||'').trim();
   if(!alias){ showNotif('별칭을 입력하세요','warning'); return; }
   window._FIN.cards.push({ id:_finId('card'), alias, cardName:(document.getElementById('fin-acard-name').value||'').trim(), last4:(document.getElementById('fin-acard-last4').value||'').trim(), active:true });
