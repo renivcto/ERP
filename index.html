@@ -5838,7 +5838,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.243';
+const ERP_VERSION = 'v2.3.244';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -47989,6 +47989,9 @@ window._deleteMilestoneQuick = function(productId, milestoneId) {
     else if (m.category === 'wadiz') p.wadizOpen = '';
     else if (m.category === 'shipping') p.wadizShip = '';
   }
+  // v2.3.244: 마일스톤 삭제 tombstone — 머지 union 이 삭제한 일정을 되살리지 않게
+  if (!Array.isArray(p._delMs)) p._delMs = [];
+  p._delMs.push({ id: milestoneId, ts: Date.now() });
   p.milestones = (p.milestones || []).filter(x => String(x.id) !== String(milestoneId));
   p.updatedAt = Date.now();
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
@@ -48010,6 +48013,9 @@ window._deleteMilestone = function(productId, milestoneId) {
     else if (targetM.category === 'wadiz') p.wadizOpen = '';
     else if (targetM.category === 'shipping') p.wadizShip = '';
   }
+  // v2.3.244: 마일스톤 삭제 tombstone — 머지 union 이 삭제한 일정을 되살리지 않게
+  if (!Array.isArray(p._delMs)) p._delMs = [];
+  p._delMs.push({ id: milestoneId, ts: Date.now() });
   p.milestones = (p.milestones || []).filter(x => String(x.id) !== String(milestoneId));
   p.updatedAt = Date.now();
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
@@ -48240,6 +48246,9 @@ window._deleteMilestoneQuick = function(productId, milestoneId) {
     else if (m.category === 'wadiz') p.wadizOpen = '';
     else if (m.category === 'shipping') p.wadizShip = '';
   }
+  // v2.3.244: 마일스톤 삭제 tombstone — 머지 union 이 삭제한 일정을 되살리지 않게
+  if (!Array.isArray(p._delMs)) p._delMs = [];
+  p._delMs.push({ id: milestoneId, ts: Date.now() });
   p.milestones = (p.milestones || []).filter(x => String(x.id) !== String(milestoneId));
   p.updatedAt = Date.now();
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
@@ -48256,6 +48265,88 @@ window._deleteMilestone = function(productId, milestoneId) {
     renderMilestonesInProductModal(window._modalProductIdForMilestones);
   }
 };
+
+// v2.3.244: 동일 id 신제품 2건을 충돌 없이 머지 — milestones 는 합집합(union, 동일 id 는 newer 제품 우선),
+//   삭제 tombstone(_delMs)로 삭제 존중, 스칼라는 base(기본 newer) 채택, 파생일정(launchDate/wadizOpen/wadizShip)
+//   은 머지된 milestones 에서 재계산. forceBaseA=true 면 a 를 base 로(재동기화 시 로컬 이미지/이름 보존용).
+//   기존 '제품 통째 newer-wins' 가 동시 편집 시 상대 마일스톤을 통째로 지우던 문제 해결.
+function _mergeNpPair(a, b, forceBaseA){
+  if (!a) return b; if (!b) return a;
+  const aTs = Number(a.updatedAt)||0, bTs = Number(b.updatedAt)||0;
+  const base = forceBaseA ? a : (bTs >= aTs ? b : a);
+  const out = Object.assign({}, base);
+  // 삭제 tombstone 합집합
+  const delMap = new Map();
+  const addDel = arr => (Array.isArray(arr)?arr:[]).forEach(d => {
+    if (d == null) return; const id = String(typeof d === 'object' ? d.id : d);
+    if (!id || id === 'undefined') return; const ts = Number(d && d.ts)||0;
+    const pv = delMap.get(id); if (pv == null || ts > pv) delMap.set(id, ts);
+  });
+  addDel(a._delMs); addDel(b._delMs);
+  // milestones union — 동일 id 는 newer(updatedAt) 제품 우선, tombstone 제외
+  const newer = (bTs >= aTs) ? b : a, older = (newer === a) ? b : a;
+  const mById = new Map();
+  (Array.isArray(older.milestones)?older.milestones:[]).forEach(m => { if (m && m.id != null) mById.set(String(m.id), m); });
+  (Array.isArray(newer.milestones)?newer.milestones:[]).forEach(m => { if (m && m.id != null) mById.set(String(m.id), m); });
+  const ms = Array.from(mById.values()).filter(m => !delMap.has(String(m.id)));
+  out.milestones = ms;
+  if (delMap.size) out._delMs = Array.from(delMap.entries()).sort((x,y)=>y[1]-x[1]).slice(0,500).map(([id,ts])=>({id,ts}));
+  // 파생 일정 재계산(가장 최근 생성=큰 id 우선). 해당 카테고리 마일스톤 없으면 base 값 유지(레거시 보호).
+  const pick = c => { const hit = ms.filter(m => m && m.category === c).sort((x,y)=>String(y.id).localeCompare(String(x.id)))[0]; return hit ? (hit.plannedDate || '') : null; };
+  const lp = pick('launch');   if (lp !== null) out.launchDate = lp;
+  const wp = pick('wadiz');    if (wp !== null) out.wadizOpen = wp;
+  const sp = pick('shipping'); if (sp !== null) out.wadizShip = sp;
+  out.updatedAt = Math.max(aTs, bTs);
+  return out;
+}
+
+// v2.3.244: 신제품 타임라인 부분 재동기화 — onSnapshot 없이도 탭 포커스/가시성 복귀 시 Firestore 의
+//   newProducts 최신본을 가져와 로컬과 필드/마일스톤 단위 머지(_mergeNpPair, 로컬 base 유지) 후 타임라인 리렌더.
+//   전체 리로드가 아니라 newProducts 1개 컬렉션만 → 가볍고 안전. 8초 쓰로틀 + 재진입 가드.
+let _npResyncBusy = false, _npResyncLast = 0;
+async function _resyncNewProducts(force){
+  try {
+    if (_npResyncBusy) return;
+    const nowMs = Date.now();
+    if (!force && nowMs - _npResyncLast < 8000) return;
+    if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return;
+    try { if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) return; } catch(_){}  // 초기 로드 전 차단
+    _npResyncBusy = true; _npResyncLast = nowMs;
+    const ref = window._firestoreDoc(window._firebaseDb, 'erp_data', 'newProducts');
+    const snap = await window._firestoreGetDoc(ref);
+    if (!snap || !snap.exists || !snap.exists()) { _npResyncBusy = false; return; }
+    let arr = [];
+    try { arr = JSON.parse((snap.data() || {}).data || '[]'); } catch(_){ arr = []; }
+    if (!Array.isArray(arr)) arr = [];
+    const byId = new Map();
+    (Array.isArray(DB.newProducts)?DB.newProducts:[]).forEach(r => { if (r && r.id != null) byId.set(String(r.id), r); });
+    let changed = false;
+    arr.forEach(sr => {
+      if (!sr || sr.id == null) return; const key = String(sr.id);
+      const lc = byId.get(key);
+      if (!lc) { byId.set(key, sr); changed = true; return; }
+      const before = JSON.stringify(lc);
+      const m = _mergeNpPair(lc, sr, true);  // 로컬 base 유지(이미지/이름 보존), 일정/마일스톤만 머지
+      if (JSON.stringify(m) !== before) { byId.set(key, m); changed = true; }
+    });
+    let next = Array.from(byId.values());
+    // 신제품 삭제 tombstone 적용 — 서버에 남은 삭제건 부활 차단
+    try {
+      const tomb = new Set((Array.isArray(DB._deletedNewProductIds)?DB._deletedNewProductIds:[]).map(t => String(t && (typeof t === 'object' ? t.id : t))));
+      if (tomb.size) next = next.filter(p => p && !tomb.has(String(p.id)));
+    } catch(_){}
+    DB.newProducts = next;
+    _npResyncBusy = false;
+    if (changed && typeof renderProductTimeline === 'function') {
+      try { renderProductTimeline(); } catch(_){}
+      try { if (window._modalProductIdForMilestones && typeof renderMilestonesInProductModal === 'function') renderMilestonesInProductModal(window._modalProductIdForMilestones); } catch(_){}
+    }
+  } catch(e){ _npResyncBusy = false; console.warn('[v2.3.244] newProducts 재동기화 실패:', e); }
+}
+try {
+  document.addEventListener('visibilitychange', function(){ if (document.visibilityState === 'visible') _resyncNewProducts(); });
+  window.addEventListener('focus', function(){ _resyncNewProducts(); });
+} catch(_){}
 
 // CSS 애니메이션 주입 (한 번만)
 (function _injectTlCss(){
@@ -52202,9 +52293,9 @@ function initERPWhenReady() {
             const key = String(r.id);
             const prev = _byId.get(key);
             if (!prev) { _byId.set(key, r); return; }
-            const fsTs = Number(r.updatedAt) || 0;
-            const lcTs = Number(prev.updatedAt) || 0;
-            if (fsTs >= lcTs) _byId.set(key, r);
+            // v2.3.244: 통째 newer-wins → milestones 합집합 머지(동시 편집 시 상대 일정 손실 방지).
+            //   prev=로컬, r=Firestore. _mergeNpPair 가 newer 스칼라 + milestone union + 삭제 tombstone 처리.
+            _byId.set(key, _mergeNpPair(prev, r));
           });
           merged.newProducts = Array.from(_byId.values());
         } else {
