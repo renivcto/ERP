@@ -5836,7 +5836,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.233';
+const ERP_VERSION = 'v2.3.234';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -8855,6 +8855,8 @@ function dedupAllExpensesV216() {
   });
   let removed = 0;
   const toRemoveRefs = new Set();
+  // v2.3.234: 최근 5분 이내 expense 는 dedup 제외(방금 만든 건 사라짐 방지) + paid 는 절대 제거 X
+  const recentThreshold = Date.now() - 5 * 60 * 1000;
   buckets.forEach((list) => {
     if (list.length <= 1) return;
     // paid 우선 → createdAt(또는 id) 가장 오래된 것 유지
@@ -8866,6 +8868,10 @@ function dedupAllExpensesV216() {
     })[0];
     list.forEach(e => {
       if (e === keep) return;
+      // v2.3.234: 지급완료 건은 어떤 경우에도 제거하지 않음(지급된 건 사라짐 방지)
+      if (e.paidStatus === 'paid') return;
+      // v2.3.234: 최근 5분 이내 생성 건은 보존(동기화 전 중복으로 오인 방지)
+      if ((e.createdAt || 0) > recentThreshold) return;
       toRemoveRefs.add(e);
       removed++;
     });
@@ -28997,6 +29003,14 @@ function uploadStampForOrder(orderId, inputEl) {
   reader.readAsDataURL(file);
 }
 
+// v2.3.234: 발주서에 연결된 PO 지출(선급금/잔금)이 하나라도 지급완료면 true
+function _anyPoExpensePaid(orderId) {
+  const oidNum = Number(orderId);
+  return DB.expenses.some(e => e && (e.category === 'po_prepay' || e.category === 'po_balance')
+    && (e.orderId === orderId || Number(e.orderId) === oidNum)
+    && e.paidStatus === 'paid');
+}
+
 // v1.9.203: 발주서의 날인 상태(stampData/stampNotRequired) ↔ DB.approvals 결재 상태 양방향 동기화
 // 발주서 페이지/모달에서 날인 변경 시 호출
 function syncApprovalFromOrderStamp(orderId) {
@@ -29026,15 +29040,17 @@ function syncApprovalFromOrderStamp(orderId) {
   if (shouldApprove && ap.status !== 'approved') {
     ap.status = 'approved';
     ap.approvedAt = Date.now();
-  ap.updatedAt = Date.now();  // v1.9.772
     ap.updatedAt = Date.now();  // v1.9.772
     try { slackNotify('approval_done', ap); } catch(_){}
   } else if (!shouldApprove && ap.status === 'approved' && ap.auto !== false) {
     // 자동 승인된 것만 되돌리기 (사용자가 수동으로 결재 요청 페이지에서 승인한 것은 유지)
     // 수동 승인 플래그가 없으면(모두 자동) → 되돌림
-    if (!ap.manualApprove) {
+    // v2.3.234: 단, 연결된 PO 지출이 이미 지급완료면 결재를 pending 으로 되돌리지 않음
+    //           (지급된 건의 결재가 사라지는 회귀 방지)
+    if (!ap.manualApprove && !_anyPoExpensePaid(orderId)) {
       ap.status = 'pending';
       ap.approvedAt = 0;
+      ap.updatedAt = Date.now();
     }
   }
 }
