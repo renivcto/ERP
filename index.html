@@ -5836,7 +5836,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.230';
+const ERP_VERSION = 'v2.3.231';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9704,6 +9704,7 @@ function _finRender(){
     '<div style="display:flex;gap:4px;flex-wrap:wrap;margin:14px 0 18px;border-bottom:1px solid #e5e7eb">' +
     tabs.map(([k,l])=>`<button onclick="_finSetTab('${k}')" style="background:${F.tab===k?'#0f172a':'transparent'};color:${F.tab===k?'#fff':'#64748b'};border:0;border-radius:8px 8px 0 0;padding:9px 15px;font-size:13px;font-weight:700;cursor:pointer">${l}</button>`).join('') +
     '</div><div id="finance-tab-body">' + body + '</div>';
+  if(F.tab==='cards'){ try{ _finUpdateReceiptIndicator(); }catch(_){} }
 }
 function _finTopBarHtml(){
   const F = window._FIN; const yNow = new Date().getFullYear();
@@ -9938,6 +9939,7 @@ function _finTabCards(){
       <td style="padding:6px 8px;text-align:center">${_finEsc(t.merchant||'')}${F.cardFilter?'':(function(){var _c=cards.find(c=>String(c.id)===String(t.cardId))||{};var _l=_c.alias||_c.cardName||'';return _l?' <span style="color:#94a3b8;font-size:11px">('+_finEsc(_l)+')</span>':'';})()}</td>
       <td style="padding:6px 8px;text-align:center;font-weight:600">${_finWon(amt)}</td>
       <td style="padding:6px 8px;text-align:center;font-size:11.5px;color:#64748b">${_finEsc(_finCatLabel(t.category)||'')}</td>
+      <td style="padding:4px 8px;text-align:center">${_finReceiptCellHtml(t)}</td>
       <td style="padding:6px 8px;text-align:center"><button onclick="_finDelCardTxn('${t.id}')" style="background:none;border:0;color:#cbd5e1;cursor:pointer;font-size:14px" title="삭제">✕</button></td>
     </tr>`; }).join('');
   const catOpts='<option value="">분류</option>'+FIN_CATS.map(c=>`<option value="${c.key}">${c.label}</option>`).join('');
@@ -9959,8 +9961,8 @@ function _finTabCards(){
       <div style="background:#fdf2f8;border:1px solid #fbcfe8;border-radius:10px;padding:7px 16px;display:flex;align-items:center;gap:8px"><span style="font-size:12px;color:#9d174d;font-weight:700">합계</span><b style="font-size:16px;color:#be185d;font-weight:800">${_finWon(useSum)}</b></div>
     </div>
     <table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:center">날짜</th><th style="padding:6px 8px;text-align:center">승인번호</th><th style="padding:6px 8px;text-align:center">가맹점</th><th style="padding:6px 8px;text-align:center">금액</th><th style="padding:6px 8px;text-align:center">분류</th><th></th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="6" style="padding:14px;text-align:center;color:#94a3b8">이 기간 내역이 없습니다</td></tr>'}</tbody>
+      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:center">날짜</th><th style="padding:6px 8px;text-align:center">승인번호</th><th style="padding:6px 8px;text-align:center">가맹점</th><th style="padding:6px 8px;text-align:center">금액</th><th style="padding:6px 8px;text-align:center">분류</th><th style="padding:6px 8px;text-align:center">영수증</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="7" style="padding:14px;text-align:center;color:#94a3b8">이 기간 내역이 없습니다</td></tr>'}</tbody>
     </table>
     ${cards.length?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;border-top:1px dashed #e5e7eb;padding-top:10px">
       ${cardSel}
@@ -9972,7 +9974,10 @@ function _finTabCards(){
       <button onclick="_finAddCardTxn()" style="background:#0f172a;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer">+ 추가</button>
       <button onclick="document.getElementById('fin-receipt-file').click()" style="background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;border-radius:6px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer">📷 영수증 인식</button>
       <input type="file" id="fin-receipt-file" accept="image/*" style="display:none" onchange="_finReceiptUpload(this)">
+      <button onclick="document.getElementById('fin-receipt-attach').click()" style="background:#f0f9ff;color:#0369a1;border:1px solid #bae6fd;border-radius:6px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer">📎 영수증 첨부</button>
+      <input type="file" id="fin-receipt-attach" accept="image/*,application/pdf" style="display:none" onchange="_finAttachReceipt(this)">
       <button onclick="_finToggleCsv('card')" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:6px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer">📋 CSV 붙여넣기</button>
+      <span id="fin-receipt-indicator"></span>
     </div>
     <div id="fin-card-csv" style="display:none;margin-top:10px">
       <textarea id="fin-card-csv-ta" rows="4" placeholder="한 줄에 한 건: 날짜,가맹점,금액\n예) 2026-06-03,쿠팡,32000" style="width:100%;${inS};font-family:monospace"></textarea>
@@ -10006,7 +10011,11 @@ async function _finAddCardTxn(){
   if(!date){ showNotif('날짜를 입력하세요','warning'); return; }
   if(!amount){ showNotif('금액을 입력하세요','warning'); return; }
   const y=parseInt(String(date).slice(0,4))||window._FIN.year; await _finLoadYear(y);
-  window._FIN.cardTxns[y].push({ id:_finId('ct'), cardId, date, approvalNo:((document.getElementById('fin-ct-approval')||{}).value||'').trim(), merchant:(document.getElementById('fin-ct-merchant').value||'').trim(), amount, category:document.getElementById('fin-ct-cat').value||'', memo:'', source:'manual' });
+  const txn={ id:_finId('ct'), cardId, date, approvalNo:((document.getElementById('fin-ct-approval')||{}).value||'').trim(), merchant:(document.getElementById('fin-ct-merchant').value||'').trim(), amount, category:document.getElementById('fin-ct-cat').value||'', memo:'', source:'manual' };
+  window._FIN.cardTxns[y].push(txn);
+  // v2.3.231: 첨부(또는 영수증 인식)한 영수증을 이 내역에 저장
+  const _pend=window._FIN.pendingReceipt;
+  if(_pend){ try{ const rc=await _finStoreReceipt(txn.id, _pend.dataUrl, _pend.type, _pend.name); if(rc) txn.receipt=rc; }catch(e){ console.warn('[영수증] 저장 실패',e); } window._FIN.pendingReceipt=null; }
   await _finSaveCardTxns(y); showNotif('내역이 추가되었습니다','success'); _finRender();
 }
 // v2.3.227: 영수증 사진 OCR (Gemini 비전) — 날짜·가맹점·금액 추출해 입력 폼 자동 채움
@@ -10041,23 +10050,72 @@ async function _finReceiptUpload(input){
   const reader=new FileReader();
   reader.onload=async()=>{
     try{
+      // v2.3.231: 인식한 영수증 이미지를 자동 첨부(보류) — +추가 시 저장됨
+      window._FIN.pendingReceipt={ dataUrl: reader.result, type:'image', name: f.name||'receipt.jpg' };
+      _finUpdateReceiptIndicator();
       const r=await _finReceiptOcr(reader.result);
       input.value='';
-      if(!r){ return; }
+      if(!r){ showNotif('영수증은 첨부됨 — 인식 결과는 없어요. 직접 입력 후 [+ 추가]','warning'); return; }
       const dEl=document.getElementById('fin-ct-date'); if(dEl&&r.date) dEl.value=r.date;
       const apEl=document.getElementById('fin-ct-approval'); if(apEl) apEl.value=r.approvalNo||'';
       const mEl=document.getElementById('fin-ct-merchant'); if(mEl) mEl.value=r.merchant||'';
       const aEl=document.getElementById('fin-ct-amount'); if(aEl&&r.amount) aEl.value=r.amount;
       if(mEl) mEl.focus();
-      showNotif('✅ 인식 완료 — 내용 확인 후 [+ 추가]를 눌러 저장하세요','success');
+      showNotif('✅ 인식 완료 — 영수증 첨부됨. 확인 후 [+ 추가]를 눌러 저장하세요','success');
     }catch(e){ console.warn('[영수증 OCR] 처리 실패',e); input.value=''; }
   };
   reader.readAsDataURL(f);
 }
+// v2.3.231: 영수증 저장(이미지/PDF) — Firebase Storage(기존 댓글 인프라) 우선, 실패 시 IDB 기기-로컬
+function _finResizeImage(dataUrl, maxPx){
+  return new Promise((resolve,reject)=>{
+    try{ const img=new Image(); img.onload=()=>{ try{ let w=img.width,h=img.height; const mx=Math.max(w,h); if(mx>maxPx){ const s=maxPx/mx; w=Math.round(w*s); h=Math.round(h*s); } const cv=document.createElement('canvas'); cv.width=w; cv.height=h; cv.getContext('2d').drawImage(img,0,0,w,h); resolve(cv.toDataURL('image/jpeg',0.82)); }catch(e){ resolve(dataUrl); } }; img.onerror=()=>resolve(dataUrl); img.src=dataUrl; }catch(e){ resolve(dataUrl); }
+  });
+}
+async function _finStoreReceipt(txnId, dataUrl, type, name){
+  let data=dataUrl;
+  if(type==='image'){ try{ data=await _finResizeImage(dataUrl, 1400); }catch(_){} }
+  const safe=String(name||'receipt').replace(/[^\w.\-가-힣]/g,'_');
+  const path='commentFiles/finance/'+txnId+'/'+safe;
+  if(typeof window._storageUploadDataUrl==='function'){
+    try{ const url=await window._storageUploadDataUrl(path, data, type==='pdf'?'application/pdf':'image/jpeg'); if(url) return { url, type, name:safe, storagePath:path }; }catch(e){ console.warn('[영수증] Storage 업로드 실패(IDB 폴백):',e&&(e.code||e.message)); }
+  }
+  try{ if(typeof idbSet==='function'){ await idbSet('fin_receipt_'+txnId, data); showNotif('⚠️ 영수증이 이 기기에만 저장됨 (Storage 설정 시 모두 공유)','warning'); return { idb:true, type, name:safe }; } }catch(e){ console.warn('[영수증] IDB 저장 실패',e); }
+  return null;
+}
+function _finReceiptCellHtml(t){
+  const rc=t&&t.receipt; if(!rc) return '<span style="color:#cbd5e1">-</span>';
+  if(rc.url){
+    if(rc.type==='pdf') return `<a href="${rc.url}" target="_blank" title="${_finEsc(rc.name||'영수증 PDF')}" style="text-decoration:none;font-size:17px">📄</a>`;
+    return `<img src="${rc.url}" onclick="window.open('${rc.url}','_blank')" style="width:34px;height:34px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0;cursor:zoom-in;vertical-align:middle" title="클릭하면 크게 보기">`;
+  }
+  if(rc.idb) return `<button onclick="_finOpenIdbReceipt('${t.id}')" style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer" title="이 기기에서만 보임">${rc.type==='pdf'?'📄':'🖼️'} 보기</button>`;
+  return '<span style="color:#cbd5e1">-</span>';
+}
+async function _finOpenIdbReceipt(txnId){
+  try{ const d=(typeof idbGet==='function')?await idbGet('fin_receipt_'+txnId):null; if(!d){ showNotif('영수증 데이터를 찾을 수 없습니다','warning'); return; }
+    let type='image'; Object.keys(window._FIN.cardTxns||{}).forEach(y=>(window._FIN.cardTxns[y]||[]).forEach(t=>{ if(String(t.id)===String(txnId)&&t.receipt) type=t.receipt.type||'image'; }));
+    const w=window.open(); if(w) w.document.write(type==='pdf'?'<embed src="'+d+'" width="100%" height="100%">':'<img src="'+d+'" style="max-width:100%">');
+  }catch(e){ console.warn('[영수증] IDB 열기 실패',e); }
+}
+function _finAttachReceipt(input){
+  const f=input.files&&input.files[0]; if(!f) return;
+  if(f.size>10*1024*1024){ showNotif('영수증 파일은 10MB 이하만 가능합니다','warning'); input.value=''; return; }
+  const isPdf=/pdf/i.test(f.type)||/\.pdf$/i.test(f.name||'');
+  const reader=new FileReader();
+  reader.onload=()=>{ window._FIN.pendingReceipt={ dataUrl: reader.result, type: isPdf?'pdf':'image', name: f.name||(isPdf?'receipt.pdf':'receipt.jpg') }; input.value=''; _finUpdateReceiptIndicator(); showNotif('📎 영수증 첨부됨 — [+ 추가] 시 저장됩니다','info'); };
+  reader.readAsDataURL(f);
+}
+function _finUpdateReceiptIndicator(){
+  const el=document.getElementById('fin-receipt-indicator'); if(!el) return;
+  const p=window._FIN.pendingReceipt;
+  el.innerHTML = p?`<span style="font-size:11.5px;color:#047857;font-weight:700;display:inline-flex;align-items:center;gap:4px">📎 ${_finEsc(p.name)} <button onclick="_finClearPendingReceipt()" style="background:none;border:0;color:#94a3b8;cursor:pointer;font-size:12px">✕</button></span>`:'';
+}
+function _finClearPendingReceipt(){ window._FIN.pendingReceipt=null; _finUpdateReceiptIndicator(); }
 async function _finDelCardTxn(id){
   if (typeof requireWrite==='function' && !requireWrite()) return;
   const F=window._FIN; let y=null; Object.keys(F.cardTxns).forEach(yy=>{ if((F.cardTxns[yy]||[]).some(t=>String(t.id)===String(id))) y=yy; });
-  if(y==null) return; F.cardTxns[y]=F.cardTxns[y].filter(t=>String(t.id)!==String(id)); await _finSaveCardTxns(y); _finRender();
+  if(y==null) return; try{ if(typeof idbDelete==='function') idbDelete('fin_receipt_'+id); }catch(_){} F.cardTxns[y]=F.cardTxns[y].filter(t=>String(t.id)!==String(id)); await _finSaveCardTxns(y); _finRender();
 }
 async function _finImportCardCsv(){
   if (typeof requireWrite==='function' && !requireWrite()) return;
