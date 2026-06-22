@@ -5836,7 +5836,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.228';
+const ERP_VERSION = 'v2.3.229';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9908,31 +9908,35 @@ async function _finImportAcctCsv(){
 function _finTabCards(){
   const F=window._FIN; const r=_finRange(); const cards=F.cards||[];
   const inS='border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px';
-  // v2.3.226: 법인 카드는 1개만 — 표 대신 한 줄 컴팩트 위젯
-  const card=cards[0];
-  const cardMaster = card
-    ? `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <span style="font-size:14px;font-weight:800;color:#0f172a;margin-right:2px">💳 법인 카드</span>
-        <input value="${_finEsc(card.cardName||'')}" onchange="_finUpdateCard('${card.id}','cardName',this.value)" placeholder="카드사(예: 신한카드)" style="${inS};width:170px">
-        <input value="${_finEsc(card.last4||'')}" onchange="_finUpdateCard('${card.id}','last4',this.value)" placeholder="끝 4자리" style="${inS};width:100px">
-        <button onclick="_finDelCard('${card.id}')" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:700;cursor:pointer">삭제</button>
-      </div>`
-    : `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+  // v2.3.229: 카드 1개 — 등록되면 마스터 박스 숨김(사용내역 헤더의 '변경' 칩으로 편집), 미등록 시만 등록줄
+  const card=cards[0]; const cardEditOpen=!!F.cardEditOpen;
+  const cardMaster = !card
+    ? `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="font-size:14px;font-weight:800;color:#0f172a;margin-right:2px">💳 법인 카드 등록</span>
         <input id="fin-acard-name" placeholder="카드사(예: 신한카드)" style="${inS};width:200px">
         <input id="fin-acard-last4" placeholder="끝 4자리" style="${inS};width:100px">
         <button onclick="_finAddCard()" style="background:#0f172a;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer">+ 카드 추가</button>
-      </div>`;
+      </div>`
+    : (cardEditOpen
+        ? `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-size:13px;font-weight:700;color:#0f172a">💳 카드 정보</span>
+            <input value="${_finEsc(card.cardName||'')}" onchange="_finUpdateCard('${card.id}','cardName',this.value)" placeholder="카드사" style="${inS};width:170px">
+            <input value="${_finEsc(card.last4||'')}" onchange="_finUpdateCard('${card.id}','last4',this.value)" placeholder="끝 4자리" style="${inS};width:100px">
+            <button onclick="_finDelCard('${card.id}')" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:700;cursor:pointer">삭제</button>
+            <button onclick="_finToggleCardEdit()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:700;cursor:pointer">닫기</button>
+          </div>`
+        : '');
   let allTxn=[]; Object.keys(F.cardTxns||{}).forEach(y=>{ (F.cardTxns[y]||[]).forEach(t=>{ if(!F.cardFilter||String(t.cardId)===String(F.cardFilter)) allTxn.push(t); }); });
   allTxn.sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
   const inRange=allTxn.filter(t=>_finInRange(t.date,r));
   let useSum=0; const byCat={};
   const rows=inRange.map(t=>{ const amt=Number(t.amount)||0; useSum+=amt; byCat[t.category||'']=(byCat[t.category||'']||0)+amt;
     return `<tr style="border-bottom:1px solid #f1f5f9">
-      <td style="padding:6px 8px;white-space:nowrap">${_finEsc(t.date)}</td>
-      <td style="padding:6px 8px">${_finEsc(t.merchant||'')}${F.cardFilter?'':(function(){var _c=cards.find(c=>String(c.id)===String(t.cardId))||{};var _l=_c.alias||_c.cardName||'';return _l?' <span style="color:#94a3b8;font-size:11px">('+_finEsc(_l)+')</span>':'';})()}</td>
-      <td style="padding:6px 8px;text-align:right;font-weight:600">${_finWon(amt)}</td>
-      <td style="padding:6px 8px;font-size:11.5px;color:#64748b">${_finEsc(_finCatLabel(t.category)||'')}</td>
+      <td style="padding:6px 8px;text-align:center;white-space:nowrap">${_finEsc(t.date)}</td>
+      <td style="padding:6px 8px;text-align:center;font-size:12px;color:#64748b">${_finEsc(t.approvalNo||'')}</td>
+      <td style="padding:6px 8px;text-align:center">${_finEsc(t.merchant||'')}${F.cardFilter?'':(function(){var _c=cards.find(c=>String(c.id)===String(t.cardId))||{};var _l=_c.alias||_c.cardName||'';return _l?' <span style="color:#94a3b8;font-size:11px">('+_finEsc(_l)+')</span>':'';})()}</td>
+      <td style="padding:6px 8px;text-align:center;font-weight:600">${_finWon(amt)}</td>
+      <td style="padding:6px 8px;text-align:center;font-size:11.5px;color:#64748b">${_finEsc(_finCatLabel(t.category)||'')}</td>
       <td style="padding:6px 8px;text-align:center"><button onclick="_finDelCardTxn('${t.id}')" style="background:none;border:0;color:#cbd5e1;cursor:pointer;font-size:14px" title="삭제">✕</button></td>
     </tr>`; }).join('');
   const catOpts='<option value="">분류</option>'+FIN_CATS.map(c=>`<option value="${c.key}">${c.label}</option>`).join('');
@@ -9944,17 +9948,21 @@ function _finTabCards(){
   <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
       <div style="font-size:14px;font-weight:800;color:#0f172a">카드 사용내역 <span style="font-size:12px;color:#94a3b8;font-weight:500">· ${r.label}</span></div>
-      <div style="font-size:12.5px;color:#0f172a">합계 <b>${_finWon(useSum)}</b></div>
+      <div style="display:flex;align-items:center;gap:10px">
+        ${card?`<button onclick="_finToggleCardEdit()" title="카드 정보 변경/삭제" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;padding:3px 10px;font-size:11.5px;font-weight:700;cursor:pointer">💳 ${_finEsc(card.cardName||'카드')}${card.last4?(' ****'+_finEsc(card.last4)):''} · 변경</button>`:''}
+        <span style="font-size:12.5px;color:#0f172a">합계 <b>${_finWon(useSum)}</b></span>
+      </div>
     </div>
     ${catBreakdown?`<div style="margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap">${catBreakdown}</div>`:''}
     <div style="margin-bottom:10px"><select onchange="_finSetCardFilter(this.value)" style="${inS}">${cardOptsFilter}</select></div>
     <table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left">날짜</th><th style="padding:6px 8px;text-align:left">가맹점</th><th style="padding:6px 8px;text-align:right">금액</th><th style="padding:6px 8px;text-align:left">분류</th><th></th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="5" style="padding:14px;text-align:center;color:#94a3b8">이 기간 내역이 없습니다</td></tr>'}</tbody>
+      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:center">날짜</th><th style="padding:6px 8px;text-align:center">승인번호</th><th style="padding:6px 8px;text-align:center">가맹점</th><th style="padding:6px 8px;text-align:center">금액</th><th style="padding:6px 8px;text-align:center">분류</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="6" style="padding:14px;text-align:center;color:#94a3b8">이 기간 내역이 없습니다</td></tr>'}</tbody>
     </table>
     ${cards.length?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;border-top:1px dashed #e5e7eb;padding-top:10px">
       ${cardSel}
       <input id="fin-ct-date" type="date" style="${inS}">
+      <input id="fin-ct-approval" placeholder="승인번호" style="${inS};width:110px">
       <input id="fin-ct-merchant" placeholder="가맹점" style="${inS};flex:1;min-width:120px">
       <input id="fin-ct-amount" type="number" placeholder="금액" style="${inS};width:110px;text-align:right">
       <select id="fin-ct-cat" style="${inS}">${catOpts}</select>
@@ -9970,6 +9978,7 @@ function _finTabCards(){
   </div>`;
 }
 function _finSetCardFilter(v){ window._FIN.cardFilter=v; _finRender(); }
+function _finToggleCardEdit(){ window._FIN.cardEditOpen=!window._FIN.cardEditOpen; _finRender(); }
 async function _finAddCard(){
   if (typeof requireWrite==='function' && !requireWrite()) return;
   if ((window._FIN.cards||[]).length >= 1){ showNotif('법인 카드는 1개만 등록할 수 있습니다','warning'); return; }
@@ -9994,14 +10003,14 @@ async function _finAddCardTxn(){
   if(!date){ showNotif('날짜를 입력하세요','warning'); return; }
   if(!amount){ showNotif('금액을 입력하세요','warning'); return; }
   const y=parseInt(String(date).slice(0,4))||window._FIN.year; await _finLoadYear(y);
-  window._FIN.cardTxns[y].push({ id:_finId('ct'), cardId, date, merchant:(document.getElementById('fin-ct-merchant').value||'').trim(), amount, category:document.getElementById('fin-ct-cat').value||'', memo:'', source:'manual' });
+  window._FIN.cardTxns[y].push({ id:_finId('ct'), cardId, date, approvalNo:((document.getElementById('fin-ct-approval')||{}).value||'').trim(), merchant:(document.getElementById('fin-ct-merchant').value||'').trim(), amount, category:document.getElementById('fin-ct-cat').value||'', memo:'', source:'manual' });
   await _finSaveCardTxns(y); showNotif('내역이 추가되었습니다','success'); _finRender();
 }
 // v2.3.227: 영수증 사진 OCR (Gemini 비전) — 날짜·가맹점·금액 추출해 입력 폼 자동 채움
 function _finParseOcrJson(txt){
   let s=String(txt==null?'':txt).trim().replace(/^```(json)?/i,'').replace(/```$/,'').trim();
   const mm=s.match(/\{[\s\S]*\}/); if(mm) s=mm[0];
-  try{ const o=JSON.parse(s); return { date:String(o.date||'').slice(0,10), merchant:String(o.merchant||'').trim(), amount:_finNum(o.amount) }; }catch(_){ return null; }
+  try{ const o=JSON.parse(s); return { date:String(o.date||'').slice(0,10), merchant:String(o.merchant||'').trim(), amount:_finNum(o.amount), approvalNo:String(o.approvalNo||'').replace(/[^0-9\-]/g,'') }; }catch(_){ return null; }
 }
 async function _finReceiptOcr(dataUrl){
   const apiKey = (typeof _getApiKey==='function') ? await _getApiKey('gemini') : ((DB.appSettings&&DB.appSettings.geminiApiKey)||'');
@@ -10012,7 +10021,7 @@ async function _finReceiptOcr(dataUrl){
   if(!models){ try{ const lr=await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`); if(lr.ok){ const ld=await lr.json(); models=(ld.models||[]).filter(x=>(x.supportedGenerationMethods||[]).includes('generateContent')).map(x=>x.name.replace(/^models\//,'')); window._geminiModelCache=models; } }catch(_){} }
   const priorities=['gemini-2.5-flash','gemini-2.0-flash','gemini-1.5-flash-latest','gemini-1.5-flash','gemini-pro-latest'];
   const chosen=(models&&(priorities.find(p=>models.includes(p))||models.find(x=>x.includes('flash'))||models[0]))||'gemini-2.5-flash';
-  const prompt='다음 영수증 사진에서 결제 날짜, 가맹점(상호명), 총 결제금액을 추출해 JSON 한 줄로만 답하라. 형식: {"date":"YYYY-MM-DD","merchant":"가맹점명","amount":12345}. amount 는 콤마·원화기호 없는 정수(원). 날짜를 못 찾으면 빈 문자열. 설명/마크다운 없이 JSON 만 출력.';
+  const prompt='다음 영수증 사진에서 결제 날짜, 가맹점(상호명), 총 결제금액, 카드 승인번호를 추출해 JSON 한 줄로만 답하라. 형식: {"date":"YYYY-MM-DD","merchant":"가맹점명","amount":12345,"approvalNo":"승인번호"}. amount 는 콤마·원화기호 없는 정수(원). approvalNo 는 영수증의 승인번호(없으면 빈 문자열). 날짜를 못 찾으면 빈 문자열. 설명/마크다운 없이 JSON 만 출력.';
   try{
     const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${chosen}:generateContent?key=${apiKey}`,{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ contents:[{ parts:[{text:prompt},{inlineData:{mimeType:mime,data:b64}}] }] }) });
     if(!res.ok){ const e=await res.text(); console.error('[영수증 OCR] error',res.status,e); showNotif('영수증 인식 실패: '+res.status,'error'); return null; }
@@ -10033,6 +10042,7 @@ async function _finReceiptUpload(input){
       input.value='';
       if(!r){ return; }
       const dEl=document.getElementById('fin-ct-date'); if(dEl&&r.date) dEl.value=r.date;
+      const apEl=document.getElementById('fin-ct-approval'); if(apEl) apEl.value=r.approvalNo||'';
       const mEl=document.getElementById('fin-ct-merchant'); if(mEl) mEl.value=r.merchant||'';
       const aEl=document.getElementById('fin-ct-amount'); if(aEl&&r.amount) aEl.value=r.amount;
       if(mEl) mEl.focus();
