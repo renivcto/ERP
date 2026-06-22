@@ -5838,7 +5838,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.242';
+const ERP_VERSION = 'v2.3.243';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -31153,7 +31153,7 @@ function cancelFeedCommentEdit(postId) {
   if (typeof renderFeed==='function') renderFeed();
 }
 
-function addFeedComment(postId){
+async function addFeedComment(postId){
   const input = document.getElementById(`feed-comment-input-${postId}`);
   if (!input) return;
   const text = (input.value||'').trim();
@@ -31179,32 +31179,46 @@ function addFeedComment(postId){
     authorEmail: u.email,
     createdAt: new Date().toISOString(),
   });
-  try { saveData(); } catch(_){}
-  // v2.3.23: 댓글/대댓글 슬랙 알림
-  try {
-    const _isReply = !!parentId;
-    const _kind = _isReply ? '대댓글' : '댓글';
-    const _author = (u && u.name) ? u.name : '익명';
-    const _time = _kstShortTimeMin();
-    const _postTitle = (p && p.title) ? p.title : '(제목 없음)';
-    const _ctext = (text && text.length > 500) ? (text.slice(0, 500) + ' …') : (text || '');
-    const _msg = `💬 *${_kind}* · ${_author}  _( ${_time} )_\n${_ctext}`;  // v2.3.173: 스레드용 — 본문 위주
-    _boardDispatch(p.id, _isReply ? 'reply' : 'comment', _msg);
-  } catch(e) { console.warn('[v2.3.23] board_comment 알림 실패:', e); }
   input.value = '';
   input.style.height = '36px';
   // 답글 모드 초기화
   if (input.dataset) { input.dataset.parentId = ''; }
   input.placeholder = '댓글을 남겨보세요... (Shift+Enter 줄바꿈)';
   renderFeed();
+  // v2.3.243: 디바운스 saveData() 는 Firestore 반영 전에 새로고침/이탈/타사용자 저장 시 댓글이
+  //   유실되는데(슬랙은 이미 발송) → 즉시·검증 저장 saveDataNow() 로 Firestore 확정 후에만 슬랙 발송.
+  let _saved = false;
+  try {
+    if (typeof saveDataNow === 'function') { await saveDataNow(); _saved = true; }
+    else { saveData(); _saved = true; }
+  } catch(e) {
+    console.warn('[v2.3.243] 댓글 저장 실패:', e);
+    try { showNotif('댓글 저장 실패 — 네트워크 확인 후 다시 시도해주세요', 'warning'); } catch(_){}
+  }
+  // v2.3.23: 댓글/대댓글 슬랙 알림 (저장 확정 후에만 — '슬랙만 가고 댓글 유실' 방지)
+  if (_saved) {
+    try {
+      const _isReply = !!parentId;
+      const _kind = _isReply ? '대댓글' : '댓글';
+      const _author = (u && u.name) ? u.name : '익명';
+      const _time = _kstShortTimeMin();
+      const _ctext = (text && text.length > 500) ? (text.slice(0, 500) + ' …') : (text || '');
+      const _msg = `💬 *${_kind}* · ${_author}  _( ${_time} )_\n${_ctext}`;  // v2.3.173: 스레드용 — 본문 위주
+      _boardDispatch(p.id, _isReply ? 'reply' : 'comment', _msg);
+    } catch(e) { console.warn('[v2.3.23] board_comment 알림 실패:', e); }
+  }
 }
 
-function deleteFeedComment(postId, commentId){
+async function deleteFeedComment(postId, commentId){
   const p = DB.feedPosts.find(x => x.id === postId);
   if (!p || !Array.isArray(p.comments)) return;
   p.comments = p.comments.filter(c => c.id !== commentId);
-  try { saveData(); } catch(_){}
   renderFeed();
+  // v2.3.243: 삭제도 즉시·검증 저장 — 디바운스 중 이탈 시 '삭제가 되살아나는' 대칭 버그 방지
+  try {
+    if (typeof saveDataNow === 'function') await saveDataNow();
+    else saveData();
+  } catch(e) { console.warn('[v2.3.243] 댓글 삭제 저장 실패:', e); }
 }
 
 function toggleFeedAllComments(postId){
