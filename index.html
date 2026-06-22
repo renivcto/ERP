@@ -5240,14 +5240,16 @@ EXP YYYYMMDD 까지</textarea></div>
         </div>
         <input type="text" id="feed-post-summary" style="width:100%;background:transparent;border:0;outline:none;font-size:13px;color:#312e81;font-weight:500" placeholder="본문을 입력한 뒤 AI 한 줄 요약 버튼을 눌러 주세요">
       </div>
-      <!-- 이미지 첨부 -->
+      <!-- 이미지·파일 첨부 -->
       <div class="fg" style="margin-bottom:10px">
-        <label style="font-size:12px;color:#475569;font-weight:700;margin-bottom:6px;display:block">이미지 첨부</label>
-        <div id="feed-post-drop" ondragover="event.preventDefault();this.style.background='#eff6ff'" ondragleave="this.style.background='#f8fafc'" ondrop="handleFeedImagesDrop(event)" style="background:#f8fafc;border:1.5px dashed #cbd5e1;border-radius:10px;padding:14px;text-align:center;cursor:pointer;transition:all .15s" onclick="document.getElementById('feed-post-file').click()">
-          <div style="font-size:12px;color:#64748b;font-weight:600">📸 클릭·드래그·붙여넣기(Ctrl+V)로 이미지 추가</div>
-          <input type="file" id="feed-post-file" multiple accept="image/*" style="display:none" onchange="handleFeedImagesSelect(this.files)">
+        <label style="font-size:12px;color:#475569;font-weight:700;margin-bottom:6px;display:block">이미지·파일 첨부</label>
+        <div id="feed-post-drop" ondragover="event.preventDefault();this.style.background='#eff6ff'" ondragleave="this.style.background='#f8fafc'" ondrop="handleFeedAttachDrop(event)" style="background:#f8fafc;border:1.5px dashed #cbd5e1;border-radius:10px;padding:14px;text-align:center;cursor:pointer;transition:all .15s" onclick="document.getElementById('feed-post-file').click()">
+          <div style="font-size:12px;color:#64748b;font-weight:600">📎 클릭·드래그·붙여넣기(Ctrl+V)로 이미지·파일 추가</div>
+          <div style="font-size:10.5px;color:#94a3b8;margin-top:3px">이미지 · PDF · 문서 모두 가능 (파일당 15MB 이하)</div>
+          <input type="file" id="feed-post-file" multiple style="display:none" onchange="handleFeedAttachSelect(this.files);this.value=''">
         </div>
         <div id="feed-post-images" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>
+        <div id="feed-post-files" style="display:flex;flex-direction:column;gap:5px;margin-top:8px"></div>
       </div>
       <!-- 핀 고정 -->
       <div class="fg" style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
@@ -5836,7 +5838,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.237';
+const ERP_VERSION = 'v2.3.238';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -11945,6 +11947,25 @@ window._notesOpenPostDetail = function(postId) {
             onmouseleave="this.style.transform=''">`).join('')}
       </div>` : '';
 
+    // v2.3.238: 일반 파일(비이미지) 첨부 — 다운로드 칩
+    const _npFiles = Array.isArray(p.files) ? p.files.filter(f => f && (f.url || f.data)) : [];
+    const filesHtml = _npFiles.length ? `
+      <div style="margin-top:16px;display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:11px;font-weight:800;color:#64748b;letter-spacing:.3px">📎 첨부파일 ${_npFiles.length}</div>
+        ${_npFiles.map(f => {
+          const href = f.url || f.data || '';
+          const sz = f.size ? (f.size>=1024*1024 ? (f.size/1024/1024).toFixed(1)+'MB' : Math.round(f.size/1024)+'KB') : '';
+          const icon = (f.type||'').indexOf('pdf')>=0 ? '📕' : ((f.type||'').indexOf('image/')===0 ? '🖼️' : '📄');
+          const nm = escFn(f.name||'첨부파일');
+          return `<a href="${href}" target="_blank" rel="noopener" download="${nm}" onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:9px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;text-decoration:none;transition:background .12s" onmouseenter="this.style.background='#eef2ff'" onmouseleave="this.style.background='#f8fafc'">
+            <span style="font-size:18px">${icon}</span>
+            <span style="flex:1;min-width:0;font-size:12.5px;font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${nm}</span>
+            <span style="font-size:10.5px;color:#64748b;flex-shrink:0">${sz}</span>
+            <span style="font-size:11px;color:#4338ca;font-weight:700;flex-shrink:0">다운로드 ↓</span>
+          </a>`;
+        }).join('')}
+      </div>` : '';
+
     // v1.9.555: 인터랙티브 반응 + 댓글 영역 (별도 컨테이너 id 부여 → 클릭 후 부분 새로고침)
     //   외부 영역(<div id="notes-detail-interactive">)이 모달 안에 있고,
     //   _notesDetailRefresh() 가 이 영역을 다시 그림.
@@ -11990,6 +12011,7 @@ window._notesOpenPostDetail = function(postId) {
           </div>` : ''}
           <div class="feed-body" style="font-size:14px;color:#334155;line-height:1.75;word-break:keep-all;letter-spacing:-.1px;max-height:none;overflow:visible">${bodyHtmlDetail}</div>
           ${imagesHtml}
+          ${filesHtml}
           <!-- v1.9.555: 반응 + 댓글 인터랙티브 영역 (id 컨테이너 → 부분 새로고침) -->
           <div id="notes-detail-interactive" style="margin-top:18px;padding-top:16px;border-top:1px solid #f1f5f9">
             ${_notesDetailInteractiveHtml(p)}
@@ -29659,6 +29681,7 @@ const FEED_REACTIONS = ['👍','❤️','🎉','👏','🔥','🤔','🙌','💡
 let _feedSelectedDate = null; // null = 전체
 let _feedSelectedCategory = null; // null = 전체
 let _feedEditingImages = []; // 현재 작성 중 이미지 배열(base64)
+let _feedAttachments = [];   // v2.3.238: 현재 작성 중 일반 파일(비이미지) 첨부 [{name,type,size,data|url,storagePath}]
 let _feedEditingCategory = 'free';
 let _feedMainPostId = null; // v1.9.244: 왼쪽 메인 카드에 표시할 포스트 id (null = 가장 최신)
 // v1.9.241: 로컬 타임존(KST) 기준 YYYY-MM-DD 반환 — 기존 toISOString().slice(0,10)은
@@ -30326,6 +30349,7 @@ window._sanitizeFeedHtml = function(html) {
 // ── 모달: 작성 / 수정 ──────────────────────────────────
 function openFeedPostModal(postId){
   _feedEditingImages = [];
+  _feedAttachments = [];  // v2.3.238
   _feedEditingCategory = 'free';
   document.getElementById('feed-post-id').value = '';
   document.getElementById('feed-post-title').value = '';
@@ -30356,6 +30380,7 @@ function openFeedPostModal(postId){
       document.getElementById('feed-post-pinned').checked = !!p.pinned;
       _feedEditingCategory = p.category || 'free';
       _feedEditingImages = Array.isArray(p.images) ? [...p.images] : [];
+      _feedAttachments = Array.isArray(p.files) ? p.files.map(f => Object.assign({}, f)) : [];  // v2.3.238
       if (p.aiSummary) {
         document.getElementById('feed-post-summary').value = p.aiSummary;
       }
@@ -30368,6 +30393,7 @@ function openFeedPostModal(postId){
   }
   renderFeedPostCategoryPicker();
   renderFeedPostImages();
+  renderFeedPostFiles();  // v2.3.238
   openModal('feed-post');
   // 붙여넣기 핸들러 등록
   document.removeEventListener('paste', _feedPasteHandler);
@@ -30467,6 +30493,86 @@ function _feedPasteHandler(ev){
   }
 }
 
+// v2.3.238: 첨부 드롭/선택 — 이미지는 기존 이미지 플로우, 그 외 파일은 일반 첨부(_feedAttachments)로 분기
+function _feedDispatchFile(file){
+  if (!file) return;
+  if (file.type && file.type.startsWith('image/')) addFeedImageFromFile(file);
+  else addFeedAttachmentFromFile(file);
+}
+function handleFeedAttachSelect(files){ if (files) [...files].forEach(_feedDispatchFile); }
+function handleFeedAttachDrop(ev){
+  ev.preventDefault();
+  ev.currentTarget.style.background = '#f8fafc';
+  if (ev.dataTransfer && ev.dataTransfer.files) [...ev.dataTransfer.files].forEach(_feedDispatchFile);
+}
+function addFeedAttachmentFromFile(file){
+  if (!file) return;
+  if (file.size > 15 * 1024 * 1024) { try { showNotif(`"${file.name}" 은(는) 15MB를 초과합니다`, 'warning'); } catch(_){} return; }
+  const reader = new FileReader();
+  reader.onload = ev => {
+    _feedAttachments.push({
+      name: file.name || ('file-' + Date.now()),
+      type: file.type || 'application/octet-stream',
+      size: file.size || 0,
+      data: ev.target.result   // base64 dataURL — 저장 시 Storage 업로드 후 url 로 교체
+    });
+    renderFeedPostFiles();
+  };
+  reader.readAsDataURL(file);
+}
+function removeFeedEditingFile(idx){ _feedAttachments.splice(idx, 1); renderFeedPostFiles(); }
+function _feedFmtSize(sz){ return sz ? (sz >= 1024*1024 ? (sz/1024/1024).toFixed(1)+'MB' : Math.round(sz/1024)+'KB') : ''; }
+function _feedFileIcon(type){ return (type||'').indexOf('pdf')>=0 ? '📕' : ((type||'').indexOf('image/')===0 ? '🖼️' : '📄'); }
+function renderFeedPostFiles(){
+  const box = document.getElementById('feed-post-files');
+  if (!box) return;
+  if (!_feedAttachments.length) { box.innerHTML = ''; return; }
+  box.innerHTML = _feedAttachments.map((at, idx) => {
+    const sz = _feedFmtSize(at.size);
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px">
+      <div style="width:34px;height:34px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0">${_feedFileIcon(at.type)}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(at.name||'첨부파일').replace(/</g,'&lt;')}</div>
+        <div style="font-size:10.5px;color:#64748b">${sz}${at.type?' · '+at.type:''}</div>
+      </div>
+      <button type="button" onclick="removeFeedEditingFile(${idx})" title="제거" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;padding:3px 8px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">✕</button>
+    </div>`;
+  }).join('');
+}
+
+// v2.3.238: 피드 파일 첨부를 Firebase Storage 에 업로드하고 post.files 의 data(base64)→url 로 치환.
+//   commentFiles/** 규칙 재사용(commentFiles/feed/<postId>/<idx>_<name>). Storage 미설정/실패 시
+//   작은 파일은 base64 인라인 유지(Firestore 1MB 한계 보호), 큰 파일은 데이터 제거 + 경고(graceful).
+async function _feedUploadAttachments(post){
+  if (!post || !Array.isArray(post.files) || !post.files.length) return;
+  for (let i = 0; i < post.files.length; i++){
+    const at = post.files[i];
+    if (!at) continue;
+    if (at.url && !at.data) continue;  // 이미 업로드됨
+    const d = at.data;
+    if (typeof d === 'string' && d.indexOf('http') === 0) { at.url = d; delete at.data; continue; }
+    if (typeof d !== 'string' || d.indexOf('data:') !== 0) continue;
+    let uploaded = false;
+    if (typeof window._storageUploadDataUrl === 'function') {
+      try {
+        const safe = String(at.name || 'file').replace(/[^\w.\-가-힣]/g, '_');
+        const path = 'commentFiles/feed/' + post.id + '/' + i + '_' + safe;
+        const url = await window._storageUploadDataUrl(path, d, at.type || '');
+        if (url) { at.url = url; at.storagePath = path; delete at.data; uploaded = true; }
+      } catch(e){ console.warn('[v2.3.238] 피드 첨부 Storage 업로드 실패:', e); }
+    }
+    if (!uploaded) {
+      if (d.length >= 700000) {
+        delete at.data; at.failed = true;
+        try { showNotif('⚠️ "' + (at.name||'파일') + '" 업로드 실패 — 너무 커서 저장 안 됨 (Storage 설정 확인)', 'warning'); } catch(_){}
+      } else {
+        try { showNotif('⚠️ "' + (at.name||'파일') + '" 은 이 기기에서만 보입니다 (Storage 설정 확인)', 'warning'); } catch(_){}
+      }
+    }
+  }
+  post.files = post.files.filter(f => f && (f.url || f.data));
+}
+
 async function saveFeedPost(){
   const id = document.getElementById('feed-post-id').value;
   const title = (document.getElementById('feed-post-title').value||'').trim();
@@ -30490,6 +30596,7 @@ async function saveFeedPost(){
       p.content = content;
       p.category = _feedEditingCategory;
       p.images = [..._feedEditingImages];
+      p.files = _feedAttachments.map(f => Object.assign({}, f));  // v2.3.238
       p.pinned = pinned;
       p.aiSummary = aiSummary;
       p.updatedAt = now;
@@ -30519,6 +30626,7 @@ async function saveFeedPost(){
       id: newId,
       title, content, category: _feedEditingCategory,
       images: [..._feedEditingImages],
+      files: _feedAttachments.map(f => Object.assign({}, f)),  // v2.3.238
       pinned, aiSummary,
       authorName: u.name,
       authorEmail: u.email,
@@ -30530,6 +30638,13 @@ async function saveFeedPost(){
     _feedMainPostId = null; // v1.9.244: 새 글이 메인 슬롯에 바로 뜨도록
     try { window._lastSavedFeedPostId = newId; } catch(_){}  // v2.3.173: 릴레이 매핑용 글ID 캡처
   }
+  // v2.3.238: 파일 첨부 Storage 업로드 — 즉시 플러시/동기화 전에 base64→url 치환(Firestore/localStorage 한계 회피)
+  try {
+    const _savedPost = isNew
+      ? DB.feedPosts.find(x => x && String(x.id) === String(window._lastSavedFeedPostId))
+      : DB.feedPosts.find(x => x && String(x.id) === String(id));
+    if (_savedPost) await _feedUploadAttachments(_savedPost);
+  } catch(e){ console.warn('피드 첨부 업로드 처리 실패:', e); }
   // v1.9.267/337 — localStorage 즉시 플러시 → 저장 전 닫힘/새로고침 방지
   //   이미지가 raw base64 채로 들어가면 quota 초과(5MB)로 silent fail → 새로고침 시 글이 사라지는 버그.
   //   이미지는 IDB + Firestore 공유 컬렉션에 별도 저장하고 localStorage 에는 '__idb__' 마커만 남긴다.
@@ -51324,14 +51439,20 @@ function initERPWhenReady() {
             });
             const mergedComments = [...commentById.values()].sort((a,b) => (a.createdAt||'').localeCompare(b.createdAt||''));
             if (mergedComments.length > srvComments.length) _commentRescued += (mergedComments.length - srvComments.length);
+            // v2.3.238: 첨부파일(files)도 합집합 — 동시 편집/타 사용자 첨부가 last-writer-wins 로 사라지지 않게.
+            const _fileKey = f => f && (f.url ? 'u:'+f.url : ('n:'+(f.name||'')+':'+(f.size||0)));
+            const _mergedFilesMap = new Map();
+            [...(Array.isArray(srvPost.files)?srvPost.files:[]), ...(Array.isArray(locPost.files)?locPost.files:[])].forEach(f => {
+              const k = _fileKey(f); if (k && !_mergedFilesMap.has(k)) _mergedFilesMap.set(k, f);
+            });
+            const mergedFiles = [..._mergedFilesMap.values()];
             // 본문/제목/이미지는 updatedAt이 더 최근인 쪽 사용
             const useLoc = locT && locT > srvT;
             const base = useLoc ? locPost : srvPost;
-            return {
-              ...base,
+            return Object.assign({}, base, {
               reactions: mergedReactions,
               comments: mergedComments,
-            };
+            }, mergedFiles.length ? { files: mergedFiles } : {});
           });
           if (_reactionRescued > 0 || _commentRescued > 0) {
             console.warn(`🛟 [FEED UNION] 반응 ${_reactionRescued}개, 댓글 ${_commentRescued}개 로컬에서 복구`);
