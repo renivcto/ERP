@@ -5836,7 +5836,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.231';
+const ERP_VERSION = 'v2.3.232';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7141,20 +7141,14 @@ async function _doSaveDataInner() {
             let _guardTombSkipped = 0;
             if (key === 'orders') {
               try {
-                const tombSet = Array.isArray(DB._deletedOrderSigs)
-                  ? new Set(DB._deletedOrderSigs.map(x => x && x.sig).filter(Boolean))
-                  : null;
-                if (tombSet && tombSet.size > 0 && typeof _orderSignatureV218 === 'function') {
+                const tombMap = (typeof _orderSigTombMap === 'function') ? _orderSigTombMap() : null;
+                if (tombMap && tombMap.size > 0 && typeof _orderSignatureV218 === 'function') {
                   const srvById = new Map(srvArr.map(o => [o && o.id, o]));
                   const _before = onlyOnServer.length;
                   onlyOnServer = onlyOnServer.filter(id => {
                     const o = srvById.get(id);
                     if (!o) return true;
-                    try {
-                      const sig = _orderSignatureV218(o);
-                      if (sig && tombSet.has(sig)) return false; // tombstone 이면 복원 제외
-                    } catch(_){}
-                    return true;
+                    return !_isOrderTombstoned(o, tombMap); // tombstone(삭제ts 이전 생성)이면 복원 제외, 삭제ts 이후 생성건은 보존
                   });
                   _guardTombSkipped = _before - onlyOnServer.length;
                   if (_guardTombSkipped > 0) {
@@ -9123,18 +9117,33 @@ function _clearOrderTombstoneForSig(sig) {
   DB._deletedOrderSigs = DB._deletedOrderSigs.filter(x => !x || x.sig !== sig);
   return before - DB._deletedOrderSigs.length;
 }
+// v2.3.232: 발주 tombstone 매칭 — '삭제 시점(ts) 이후 생성된 발주서'는 보존.
+//   발주번호(serial)가 비면 내용 기반 서명을 쓰는데, 과거 삭제 발주서와 서명이 우연히 겹쳐도
+//   '새로 만든' 발주서(createdAt > 삭제ts)는 지우지 않는다(다른 사용자에게 안 보이던 버그). 지출 v1.9.940 동일 패턴.
+function _orderSigTombMap(){
+  const m=new Map();
+  (Array.isArray(DB._deletedOrderSigs)?DB._deletedOrderSigs:[]).forEach(x=>{ if(x&&x.sig){ const p=m.get(x.sig); const t=Number(x.ts)||0; if(p==null||t>p) m.set(x.sig,t); } });
+  return m;
+}
+function _isOrderTombstoned(o, tombMap){
+  if(!o) return false;
+  try{
+    const sig=_orderSignatureV218(o); if(!sig||!tombMap||!tombMap.has(sig)) return false;
+    let oTs=0; const raw=o.createdAt;
+    if(typeof raw==='number') oTs=raw;
+    else if(raw){ const n=Number(raw); oTs=(!isNaN(n)&&n>0)?n:(Date.parse(raw)||0); }
+    return !(oTs>tombMap.get(sig)); // 삭제 ts 이후 생성건이면 tombstoned 아님(보존)
+  }catch(_){ return false; }
+}
 function applyOrderTombstonesV226() {
   if (!Array.isArray(DB.orders) || !Array.isArray(DB._deletedOrderSigs) || DB._deletedOrderSigs.length === 0) return 0;
-  const tombSet = new Set(DB._deletedOrderSigs.map(x => x && x.sig).filter(Boolean));
-  if (tombSet.size === 0) return 0;
+  const tombMap = _orderSigTombMap();
+  if (tombMap.size === 0) return 0;
   const removedIds = [];
   const kept = [];
   DB.orders.forEach(o => {
     if (!o) return;
-    try {
-      const sig = _orderSignatureV218(o);
-      if (sig && tombSet.has(sig)) { removedIds.push(o.id); return; }
-    } catch(_){}
+    if (_isOrderTombstoned(o, tombMap)) { removedIds.push(o.id); return; }
     kept.push(o);
   });
   if (removedIds.length === 0) return 0;
@@ -52159,23 +52168,20 @@ function initERPWhenReady() {
         const bArr = JSON.parse(oBackup);
         const curr = DB.orders || [];
         // v1.9.226 — Tombstone 서명 집합 준비 (백업 복원 전 선제 차단)
-        let _tombSet = null;
+        let _tombMap = null;
         try {
-          if (Array.isArray(DB._deletedOrderSigs) && DB._deletedOrderSigs.length > 0 && typeof _orderSignatureV218 === 'function') {
-            _tombSet = new Set(DB._deletedOrderSigs.map(x => x && x.sig).filter(Boolean));
+          if (Array.isArray(DB._deletedOrderSigs) && DB._deletedOrderSigs.length > 0 && typeof _orderSigTombMap === 'function') {
+            _tombMap = _orderSigTombMap();
           }
         } catch(_){}
         if (Array.isArray(bArr) && bArr.length > curr.length) {
           const currIds = new Set(curr.map(o=>o&&o.id));
           let onlyInBackup = bArr.filter(o => o && !currIds.has(o.id));
-          // v1.9.226 — 삭제 Tombstone 에 있는 서명은 backup 에서도 되살리지 않음
+          // v1.9.226 — 삭제 Tombstone 서명은 backup 에서도 되살리지 않음 (단 삭제ts 이후 생성건은 보존 — v2.3.232)
           let _tombSkipped = 0;
-          if (_tombSet && _tombSet.size > 0) {
+          if (_tombMap && _tombMap.size > 0) {
             onlyInBackup = onlyInBackup.filter(o => {
-              try {
-                const sig = _orderSignatureV218(o);
-                if (sig && _tombSet.has(sig)) { _tombSkipped++; return false; }
-              } catch(_){}
+              if (_isOrderTombstoned(o, _tombMap)) { _tombSkipped++; return false; }
               return true;
             });
             if (_tombSkipped > 0) {
