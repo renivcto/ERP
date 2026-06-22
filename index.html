@@ -5838,7 +5838,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.241';
+const ERP_VERSION = 'v2.3.242';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -11659,6 +11659,36 @@ function _notesBuildCommentTree(comments) {
   sortRec(roots);
   return roots;
 }
+// v2.3.242: 댓글 첨부(이미지 썸네일 + 파일 다운로드 칩) 렌더 — 상세팝업/카드 양쪽 댓글 노드 공용.
+//   첨부는 comment.attachments=[{name,type,size,url}] (Storage URL). 스킴 화이트리스트로 href 보호.
+function _feedCommentAttachHtml(c){
+  var atts = (c && Array.isArray(c.attachments)) ? c.attachments.filter(function(a){ return a && (a.url || a.data); }) : [];
+  if (!atts.length) return '';
+  var esc2 = (typeof esc === 'function') ? esc : function(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(ch){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]); }); };
+  var safeHref = function(u){ var s = String(u||''); return /^(https?:|data:)/i.test(s) ? s.replace(/"/g,'%22').replace(/</g,'%3C') : '#'; };
+  var imgs = atts.filter(function(a){ return (a.type||'').indexOf('image/') === 0; });
+  var files = atts.filter(function(a){ return (a.type||'').indexOf('image/') !== 0; });
+  var html = '';
+  if (imgs.length){
+    html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">' + imgs.map(function(a){
+      var raw = a.url || a.data || '';
+      return '<img src="' + safeHref(raw) + '" onclick="event.stopPropagation();(typeof openFeedLightbox===\'function\'&&openFeedLightbox(\'' + encodeURIComponent(raw) + '\'))" alt="" style="width:84px;height:84px;object-fit:cover;border-radius:7px;border:1px solid #e2e8f0;cursor:zoom-in">';
+    }).join('') + '</div>';
+  }
+  if (files.length){
+    html += '<div style="display:flex;flex-direction:column;gap:4px;margin-top:6px">' + files.map(function(a){
+      var h = safeHref(a.url || a.data || '');
+      var sz = a.size ? (a.size>=1048576 ? (a.size/1048576).toFixed(1)+'MB' : Math.round(a.size/1024)+'KB') : '';
+      var ic = (a.type||'').indexOf('pdf') >= 0 ? '📕' : '📄';
+      return '<a href="' + h + '" target="_blank" rel="noopener" download="' + esc2(a.name||'파일') + '" onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:7px;padding:5px 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;text-decoration:none;max-width:300px">'
+        + '<span style="font-size:15px">' + ic + '</span>'
+        + '<span style="flex:1;min-width:0;font-size:11.5px;font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc2(a.name||'첨부파일') + '</span>'
+        + '<span style="font-size:10px;color:#64748b;flex-shrink:0">' + sz + ' ↓</span></a>';
+    }).join('') + '</div>';
+  }
+  return html;
+}
+
 function _notesRenderCommentNode(c, postId, myEmail, isAdmin, depth) {
   if (!c) return '';
   var escFn = (typeof esc === 'function') ? esc : function(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(ch){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]); }); };
@@ -11680,6 +11710,7 @@ function _notesRenderCommentNode(c, postId, myEmail, isAdmin, depth) {
     +     '<span style="font-size:10.5px;color:#94a3b8">' + timeStr + editedTag + '</span>'
     +   '</div>'
     +   '<div id="notes-cm-text-' + postId + '-' + c.id + '" style="font-size:13px;color:#334155;line-height:1.55;word-break:break-word">' + textSafe + '</div>'
+    +   _feedCommentAttachHtml(c)
     +   '<div id="notes-cm-actions-' + postId + '-' + c.id + '" style="display:flex;gap:5px;margin-top:4px;align-items:center;flex-wrap:wrap">'
     +     (depth < 3 ? '<button type="button" onclick="_notesDetailReplyComment(' + postId + ',\'' + c.id + '\')" style="background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;cursor:pointer">💬 답글</button>' : '')
     +     (canEdit ? '<button type="button" onclick="_notesDetailEditComment(' + postId + ',\'' + c.id + '\')" style="background:#eef2ff;border:1px solid #c7d2fe;color:#4338ca;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;cursor:pointer;margin-left:auto">✏️ 수정</button>' : '')
@@ -11784,12 +11815,16 @@ function _notesDetailInteractiveHtml(p) {
       ? _notesRenderCommentsTree(comments, p.id, myEmail, isAdmin)
       : '';
 
-  // 댓글 입력
+  // 댓글 입력 — v2.3.242: 이미지·파일 첨부 지원
   const inputArea = `
-    <div style="display:flex;gap:8px;align-items:flex-end;margin-top:12px">
-      <textarea id="notes-detail-comment-input" placeholder="댓글을 남겨주세요... (Shift+Enter 줄바꿈)" rows="1"
+    <div id="notes-cmt-attach-preview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;align-items:flex-end;margin-top:8px">
+      <button type="button" onclick="document.getElementById('notes-cmt-file').click()" title="이미지·파일 첨부" style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;height:36px;width:40px;font-size:16px;cursor:pointer;flex-shrink:0;color:#475569">📎</button>
+      <input type="file" id="notes-cmt-file" multiple style="display:none" onchange="_notesCmtAttachSelect(this.files);this.value=''">
+      <textarea id="notes-detail-comment-input" placeholder="댓글을 남겨주세요... (Shift+Enter 줄바꿈 · 이미지 붙여넣기 가능)" rows="1"
         style="flex:1;resize:none;min-height:36px;max-height:120px;line-height:1.5;padding:8px 12px;font-family:inherit;font-size:13px;border:1px solid #e2e8f0;border-radius:8px;outline:none"
         oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"
+        onpaste="_notesCmtPaste(event)"
         onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();_notesDetailAddComment(${p.id});}"></textarea>
       <button type="button" onclick="_notesDetailAddComment(${p.id})" style="background:#0f172a;color:#fff;border:0;border-radius:8px;padding:0 16px;height:36px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0">전송</button>
     </div>`;
@@ -11806,6 +11841,7 @@ function _notesDetailRefresh(postId) {
   const p = (DB.feedPosts || []).find(x => x && x.id === postId);
   if (!p) return;
   container.innerHTML = _notesDetailInteractiveHtml(p);
+  try { _notesCmtRenderPreview(); } catch(_){}  // v2.3.242: 재렌더 후에도 작성 중 첨부 미리보기 유지
 }
 
 async function _notesDetailToggleReaction(postId, emoji) {
@@ -11849,11 +11885,65 @@ function _notesDetailOpenPicker(ev, postId) {
   }, 0);
 }
 
-function _notesDetailAddComment(postId) {
+// v2.3.242: 댓글 첨부 컴포저 (상세 팝업 단일 입력 — 전역 1개 배열)
+window._notesCmtAttach = window._notesCmtAttach || [];
+function _notesCmtAttachSelect(files){ if (files) [...files].forEach(_notesCmtAddFile); }
+function _notesCmtPaste(ev){
+  var items = (ev.clipboardData||{}).items || [];
+  for (var i=0;i<items.length;i++){
+    if (items[i].kind === 'file'){ var f = items[i].getAsFile(); if (f){ _notesCmtAddFile(f); ev.preventDefault(); } }
+  }
+}
+function _notesCmtAddFile(file){
+  if (!file) return;
+  if (file.size > 50 * 1024 * 1024) { try { showNotif('"' + file.name + '" 은(는) 50MB를 초과합니다', 'warning'); } catch(_){} return; }
+  var reader = new FileReader();
+  reader.onload = function(ev){
+    window._notesCmtAttach.push({ name: file.name || ('file-'+Date.now()), type: file.type || 'application/octet-stream', size: file.size || 0, data: ev.target.result });
+    _notesCmtRenderPreview();
+  };
+  reader.readAsDataURL(file);
+}
+function _notesCmtAttachRemove(idx){ (window._notesCmtAttach||[]).splice(idx, 1); _notesCmtRenderPreview(); }
+function _notesCmtRenderPreview(){
+  var box = document.getElementById('notes-cmt-attach-preview');
+  if (!box) return;
+  var a = window._notesCmtAttach || [];
+  if (!a.length) { box.innerHTML = ''; return; }
+  box.innerHTML = a.map(function(at, idx){
+    var isImg = (at.type||'').indexOf('image/') === 0;
+    var prev = isImg ? '<img src="' + at.data + '" style="width:30px;height:30px;object-fit:cover;border-radius:5px;flex-shrink:0">' : '<span style="font-size:15px;flex-shrink:0">📄</span>';
+    var nm = (at.name||'파일').replace(/</g,'&lt;');
+    return '<div style="display:flex;align-items:center;gap:6px;padding:4px 7px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;max-width:200px">' + prev
+      + '<span style="flex:1;min-width:0;font-size:11px;font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + nm + '</span>'
+      + '<button type="button" onclick="_notesCmtAttachRemove(' + idx + ')" title="제거" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;cursor:pointer;flex-shrink:0">✕</button></div>';
+  }).join('');
+}
+// v2.3.242: 임의 첨부 배열을 Storage 업로드 → [{name,type,size,url}] 반환(실패분 제외, base64 durable 미포함)
+async function _feedUploadFileList(list, pathPrefix){
+  var out = [];
+  for (var i=0;i<list.length;i++){
+    var at = list[i]; if (!at) continue;
+    if (typeof at.url === 'string' && at.url.indexOf('http') === 0) { out.push({ name:at.name, type:at.type, size:at.size, url:at.url, storagePath:at.storagePath }); continue; }
+    var d = at.data;
+    if (typeof d !== 'string' || d.indexOf('data:') !== 0) continue;
+    if (typeof window._storageUploadDataUrl !== 'function') { try { showNotif('⚠️ Storage 미설정 — 첨부가 저장되지 않았습니다', 'warning'); } catch(_){} continue; }
+    try {
+      var safe = String(at.name||'file').replace(/[^\w.\-가-힣]/g, '_');
+      var path = pathPrefix + '/' + i + '_' + safe;
+      var url = await window._storageUploadDataUrl(path, d, at.type || '');
+      if (url) out.push({ name:at.name, type:at.type, size:at.size, url:url, storagePath:path });
+    } catch(e){ console.warn('[v2.3.242] 댓글 첨부 업로드 실패:', e); try { showNotif('⚠️ "' + (at.name||'파일') + '" 업로드 실패 — 다시 시도해주세요', 'warning'); } catch(_){} }
+  }
+  return out;
+}
+
+async function _notesDetailAddComment(postId) {
   const inp = document.getElementById('notes-detail-comment-input');
   if (!inp) return;
   const text = (inp.value||'').trim();
-  if (!text) return;
+  const pending = Array.isArray(window._notesCmtAttach) ? window._notesCmtAttach.slice() : [];
+  if (!text && !pending.length) return;
   const p = DB.feedPosts.find(x => x && x.id === postId);
   if (!p) return;
   if (!Array.isArray(p.comments)) p.comments = [];
@@ -11863,20 +11953,29 @@ function _notesDetailAddComment(postId) {
   let parentId = null;
   if (parentIdRaw) { var pn = Number(parentIdRaw); parentId = isNaN(pn) ? parentIdRaw : pn; }
   const newCid = Date.now() * 1000 + Math.floor(Math.random() * 1000);
-  p.comments.push({
+  // v2.3.242: 첨부 Storage 업로드 (있을 때만)
+  let _atts = [];
+  if (pending.length) {
+    try { showNotif('⏳ 첨부 업로드 중…', 'info'); } catch(_){}
+    try { _atts = await _feedUploadFileList(pending, 'commentFiles/feedcmt/' + postId + '/' + newCid); } catch(_){}
+  }
+  const _cmt = {
     id: newCid,
     text,
     parentId: parentId,
     authorName: u.name || '익명',
     authorEmail: u.email || '',
     createdAt: new Date().toISOString(),
-  });
+  };
+  if (_atts.length) _cmt.attachments = _atts;
+  p.comments.push(_cmt);
+  window._notesCmtAttach = [];  // 컴포저 초기화
   try { if (typeof saveDataNow === 'function') saveDataNow(); else if (typeof saveData === 'function') saveData(); } catch(_){}
   inp.value = '';
   inp.style.height = '36px';
   // 답글 모드 초기화
   if (inp.dataset) inp.dataset.parentId = '';
-  inp.placeholder = '댓글을 남겨주세요... (Shift+Enter 줄바꿈)';
+  inp.placeholder = '댓글을 남겨주세요... (Shift+Enter 줄바꿈 · 이미지 붙여넣기 가능)';
   var hint = document.getElementById('notes-reply-hint');
   if (hint) hint.remove();
   _notesDetailRefresh(postId);
@@ -11908,6 +12007,7 @@ window._notesOpenPostDetail = function(postId) {
   try {
     const p = (DB.feedPosts||[]).find(x => x && x.id === postId);
     if (!p) return;
+    window._notesCmtAttach = [];  // v2.3.242: 댓글 첨부 컴포저 초기화
 
     // 기존 팝업 제거
     document.getElementById('notes-post-detail-overlay')?.remove();
@@ -30949,6 +31049,7 @@ function _renderFeedCommentNode(c, postId, myEmail, isAdmin, depth) {
     +     '<span class="time" style="font-size:10.5px;color:#94a3b8">' + time + editedTag + '</span>'
     +   '</div>'
     +   '<div id="feed-cm-text-' + postId + '-' + c.id + '" style="font-size:12.5px;color:#1e293b;line-height:1.55;white-space:pre-wrap;word-break:break-word">' + textSafe + '</div>'
+    +   _feedCommentAttachHtml(c)
     +   (reactionsHtml ? '<div style="margin-top:4px">' + reactionsHtml + '</div>' : '')
     +   '<div id="feed-cm-actions-' + postId + '-' + c.id + '" style="display:flex;gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap">'
     +     '<button type="button" onclick="toggleFeedCmReactionPicker(this,' + JSON.stringify(postId) + ',' + JSON.stringify(c.id) + ')" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:1px solid #fcd34d;color:#92400e;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;cursor:pointer">😊 반응 ＋</button>'
