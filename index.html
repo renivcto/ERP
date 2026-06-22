@@ -5836,7 +5836,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.227';
+const ERP_VERSION = 'v2.3.228';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9913,16 +9913,14 @@ function _finTabCards(){
   const cardMaster = card
     ? `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span style="font-size:14px;font-weight:800;color:#0f172a;margin-right:2px">💳 법인 카드</span>
-        <input value="${_finEsc(card.alias||'')}" onchange="_finUpdateCard('${card.id}','alias',this.value)" placeholder="별칭" style="${inS};width:150px">
-        <input value="${_finEsc(card.cardName||'')}" onchange="_finUpdateCard('${card.id}','cardName',this.value)" placeholder="카드사" style="${inS};width:120px">
-        <input value="${_finEsc(card.last4||'')}" onchange="_finUpdateCard('${card.id}','last4',this.value)" placeholder="끝 4자리" style="${inS};width:90px">
+        <input value="${_finEsc(card.cardName||'')}" onchange="_finUpdateCard('${card.id}','cardName',this.value)" placeholder="카드사(예: 신한카드)" style="${inS};width:170px">
+        <input value="${_finEsc(card.last4||'')}" onchange="_finUpdateCard('${card.id}','last4',this.value)" placeholder="끝 4자리" style="${inS};width:100px">
         <button onclick="_finDelCard('${card.id}')" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:700;cursor:pointer">삭제</button>
       </div>`
     : `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="font-size:14px;font-weight:800;color:#0f172a;margin-right:2px">💳 법인 카드 등록</span>
-        <input id="fin-acard-alias" placeholder="별칭(예: 법인 신한)" style="${inS};width:170px">
-        <input id="fin-acard-name" placeholder="카드사" style="${inS};width:110px">
-        <input id="fin-acard-last4" placeholder="끝 4자리" style="${inS};width:90px">
+        <input id="fin-acard-name" placeholder="카드사(예: 신한카드)" style="${inS};width:200px">
+        <input id="fin-acard-last4" placeholder="끝 4자리" style="${inS};width:100px">
         <button onclick="_finAddCard()" style="background:#0f172a;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer">+ 카드 추가</button>
       </div>`;
   let allTxn=[]; Object.keys(F.cardTxns||{}).forEach(y=>{ (F.cardTxns[y]||[]).forEach(t=>{ if(!F.cardFilter||String(t.cardId)===String(F.cardFilter)) allTxn.push(t); }); });
@@ -9932,7 +9930,7 @@ function _finTabCards(){
   const rows=inRange.map(t=>{ const amt=Number(t.amount)||0; useSum+=amt; byCat[t.category||'']=(byCat[t.category||'']||0)+amt;
     return `<tr style="border-bottom:1px solid #f1f5f9">
       <td style="padding:6px 8px;white-space:nowrap">${_finEsc(t.date)}</td>
-      <td style="padding:6px 8px">${_finEsc(t.merchant||'')}${F.cardFilter?'':' <span style="color:#94a3b8;font-size:11px">('+_finEsc((cards.find(c=>String(c.id)===String(t.cardId))||{}).alias||'')+')</span>'}</td>
+      <td style="padding:6px 8px">${_finEsc(t.merchant||'')}${F.cardFilter?'':(function(){var _c=cards.find(c=>String(c.id)===String(t.cardId))||{};var _l=_c.alias||_c.cardName||'';return _l?' <span style="color:#94a3b8;font-size:11px">('+_finEsc(_l)+')</span>':'';})()}</td>
       <td style="padding:6px 8px;text-align:right;font-weight:600">${_finWon(amt)}</td>
       <td style="padding:6px 8px;font-size:11.5px;color:#64748b">${_finEsc(_finCatLabel(t.category)||'')}</td>
       <td style="padding:6px 8px;text-align:center"><button onclick="_finDelCardTxn('${t.id}')" style="background:none;border:0;color:#cbd5e1;cursor:pointer;font-size:14px" title="삭제">✕</button></td>
@@ -9975,9 +9973,9 @@ function _finSetCardFilter(v){ window._FIN.cardFilter=v; _finRender(); }
 async function _finAddCard(){
   if (typeof requireWrite==='function' && !requireWrite()) return;
   if ((window._FIN.cards||[]).length >= 1){ showNotif('법인 카드는 1개만 등록할 수 있습니다','warning'); return; }
-  const alias=(document.getElementById('fin-acard-alias').value||'').trim();
-  if(!alias){ showNotif('별칭을 입력하세요','warning'); return; }
-  window._FIN.cards.push({ id:_finId('card'), alias, cardName:(document.getElementById('fin-acard-name').value||'').trim(), last4:(document.getElementById('fin-acard-last4').value||'').trim(), active:true });
+  const cardName=(document.getElementById('fin-acard-name').value||'').trim();
+  if(!cardName){ showNotif('카드사를 입력하세요','warning'); return; }
+  window._FIN.cards.push({ id:_finId('card'), alias:'', cardName, last4:(document.getElementById('fin-acard-last4').value||'').trim(), active:true });
   await _finSaveCards(); showNotif('카드가 추가되었습니다','success'); _finRender();
 }
 async function _finUpdateCard(id,field,val){
