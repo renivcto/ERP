@@ -5836,7 +5836,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.232';
+const ERP_VERSION = 'v2.3.233';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28956,6 +28956,7 @@ let _orderStampName = null;
 
 // 날인 불필요 → 결재 전으로 되돌리기 (확인 후)
 function toggleStampNotRequired(orderId) {
+  if (typeof requireWrite==='function' && !requireWrite()) return;  // v2.3.233: 쓰기권한자만
   const idx = DB.orders.findIndex(o => o.id === orderId);
   if (idx < 0) { showNotif('발주서를 찾을 수 없습니다','warning'); return; }
   const o = DB.orders[idx];
@@ -28973,6 +28974,7 @@ function toggleStampNotRequired(orderId) {
 
 // 발주서 표에서 '없음' 클릭 시 바로 날인본 업로드
 function uploadStampForOrder(orderId, inputEl) {
+  if (typeof requireWrite==='function' && !requireWrite()) return;  // v2.3.233: 쓰기권한자만
   const file = inputEl && inputEl.files && inputEl.files[0];
   if (!file) return;
   if (file.size > 10 * 1024 * 1024) { showNotif('파일 크기는 10MB 이하여야 합니다','warning'); return; }
@@ -33091,7 +33093,8 @@ function renderApprovalPoTable() {
 }
 
 function getOrderApprovalStatus(o) {
-  const ap = DB.approvals.find(a => a.type === 'po_approval' && a.refId === o.id);
+  // v2.3.233: 타입 무관 비교(다른 매칭과 통일) — id 가 문자열/숫자 섞여도 결재상태 오판 방지
+  const ap = DB.approvals.find(a => a.type === 'po_approval' && String(a.refId) === String(o.id));
   if (ap) return ap.status;
   // 레거시 발주서(기존 것) — stampData 있거나 stampNotRequired면 완료로 간주
   if (o.stampData || o.stampNotRequired) return 'approved';
@@ -33100,6 +33103,7 @@ function getOrderApprovalStatus(o) {
 
 // v1.9.206: 결재 요청 페이지에서 날인 PDF 업로드 → 자동 결재 완료
 function uploadStampAndApprove(orderId, inputEl) {
+  if (typeof requireWrite==='function' && !requireWrite()) return;  // v2.3.233: 쓰기권한자만
   const file = inputEl && inputEl.files && inputEl.files[0];
   if (!file) return;
   if (file.size > 10 * 1024 * 1024) { showNotif('파일 크기는 10MB 이하여야 합니다','warning'); return; }
@@ -33126,6 +33130,7 @@ function uploadStampAndApprove(orderId, inputEl) {
 }
 
 function approveOrderFromTable(orderId) {
+  if (typeof requireWrite==='function' && !requireWrite()) return;  // v2.3.233: 쓰기권한자만
   const o = DB.orders.find(x => x.id === orderId);
   if (!o) return;
   if (!confirm(`발주서 #${orderId} (${vendorName(o.vendorId)})을(를) 결재 완료로 처리하시겠습니까?\n\n→ 결재 완료 PDF가 필요한 경우에는 발주서 편집 화면에서 날인 PDF를 첨부해 주세요.`)) return;
@@ -33157,6 +33162,7 @@ function toggleOrderTaxInvoice(orderId) {
 
 // v1.9.214: (orderId, category) 보조 키로 id 중복 방어
 async function togglePayStatus(expenseId, orderId, category) {
+  if (typeof requireWrite==='function' && !requireWrite()) return;  // v2.3.233: 쓰기권한자만
   // v2.2.67: 클릭한 expense ID 를 우선 정확 매칭 (String 비교)
   //   기존: _findExpenseByOrderAndCategory 가 paid 우선 선택 → 사용자가 미지급 버튼 클릭해도
   //         이미 지급완료인 다른 expense 가 토글되어 상태 뒤바뀌는 버그
@@ -40051,6 +40057,7 @@ function _overlayStampOnCeoCell(dataUrl) {
 
 // v1.9.997: 결재 완료 저장 — 현재 오버레이된 도장 이미지를 DB 에 저장하고 결재 상태 전환
 function _savePoApprovalStamp() {
+  if (typeof requireWrite==='function' && !requireWrite()) return;  // v2.3.233: 쓰기권한자만
   try {
     var orderId = window._poSheetOrderId;
     if (orderId == null) { try { showNotif('대상 발주서 정보를 찾을 수 없습니다','warning'); } catch(_){} return; }
@@ -40096,6 +40103,7 @@ function _savePoApprovalStamp() {
 }
 
 function _applyPoApprovalStamp(inputEl) {
+  if (typeof requireWrite==='function' && !requireWrite()) return;  // v2.3.233: 쓰기권한자만
   if (!inputEl || !inputEl.files || !inputEl.files[0]) return;
   var file = inputEl.files[0];
   if (!/^image\//.test(file.type)) { try { showNotif('이미지 파일만 가능합니다','warning'); } catch(_){} return; }
