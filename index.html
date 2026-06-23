@@ -5784,7 +5784,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.260';
+const ERP_VERSION = 'v2.3.261';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -19557,10 +19557,33 @@ function _ceUseOrderQtyAll() {
 }
 
 // BOM 행 렌더 (제품 선택 또는 수정 모드에서 호출)
+// v2.3.261: 제품(BOM) 없이 저장된 시나리오(신제품 COGS 등)의 수동 행 1줄 HTML — 자재명/수량/단가 직접 수정
+function _ceManualRowHtml(r){
+  r = r || {};
+  const name = String(r.itemName||'항목').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  const perUnit = Number(r.perUnit)||0;
+  const qty = Number(r.qty)||0;
+  const price = Number(r.unitPrice)||0;
+  const sub = qty*price;
+  return '<tr data-ce-row="1" data-item-id="0" data-per-unit="'+perUnit+'" data-item-name="'+name+'" style="border-bottom:1px solid #f1f5f9">'
+    + '<td style="padding:4px 6px"><input type="text" class="ce-row-name" value="'+name+'" oninput="this.closest(\'tr\').dataset.itemName=this.value" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-weight:600"></td>'
+    + '<td style="padding:6px 8px;text-align:center;color:#64748b;font-size:11px">-</td>'
+    + '<td style="padding:6px 8px;text-align:center;color:#64748b;font-variant-numeric:tabular-nums">'+_ceFmtQty(perUnit)+'</td>'
+    + '<td style="padding:4px 6px"><input type="number" class="ce-row-qty" value="'+_ceFmtQty(qty)+'" min="0" step="any" oninput="_ceCalcRowSubtotal(this.closest(\'tr\'));_ceRecalcAll();" style="width:100%;padding:4px 6px;text-align:center;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums"></td>'
+    + '<td style="padding:4px 6px"><input type="number" class="ce-row-price" value="'+price+'" data-source="manual" min="0" step="any" oninput="_ceCalcRowSubtotal(this.closest(\'tr\'));_ceRecalcAll();" style="width:100%;padding:4px 6px;text-align:center;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;font-variant-numeric:tabular-nums"></td>'
+    + '<td class="ce-row-subtotal" style="padding:6px 8px;text-align:center;font-weight:700;color:#0f172a;font-variant-numeric:tabular-nums">₩'+Math.round(sub).toLocaleString()+'</td>'
+    + '<td style="padding:6px 8px;text-align:center;white-space:nowrap"><span style="background:#f0fdf4;color:#15803d;padding:2px 6px;border-radius:3px;font-size:9.5px;font-weight:700">수동</span> <button type="button" onclick="_ceRemoveBomRow(this.closest(\'tr\'))" title="행 제거" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;padding:2px 5px;border-radius:4px;font-size:10px;cursor:pointer;margin-left:4px;line-height:1">🗑</button></td>'
+    + '</tr>';
+}
 function _ceRenderBomRows(productId, productionQty, existingRows) {
   const tbody = document.getElementById('ce-bom-rows');
   if (!tbody) return;
   if (!productId) {
+    // v2.3.261: 제품 없이 저장된 시나리오(신제품 COGS 등)는 저장된 행을 수동 편집 가능하게 표시
+    if (Array.isArray(existingRows) && existingRows.length) {
+      tbody.innerHTML = existingRows.map(r => _ceManualRowHtml(r)).join('');
+      return;
+    }
     tbody.innerHTML = '<tr><td colspan="7" style="padding:18px;text-align:center;color:#94a3b8">제품을 선택하면 BOM 자재가 표시됩니다</td></tr>';
     return;
   }
@@ -19745,12 +19768,8 @@ function _ceRecalcAll() {
 // 폼 → 객체로 수집
 function _ceCollectData() {
   const productId = parseInt(document.getElementById('ce-product').value || '0');
-  if (!productId) { showNotif('제품을 선택하세요', 'warning'); return null; }
-  const item = (DB.items || []).find(i => i.id === productId) || {};
   const productionQty = parseFloat(document.getElementById('ce-qty').value) || 0;
   if (!productionQty) { showNotif('생산 수량을 입력하세요', 'warning'); return null; }
-  const scenarioName = document.getElementById('ce-scenario').value.trim() || ((item.name || '제품') + ' · ' + new Date().toISOString().slice(0,10));
-  const memo = document.getElementById('ce-memo').value || '';
   // BOM 행 수집
   const bomRows = [];
   const tbody = document.getElementById('ce-bom-rows');
@@ -19762,12 +19781,26 @@ function _ceCollectData() {
       const q = parseFloat(tr.querySelector('.ce-row-qty')?.value) || 0;
       const p = parseFloat(tr.querySelector('.ce-row-price')?.value) || 0;
       const priceSource = tr.querySelector('.ce-row-price')?.dataset.source || 'order';
+      // v2.3.261: 수동 행(itemId 0)은 data-item-name 사용
+      const itemName = it.name || tr.dataset.itemName || '';
       bomRows.push({
-        itemId, itemName: it.name || '', itemCode: it.code || '',
+        itemId, itemName, itemCode: it.code || '',
         perUnit, qty: q, unitPrice: p, subtotal: q * p, priceSource
       });
     });
   }
+  // v2.3.261: 제품(BOM) 없이도 행이 있으면 저장 허용 — 신제품 COGS·수동 시나리오 수정 가능
+  if (!productId && bomRows.length === 0) { showNotif('제품을 선택하거나 생산 수량 행을 입력하세요', 'warning'); return null; }
+  const item = (DB.items || []).find(i => i.id === productId) || {};
+  // 제품 없을 때 productName 은 기존 시나리오 값 보존(수정 시 표의 '제품' 열 유지)
+  let productName = item.name || '';
+  if (!productId) {
+    const _editId = (document.getElementById('ce-edit-id')||{}).value;
+    const _ex = (DB.costEstimates||[]).find(e => String(e.id) === String(_editId));
+    productName = (_ex && _ex.productName) || '';
+  }
+  const scenarioName = document.getElementById('ce-scenario').value.trim() || ((item.name || productName || '시나리오') + ' · ' + new Date().toISOString().slice(0,10));
+  const memo = document.getElementById('ce-memo').value || '';
   // 추가 비용 행 수집
   const extraRows = (window._ceExtraRows || []).filter(r => r && (r.label || r.amount));
   const totalMaterial = bomRows.reduce((s, r) => s + (r.subtotal || 0), 0);
@@ -19775,7 +19808,7 @@ function _ceCollectData() {
   const totalCost = totalMaterial + totalExtra;
   const perUnitCost = productionQty > 0 ? totalCost / productionQty : 0;
   return {
-    scenarioName, productId, productName: item.name || '', productionQty,
+    scenarioName, productId: productId || '', productName, productionQty,
     bomRows, extraRows: extraRows.slice(),
     totalMaterial, totalExtra, totalCost, perUnitCost, memo
   };
