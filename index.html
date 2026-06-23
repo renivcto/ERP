@@ -5784,7 +5784,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.262';
+const ERP_VERSION = 'v2.3.263';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -19329,7 +19329,7 @@ function _ceNpOnSelect() {
   const nm=document.getElementById('ce-np-name'); if(nm && !nm.value) nm.value='[신제품] '+(p.name||'');
   _ceNpCalc();
 }
-function _ceNpExtraSum(){ return (window._ceNpExtra||[]).reduce((s,r)=>s+(Number(r&&r.amount)||0),0); }
+function _ceNpExtraSum(){ return (window._ceNpExtra||[]).reduce((s,r)=>s+((Number(r&&r.unitPrice)||0)*(Number(r&&r.qty)||0)),0); }
 function _ceNpCalc() {
   const p = _ceNpFindProd();
   const cogs = p ? (Number(p.bomCost)||0) : 0;
@@ -19337,10 +19337,10 @@ function _ceNpCalc() {
   const el = document.getElementById('ce-np-total');
   if (el) el.textContent = '₩'+(cogs*qty + _ceNpExtraSum()).toLocaleString();
 }
-// v2.3.262: 신제품 예상 비용 모달의 추가 비용 행
+// v2.3.262/263: 신제품 예상 비용 모달의 추가 비용 행 (단가 × 수량 = 합계)
 function _ceNpAddExtra(){
   if (!Array.isArray(window._ceNpExtra)) window._ceNpExtra = [];
-  window._ceNpExtra.push({ label:'', amount:0 });
+  window._ceNpExtra.push({ label:'', unitPrice:0, qty:1 });
   _ceNpRenderExtra();
 }
 function _ceNpRemoveExtra(i){
@@ -19348,19 +19348,29 @@ function _ceNpRemoveExtra(i){
   window._ceNpExtra.splice(i,1);
   _ceNpRenderExtra(); _ceNpCalc();
 }
+function _ceNpExUpdate(i){
+  const r = (window._ceNpExtra||[])[i]; if (!r) return;
+  const el = document.getElementById('ce-np-ex-sum-'+i);
+  if (el) el.textContent = '= ₩'+((Number(r.unitPrice)||0)*(Number(r.qty)||0)).toLocaleString();
+  _ceNpCalc();
+}
 function _ceNpRenderExtra(){
   const box = document.getElementById('ce-np-extra-rows');
   if (!box) return;
   const arr = window._ceNpExtra || [];
   if (!arr.length){ box.innerHTML = '<div style="font-size:11.5px;color:#cbd5e1;padding:2px 0">아직 없음 · "+ 비용 추가" 클릭</div>'; return; }
-  box.innerHTML = arr.map((r,i)=>
-    '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">'
-    + '<input value="'+String(r.label||'').replace(/"/g,'&quot;')+'" placeholder="항목명 (예: 인건비)" oninput="window._ceNpExtra['+i+'].label=this.value" style="flex:1;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:13px;outline:none">'
-    + '<input type="number" value="'+(Number(r.amount)||0)+'" placeholder="금액" oninput="window._ceNpExtra['+i+'].amount=parseFloat(this.value)||0;_ceNpCalc()" style="width:130px;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:13px;text-align:right;outline:none">'
-    + '<span style="font-size:12px;color:#94a3b8">원</span>'
-    + '<button type="button" onclick="_ceNpRemoveExtra('+i+')" title="제거" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:6px;padding:5px 9px;font-size:12px;font-weight:700;cursor:pointer">✕</button>'
-    + '</div>'
-  ).join('');
+  box.innerHTML = arr.map((r,i)=>{
+    const amt = (Number(r.unitPrice)||0)*(Number(r.qty)||0);
+    return '<div style="border:1px solid #eef2f7;border-radius:8px;padding:8px 8px 6px;margin-bottom:6px;background:#fafbff">'
+      + '<input value="'+String(r.label||'').replace(/"/g,'&quot;')+'" placeholder="항목명 (예: 용기 MOQ)" oninput="window._ceNpExtra['+i+'].label=this.value" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 9px;font-size:13px;outline:none;margin-bottom:6px;box-sizing:border-box">'
+      + '<div style="display:flex;gap:5px;align-items:center">'
+      +   '<input type="number" value="'+(Number(r.unitPrice)||0)+'" placeholder="단가" oninput="window._ceNpExtra['+i+'].unitPrice=parseFloat(this.value)||0;_ceNpExUpdate('+i+')" title="단가" style="flex:1;min-width:0;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;text-align:right;outline:none">'
+      +   '<span style="font-size:11.5px;color:#94a3b8">원</span><span style="font-size:12px;color:#94a3b8">×</span>'
+      +   '<input type="number" value="'+(Number(r.qty)||0)+'" placeholder="수량" oninput="window._ceNpExtra['+i+'].qty=parseFloat(this.value)||0;_ceNpExUpdate('+i+')" title="수량" style="width:62px;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;text-align:right;outline:none">'
+      +   '<span id="ce-np-ex-sum-'+i+'" style="margin-left:auto;font-size:12.5px;font-weight:700;color:#0f172a;white-space:nowrap">= ₩'+amt.toLocaleString()+'</span>'
+      +   '<button type="button" onclick="_ceNpRemoveExtra('+i+')" title="제거" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:6px;padding:5px 9px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0">✕</button>'
+      + '</div></div>';
+  }).join('');
 }
 async function _ceNpSave() {
   if (typeof requireWrite === 'function' && !requireWrite()) return;
@@ -19374,8 +19384,8 @@ async function _ceNpSave() {
   const now = Date.now();
   const mat = cogs*qty;
   // v2.3.262: 추가 비용 반영
-  const extraRows = (window._ceNpExtra||[]).filter(r => r && (String(r.label||'').trim() || Number(r.amount)>0))
-    .map(r => ({ label: String(r.label||'').trim() || '추가비용', unitPrice: Number(r.amount)||0, qty: 1, amount: Number(r.amount)||0, memo: '' }));
+  const extraRows = (window._ceNpExtra||[]).filter(r => r && (String(r.label||'').trim() || (Number(r.unitPrice)||0)*(Number(r.qty)||0) > 0))
+    .map(r => { const up=Number(r.unitPrice)||0, q=Number(r.qty)||0; return { label: String(r.label||'').trim() || '추가비용', unitPrice: up, qty: q, amount: up*q, memo: '' }; });
   const totalExtra = extraRows.reduce((s,r)=>s+(Number(r.amount)||0),0);
   const total = mat + totalExtra;
   if (!Array.isArray(DB.costEstimates)) DB.costEstimates = [];
