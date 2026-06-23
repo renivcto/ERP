@@ -5784,7 +5784,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.259';
+const ERP_VERSION = 'v2.3.260';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9675,8 +9675,9 @@ function _finRender(){
 // v2.3.259: 생산 예상 비용 탭 본문 — 작성 버튼 + 저장된 시나리오 표 + 선택 합계 (모달은 상시 오버레이)
 function _finTabCostest(){
   return `
-  <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
     <button onclick="_ceNewEstimate()" style="background:#be185d;color:#fff;border:0;border-radius:9px;padding:9px 18px;font-size:13.5px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;box-shadow:0 2px 8px rgba(190,24,93,.28)">📝 새 예상 비용 작성</button>
+    <button onclick="_ceNewFromNewProduct()" title="제품개발 중 신제품의 예상 COGS 로 시나리오 생성" style="background:#fff;color:#be185d;border:1.5px solid #fbcfe8;border-radius:9px;padding:9px 18px;font-size:13.5px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px">🌱 신제품 예상 비용</button>
   </div>
   <div class="card">
     <div class="card-hdr"><span class="card-title">📋 저장된 시나리오 <span id="ce-list-count" style="font-size:11px;color:var(--gray-500);font-weight:500;margin-left:6px"></span></span></div>
@@ -19257,6 +19258,99 @@ function _ceNewEstimate() {
   try { _ceResetForm(); } catch(_){}
   _ceOpenModal();
   setTimeout(function(){ var el = document.getElementById('ce-scenario'); if (el) el.focus(); }, 120);
+}
+
+// v2.3.260: '신제품 예상 비용' — 제품개발 중 신제품의 예상 COGS(bomCost)로 생산 예상 비용 시나리오 생성
+function _ceEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]); }); }
+function _ceNewFromNewProduct() {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  document.getElementById('ce-np-overlay')?.remove();
+  const prods = (DB.newProducts||[]).filter(p => p && p.stage === 'developing' && String(p.name||'').trim());
+  const inS = 'border:1px solid #d1d5db;border-radius:8px;padding:9px 11px;font-size:14px;width:100%;box-sizing:border-box;outline:none';
+  const opts = prods.length
+    ? '<option value="">— 신제품 선택 —</option>' + prods.map(p => `<option value="${_ceEsc(p.id)}">${_ceEsc(p.name)}</option>`).join('')
+    : '<option value="">제품개발 중 신제품이 없습니다</option>';
+  const ov = document.createElement('div');
+  ov.id = 'ce-np-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10045;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)';
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  ov.innerHTML = `<div onclick="event.stopPropagation()" style="background:#fff;border-radius:16px;max-width:480px;width:100%;box-shadow:0 24px 60px rgba(15,23,42,.3);overflow:hidden">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 22px;border-bottom:1px solid #f1f5f9">
+      <div style="font-size:16px;font-weight:800;color:#0f172a">🌱 신제품 예상 비용</div>
+      <button onclick="document.getElementById('ce-np-overlay')?.remove()" style="background:#f1f5f9;border:0;font-size:18px;color:#64748b;cursor:pointer;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center">✕</button>
+    </div>
+    <div style="padding:20px 22px;display:flex;flex-direction:column;gap:14px">
+      <div>
+        <label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">제품개발 중 신제품 선택</label>
+        <select id="ce-np-select" onchange="_ceNpOnSelect()" style="${inS}">${opts}</select>
+      </div>
+      <div id="ce-np-info" style="display:none;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;font-size:13px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;color:#475569;font-weight:600">예상 COGS (단위당) <b id="ce-np-cogs" style="color:#0f172a;font-size:15px">₩0</b></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:#94a3b8">예상 판매가 <span id="ce-np-price">₩0</span></div>
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">생산 수량</label>
+        <input id="ce-np-qty" type="number" min="0" placeholder="0" oninput="_ceNpCalc()" style="${inS};text-align:right">
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">시나리오명</label>
+        <input id="ce-np-name" placeholder="시나리오명" style="${inS}">
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;background:#fdf2f8;border:1px solid #fbcfe8;border-radius:10px;padding:12px 16px">
+        <span style="font-size:12px;color:#9d174d;font-weight:700">총 예상 비용 (COGS × 수량, VAT 별도)</span>
+        <b id="ce-np-total" style="font-size:20px;color:#be185d">₩0</b>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 22px;border-top:1px solid #f1f5f9;background:#fafbfc">
+      <button onclick="document.getElementById('ce-np-overlay')?.remove()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:9px 18px;font-size:13.5px;font-weight:700;cursor:pointer">취소</button>
+      <button onclick="_ceNpSave()" style="background:#be185d;color:#fff;border:0;border-radius:8px;padding:9px 22px;font-size:13.5px;font-weight:700;cursor:pointer">💾 시나리오 저장</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+function _ceNpFindProd(){ const id=(document.getElementById('ce-np-select')||{}).value; return (DB.newProducts||[]).find(x=>String(x.id)===String(id)); }
+function _ceNpOnSelect() {
+  const p = _ceNpFindProd();
+  const info = document.getElementById('ce-np-info');
+  if (!p) { if (info) info.style.display='none'; _ceNpCalc(); return; }
+  const cogs = Number(p.bomCost)||0;
+  const cEl=document.getElementById('ce-np-cogs'); if(cEl) cEl.textContent='₩'+cogs.toLocaleString();
+  const pEl=document.getElementById('ce-np-price'); if(pEl) pEl.textContent='₩'+(Number(p.price)||0).toLocaleString();
+  if (info) info.style.display='';
+  const nm=document.getElementById('ce-np-name'); if(nm && !nm.value) nm.value='[신제품] '+(p.name||'');
+  _ceNpCalc();
+}
+function _ceNpCalc() {
+  const p = _ceNpFindProd();
+  const cogs = p ? (Number(p.bomCost)||0) : 0;
+  const qty = parseInt((document.getElementById('ce-np-qty')||{}).value||'0',10)||0;
+  const el = document.getElementById('ce-np-total');
+  if (el) el.textContent = '₩'+(cogs*qty).toLocaleString();
+}
+async function _ceNpSave() {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  const p = _ceNpFindProd();
+  if (!p) { showNotif('신제품을 선택하세요','warning'); return; }
+  const cogs = Number(p.bomCost)||0;
+  if (!cogs) { showNotif('이 신제품에 예상 COGS 가 없습니다 (신제품 개발 > 수익성에서 입력)','warning'); return; }
+  const qty = parseInt((document.getElementById('ce-np-qty')||{}).value||'0',10)||0;
+  if (!qty) { showNotif('생산 수량을 입력하세요','warning'); return; }
+  const name = ((document.getElementById('ce-np-name')||{}).value||'').trim() || ('[신제품] '+(p.name||''));
+  const now = Date.now(); const total = cogs*qty;
+  if (!Array.isArray(DB.costEstimates)) DB.costEstimates = [];
+  DB.costEstimates.push({
+    id: 'est_'+now+'_'+Math.floor(Math.random()*1000),
+    scenarioName: name, productId: '', productName: p.name||'', productionQty: qty,
+    bomRows: [{ itemName:'예상 COGS (신제품 수익성)', itemCode:'', perUnit:1, qty:qty, unitPrice:cogs, subtotal:total, priceSource:'newproduct' }],
+    extraRows: [], totalMaterial: total, totalExtra: 0, totalCost: total, perUnitCost: cogs,
+    memo: '신제품 개발 수익성(예상 COGS)에서 생성 · COGS ₩'+cogs.toLocaleString()+'/개',
+    newProductId: p.id, createdAt: now, updatedAt: now
+  });
+  try { localStorage.setItem('renivCostEstimates', JSON.stringify(DB.costEstimates||[])); } catch(_){}
+  try { if (typeof saveData === 'function') saveData(); } catch(_){}
+  document.getElementById('ce-np-overlay')?.remove();
+  showNotif('✅ 신제품 예상 비용 시나리오 저장','success');
+  try { _ceRenderTable(); } catch(_){}
 }
 
 // ════════════════════════════════════════════════════════════════════
