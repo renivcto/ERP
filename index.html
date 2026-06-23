@@ -5841,7 +5841,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.247';
+const ERP_VERSION = 'v2.3.248';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -39482,8 +39482,8 @@ function _renderApCommentNode(c, depth) {
         const canPreview = type === 'application/pdf' || type === 'text/plain';
         const okData = a.data && a.data !== '__idb__' && typeof a.data === 'string' && (a.data.indexOf('data:') === 0 || a.data.indexOf('http') === 0);
         if (okData) {
-          const linkAttr = canPreview ? 'target="_blank"' : 'download="' + (a.name||'file').replace(/"/g,'&quot;') + '"';
-          h += '<a href="' + a.data + '" ' + linkAttr + ' style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;color:#1e40af;text-decoration:none;max-width:300px">'
+          // v2.3.248: data: URL 새탭 차단 우회 — 클릭 시 Blob 변환 열기/다운로드 핸들러로 라우팅
+          h += '<a href="#" onclick="return _apOpenCommentFile(event,\'' + c.id + '\',' + ai + ')" title="클릭해 열기" style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;color:#1e40af;text-decoration:none;max-width:300px;cursor:pointer">'
             + '<span>📄</span>'
             + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (a.name||'?').replace(/</g,'&lt;') + '</span>'
             + (sz ? '<span style="font-size:10.5px;color:#94a3b8">' + sz + '</span>' : '')
@@ -39558,15 +39558,64 @@ async function _apRecoverCommentFile(commentId, ai, elId) {
         try { _saveSharedCommentImage(commentId, ai, data); } catch(_){}
       }
       if (el) {
-        const canPreview = type === 'application/pdf' || type === 'text/plain';
-        const linkAttr = canPreview ? 'target="_blank"' : 'download="' + String(name).replace(/"/g, '&quot;') + '"';
-        el.outerHTML = '<a href="' + data + '" ' + linkAttr + ' style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;color:#1e40af;text-decoration:none;max-width:300px"><span>📄</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + String(name).replace(/</g, '&lt;') + '</span></a>';
+        // v2.3.248: data: URL 새탭 차단 우회 — 핸들러 라우팅(위에서 at.data 채움 완료)
+        el.outerHTML = '<a href="#" onclick="return _apOpenCommentFile(event,\'' + commentId + '\',' + ai + ')" title="클릭해 열기" style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;color:#1e40af;text-decoration:none;max-width:300px;cursor:pointer"><span>📄</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + String(name).replace(/</g, '&lt;') + '</span></a>';
       }
     } else if (el) {
       el.innerHTML = '📄 ' + String(name).replace(/</g, '&lt;') + ' (미동기화)';
       el.title = '이 파일은 다른 기기에서 업로드되어 아직 동기화되지 않았거나 900KB 를 초과합니다. 작성자가 다시 열람하면 동기화됩니다.';
     }
   } catch(_){}
+}
+
+// v2.3.248: 댓글 첨부 파일 열기 — data: URL 은 새탭 네비게이션이 브라우저(크롬/엣지) 보안정책으로
+//   차단되어 클릭해도 안 열림. → Blob URL 로 변환해 미리보기(새탭)/다운로드. http(Storage) URL 은 그대로.
+//   base64 는 HTML 속성에 직접 넣지 않고 클릭 시 DB 에서 조회(속성 비대화·이스케이프 사고 방지).
+window._apOpenCommentFile = function(ev, commentId, ai){
+  try { if (ev && ev.preventDefault) { ev.preventDefault(); ev.stopPropagation(); } } catch(_){}
+  try {
+    const c = (DB.approvalComments||[]).find(x => x && String(x.id) === String(commentId));
+    const a = (c && Array.isArray(c.attachments)) ? c.attachments[ai] : null;
+    if (!a || !a.data || typeof a.data !== 'string') { try { showNotif('파일 데이터를 찾을 수 없습니다 (동기화 대기 중)', 'warning'); } catch(_){} return false; }
+    const src = a.data, name = a.name || 'file', type = (a.type||'').toLowerCase();
+    if (src.indexOf('http') === 0) { window.open(src, '_blank', 'noopener'); return false; }
+    if (src.indexOf('data:') === 0) {
+      const blob = _dataUrlToBlob(src, type);
+      if (!blob) { try { showNotif('파일 열기 실패', 'warning'); } catch(_){} return false; }
+      const url = URL.createObjectURL(blob);
+      const previewable = type === 'application/pdf' || type.indexOf('image/') === 0 || type === 'text/plain';
+      if (previewable) { const w = window.open(url, '_blank', 'noopener'); if (!w) _triggerDownload(url, name); }
+      else { _triggerDownload(url, name); }
+      setTimeout(function(){ try { URL.revokeObjectURL(url); } catch(_){} }, 60000);
+      return false;
+    }
+    window.open(src, '_blank', 'noopener');
+    return false;
+  } catch(e){ console.warn('[v2.3.248] 첨부 열기 실패:', e); try { showNotif('파일 열기 실패', 'warning'); } catch(_){} return false; }
+};
+function _dataUrlToBlob(dataUrl, fallbackType){
+  try {
+    const m = String(dataUrl).match(/^data:([^;,]*)?(;base64)?,([\s\S]*)$/);
+    if (!m) return null;
+    const mime = m[1] || fallbackType || 'application/octet-stream';
+    let bytes;
+    if (m[2]) { // base64
+      const bin = atob(m[3]);
+      bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    } else {
+      bytes = new TextEncoder().encode(decodeURIComponent(m[3]));
+    }
+    return new Blob([bytes], { type: mime });
+  } catch(e){ console.warn('_dataUrlToBlob:', e); return null; }
+}
+function _triggerDownload(url, name){
+  try {
+    const a = document.createElement('a');
+    a.href = url; a.download = name || 'file';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ try { a.remove(); } catch(_){} }, 0);
+  } catch(e){ console.warn('_triggerDownload:', e); }
 }
 
 // v2.3.206: 댓글 본문의 URL 을 클릭 가능한 링크로 (XSS 안전: 먼저 전체 이스케이프 → URL 토큰만 앵커화)
