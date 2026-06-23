@@ -5842,7 +5842,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.249';
+const ERP_VERSION = 'v2.3.250';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -50662,19 +50662,36 @@ async function saveSharedSetting(key, value) {
 
 async function loadSharedSetting(key) {
   // 1차: Firestore
+  let fsReadOk = false, fsExists = false, fsVal = null;
   if (window._firestoreGetDoc && window._firestoreDoc && window._firebaseDb) {
     try {
       const ref = window._firestoreDoc(window._firebaseDb, 'settings', key);
       const snap = await window._firestoreGetDoc(ref);
-      if (snap.exists()) return JSON.parse(snap.data().value);
+      fsReadOk = true;
+      if (snap.exists()) { fsExists = true; fsVal = JSON.parse(snap.data().value); }
     } catch(e) {}
   }
   // 2차: localStorage 백업
-  try {
-    const s = localStorage.getItem('reniv_shared_' + key);
-    if (s) return JSON.parse(s);
-  } catch(e) {}
-  return null;
+  let lsVal = null;
+  try { const s = localStorage.getItem('reniv_shared_' + key); if (s) lsVal = JSON.parse(s); } catch(e) {}
+
+  if (fsExists) {
+    try { localStorage.setItem('reniv_shared_' + key, JSON.stringify(fsVal)); } catch(_){}  // 로컬 캐시 동기화
+    return fsVal;
+  }
+  // v2.3.250: 자가복구 — Firestore 읽기는 성공했는데 문서가 '없고'(read OK + not-exists),
+  //   로컬에만 값이 있으면, 과거 저장이 Firestore 에 반영 안 된 것(=다른 사용자는 못 봄).
+  //   → 로컬 값을 Firestore 로 백필해 모든 사용자에게 공유되게 한다.
+  //   (읽기 자체가 실패(fsReadOk=false)했을 땐 문서 존재 여부를 모르므로 백필하지 않음 — 덮어쓰기 방지)
+  if (fsReadOk && !fsExists && lsVal != null
+      && window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
+    try {
+      const ref = window._firestoreDoc(window._firebaseDb, 'settings', key);
+      await window._firestoreSetDoc(ref, { value: JSON.stringify(lsVal) }, { merge: true });
+      console.log('[shared] ' + key + ' — localStorage→Firestore 백필(자가복구): 다른 사용자도 공유됨');
+    } catch(_){}
+  }
+  return lsVal;
 }
 
 // v1.9.336: 피드 포스트 이미지 공유 저장소 — Firestore feedImages 컬렉션
