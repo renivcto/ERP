@@ -5842,7 +5842,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.251';
+const ERP_VERSION = 'v2.3.252';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -50688,11 +50688,21 @@ async function exportToSheets() {
 
 // 설정에서 Web App URL 저장
 // ── Firestore 공유 설정 (회사정보, BOM마진, Trello) ───────────
+// v2.3.252: 컬렉션 라우팅 — firestore.rules 상 settings/{key} 는 '관리자만 read/write'(API키 등 민감).
+//   그래서 재무 카드·예산·지급완료 override 처럼 '전 직원이 읽어야 하는' 공유데이터를 settings 에 두면
+//   비관리자(다른 직원)는 못 읽어 안 보였음. → 이런 키는 shared/{key}(read:isActive, write:canWrite)로 보냄.
+//   민감 키(api_*, slack_*, *_webhook, trello_* 등)는 settings 유지.
+function _sharedSettingCollection(key) {
+  const k = String(key || '');
+  if (/^finance_/.test(k) || /^budget_/.test(k) || k === 'expense_paid_overrides' || k === 'company_info') return 'shared';
+  return 'settings';
+}
 async function saveSharedSetting(key, value) {
+  const coll = _sharedSettingCollection(key);
   // 1차: Firestore (있으면)
   if (window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
     try {
-      const ref = window._firestoreDoc(window._firebaseDb, 'settings', key);
+      const ref = window._firestoreDoc(window._firebaseDb, coll, key);
       await window._firestoreSetDoc(ref, { value: JSON.stringify(value) }, { merge: true });
     } catch(e) { console.warn('Firestore 저장 실패:', e); }
   }
@@ -50701,11 +50711,12 @@ async function saveSharedSetting(key, value) {
 }
 
 async function loadSharedSetting(key) {
+  const coll = _sharedSettingCollection(key);  // v2.3.252
   // 1차: Firestore
   let fsReadOk = false, fsExists = false, fsVal = null;
   if (window._firestoreGetDoc && window._firestoreDoc && window._firebaseDb) {
     try {
-      const ref = window._firestoreDoc(window._firebaseDb, 'settings', key);
+      const ref = window._firestoreDoc(window._firebaseDb, coll, key);
       const snap = await window._firestoreGetDoc(ref);
       fsReadOk = true;
       if (snap.exists()) { fsExists = true; fsVal = JSON.parse(snap.data().value); }
@@ -50721,14 +50732,15 @@ async function loadSharedSetting(key) {
   }
   // v2.3.250: 자가복구 — Firestore 읽기는 성공했는데 문서가 '없고'(read OK + not-exists),
   //   로컬에만 값이 있으면, 과거 저장이 Firestore 에 반영 안 된 것(=다른 사용자는 못 봄).
-  //   → 로컬 값을 Firestore 로 백필해 모든 사용자에게 공유되게 한다.
+  //   → 로컬 값을 Firestore(라우팅된 컬렉션)로 백필해 모든 사용자에게 공유되게 한다.
+  //   v2.3.252: settings→shared 라우팅 변경분도 이 백필로 자동 이관됨(관리자가 재진입 시).
   //   (읽기 자체가 실패(fsReadOk=false)했을 땐 문서 존재 여부를 모르므로 백필하지 않음 — 덮어쓰기 방지)
   if (fsReadOk && !fsExists && lsVal != null
       && window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
     try {
-      const ref = window._firestoreDoc(window._firebaseDb, 'settings', key);
+      const ref = window._firestoreDoc(window._firebaseDb, coll, key);
       await window._firestoreSetDoc(ref, { value: JSON.stringify(lsVal) }, { merge: true });
-      console.log('[shared] ' + key + ' — localStorage→Firestore 백필(자가복구): 다른 사용자도 공유됨');
+      console.log('[shared] ' + key + ' — localStorage→' + coll + ' 백필(자가복구): 다른 사용자도 공유됨');
     } catch(_){}
   }
   return lsVal;
