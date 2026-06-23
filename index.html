@@ -5842,7 +5842,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.250';
+const ERP_VERSION = 'v2.3.251';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -33570,7 +33570,8 @@ async function togglePayStatus(expenseId, orderId, category) {
   }
   e.updatedAt = Date.now();
   // v2.3.171: override 동기화 (paid → 기록 / requested → 해제) — 새로고침 후에도 상태 유지
-  try { _setExpensePaidOverride(e, e.paidDate || '', e.paidStatus === 'paid'); } catch(_){}
+  // v2.3.251: await 로 Firestore 반영 보장(반영 전 새로고침 race 차단)
+  try { await _setExpensePaidOverride(e, e.paidDate || '', e.paidStatus === 'paid'); } catch(_){}
   // v1.9.863: await 로 race condition 차단 — 두 토글 연속 시 첫 저장 완료 대기
   console.log('💳 [PAY TOGGLE] expense id=' + e.id + ' status=' + e.paidStatus + ' date=' + (e.paidDate||''));
   try {
@@ -33685,20 +33686,47 @@ function _expensePaidKey(e) {
   }
   return 'id:' + e.id;
 }
+// v2.3.251: id 와 무관한 콘텐츠 서명 키 — 비-PO 지출의 id 가 머지(reassignDuplicateExpenseIds)로
+//   재할당돼도 override 가 매칭되도록. dedupAllExpensesV216 의 서명과 동형.
+function _expensePaidSig(e) {
+  if (!e) return null;
+  return 'sig:' + [
+    e.category || '',
+    (e.vendor || '').trim(),
+    (e.title || '').trim(),
+    Math.round(Number(e.amount) || 0),
+    e.dueDate || '',
+    e.orderId || '',
+    e.sampleId || ''
+  ].join('|');
+}
+// v2.3.251: 한 expense 의 모든 후보 override 키(po / id / sig). 저장은 전부 기록, 적용은 any-match.
+function _expensePaidKeys(e) {
+  if (!e) return [];
+  const keys = [];
+  if (e.orderId && (e.category === 'po_prepay' || e.category === 'po_balance')) {
+    keys.push('po:' + e.orderId + ':' + e.category);
+  }
+  if (e.id != null) keys.push('id:' + e.id);
+  const sig = _expensePaidSig(e);
+  if (sig) keys.push(sig);
+  return keys;
+}
 async function _setExpensePaidOverride(e, paidDate, isPaid) {
   try {
-    const key = _expensePaidKey(e);
-    if (!key) return;
+    const keys = _expensePaidKeys(e);
+    if (!keys.length) return;
     let map = window._expensePaidOverrides;
     if (!map || typeof map !== 'object') {
       map = (typeof loadSharedSetting === 'function') ? await loadSharedSetting('expense_paid_overrides') : null;
       map = (map && typeof map === 'object' && !Array.isArray(map)) ? map : {};
       window._expensePaidOverrides = map;
     }
-    if (isPaid) map[key] = { paidDate: paidDate || '', ts: Date.now() };
-    else delete map[key];
+    // v2.3.251: id·sig 키를 모두 기록 → id 재할당돼도 sig 로 복원. rec.sig 로 id 오탐 차단.
+    if (isPaid) { const rec = { paidDate: paidDate || '', ts: Date.now(), sig: _expensePaidSig(e) || '' }; keys.forEach(k => { map[k] = rec; }); }
+    else keys.forEach(k => { delete map[k]; });
     if (typeof saveSharedSetting === 'function') await saveSharedSetting('expense_paid_overrides', map);
-    console.log('💾 [override] ' + (isPaid ? '지급완료' : '해제') + ' 기록: ' + key);
+    console.log('💾 [override] ' + (isPaid ? '지급완료' : '해제') + ' 기록: ' + keys.join('  '));
   } catch(err) { console.warn('[expense override] 저장 실패:', err); }
 }
 function _applyExpensePaidOverrides() {
@@ -33707,11 +33735,22 @@ function _applyExpensePaidOverrides() {
     if (!map || typeof map !== 'object') return 0;
     let applied = 0;
     (DB.expenses||[]).forEach(e => {
-      if (!e) return;
-      const key = _expensePaidKey(e);
-      if (key && map[key] && e.paidStatus !== 'paid') {
+      if (!e || e.paidStatus === 'paid') return;
+      // v2.3.251: po / id / sig 후보 키 중 하나라도 맞으면 paid 강제 복원.
+      //   단 'id:' 키는 다른 expense 가 같은 id 를 재사용했을 때 오탐할 수 있으므로,
+      //   기록에 sig 가 있으면 현재 expense sig 와 일치할 때만 인정(po/sig 키는 이미 정밀해 무조건 인정).
+      const eSig = _expensePaidSig(e);
+      const keys = _expensePaidKeys(e);
+      let rec = null;
+      for (const k of keys) {
+        const r = map[k];
+        if (!r) continue;
+        if (k.indexOf('id:') === 0 && r.sig && eSig && r.sig !== eSig) continue;  // id 재사용 오탐 차단
+        rec = r; break;
+      }
+      if (rec) {
         e.paidStatus = 'paid';
-        if (map[key].paidDate && !e.paidDate) e.paidDate = map[key].paidDate;
+        if (rec.paidDate && !e.paidDate) e.paidDate = rec.paidDate;
         e.updatedAt = Date.now();
         applied++;
       }
@@ -33723,7 +33762,7 @@ function _applyExpensePaidOverrides() {
 
 // v1.9.212: 지급 완료 처리 — strict id 비교 + 디바운스 우회 + 검증 + 2차 재렌더
 // v1.9.214: (orderId, category) 복합키 우선 사용 — 중복 id 시에도 정확한 레코드만 업데이트
-function confirmPayDate(expenseId, orderId, category) {
+async function confirmPayDate(expenseId, orderId, category) {
   // 클릭 시점 중복 id 자동 재할당 (혹시 모달 열린 사이 중복이 생겼더라도)
   try { _autoHealExpenseIdCollisions(expenseId); } catch(_){}
   // v2.3.167: 클릭한 expense id 우선 매칭 (paid-first 선택이 다른 행을 잡는 것 방지)
@@ -33762,7 +33801,8 @@ function confirmPayDate(expenseId, orderId, category) {
     }
   } catch(_twErr) { console.warn('[confirmPayDate] 쌍둥이 동기화 실패:', _twErr); }
   // v2.3.171: 전용 shared setting 에 지급완료 영속 기록 (머지/가드 되돌림 방지)
-  try { _setExpensePaidOverride(e, d, true); } catch(_){}
+  // v2.3.251: await 로 Firestore 반영 보장 후 슬랙/저장 — 반영 전 새로고침 race 차단
+  try { await _setExpensePaidOverride(e, d, true); } catch(_){}
   console.log('[confirmPayDate] 저장 전/후:', {id: e.id, title: e.title, orderId: e.orderId, category: e.category, before: _before, after: { paidStatus: e.paidStatus, paidDate: e.paidDate, updatedAt: e.updatedAt }, calledWith:{expenseId, orderId, category}});
   // v1.9.639: 즉시 persist (await) — 디바운스 우회 + 새로고침 race 방지
   try {
