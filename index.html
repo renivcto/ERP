@@ -5784,7 +5784,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.261';
+const ERP_VERSION = 'v2.3.262';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -19264,6 +19264,7 @@ function _ceNewEstimate() {
 function _ceEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]); }); }
 function _ceNewFromNewProduct() {
   if (typeof requireWrite === 'function' && !requireWrite()) return;
+  window._ceNpExtra = [];  // v2.3.262: 추가 비용 초기화
   document.getElementById('ce-np-overlay')?.remove();
   const prods = (DB.newProducts||[]).filter(p => p && p.stage === 'developing' && String(p.name||'').trim());
   const inS = 'border:1px solid #d1d5db;border-radius:8px;padding:9px 11px;font-size:14px;width:100%;box-sizing:border-box;outline:none';
@@ -19281,6 +19282,10 @@ function _ceNewFromNewProduct() {
     </div>
     <div style="padding:20px 22px;display:flex;flex-direction:column;gap:14px">
       <div>
+        <label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">시나리오명</label>
+        <input id="ce-np-name" placeholder="시나리오명" style="${inS}">
+      </div>
+      <div>
         <label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">제품개발 중 신제품 선택</label>
         <select id="ce-np-select" onchange="_ceNpOnSelect()" style="${inS}">${opts}</select>
       </div>
@@ -19293,11 +19298,14 @@ function _ceNewFromNewProduct() {
         <input id="ce-np-qty" type="number" min="0" placeholder="0" oninput="_ceNpCalc()" style="${inS};text-align:right">
       </div>
       <div>
-        <label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">시나리오명</label>
-        <input id="ce-np-name" placeholder="시나리오명" style="${inS}">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <label style="font-size:12px;font-weight:700;color:#475569">추가 비용 <span style="font-size:11px;color:#94a3b8;font-weight:500">(인건비·운반비·가공비 등)</span></label>
+          <button type="button" onclick="_ceNpAddExtra()" style="background:#fff;color:#be185d;border:1px solid #fbcfe8;padding:4px 10px;border-radius:6px;font-size:11.5px;font-weight:700;cursor:pointer">+ 비용 추가</button>
+        </div>
+        <div id="ce-np-extra-rows"></div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;background:#fdf2f8;border:1px solid #fbcfe8;border-radius:10px;padding:12px 16px">
-        <span style="font-size:12px;color:#9d174d;font-weight:700">총 예상 비용 (COGS × 수량, VAT 별도)</span>
+        <span style="font-size:12px;color:#9d174d;font-weight:700">총 예상 비용 (COGS × 수량 + 추가비용, VAT 별도)</span>
         <b id="ce-np-total" style="font-size:20px;color:#be185d">₩0</b>
       </div>
     </div>
@@ -19307,6 +19315,7 @@ function _ceNewFromNewProduct() {
     </div>
   </div>`;
   document.body.appendChild(ov);
+  try { _ceNpRenderExtra(); } catch(_){}  // v2.3.262: 추가비용 빈 상태 표시
 }
 function _ceNpFindProd(){ const id=(document.getElementById('ce-np-select')||{}).value; return (DB.newProducts||[]).find(x=>String(x.id)===String(id)); }
 function _ceNpOnSelect() {
@@ -19320,12 +19329,38 @@ function _ceNpOnSelect() {
   const nm=document.getElementById('ce-np-name'); if(nm && !nm.value) nm.value='[신제품] '+(p.name||'');
   _ceNpCalc();
 }
+function _ceNpExtraSum(){ return (window._ceNpExtra||[]).reduce((s,r)=>s+(Number(r&&r.amount)||0),0); }
 function _ceNpCalc() {
   const p = _ceNpFindProd();
   const cogs = p ? (Number(p.bomCost)||0) : 0;
   const qty = parseInt((document.getElementById('ce-np-qty')||{}).value||'0',10)||0;
   const el = document.getElementById('ce-np-total');
-  if (el) el.textContent = '₩'+(cogs*qty).toLocaleString();
+  if (el) el.textContent = '₩'+(cogs*qty + _ceNpExtraSum()).toLocaleString();
+}
+// v2.3.262: 신제품 예상 비용 모달의 추가 비용 행
+function _ceNpAddExtra(){
+  if (!Array.isArray(window._ceNpExtra)) window._ceNpExtra = [];
+  window._ceNpExtra.push({ label:'', amount:0 });
+  _ceNpRenderExtra();
+}
+function _ceNpRemoveExtra(i){
+  if (!Array.isArray(window._ceNpExtra)) return;
+  window._ceNpExtra.splice(i,1);
+  _ceNpRenderExtra(); _ceNpCalc();
+}
+function _ceNpRenderExtra(){
+  const box = document.getElementById('ce-np-extra-rows');
+  if (!box) return;
+  const arr = window._ceNpExtra || [];
+  if (!arr.length){ box.innerHTML = '<div style="font-size:11.5px;color:#cbd5e1;padding:2px 0">아직 없음 · "+ 비용 추가" 클릭</div>'; return; }
+  box.innerHTML = arr.map((r,i)=>
+    '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">'
+    + '<input value="'+String(r.label||'').replace(/"/g,'&quot;')+'" placeholder="항목명 (예: 인건비)" oninput="window._ceNpExtra['+i+'].label=this.value" style="flex:1;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:13px;outline:none">'
+    + '<input type="number" value="'+(Number(r.amount)||0)+'" placeholder="금액" oninput="window._ceNpExtra['+i+'].amount=parseFloat(this.value)||0;_ceNpCalc()" style="width:130px;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:13px;text-align:right;outline:none">'
+    + '<span style="font-size:12px;color:#94a3b8">원</span>'
+    + '<button type="button" onclick="_ceNpRemoveExtra('+i+')" title="제거" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:6px;padding:5px 9px;font-size:12px;font-weight:700;cursor:pointer">✕</button>'
+    + '</div>'
+  ).join('');
 }
 async function _ceNpSave() {
   if (typeof requireWrite === 'function' && !requireWrite()) return;
@@ -19336,13 +19371,19 @@ async function _ceNpSave() {
   const qty = parseInt((document.getElementById('ce-np-qty')||{}).value||'0',10)||0;
   if (!qty) { showNotif('생산 수량을 입력하세요','warning'); return; }
   const name = ((document.getElementById('ce-np-name')||{}).value||'').trim() || ('[신제품] '+(p.name||''));
-  const now = Date.now(); const total = cogs*qty;
+  const now = Date.now();
+  const mat = cogs*qty;
+  // v2.3.262: 추가 비용 반영
+  const extraRows = (window._ceNpExtra||[]).filter(r => r && (String(r.label||'').trim() || Number(r.amount)>0))
+    .map(r => ({ label: String(r.label||'').trim() || '추가비용', unitPrice: Number(r.amount)||0, qty: 1, amount: Number(r.amount)||0, memo: '' }));
+  const totalExtra = extraRows.reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const total = mat + totalExtra;
   if (!Array.isArray(DB.costEstimates)) DB.costEstimates = [];
   DB.costEstimates.push({
     id: 'est_'+now+'_'+Math.floor(Math.random()*1000),
     scenarioName: name, productId: '', productName: p.name||'', productionQty: qty,
-    bomRows: [{ itemName:'예상 COGS (신제품 수익성)', itemCode:'', perUnit:1, qty:qty, unitPrice:cogs, subtotal:total, priceSource:'newproduct' }],
-    extraRows: [], totalMaterial: total, totalExtra: 0, totalCost: total, perUnitCost: cogs,
+    bomRows: [{ itemName:'예상 COGS (신제품 수익성)', itemCode:'', perUnit:1, qty:qty, unitPrice:cogs, subtotal:mat, priceSource:'newproduct' }],
+    extraRows: extraRows, totalMaterial: mat, totalExtra: totalExtra, totalCost: total, perUnitCost: qty>0?(total/qty):cogs,
     memo: '신제품 개발 수익성(예상 COGS)에서 생성 · COGS ₩'+cogs.toLocaleString()+'/개',
     newProductId: p.id, createdAt: now, updatedAt: now
   });
