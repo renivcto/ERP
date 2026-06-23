@@ -2202,15 +2202,14 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
         <button onclick="_ceNewEstimate()" style="background:#be185d;color:#fff;border:0;border-radius:9px;padding:10px 20px;font-size:14px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:7px;box-shadow:0 2px 8px rgba(190,24,93,.28);transition:transform .12s" onmouseenter="this.style.transform='translateY(-1px)'" onmouseleave="this.style.transform=''">📝 새 예상 비용 작성</button>
       </div>
-      <!-- 상단 입력 카드 (v2.1.9: 토글 - 디폴트 접힘) -->
-      <div class="card" style="margin-bottom:16px;border:1px solid #fde2e7;background:linear-gradient(135deg,#fff,#fff7f9)">
-        <div class="card-hdr" id="ce-form-hdr" onclick="_ceToggleForm()" style="background:transparent;cursor:pointer;user-select:none">
-          <span class="card-title" style="color:#9d174d;display:inline-flex;align-items:center;gap:6px">
-            <span id="ce-form-toggle-icon" style="font-size:11px;color:#be185d;transition:transform .15s">▶</span>
-            📝 새 예상 비용 작성 <span style="font-size:11px;color:#be185d;font-weight:500;margin-left:6px">(VAT 별도 기준)</span>
-          </span>
-        </div>
-        <div class="card-body" id="ce-form-body" style="padding:16px 18px;display:none">
+      <!-- v2.3.256: 작성/수정 모달(팝업) — 인라인 토글 폼 제거 -->
+      <div id="ce-form-overlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10040;justify-content:center;align-items:flex-start;padding:28px 20px;backdrop-filter:blur(4px);overflow-y:auto" onclick="if(event.target===this)_ceCloseModal()">
+        <div onclick="event.stopPropagation()" style="background:#fff;border-radius:16px;max-width:940px;width:100%;margin:auto;box-shadow:0 24px 60px rgba(15,23,42,.3);overflow:hidden;border:1px solid #fde2e7">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:15px 22px;border-bottom:1px solid #fbcfe8;background:linear-gradient(135deg,#fff,#fff7f9)">
+            <span class="card-title" id="ce-form-modal-title" style="color:#9d174d;font-size:16px;font-weight:800;display:inline-flex;align-items:center;gap:6px">📝 새 예상 비용 작성 <span style="font-size:11px;color:#be185d;font-weight:500;margin-left:6px">(VAT 별도 기준)</span></span>
+            <button onclick="_ceCloseModal()" title="닫기" style="background:#f1f5f9;border:0;font-size:18px;color:#64748b;cursor:pointer;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0">✕</button>
+          </div>
+          <div id="ce-form-body" style="padding:16px 18px;max-height:78vh;overflow-y:auto">
           <input type="hidden" id="ce-edit-id" value="">
           <!-- 기본 정보 -->
           <div style="display:grid;grid-template-columns:1.5fr 1.5fr 1fr;gap:10px;margin-bottom:14px">
@@ -2309,6 +2308,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div style="display:flex;justify-content:flex-end;gap:8px">
             <button type="button" class="btn btn-outline" onclick="_ceResetForm()" style="font-size:12.5px">초기화</button>
             <button type="button" class="btn btn-primary" onclick="_ceSave()" style="background:#be185d;font-size:12.5px">💾 저장</button>
+          </div>
           </div>
         </div>
       </div>
@@ -5846,7 +5846,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.255';
+const ERP_VERSION = 'v2.3.256';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -19229,21 +19229,22 @@ function _ceToggleForm() {
     if (hdr) hdr.style.borderBottom = 'none';
   }
 }
-// v2.3.255: 작성 폼 펼치기(접혀 있으면 펼침)
-function _ceExpandForm() {
+// v2.3.256: 작성/수정 모달(팝업) 열기/닫기
+function _ceOpenModal() {
+  var ov = document.getElementById('ce-form-overlay');
+  if (ov) ov.style.display = 'flex';
   var body = document.getElementById('ce-form-body');
-  var icon = document.getElementById('ce-form-toggle-icon');
-  var hdr = document.getElementById('ce-form-hdr');
-  if (body) body.style.display = '';
-  if (icon) icon.textContent = '▼';
-  if (hdr) hdr.style.borderBottom = '1px solid #fbcfe8';
+  if (body) body.scrollTop = 0;
 }
-// v2.3.255: 상단 '새 예상 비용 작성' 버튼 — 신규 모드로 초기화 + 폼 펼침 + 스크롤 + 포커스
+function _ceCloseModal() {
+  var ov = document.getElementById('ce-form-overlay');
+  if (ov) ov.style.display = 'none';
+}
+// v2.3.255/256: 상단 '새 예상 비용 작성' 버튼 — 신규 모드로 초기화 후 팝업 열기 + 포커스
 function _ceNewEstimate() {
   if (typeof requireWrite === 'function' && !requireWrite()) return;
   try { _ceResetForm(); } catch(_){}
-  _ceExpandForm();
-  try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch(_) { window.scrollTo(0,0); }
+  _ceOpenModal();
   setTimeout(function(){ var el = document.getElementById('ce-scenario'); if (el) el.focus(); }, 120);
 }
 
@@ -19718,6 +19719,7 @@ async function _ceSave() {
       }
     } catch(e) { console.error('🔴 [_ceSave] saveData 실패:', e); }
     _ceResetForm();
+    _ceCloseModal();  // v2.3.256: 저장 후 팝업 닫기
     _ceRenderTable();
     console.log('🟢 [_ceSave] 완료');
   } catch(e) {
@@ -19740,31 +19742,27 @@ function _ceLoadForEdit(id) {
   _ceRenderBomRows(est.productId, est.productionQty, est.bomRows);
   _ceRenderExtraRows();
   _ceRecalcAll();
-  // v2.3.255: 시나리오명 클릭 시 폼이 접혀 있으면 펼쳐서 바로 수정 가능하게
-  _ceExpandForm();
-  // 페이지 상단으로 스크롤 + 수정 모드 시각화
-  try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch(_) { window.scrollTo(0,0); }
+  // v2.3.256: 시나리오명 클릭 시 팝업으로 열어 바로 수정 가능하게
   _ceUpdateFormHeader(true, est.scenarioName);
+  _ceOpenModal();
 }
 
 // 수정 모드 헤더 / 버튼 변경
 function _ceUpdateFormHeader(isEdit, name) {
-  const card = document.querySelector('#page-costest .card');
-  const hdr = card ? card.querySelector('.card-hdr .card-title') : null;
-  if (hdr) {
-    hdr.innerHTML = isEdit
+  // v2.3.256: 모달 타이틀 갱신(기존 .card-hdr → #ce-form-modal-title)
+  const ttl = document.getElementById('ce-form-modal-title');
+  if (ttl) {
+    ttl.innerHTML = isEdit
       ? '✏️ 수정 중: <span style="color:#0f172a">' + (name || '-').replace(/</g,'&lt;') + '</span> <span style="font-size:11px;color:#be185d;font-weight:500;margin-left:6px">(VAT 별도 기준)</span>'
       : '📝 새 예상 비용 작성 <span style="font-size:11px;color:#be185d;font-weight:500;margin-left:6px">(VAT 별도 기준)</span>';
   }
-  // 카드 색상도 살짝 변경
-  if (card) card.style.borderColor = isEdit ? '#fcd34d' : '#fde2e7';
-  // 저장 버튼 텍스트 + 삭제/취소 버튼 노출
-  const ft = card ? card.querySelector('.card-body > div:last-child') : null;
+  // 저장 버튼 텍스트 + 삭제/취소 버튼 노출 (모달 본문 마지막 div = 푸터)
+  const ft = document.querySelector('#ce-form-body > div:last-child');
   if (ft) {
     if (isEdit) {
       ft.innerHTML =
         '<button type="button" class="btn btn-outline" onclick="_ceDelete(document.getElementById(\'ce-edit-id\').value)" style="color:var(--red-500);border-color:#fca5a5;font-size:12.5px">🗑 삭제</button>' +
-        '<button type="button" class="btn btn-outline" onclick="_ceResetForm()" style="font-size:12.5px;margin-left:auto">취소</button>' +
+        '<button type="button" class="btn btn-outline" onclick="_ceCloseModal()" style="font-size:12.5px;margin-left:auto">취소</button>' +
         '<button type="button" class="btn btn-primary" onclick="_ceSave()" style="background:#a16207;font-size:12.5px;margin-left:8px">💾 수정 저장</button>';
       ft.style.display = 'flex';
       ft.style.justifyContent = 'flex-start';
@@ -19792,6 +19790,7 @@ async function _ceDelete(id) {
   try { localStorage.setItem('renivCostEstimates', JSON.stringify(DB.costEstimates || [])); } catch(_){}
   try { if (typeof saveData === 'function') saveData(); } catch(_){}
   _ceResetForm();
+  _ceCloseModal();  // v2.3.256: 삭제 후 팝업 닫기
   _ceRenderTable();
   showNotif('🗑 시나리오 삭제 완료', 'success');
 }
