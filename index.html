@@ -4239,7 +4239,9 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <!-- 1. 기본정보 -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-bottom:14px">
         <div class="fg full"><label>제품명 (국문) <span class="req">*</span></label>
-          <select class="fs" id="ps-product" onchange="onPartSpecProductChange()"><option value="">— 완제품을 선택하세요 —</option></select>
+          <!-- v2.3.267: 드롭다운으로 완제품 선택(자동 채우기) 후, 아래 입력란에서 제품명 직접 수정 가능 -->
+          <select class="fs" id="ps-product" onchange="onPartSpecProductChange()" style="margin-bottom:6px"><option value="">— 완제품 선택 (자동 채우기) —</option></select>
+          <input class="fi" id="ps-name-ko" placeholder="제품명 (국문) — 드롭다운 선택 후 직접 수정 가능">
         </div>
         <div class="fg"><label>브랜드명</label><input class="fi" id="ps-brand"></div>
         <div class="fg"><label>제품명 (영문)</label><input class="fi" id="ps-name-en"></div>
@@ -5784,7 +5786,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.266';
+const ERP_VERSION = 'v2.3.267';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -23755,9 +23757,10 @@ function renderPartSpecList() {
   tbody.innerHTML = filtered.map(p => {
     const d = new Date(p.updatedAt || p.createdAt || Date.now());
     const dateStr = d.toISOString().slice(0,10);
-    // 품목 ID로 현재 등록된 품목에서 최신 코드·품명을 끌어옴 (스냅샷보다 우선)
+    // 품목 ID로 현재 등록된 품목에서 최신 코드·품명을 끌어옴
     const live = (p.productId && (DB.items||[]).find(it => it.id === p.productId)) || null;
-    const liveName = (live && live.name) || p.productNameKo || '-';
+    // v2.3.267: 사용자가 수정한 제품명(국문) 우선 — 없으면 live 품명 fallback
+    const liveName = p.productNameKo || (live && live.name) || '-';
     const liveCode = (live && live.code) || p.productCode || '-';
     const liveVol = (live && live.spec) || p.displayVolume || p.volume || '-';
     const liveImg = (live && live.image && live.image !== '__idb__') ? live.image : '';
@@ -23793,6 +23796,7 @@ function openPartSpecForm() {
   populatePartSpecProductSelect();
   // 기본값 초기화
   $('ps-product').value = '';
+  if ($('ps-name-ko')) $('ps-name-ko').value = '';  // v2.3.267
   $('ps-brand').value = '르니브';
   $('ps-name-en').value = '';
   $('ps-code').value = '';
@@ -23855,6 +23859,8 @@ function onPartSpecProductChange() {
   if (!pid) return;
   const product = (DB.items||[]).find(i => i.id === pid);
   if (!product) return;
+  // v2.3.267: 제품명(국문) 편집 입력란에 선택 제품명 채움(이후 사용자가 수정 가능)
+  if ($('ps-name-ko')) $('ps-name-ko').value = product.name || '';
   // 자동 채우기 (비어있을 때만 덮어쓰지 않고, 모든 경우 갱신)
   $('ps-code').value = product.code || '';
   $('ps-barcode').value = product.barcode || '';
@@ -24262,7 +24268,8 @@ function collectPartSpecForm() {
   const product = pid ? (DB.items||[]).find(i => i.id === pid) : null;
   return {
     productId: pid,
-    productNameKo: product ? product.name : '',
+    // v2.3.267: 편집 입력란(ps-name-ko) 우선 — 사용자가 수정한 제품명 저장
+    productNameKo: (($('ps-name-ko')||{}).value||'').trim() || (product ? product.name : ''),
     brand: $('ps-brand').value.trim(),
     productNameEn: $('ps-name-en').value.trim(),
     productCode: $('ps-code').value.trim(),
@@ -24373,6 +24380,8 @@ function editPartSpec(id) {
   setTimeout(() => {
    try {
     $('ps-product').value = p.productId || '';
+    // v2.3.267: 저장된 제품명(국문) 우선 로드 — 사용자가 수정한 이름 유지
+    if ($('ps-name-ko')) { const _live = (p.productId && (DB.items||[]).find(it => it.id === p.productId)) || null; $('ps-name-ko').value = p.productNameKo || (_live && _live.name) || ''; }
     $('ps-brand').value = p.brand || '';
     // v1.9.609: 저장된 값 우선 — 사용자 편집이 다음번 열기에서도 유지됨
     //           (이전엔 live items 가 우선이라 편집해도 저장이 무시됐음)
