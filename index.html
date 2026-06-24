@@ -5786,7 +5786,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.267';
+const ERP_VERSION = 'v2.3.268';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -24321,6 +24321,32 @@ function collectPartSpecForm() {
   };
 }
 
+// v2.3.268: 부자재 사양서 IDB 백업/복구 안전망 — partSpecs 는 이미지 base64 인라인이라
+//   Firestore 1MB 초과·localStorage quota 슬림으로 '저장 후 새로고침 시 사라지던' 유실 버그 방지.
+//   IDB 는 용량이 커서 1MB·quota 영향 없음. 저장/삭제 때마다 동기화, 로드 시 누락분 복구.
+function _psBackupToIdb(){ try { if (typeof idbSet === 'function') idbSet('reniv_partspecs_backup', (DB.partSpecs||[]).slice()); } catch(_){} }
+async function _recoverPartSpecsFromIdb(){
+  try {
+    if (typeof idbGet !== 'function') return;
+    const bk = await idbGet('reniv_partspecs_backup');
+    if (!Array.isArray(bk) || !bk.length) return;
+    if (!Array.isArray(DB.partSpecs)) DB.partSpecs = [];
+    const byId = new Map(DB.partSpecs.filter(p=>p&&p.id!=null).map(p=>[String(p.id),p]));
+    let recovered = 0;
+    bk.forEach(b=>{
+      if (!b || b.id==null) return;
+      const cur = byId.get(String(b.id));
+      const bTs = Number(b.updatedAt)||0;
+      if (!cur) { DB.partSpecs.push(b); recovered++; }          // 서버/로컬에서 사라진 신규건 복구
+      else if (bTs > (Number(cur.updatedAt)||0)) { Object.assign(cur, b); recovered++; }  // 더 최신 수정본 복구
+    });
+    if (recovered > 0) {
+      console.warn('🛟 [partSpec] IDB 백업에서 ' + recovered + '건 복구(서버 미반영분)');
+      try { if (typeof renderPartSpecList === 'function') renderPartSpecList(); } catch(_){}
+      try { if (typeof saveData === 'function') saveData(); } catch(_){}
+    }
+  } catch(e){ console.warn('[partSpec] IDB 복구 실패:', e); }
+}
 function savePartSpec() {
   if (!requireWrite()) return;
   if (!DB.partSpecs) DB.partSpecs = [];
@@ -24346,6 +24372,7 @@ function savePartSpec() {
   } else {
     saveData();
   }
+  _psBackupToIdb();  // v2.3.268: IDB 안전망 백업
   renderPartSpecList();
   showNotif('부자재 사양서 저장 완료', 'success');
   closeModal('add-partspec');
@@ -24457,6 +24484,7 @@ function deletePartSpec() {
   const idx = (DB.partSpecs||[]).findIndex(x => x.id === window._editingPartSpecId);
   if (idx >= 0) DB.partSpecs.splice(idx, 1);
   saveData();
+  _psBackupToIdb();  // v2.3.268: 삭제도 IDB 백업 동기화(부활 방지)
   renderPartSpecList();
   closeModal('add-partspec');
   showNotif('삭제되었습니다', 'success');
@@ -24468,6 +24496,7 @@ function deletePartSpecById(id) {
   const idx = (DB.partSpecs||[]).findIndex(x => x.id === id);
   if (idx >= 0) DB.partSpecs.splice(idx, 1);
   saveData();
+  _psBackupToIdb();  // v2.3.268: 삭제도 IDB 백업 동기화(부활 방지)
   renderPartSpecList();
   showNotif('삭제되었습니다', 'success');
 }
@@ -52861,6 +52890,8 @@ function initERPWhenReady() {
           }).catch(function(){});
         }
       } catch(_){}
+      // v2.3.268: 부자재 사양서 IDB 백업 복구 (Firestore 1MB 초과·localStorage 슬림으로 유실된 신규/수정분)
+      try { if (typeof _recoverPartSpecsFromIdb === 'function') _recoverPartSpecsFromIdb(); } catch(_){}
       // v2.3.183: 슬랙→ERP 역방향 — 슬랙 스레드 답글 inbox 적용 (머지 5초 후 1회 + 3분 주기)
       try {
         setTimeout(() => { try { _processSlackBoardInbox(); } catch(_){} }, 5000);
