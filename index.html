@@ -5786,7 +5786,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.268';
+const ERP_VERSION = 'v2.3.269';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6780,6 +6780,7 @@ async function _doSaveDataInner() {
           if (at.data.length > 100) {
             try {
               idbSet('expense_attach_' + ex.id + '_' + ai, at.data);
+              try { _saveSharedExpenseFile(ex.id, 'attach', ai, at.data); } catch(_){}  // v2.3.269: 공유 저장(타 사용자 열람)
               _v280Offload.bytes += at.data.length;
               _v280Offload.expenses++;
               dbToSave.expenses[ei].attachments[ai] = { ...at, data: '__idb__' };
@@ -6795,6 +6796,7 @@ async function _doSaveDataInner() {
           if (q.data.length > 100) {
             try {
               idbSet('expense_quote_' + ex.id + '_' + qi, q.data);
+              try { _saveSharedExpenseFile(ex.id, 'quote', qi, q.data); } catch(_){}  // v2.3.269: 공유 저장(타 사용자 열람)
               _v280Offload.bytes += q.data.length;
               _v280Offload.expenses++;
               dbToSave.expenses[ei].quotes[qi] = { ...q, data: '__idb__' };
@@ -41218,10 +41220,14 @@ async function openExpenseApprovalForm(expenseId) {
   e._hydratedFiles = [];
   try {
     // v2.2.97: IDB miss 시 Firestore fallback + IDB 캐시 백필
-    const _hyd = async (val, key, fsLoadFn) => {
+    const _hyd = async (val, key, fsLoadFn, fsSaveFn) => {
       if (val !== '__idb__') return val; // 이미 inline base64 거나 다른 값
       // 1) IDB 시도
-      try { const v = await idbGet(key); if (v) return v; } catch(_){}
+      try { const v = await idbGet(key); if (v) {
+        // v2.3.269: 내(작성자) IDB 에만 있는 첨부를 공유 저장소로 백필 → 다른 사용자도 열람 가능
+        if (typeof fsSaveFn === 'function') { try { fsSaveFn(v); } catch(_){} }
+        return v;
+      } } catch(_){}
       // 2) Firestore fallback (있으면)
       if (typeof fsLoadFn === 'function') {
         try {
@@ -41237,14 +41243,17 @@ async function openExpenseApprovalForm(expenseId) {
     if (Array.isArray(e.quotes)) {
       for (let qi = 0; qi < e.quotes.length; qi++) {
         const f = e.quotes[qi]; if (!f || !f.name) continue;
-        const d = await _hyd(f.data, 'expense_quote_' + e.id + '_' + qi);
+        // v2.3.269: 공유 Firestore fallback(다른 사용자) + IDB 히트 시 공유 백필(작성자)
+        const d = await _hyd(f.data, 'expense_quote_' + e.id + '_' + qi,
+          () => _loadSharedExpenseFile(e.id, 'quote', qi), (v) => _saveSharedExpenseFile(e.id, 'quote', qi, v));
         e._hydratedFiles.push({ ...f, data: d, kind: '견적서' });
       }
     }
     if (Array.isArray(e.attachments)) {
       for (let ai = 0; ai < e.attachments.length; ai++) {
         const f = e.attachments[ai]; if (!f || !f.name) continue;
-        const d = await _hyd(f.data, 'expense_attach_' + e.id + '_' + ai);
+        const d = await _hyd(f.data, 'expense_attach_' + e.id + '_' + ai,
+          () => _loadSharedExpenseFile(e.id, 'attach', ai), (v) => _saveSharedExpenseFile(e.id, 'attach', ai, v));
         e._hydratedFiles.push({ ...f, data: d, kind: '첨부' });
       }
     }
@@ -51127,6 +51136,28 @@ async function _loadSharedOrderClosing(orderId, idx) {
   return null;
 }
 
+
+// v2.3.269: 지출결의서 첨부/견적서 공유 저장소 — 기존엔 IDB(기기-로컬)만이라 다른 사용자는 '__idb__'
+//   마커만 받아 첨부 PDF 를 못 열던 문제. orderPdfs 컬렉션(read:isActive,write:canWrite) 재사용.
+//   doc id: 'exp_<expId>_<kind>_<idx>' (kind: attach|quote). Firestore 1MB 한계로 900KB 미만만.
+async function _saveSharedExpenseFile(expId, kind, idx, dataUrl) {
+  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return;
+  if (!dataUrl || dataUrl === '__idb__' || typeof dataUrl !== 'string' || dataUrl.indexOf('http') === 0) return;
+  if (dataUrl.length > 900000) return;  // 1MB 초과는 Firestore 불가(추후 Storage)
+  try {
+    const ref = window._firestoreDoc(window._firebaseDb, 'orderPdfs', 'exp_' + expId + '_' + kind + '_' + idx);
+    await window._firestoreSetDoc(ref, { data: dataUrl, kind: 'expense_' + kind, ts: Date.now() });
+  } catch(e) { console.warn('[expenseAttach] Firestore 저장 실패:', e); }
+}
+async function _loadSharedExpenseFile(expId, kind, idx) {
+  if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return null;
+  try {
+    const ref = window._firestoreDoc(window._firebaseDb, 'orderPdfs', 'exp_' + expId + '_' + kind + '_' + idx);
+    const snap = await window._firestoreGetDoc(ref);
+    if (snap.exists()) return snap.data().data || null;
+  } catch(e) { console.warn('[expenseAttach] Firestore 로드 실패:', e); }
+  return null;
+}
 
 // v1.9.713: 업체 견적서 Firestore 백업 (IDB 손실 시 복구용)
 async function _saveSharedVendorQuote(vendorId, idx, dataUrl, fileName) {
