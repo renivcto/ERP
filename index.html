@@ -5793,7 +5793,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.272';
+const ERP_VERSION = 'v2.3.273';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30031,8 +30031,6 @@ function saveOrder() {
               (data.inDate ? '\n• 입고예정: ' + data.inDate : '')
             });
           } catch(_){}
-          // v2.3.127: Trello 입고확인 카드 자동 생성
-          try { if (typeof _trelloAutoOrderCard === 'function') _trelloAutoOrderCard(data, _savedOrderId, rows); } catch(_){}
         }
       } else {
         console.error('❌ [SAVE-VERIFY] 저장 검증 실패! 발주서 #' + _savedOrderId);
@@ -30043,6 +30041,13 @@ function saveOrder() {
               ' - 로컬스토리지: ' + (inLocal ? 'OK' : '❌ 없음') + '\n' +
               ' - 백업: ' + (inBackup ? 'OK' : '❌ 없음') + '\n\n' +
               '페이지를 닫지 마시고, 발주서 목록에서 실제로 보이는지 확인 후 다시 저장해주세요.');
+      }
+      // v2.3.273: Trello 입고확인 카드 — 저장검증(ok) 무관하게 신규 발주면 항상 시도
+      //   (발주 객체는 이미 메모리/로컬/백업까지 기록된 뒤이고, ok=false 는 검증 까다로움일 수 있어
+      //    카드 생성 자체를 막으면 누락됨). 수정(isEdit)은 카드 생성 대상 아님.
+      if (!isEdit) {
+        try { if (typeof _trelloAutoOrderCard === 'function') _trelloAutoOrderCard(data, _savedOrderId, rows); }
+        catch(e) { console.warn('[TRELLO-AUTO] order card 호출 오류', e); }
       }
     } catch(e) {
       console.error('❌ saveOrder 즉시저장 실패:', e);
@@ -37760,6 +37765,25 @@ function _trelloAutoCreds() {
   return (key && token) ? { key, token } : null;
 }
 
+// v2.3.273: 자격증명이 비어있으면 공용 trello_config(shared/) 를 1회 흡수해 재시도.
+//   부팅 복원이 공용 config 를 자동화 키 경로(reniv_trello_key / DB._trelloKey)로 안 끌어와,
+//   워크플로우 보드 화면을 한 번도 안 연 기기/비관리자에서 _trelloAutoCreds()=null →
+//   자동화가 조용히 skip 되던 문제(v2.3.272 조사 확정) 해결. 자동화가 키를 필요로 하는
+//   순간(발주 저장 등, 부팅·Firestore 준비 이후)에만 호출되므로 init 순서 race 없음.
+async function _trelloEnsureCreds() {
+  let c = _trelloAutoCreds();
+  if (c) return c;
+  try {
+    const tc = (typeof loadSharedSetting === 'function') ? await loadSharedSetting('trello_config') : null;
+    if (tc && tc.key && tc.token) {
+      try { if (!localStorage.getItem('reniv_trello_key'))   localStorage.setItem('reniv_trello_key', tc.key); } catch(_){}
+      try { if (!localStorage.getItem('reniv_trello_token')) localStorage.setItem('reniv_trello_token', tc.token); } catch(_){}
+      if (window.DB) { DB._trelloKey = DB._trelloKey || tc.key; DB._trelloToken = DB._trelloToken || tc.token; }
+    }
+  } catch(_){}
+  return _trelloAutoCreds();
+}
+
 function _trelloAutoEnabled() {
   const c = window._trelloAutoCfg;
   return !!(c && c.enabled);
@@ -37812,9 +37836,15 @@ async function _trelloApiCall(path, method, params) {
 // 발주 생성 → 입고확인 카드
 async function _trelloAutoOrderCard(data, orderId, rows) {
   try {
-    const cfg = await _trelloLoadAutoCfg();
-    if (!cfg || !cfg.enabled || !cfg.listIncoming) return;
-    if (!_trelloAutoCreds()) return;
+    const cfg = await _trelloLoadAutoCfg(true);  // v2.3.273: force — stale 캐시로 인한 오판 방지
+    if (!cfg || !cfg.enabled || !cfg.listIncoming) {
+      console.warn('[TRELLO-AUTO] 입고확인 카드 skip — cfg 미충족', { hasCfg: !!cfg, enabled: !!(cfg && cfg.enabled), listIncoming: !!(cfg && cfg.listIncoming) });
+      return;
+    }
+    if (!(await _trelloEnsureCreds())) {
+      console.warn('[TRELLO-AUTO] 입고확인 카드 skip — Trello 자격증명 없음 (공용 trello_config 흡수 실패: 관리자가 Trello 설정 1회 저장 필요할 수 있음)');
+      return;
+    }
     const serial = data.serial || ('#' + orderId);
     const descLines = [
       '**발주서**: ' + serial,
@@ -37844,7 +37874,11 @@ async function _trelloAutoOrderCard(data, orderId, rows) {
       console.log('🤖 [TRELLO-AUTO] 입고확인 카드 생성:', serial, '→', card.id);
       try { showNotif('🤖 Trello 입고확인 카드가 생성되었습니다', 'success'); } catch(_){}
     }
-  } catch(e) { console.warn('[TRELLO-AUTO] 입고확인 카드 생성 실패:', e); }
+  } catch(e) {
+    console.warn('[TRELLO-AUTO] 입고확인 카드 생성 실패:', e);
+    // v2.3.273: 발주 단건 경로에만 사용자 경고 (lowstock 대량 경로엔 미적용 — 알림 폭주 방지)
+    try { showNotif('⚠️ Trello 입고확인 카드 생성 실패: ' + ((e && e.message) || e), 'warning'); } catch(_){}
+  }
 }
 
 // 입고 완료 → 카드 완료 처리
@@ -37852,7 +37886,7 @@ async function _trelloAutoCompleteOrder(orderId, serial) {
   try {
     const cfg = await _trelloLoadAutoCfg();
     if (!cfg || !cfg.enabled) return;
-    if (!_trelloAutoCreds()) return;
+    if (!(await _trelloEnsureCreds())) return;  // v2.3.273
     const m = await _trelloLoadAutoMap();
     const cardId = m.orders[String(orderId)];
     if (!cardId) return;
@@ -37871,7 +37905,7 @@ async function _trelloAutoLowStockCards(newlyItems, recoveredIds) {
   try {
     const cfg = await _trelloLoadAutoCfg();
     if (!cfg || !cfg.enabled || !cfg.listRestock) return;
-    if (!_trelloAutoCreds()) return;
+    if (!(await _trelloEnsureCreds())) return;  // v2.3.273
     const m = await _trelloLoadAutoMap();
     let mapChanged = false;
     // 신규 부족 → 카드 생성 (1회 실행당 최대 5건 — API 폭주 방지)
@@ -50984,7 +51018,11 @@ async function exportToSheets() {
 //   민감 키(api_*, slack_*, *_webhook, trello_* 등)는 settings 유지.
 function _sharedSettingCollection(key) {
   const k = String(key || '');
-  if (/^finance_/.test(k) || /^budget_/.test(k) || k === 'expense_paid_overrides' || k === 'company_info') return 'shared';
+  // v2.3.273: trello_config(자격증명)·trello_automation(cfg)·trello_auto_cards(카드맵) 는
+  //   전 직원(쓰기권한 직원도 발주 가능)이 읽어야 자동화가 동작 → shared/ 로 라우팅.
+  //   (trello_config 는 API 토큰 포함 → 쓰기권한자에게 노출되는 트레이드오프 수용. 나머지 둘은 비밀 아님)
+  if (/^finance_/.test(k) || /^budget_/.test(k) || k === 'expense_paid_overrides' || k === 'company_info'
+      || k === 'trello_config' || k === 'trello_automation' || k === 'trello_auto_cards') return 'shared';
   return 'settings';
 }
 async function saveSharedSetting(key, value) {
