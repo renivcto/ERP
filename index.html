@@ -5816,7 +5816,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.285';
+const ERP_VERSION = 'v2.3.286';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9811,16 +9811,36 @@ function _finAssetSection(kind, title, accent){
   const cats = FIN_ASSET_CATS[kind] || ['기타'];
   const list = (F.assets||[]).filter(a=>a && a.kind===kind);
   const subtotal = list.reduce((s,a)=>s+(Number(a.amount)||0),0);
-  const rows = list.map(a=>`
-    <tr style="border-bottom:1px solid #f1f5f9">
+  const editId = F.assetEditId;
+  const _attCell = function(a, editing){
+    if(a.att&&a.att.url){
+      return `<button onclick="_finOpenAsset('${a.id}')" title="${_finEsc(a.att.name||'첨부')} — 클릭하면 열기/다운로드" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:6px;padding:4px 9px;font-size:11.5px;font-weight:700;cursor:pointer;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle">📎 ${_finEsc(a.att.name||'첨부')}</button>${editing?` <button onclick="_finDelAssetFile('${a.id}')" title="첨부 삭제" style="background:none;border:0;color:#cbd5e1;cursor:pointer;font-size:12px">✕</button>`:''}`;
+    }
+    return editing ? `<label style="display:inline-flex;align-items:center;gap:3px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;padding:4px 9px;font-size:11.5px;font-weight:600;cursor:pointer" title="이미지·PDF·파일 첨부"><span>📎 첨부</span><input type="file" style="display:none" onchange="_finAttachToAsset('${a.id}',this)"></label>` : `<span style="color:#cbd5e1">-</span>`;
+  };
+  const rows = list.map(function(a){
+    const editing = String(editId)===String(a.id);
+    if(editing){
+      return `<tr style="border-bottom:1px solid #f1f5f9;background:#f8fafc">
       <td style="padding:6px 8px"><select onchange="_finUpdateAsset('${a.id}','category',this.value)" style="${inS};font-size:12px">${cats.map(c=>`<option value="${c}" ${a.category===c?'selected':''}>${c}</option>`).join('')}</select></td>
       <td style="padding:6px 8px"><input value="${_finEsc(a.name||'')}" onchange="_finUpdateAsset('${a.id}','name',this.value)" placeholder="항목명" style="${inS};width:100%"></td>
       <td style="padding:6px 8px"><input type="date" value="${_finEsc(a.acqDate||'')}" onchange="_finUpdateAsset('${a.id}','acqDate',this.value)" style="${inS}"></td>
       <td style="padding:6px 8px"><input value="${_finEsc(a.note||'')}" onchange="_finUpdateAsset('${a.id}','note',this.value)" placeholder="비고" style="${inS};width:100%"></td>
       <td style="padding:6px 8px;text-align:right"><input type="number" value="${Number(a.amount)||0}" onchange="_finUpdateAsset('${a.id}','amount',this.value)" style="${inS};width:120px;text-align:right"></td>
-      <td style="padding:6px 8px;text-align:center">${(a.att&&a.att.url)?`<button onclick="_finOpenAsset('${a.id}')" title="${_finEsc(a.att.name||'첨부')} — 클릭하면 열기/다운로드" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:6px;padding:4px 9px;font-size:11.5px;font-weight:700;cursor:pointer;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle">📎 ${_finEsc(a.att.name||'첨부')}</button> <button onclick="_finDelAssetFile('${a.id}')" title="첨부 삭제" style="background:none;border:0;color:#cbd5e1;cursor:pointer;font-size:12px">✕</button>`:`<label style="display:inline-flex;align-items:center;gap:3px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;padding:4px 9px;font-size:11.5px;font-weight:600;cursor:pointer" title="이미지·PDF·파일 첨부"><span>📎 첨부</span><input type="file" style="display:none" onchange="_finAttachToAsset('${a.id}',this)"></label>`}</td>
-      <td style="padding:6px 8px;text-align:center"><button onclick="_finDelAsset('${a.id}')" style="background:none;border:0;color:#cbd5e1;cursor:pointer;font-size:14px" title="삭제">✕</button></td>
-    </tr>`).join('');
+      <td style="padding:6px 8px;text-align:center">${_attCell(a,true)}</td>
+      <td style="padding:6px 8px;text-align:center;white-space:nowrap"><button onclick="_finDelAsset('${a.id}')" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer;margin-right:4px">삭제</button><button onclick="_finEditAsset('')" style="background:#0f172a;color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer">완료</button></td>
+    </tr>`;
+    }
+    return `<tr style="border-bottom:1px solid #f1f5f9">
+      <td style="padding:9px 8px">${_finEsc(a.category||'')}</td>
+      <td style="padding:9px 8px;font-weight:600;color:#0f172a">${_finEsc(a.name||'')}</td>
+      <td style="padding:9px 8px;color:#475569">${_finEsc(a.acqDate||'-')}</td>
+      <td style="padding:9px 8px;color:#475569">${_finEsc(a.note||'')}</td>
+      <td style="padding:9px 8px;text-align:right;font-weight:600">${_finWon(Number(a.amount)||0)}</td>
+      <td style="padding:9px 8px;text-align:center">${_attCell(a,false)}</td>
+      <td style="padding:9px 8px;text-align:center"><button onclick="_finEditAsset('${a.id}')" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer">수정</button></td>
+    </tr>`;
+  }).join('');
   return `
   <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:14px">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
@@ -9828,7 +9848,7 @@ function _finAssetSection(kind, title, accent){
       <div style="font-size:13px;color:#0f172a">소계 <b style="color:${accent}">${_finWon(subtotal)}</b></div>
     </div>
     <table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left;width:108px">분류</th><th style="padding:6px 8px;text-align:left">항목명</th><th style="padding:6px 8px;text-align:left;width:150px">취득일</th><th style="padding:6px 8px;text-align:left">비고</th><th style="padding:6px 8px;text-align:right;width:140px">취득가액</th><th style="padding:6px 8px;text-align:center;width:150px">첨부</th><th style="width:30px"></th></tr></thead>
+      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left;width:108px">분류</th><th style="padding:6px 8px;text-align:left">항목명</th><th style="padding:6px 8px;text-align:left;width:150px">취득일</th><th style="padding:6px 8px;text-align:left">비고</th><th style="padding:6px 8px;text-align:right;width:140px">취득가액</th><th style="padding:6px 8px;text-align:center;width:150px">첨부</th><th style="padding:6px 8px;text-align:center;width:120px">관리</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="7" style="padding:14px;text-align:center;color:#94a3b8">등록된 ${title}이 없습니다</td></tr>`}</tbody>
     </table>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;border-top:1px dashed #e5e7eb;padding-top:10px">
@@ -9864,7 +9884,8 @@ function _finTabAsset(){
   </div>
   ${sub==='tangible' ? _finAssetSection('tangible','유형 자산','#2563eb') : _finAssetSection('intangible','무형 자산','#7c3aed')}`;
 }
-function _finSetAssetTab(k){ window._FIN.assetTab = k; try{ localStorage.setItem('reniv_fin_asset_tab', k); }catch(_){} _finRender(); }
+function _finSetAssetTab(k){ window._FIN.assetTab = k; window._FIN.assetEditId = null; try{ localStorage.setItem('reniv_fin_asset_tab', k); }catch(_){} _finRender(); }
+function _finEditAsset(id){ window._FIN.assetEditId = id || null; _finRender(); }
 async function _finAddAsset(kind){
   if (typeof requireWrite==='function' && !requireWrite()) return;
   const name=(document.getElementById('fin-as-name-'+kind).value||'').trim();
@@ -9897,6 +9918,7 @@ async function _finDelAsset(id){
   const a=(window._FIN.assets||[]).find(x=>String(x.id)===String(id));
   try{ if(a&&a.att&&a.att.storagePath&&typeof window._storageDeletePath==='function') await window._storageDeletePath(a.att.storagePath); }catch(_){}
   window._FIN.assets = (window._FIN.assets||[]).filter(x=>String(x.id)!==String(id));
+  window._FIN.assetEditId = null;
   await _finSaveAssets(); showNotif('삭제되었습니다','info'); _finRender();
 }
 // ── 자산 첨부 파일 (v2.3.285) ──
