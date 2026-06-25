@@ -5816,7 +5816,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.281';
+const ERP_VERSION = 'v2.3.282';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9658,6 +9658,7 @@ async function _finEnsureLoaded(){
     window._FIN.budget = (await loadSharedSetting('budget_targets')) || {};
     window._FIN.budgetItems = (await loadSharedSetting('budget_items')) || {};
     window._FIN.planItems = (await loadSharedSetting('finance_plan_items')) || [];
+    window._FIN.assets = (await loadSharedSetting('finance_assets')) || [];
     window._FIN.planHorizon = parseInt(localStorage.getItem('reniv_fin_plan_horizon')) || 90;
     const now = new Date();
     window._FIN.year = parseInt(localStorage.getItem('reniv_fin_year')) || now.getFullYear();
@@ -9677,6 +9678,7 @@ async function _finLoadYear(y){
 async function _finSaveAccounts(){ await saveSharedSetting('finance_accounts', window._FIN.accounts); }
 async function _finSaveCards(){ await saveSharedSetting('finance_cards', window._FIN.cards); }
 async function _finSaveRecurring(){ await saveSharedSetting('finance_recurring', window._FIN.recurring); }
+async function _finSaveAssets(){ await saveSharedSetting('finance_assets', window._FIN.assets||[]); }
 async function _finSaveAcctTxns(y){ await saveSharedSetting('finance_account_txns_'+y, window._FIN.acctTxns[y]||[]); }
 async function _finSaveCardTxns(y){ await saveSharedSetting('finance_card_txns_'+y, window._FIN.cardTxns[y]||[]); }
 
@@ -9693,7 +9695,7 @@ function _finRender(){
   const root = document.getElementById('finance-root'); if(!root) return;
   const F = window._FIN;
   // v2.3.259: '생산 예상 비용'을 '예산' 오른쪽의 정식 탭으로 편입(검정 활성 + 인플레이스 렌더)
-  const tabs = [['dashboard','📊 자금 현황'],['accounts','🏦 법인 계좌'],['cards','💳 법인 카드'],['recurring','🔁 고정비'],['budget','🎯 예산'],['costest','💰 생산 예상 비용'],['plan','📈 자금 계획']];
+  const tabs = [['dashboard','📊 자금 현황'],['accounts','🏦 법인 계좌'],['cards','💳 법인 카드'],['recurring','🔁 고정비'],['plan','📈 자금 계획'],['budget','🎯 예산'],['costest','💰 생산 예상 비용'],['asset','🏛️ 자산']];
   let body = '';
   if (F.tab==='accounts') body = _finTabAccounts();
   else if (F.tab==='cards') body = _finTabCards();
@@ -9702,6 +9704,7 @@ function _finRender(){
   else if (F.tab==='costest') body = _finTabCostest();
   else if (F.tab==='dashboard') body = _finTabDashboard();
   else if (F.tab==='plan') body = _finTabPlan();
+  else if (F.tab==='asset') body = _finTabAsset();
   else body = _finStagePlaceholder(F.tab);
   root.innerHTML =
     _finTopBarHtml() +
@@ -9796,6 +9799,85 @@ function _finStagePlaceholder(tab){
 
 // ── 상단바 핸들러 ──
 function _finSetTab(k){ window._FIN.tab=k; try{localStorage.setItem('reniv_fin_tab',k);}catch(_){} _finRender(); }
+
+// ═══ 탭: 자산 (유형/무형, v2.3.282) — finance_assets shared setting ═══
+const FIN_ASSET_CATS = {
+  tangible:   ['보증금','가구','장비','차량','비품','기타'],
+  intangible: ['특허','상표','디자인','소프트웨어','영업권','기타']
+};
+function _finAssetSection(kind, title, hint, accent){
+  const F = window._FIN;
+  const inS='border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px';
+  const cats = FIN_ASSET_CATS[kind] || ['기타'];
+  const list = (F.assets||[]).filter(a=>a && a.kind===kind);
+  const subtotal = list.reduce((s,a)=>s+(Number(a.amount)||0),0);
+  const rows = list.map(a=>`
+    <tr style="border-bottom:1px solid #f1f5f9">
+      <td style="padding:6px 8px"><select onchange="_finUpdateAsset('${a.id}','category',this.value)" style="${inS};font-size:12px">${cats.map(c=>`<option value="${c}" ${a.category===c?'selected':''}>${c}</option>`).join('')}</select></td>
+      <td style="padding:6px 8px"><input value="${_finEsc(a.name||'')}" onchange="_finUpdateAsset('${a.id}','name',this.value)" placeholder="항목명" style="${inS};width:100%"></td>
+      <td style="padding:6px 8px"><input type="date" value="${_finEsc(a.acqDate||'')}" onchange="_finUpdateAsset('${a.id}','acqDate',this.value)" style="${inS}"></td>
+      <td style="padding:6px 8px"><input value="${_finEsc(a.note||'')}" onchange="_finUpdateAsset('${a.id}','note',this.value)" placeholder="비고" style="${inS};width:100%"></td>
+      <td style="padding:6px 8px;text-align:right"><input type="number" value="${Number(a.amount)||0}" onchange="_finUpdateAsset('${a.id}','amount',this.value)" style="${inS};width:120px;text-align:right"></td>
+      <td style="padding:6px 8px;text-align:center"><button onclick="_finDelAsset('${a.id}')" style="background:none;border:0;color:#cbd5e1;cursor:pointer;font-size:14px" title="삭제">✕</button></td>
+    </tr>`).join('');
+  return `
+  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+      <div style="font-size:14px;font-weight:800;color:#0f172a">${title} <span style="font-size:11.5px;color:#94a3b8;font-weight:500">· ${hint}</span></div>
+      <div style="font-size:13px;color:#0f172a">소계 <b style="color:${accent}">${_finWon(subtotal)}</b></div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left;width:108px">분류</th><th style="padding:6px 8px;text-align:left">항목명</th><th style="padding:6px 8px;text-align:left;width:150px">취득일</th><th style="padding:6px 8px;text-align:left">비고</th><th style="padding:6px 8px;text-align:right;width:140px">취득가액</th><th style="width:30px"></th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="6" style="padding:14px;text-align:center;color:#94a3b8">등록된 ${title}이 없습니다</td></tr>`}</tbody>
+    </table>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;border-top:1px dashed #e5e7eb;padding-top:10px">
+      <select id="fin-as-cat-${kind}" style="${inS}">${cats.map(c=>`<option value="${c}">${c}</option>`).join('')}</select>
+      <input id="fin-as-name-${kind}" placeholder="항목명 (예: ${kind==='tangible'?'강남 사무실 보증금':'르니브 상표권'})" style="${inS};flex:1;min-width:150px">
+      <input id="fin-as-date-${kind}" type="date" style="${inS}">
+      <input id="fin-as-amount-${kind}" type="number" placeholder="취득가액" style="${inS};width:120px;text-align:right">
+      <button onclick="_finAddAsset('${kind}')" style="background:#0f172a;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer">+ 추가</button>
+    </div>
+  </div>`;
+}
+function _finTabAsset(){
+  const assets = window._FIN.assets || [];
+  const tan = assets.filter(a=>a&&a.kind==='tangible').reduce((s,a)=>s+(Number(a.amount)||0),0);
+  const intan = assets.filter(a=>a&&a.kind==='intangible').reduce((s,a)=>s+(Number(a.amount)||0),0);
+  return `
+  <div style="background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:12px;padding:15px 18px;margin-bottom:14px;color:#fff;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+    <div style="font-size:14px;font-weight:800">🏛️ 총자산</div>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;font-size:13px">
+      <span style="opacity:.85">유형 <b>${_finWon(tan)}</b></span>
+      <span style="opacity:.85">무형 <b>${_finWon(intan)}</b></span>
+      <span style="font-size:15px;font-weight:800">합계 ${_finWon(tan+intan)}</span>
+    </div>
+  </div>
+  ${_finAssetSection('tangible','유형 자산','보증금·가구·장비·차량 등 실물','#2563eb')}
+  ${_finAssetSection('intangible','무형 자산','특허·상표·소프트웨어 등','#7c3aed')}`;
+}
+async function _finAddAsset(kind){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const name=(document.getElementById('fin-as-name-'+kind).value||'').trim();
+  if(!name){ showNotif('항목명을 입력하세요','warning'); return; }
+  const category=(document.getElementById('fin-as-cat-'+kind).value||'').trim();
+  const acqDate=(document.getElementById('fin-as-date-'+kind).value||'').trim();
+  const amount=_finNum(document.getElementById('fin-as-amount-'+kind).value);
+  if(!window._FIN.assets) window._FIN.assets=[];
+  window._FIN.assets.push({ id:_finId('ast'), kind, category, name, acqDate, amount, note:'' });
+  await _finSaveAssets(); showNotif('자산이 추가되었습니다','success'); _finRender();
+}
+async function _finUpdateAsset(id,field,val){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const a=(window._FIN.assets||[]).find(x=>String(x.id)===String(id)); if(!a) return;
+  a[field] = (field==='amount') ? _finNum(val) : val;
+  await _finSaveAssets(); if(field==='amount'||field==='category') _finRender();
+}
+async function _finDelAsset(id){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  if(!confirm('이 자산을 삭제할까요?')) return;
+  window._FIN.assets = (window._FIN.assets||[]).filter(x=>String(x.id)!==String(id));
+  await _finSaveAssets(); showNotif('삭제되었습니다','info'); _finRender();
+}
 async function _finSetYear(v){ const y=parseInt(v)||new Date().getFullYear(); window._FIN.year=y; try{localStorage.setItem('reniv_fin_year',String(y));}catch(_){} await _finLoadYear(y); _finRender(); }
 function _finSetPeriod(k){ window._FIN.period=k; try{localStorage.setItem('reniv_fin_period',k);}catch(_){} _finRender(); }
 function _finSetMonth(v){ window._FIN.month=parseInt(v)||1; try{localStorage.setItem('reniv_fin_month',String(window._FIN.month));}catch(_){} _finRender(); }
