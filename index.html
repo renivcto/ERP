@@ -5816,7 +5816,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.283';
+const ERP_VERSION = 'v2.3.284';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9805,7 +9805,7 @@ const FIN_ASSET_CATS = {
   tangible:   ['보증금','가구','장비','차량','비품','기타'],
   intangible: ['특허','상표','디자인','소프트웨어','영업권','기타']
 };
-function _finAssetSection(kind, title, hint, accent){
+function _finAssetSection(kind, title, accent){
   const F = window._FIN;
   const inS='border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px';
   const cats = FIN_ASSET_CATS[kind] || ['기타'];
@@ -9823,7 +9823,7 @@ function _finAssetSection(kind, title, hint, accent){
   return `
   <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:14px">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
-      <div style="font-size:14px;font-weight:800;color:#0f172a">${title} <span style="font-size:11.5px;color:#94a3b8;font-weight:500">· ${hint}</span></div>
+      <div style="font-size:14px;font-weight:800;color:#0f172a">${title}</div>
       <div style="font-size:13px;color:#0f172a">소계 <b style="color:${accent}">${_finWon(subtotal)}</b></div>
     </div>
     <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -9840,21 +9840,28 @@ function _finAssetSection(kind, title, hint, accent){
   </div>`;
 }
 function _finTabAsset(){
-  const assets = window._FIN.assets || [];
+  const F = window._FIN;
+  const assets = F.assets || [];
   const tan = assets.filter(a=>a&&a.kind==='tangible').reduce((s,a)=>s+(Number(a.amount)||0),0);
   const intan = assets.filter(a=>a&&a.kind==='intangible').reduce((s,a)=>s+(Number(a.amount)||0),0);
+  let sub = F.assetTab; if(!sub){ try{ sub = localStorage.getItem('reniv_fin_asset_tab'); }catch(_){} }
+  sub = (sub==='intangible') ? 'intangible' : 'tangible'; F.assetTab = sub;
+  const tabBtn = (k,label) => `<button onclick="_finSetAssetTab('${k}')" style="background:${sub===k?'#fff':'rgba(255,255,255,.14)'};color:${sub===k?'#0f172a':'#fff'};border:0;border-radius:7px;padding:6px 14px;font-size:12.5px;font-weight:700;cursor:pointer;transition:all .12s">${label}</button>`;
   return `
-  <div style="background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:12px;padding:15px 18px;margin-bottom:14px;color:#fff;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
-    <div style="font-size:14px;font-weight:800">🏛️ 총자산</div>
+  <div style="background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:12px;padding:14px 18px;margin-bottom:14px;color:#fff;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div style="font-size:14px;font-weight:800">🏛️ 총자산</div>
+      <div style="display:flex;gap:6px">${tabBtn('tangible','유형 자산')}${tabBtn('intangible','무형 자산')}</div>
+    </div>
     <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;font-size:13px">
       <span style="opacity:.85">유형 <b>${_finWon(tan)}</b></span>
       <span style="opacity:.85">무형 <b>${_finWon(intan)}</b></span>
       <span style="font-size:15px;font-weight:800">합계 ${_finWon(tan+intan)}</span>
     </div>
   </div>
-  ${_finAssetSection('tangible','유형 자산','보증금·가구·장비·차량 등 실물','#2563eb')}
-  ${_finAssetSection('intangible','무형 자산','특허·상표·소프트웨어 등','#7c3aed')}`;
+  ${sub==='tangible' ? _finAssetSection('tangible','유형 자산','#2563eb') : _finAssetSection('intangible','무형 자산','#7c3aed')}`;
 }
+function _finSetAssetTab(k){ window._FIN.assetTab = k; try{ localStorage.setItem('reniv_fin_asset_tab', k); }catch(_){} _finRender(); }
 async function _finAddAsset(kind){
   if (typeof requireWrite==='function' && !requireWrite()) return;
   const name=(document.getElementById('fin-as-name-'+kind).value||'').trim();
