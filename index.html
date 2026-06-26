@@ -5816,7 +5816,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.298';
+const ERP_VERSION = 'v2.3.299';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7330,9 +7330,9 @@ async function _doSaveDataInner() {
   }
 
   // meta 저장
+  let _metaStr = '';
   try {
-  await setDoc(docRef(db, 'erp_data', 'meta'), {
-    data: JSON.stringify({
+  _metaStr = JSON.stringify({
       _trelloKey:       dbToSave._trelloKey       || null,
       _trelloToken:     dbToSave._trelloToken     || null,
       _trelloLists:     dbToSave._trelloLists     || null,
@@ -7368,12 +7368,18 @@ async function _doSaveDataInner() {
       // v1.9.247 — 앱 설정 (슬랙 Webhook URL, Gemini API 키 등) Firestore 저장
       //            이전에는 localStorage 전용이라 브라우저 정리/기기 변경 시 설정이 소실됨
       appSettings:      dbToSave.appSettings      || {},
-    }),
-    ts: Date.now()
-  });
-  try { console.warn('[META-SAVE v2.3.297] OK · dbToSave sigTomb=' + ((dbToSave._deletedCommentSigs||[]).length) + ' idTomb=' + ((dbToSave._deletedCommentIds||[]).length)); } catch(_){}
+    });
+  await setDoc(docRef(db, 'erp_data', 'meta'), { data: _metaStr, ts: Date.now() });
+  try { console.warn('[META-SAVE v2.3.299] OK · ' + Math.round(_metaStr.length/1024) + 'KB · sigTomb=' + ((dbToSave._deletedCommentSigs||[]).length) + ' idTomb=' + ((dbToSave._deletedCommentIds||[]).length)); } catch(_){}
   } catch(e) {
-    console.error('❌ [META-SAVE v2.3.297] 실패 — 새 tombstone 미저장! :', e.message, '· (dbToSave sigTomb=' + ((dbToSave._deletedCommentSigs||[]).length) + ')');
+    console.error('❌ [META-SAVE] 실패:', e.message, '· 크기=' + Math.round((_metaStr.length||0)/1024) + 'KB');
+    // v2.3.299: meta 저장 재시도 — 무음 실패 시 tombstone(삭제기록)·설정 유실 → "삭제했는데 부활"의 근본 원인
+    let _metaSaved = false;
+    for (let r = 1; r <= 3 && _metaStr; r++) {
+      try { await new Promise(res => setTimeout(res, 500 * r)); await setDoc(docRef(db, 'erp_data', 'meta'), { data: _metaStr, ts: Date.now() }); _metaSaved = true; console.log('✅ meta 저장 재시도 ' + r + ' 성공'); break; }
+      catch(re) { console.error('❌ meta 재시도 ' + r + ' 실패:', re.message); }
+    }
+    if (!_metaSaved) { const _mkb = Math.round((_metaStr.length||0)/1024); try { showNotif('⚠️ 설정·삭제기록(meta) 클라우드 저장 실패 (' + _mkb + 'KB) — 삭제가 되살아날 수 있습니다.' + (_mkb>1000?' 데이터가 1MB를 초과합니다.':''), 'error'); } catch(_){} }
   }
   // 🔑 서버 쓰기 완료 대기 (캐시→서버 동기화 보장)
   try {
