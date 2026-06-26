@@ -5816,7 +5816,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.291';
+const ERP_VERSION = 'v2.3.292';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -40553,7 +40553,11 @@ function cancelCommentEdit(commentId) {
 //   이 의견만 정확히 식별(부활 차단/삭제). 지급완료 override sig(v2.3.251)와 동형.
 function _apCommentSig(c){
   if(!c) return '';
-  return [String(c.approvalId==null?'':c.approvalId), String(c.author==null?'':c.author), String(c.text==null?'':c.text).trim(), String(c.createdAt==null?'':c.createdAt)].join('|');
+  const t = String(c.text==null?'':c.text).trim();
+  if(!t) return '';  // 빈 본문 → sig 무효(무차별 삭제 방지)
+  // v2.3.292: approvalId 제외 — 같은 의견이 다른 approvalId(중복 PO 결재 레코드)로 흩어진 ghost 까지
+  //   tombstone 으로 잡기 위함. author|text|createdAt 로 콘텐츠 동일성 식별(approvalId 가 리매핑/중복돼도 동일).
+  return [String(c.author==null?'':c.author).trim(), t, String(c.createdAt==null?'':c.createdAt)].join('|');
 }
 function deleteComment(commentId) {
   if (!confirm('이 의견을 삭제하시겠습니까? (딸린 답글도 함께 삭제됩니다)')) return;
