@@ -5816,7 +5816,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.287';
+const ERP_VERSION = 'v2.3.288';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7233,6 +7233,12 @@ async function _doSaveDataInner() {
                         return true;
                       });
                     }
+                    if (key === 'approvalComments' && Array.isArray(DB._deletedCommentSigs) && DB._deletedCommentSigs.length > 0 && typeof _apCommentSig === 'function') {
+                      // v2.3.288: 서버전용 의견도 sig tombstone 이면 보존하지 않음(작은 id 충돌 무관)
+                      const _cSigSet = new Set(DB._deletedCommentSigs.map(x => String(x && x.sig)));
+                      const _srvByIdC = new Map(srvArr.map(o => [o && o.id, o]));
+                      _keepIds = _keepIds.filter(id => { const o = _srvByIdC.get(id); if (!o) return true; try { if (_cSigSet.has(_apCommentSig(o))) return false; } catch(_){} return true; });
+                    }
                   } catch(tgErr2) { console.warn('[COUNT-GUARD] ' + key + ' tombstone 필터 실패:', tgErr2); }
                   if (_keepIds.length > 0) {
                     const _merged = [...val];
@@ -7324,6 +7330,7 @@ async function _doSaveDataInner() {
       _deletedFeedPostIds: Array.isArray(dbToSave._deletedFeedPostIds) ? dbToSave._deletedFeedPostIds : [],
       _deletedApprovalIds: Array.isArray(dbToSave._deletedApprovalIds) ? dbToSave._deletedApprovalIds : [],
       _deletedCommentIds: Array.isArray(dbToSave._deletedCommentIds) ? dbToSave._deletedCommentIds : [],
+      _deletedCommentSigs: Array.isArray(dbToSave._deletedCommentSigs) ? dbToSave._deletedCommentSigs : [],  // v2.3.288
       _deletedSampleIds: Array.isArray(dbToSave._deletedSampleIds) ? dbToSave._deletedSampleIds : [],  // v1.9.682
       _deletedItemIds: Array.isArray(dbToSave._deletedItemIds) ? dbToSave._deletedItemIds : [],  // v1.9.892
       _deletedShopIds: Array.isArray(dbToSave._deletedShopIds) ? dbToSave._deletedShopIds : [],  // v1.9.691
@@ -8449,6 +8456,7 @@ const DEFAULT_DB = {
   _deletedFeedPostIds: [],
   _deletedApprovalIds: [],
   _deletedCommentIds: [],
+  _deletedCommentSigs: [],  // v2.3.288: 의견 콘텐츠 sig tombstone (작은-정수 id 충돌 방어)
   _deletedSampleIds: [],  // v1.9.682
   _deletedItemIds: [],  // v1.9.892 — 품목 삭제 tombstone
   _deletedShopIds: [],  // v1.9.691
@@ -40463,6 +40471,12 @@ function cancelCommentEdit(commentId) {
   if (typeof renderApprovalComments === 'function') renderApprovalComments(c.approvalId);
 }
 
+// v2.3.288: 의견 콘텐츠 서명 — 구버전 작은-정수 id 가 다른 사용자 tombstone id 와 충돌해도
+//   이 의견만 정확히 식별(부활 차단/삭제). 지급완료 override sig(v2.3.251)와 동형.
+function _apCommentSig(c){
+  if(!c) return '';
+  return [String(c.approvalId==null?'':c.approvalId), String(c.author==null?'':c.author), String(c.text==null?'':c.text).trim(), String(c.createdAt==null?'':c.createdAt)].join('|');
+}
 function deleteComment(commentId) {
   if (!confirm('이 의견을 삭제하시겠습니까? (딸린 답글도 함께 삭제됩니다)')) return;
   // v2.1.8: ID 타입 불일치 방어 — String() 비교로 통일
@@ -40476,23 +40490,35 @@ function deleteComment(commentId) {
     return acc;
   };
   const idsToRemove = collectIds(_cidStr, new Set());
-  // tombstone 등록
-  if (!Array.isArray(DB._deletedCommentIds)) DB._deletedCommentIds = [];
   const _now = Date.now();
+  // v2.3.288: 삭제 대상의 콘텐츠 sig 수집 (의미있는 sig 만 — 전부 빈값이면 제외)
+  const _removedSigs = [];
+  DB.approvalComments.forEach(x => { if (x && idsToRemove.has(String(x.id))) { const s = _apCommentSig(x); if (s && s !== '|||') _removedSigs.push(s); } });
+  // tombstone 등록 (id)
+  if (!Array.isArray(DB._deletedCommentIds)) DB._deletedCommentIds = [];
   idsToRemove.forEach(id => DB._deletedCommentIds.push({ id: String(id), ts: _now }));
   if (DB._deletedCommentIds.length > 1000) {
     DB._deletedCommentIds = DB._deletedCommentIds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 1000);
   }
-  // v2.1.8: String 키 Set 으로 비교
-  DB.approvalComments = DB.approvalComments.filter(x => x && !idsToRemove.has(String(x.id)));
-  console.log('🗑️ [COMMENT DELETE] ' + idsToRemove.size + '건 (' + Array.from(idsToRemove).join(',') + ')');
+  // tombstone 등록 (sig) — v2.3.288
+  if (!Array.isArray(DB._deletedCommentSigs)) DB._deletedCommentSigs = [];
+  _removedSigs.forEach(s => DB._deletedCommentSigs.push({ sig: s, ts: _now }));
+  if (DB._deletedCommentSigs.length > 1000) {
+    DB._deletedCommentSigs = DB._deletedCommentSigs.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 1000);
+  }
+  // v2.1.8: String 키 Set 비교 + v2.3.288: sig 매칭(다른 id 의 동일내용 dup)도 제거
+  const _sigSet = new Set(_removedSigs);
+  DB.approvalComments = DB.approvalComments.filter(x => x && !idsToRemove.has(String(x.id)) && !(_sigSet.size && _sigSet.has(_apCommentSig(x))));
+  console.log('🗑️ [COMMENT DELETE] ' + idsToRemove.size + '건 (' + Array.from(idsToRemove).join(',') + ') sig=' + _removedSigs.length);
   // v1.9.661: 즉시 저장 (디바운스 우회)
   if (typeof saveDataNow === 'function') {
     saveDataNow().then(() => console.log('✅ [SAVE] comment delete OK')).catch(e => { console.error('❌ comment delete 저장 실패:', e); try { showNotif('⚠️ 삭제 저장 실패: ' + (e.message||e), 'error'); } catch(_){} });
   } else {
     try { saveData(); } catch(_){}
   }
-  if (ref != null) renderApprovalComments(ref);
+  // v2.3.288: ref 누락(구 의견 approvalId 없음)이어도 현재 열린 결재로 재렌더 → "삭제했는데 화면에 남음" 방지
+  const _rk = (ref != null) ? ref : (typeof _currentApprovalDetailId !== 'undefined' ? _currentApprovalDetailId : null);
+  if (_rk != null) renderApprovalComments(_rk);
   // v1.9.678: 외부 표 의견 카운트 배지 즉시 갱신
   try { if (typeof renderApprovalPage === 'function') renderApprovalPage(); } catch(_){}
   try { if (typeof updateApprovalBadges === 'function') updateApprovalBadges(); } catch(_){}
@@ -52708,6 +52734,19 @@ function initERPWhenReady() {
           merged.approvalComments = merged.approvalComments.filter(c => c && !cmTombSet.has(String(c.id)));
           const removed = before - merged.approvalComments.length;
           if (removed > 0) console.warn('🪦 [v1.9.661] comment tombstone 으로 ' + removed + '건 부활 차단');
+        }
+        // v2.3.288: 의견 콘텐츠 sig tombstone 머지 — 작은-정수 id 충돌과 무관하게 정확히 부활 차단
+        const fsCmSig = Array.isArray(firestoreDB._deletedCommentSigs) ? firestoreDB._deletedCommentSigs : [];
+        const lcCmSig = Array.isArray(localDB._deletedCommentSigs) ? localDB._deletedCommentSigs : [];
+        const cmSigByKey = new Map();
+        [...fsCmSig, ...lcCmSig].forEach(x => { if (!x || x.sig == null) return; const k = String(x.sig); const prev = cmSigByKey.get(k); if (!prev || (x.ts||0) > (prev.ts||0)) cmSigByKey.set(k, x); });
+        merged._deletedCommentSigs = Array.from(cmSigByKey.values()).sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 1000);
+        const cmSigSet = new Set(merged._deletedCommentSigs.map(x => String(x.sig)));
+        if (Array.isArray(merged.approvalComments) && cmSigSet.size > 0 && typeof _apCommentSig === 'function') {
+          const beforeS = merged.approvalComments.length;
+          merged.approvalComments = merged.approvalComments.filter(c => c && !cmSigSet.has(_apCommentSig(c)));
+          const removedS = beforeS - merged.approvalComments.length;
+          if (removedS > 0) console.warn('🪦 [v2.3.288] comment sig tombstone 으로 ' + removedS + '건 부활 차단');
         }
         // v1.9.682: 샘플 구매 tombstone 머지
         const fsSmT = Array.isArray(firestoreDB._deletedSampleIds) ? firestoreDB._deletedSampleIds : [];
