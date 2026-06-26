@@ -5816,7 +5816,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.293';
+const ERP_VERSION = 'v2.3.294';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -40303,7 +40303,7 @@ function renderApprovalComments(refKey, hideEmptyState) {
   const roots = [];
   all.forEach(c => {
     const node = byId[c.id];
-    if (c.parentId && byId[c.parentId]) byId[c.parentId]._children.push(node);
+    if (c.parentId && String(c.parentId) !== String(c.id) && byId[c.parentId]) byId[c.parentId]._children.push(node);  // v2.3.294: 자기참조 방어(무한루프 차단)
     else roots.push(node);
   });
   const sortByTs = arr => arr.sort((a,b) => (a.createdAt||0) - (b.createdAt||0));
@@ -40567,8 +40567,9 @@ function deleteComment(commentId) {
   const ref = c ? c.approvalId : null;
   // 자식(답글) 재귀 수집 — String 비교
   const collectIds = (idStr, acc) => {
+    if (acc.has(idStr)) return acc;  // v2.3.294: parentId 순환/자기참조 무한재귀(스택오버플로) 방어 — 삭제가 통째로 throw 되던 진짜 원인
     acc.add(idStr);
-    DB.approvalComments.filter(x => x && String(x.parentId) === idStr).forEach(ch => collectIds(String(ch.id), acc));
+    DB.approvalComments.filter(x => x && String(x.parentId) === idStr && String(x.id) !== idStr).forEach(ch => collectIds(String(ch.id), acc));
     return acc;
   };
   const idsToRemove = collectIds(_cidStr, new Set());
@@ -40596,8 +40597,6 @@ function deleteComment(commentId) {
   DB.approvalComments = DB.approvalComments.filter(x => x && !idsToRemove.has(String(x.id)) && !(_sigSet.size && _sigSet.has(_apCommentSig(x))));
   const _diagRemoved = _diagBeforeLen - DB.approvalComments.length;
   console.log('🗑️ [COMMENT DELETE] ' + idsToRemove.size + '건 (' + Array.from(idsToRemove).join(',') + ') sig=' + _removedSigs.length + ' | id매칭=' + _diagMatchById + ' 제거=' + _diagRemoved);
-  // v2.3.293 진단 알림(원인 파악 후 제거 예정)
-  try { showNotif('🗑 삭제진단 ' + (typeof ERP_VERSION!=='undefined'?ERP_VERSION:'') + ' · 받은id=' + _cidStr + ' · id매칭=' + _diagMatchById + ' · 제거=' + _diagRemoved, _diagRemoved>0?'success':'warning'); } catch(_){}
   // v1.9.661: 즉시 저장 (디바운스 우회)
   if (typeof saveDataNow === 'function') {
     saveDataNow().then(() => console.log('✅ [SAVE] comment delete OK')).catch(e => { console.error('❌ comment delete 저장 실패:', e); try { showNotif('⚠️ 삭제 저장 실패: ' + (e.message||e), 'error'); } catch(_){} });
