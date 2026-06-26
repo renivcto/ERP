@@ -5816,7 +5816,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.300';
+const ERP_VERSION = 'v2.3.301';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -53379,6 +53379,23 @@ function initERPWhenReady() {
               try { if (typeof saveData === 'function') saveData(); } catch(_){}
             }
           }).catch(function(){});
+        }
+      } catch(_){}
+      // v2.3.301: 일회성 고아 의견 정리 — '수정 전 작성돼 삭제가 안 되던' 특정 의견을 본문 키워드로
+      //   강제 제거 + 해시 톰스톤 기록. 톰스톤이 persist 되면 다음 로드부터 merge 필터가 자동 차단(자기치유).
+      //   (해당 의견이 더는 없으면 _orphHit=0 → 아무 동작 안 함)
+      try {
+        const _orphKW = '무광 코팅 추가로 인해 단상자 단가';
+        const _orphHit = (DB.approvalComments||[]).filter(c => c && String(c.text||'').indexOf(_orphKW) >= 0);
+        if (_orphHit.length) {
+          const _on = Date.now();
+          if (!Array.isArray(DB._deletedCommentIds)) DB._deletedCommentIds = [];
+          if (!Array.isArray(DB._deletedCommentSigs)) DB._deletedCommentSigs = [];
+          _orphHit.forEach(c => { DB._deletedCommentIds.push({ id: String(c.id), ts: _on }); const _s = (typeof _apCommentSig === 'function') ? _apCommentSig(c) : ''; if (_s) DB._deletedCommentSigs.push({ sig: _s, ts: _on }); });
+          DB.approvalComments = (DB.approvalComments||[]).filter(c => !(c && String(c.text||'').indexOf(_orphKW) >= 0));
+          console.warn('🧹 [v2.3.301] 고아 의견 ' + _orphHit.length + '건 강제 정리 + 톰스톤 기록');
+          try { if (typeof saveDataNow === 'function') saveDataNow(); else if (typeof saveData === 'function') saveData(); } catch(_){}
+          try { if (typeof renderApprovalComments === 'function' && typeof _currentApprovalDetailId !== 'undefined' && _currentApprovalDetailId != null) renderApprovalComments(_currentApprovalDetailId); } catch(_){}
         }
       } catch(_){}
       // v2.3.268: 부자재 사양서 IDB 백업 복구 (Firestore 1MB 초과·localStorage 슬림으로 유실된 신규/수정분)
