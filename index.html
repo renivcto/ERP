@@ -5816,7 +5816,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.289';
+const ERP_VERSION = 'v2.3.290';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -34630,7 +34630,7 @@ function renderApprovalExpenseTable() {
       <td style="text-align:center">${catBadge}</td>
       <td style="text-align:center;font-weight:400">${e.vendor||'-'}</td>
       <td style="text-align:center;padding:8px 10px"><div style="font-size:12.5px;font-weight:400;cursor:pointer;color:var(--sky-700);max-width:240px;margin:0 auto;white-space:normal;word-break:break-word;overflow-wrap:anywhere;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden" class="po-item-link" title="클릭하면 지출결의서 PDF 열기" onclick="openExpenseApprovalForm(${e.id})">${itemName}</div></td>
-      <td style="text-align:center;font-weight:400;color:${paid?'#0f172a':'#b91c1c'}">${_fmtExpenseAmount(e)}${(e.amountManual && e.poAmount!=null && Number(e.poAmount)!==Number(e.amount)) ? `<div style="font-size:10px;color:#94a3b8;font-weight:400;margin-top:1px;line-height:1.2">청구 ${fmtWon(Number(e.poAmount))} <span style="color:#7c3aed;font-weight:700">· 실지급 조정</span></div>` : ''}</td>
+      <td style="text-align:center;font-weight:400;color:${paid?'#0f172a':'#b91c1c'}${_poAdjustable?';cursor:pointer':''}" ${_poAdjustable?`onclick="_openExpenseAmountOverride(${e.id})" title="클릭해 실지급 금액·사유 입력"`:''}>${_fmtExpenseAmount(e)}${(e.amountManual && e.poAmount!=null && Number(e.poAmount)!==Number(e.amount)) ? `<div style="font-size:10px;color:#94a3b8;font-weight:400;margin-top:2px;line-height:1.3">청구 ${fmtWon(Number(e.poAmount))}<br><span style="color:#7c3aed;font-weight:700">${e.amountReason?String(e.amountReason).replace(/&/g,'&amp;').replace(/</g,'&lt;'):'실지급'} 조정 ${fmtWon(Number(e.amount))}</span></div>` : ''}</td>
       <td style="text-align:center">${dueCell}</td>
       <td style="text-align:center">${closingCell}</td>
       <td style="text-align:center">${payBtn}</td>
@@ -36635,6 +36635,8 @@ function _openExpenseAmountOverride(expId){
     <label style="font-size:13px;font-weight:700;color:#0f172a;display:block;margin-bottom:6px">실지급 금액 (원)</label>
     <input id="_expAmtOvInput" type="number" value="${cur}" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:15px;text-align:right;font-weight:700" placeholder="실제 지급 금액">
     <div id="_expAmtOvDiff" style="font-size:12px;margin-top:6px;text-align:right;min-height:16px"></div>
+    <label style="font-size:13px;font-weight:700;color:#0f172a;display:block;margin:14px 0 6px">조정 사유</label>
+    <input id="_expAmtOvReason" type="text" value="${String(e.amountReason||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')}" placeholder="예: 생산 완료 후 실수량 변경" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:13.5px">
     <div style="display:flex;gap:8px;margin-top:18px;justify-content:space-between;align-items:center;flex-wrap:wrap">
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${e.amountManual ? `<button onclick="_clearExpenseAmountOverride('${e.id}')" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer" title="발주서 청구액으로 되돌리고 자동계산 복귀">↩ 청구액으로 복귀</button>` : ''}
@@ -36662,6 +36664,8 @@ async function _saveExpenseAmountOverride(expId){
   const v = Number((inp&&inp.value)||0);
   if (!isFinite(v) || v < 0) { try { showNotif('올바른 금액을 입력하세요','warning'); } catch(_){} return; }
   if (e.poAmount == null) e.poAmount = Number(e.amount||0);  // 최초 1회 발주서 파생액 보존
+  const reasonEl = document.getElementById('_expAmtOvReason');
+  e.amountReason = ((reasonEl&&reasonEl.value)||'').trim();
   e.amount = v;
   e.amountManual = true;
   e.updatedAt = Date.now();
@@ -36675,6 +36679,7 @@ async function _clearExpenseAmountOverride(expId){
   const e = (DB.expenses||[]).find(x => x && String(x.id) === String(expId));
   if (!e) { _closeExpenseAmountOverride(); return; }
   e.amountManual = false;
+  e.amountReason = '';
   if (e.poAmount != null) e.amount = Number(e.poAmount);  // 발주서 청구액으로 복귀
   e.updatedAt = Date.now();
   _closeExpenseAmountOverride();
@@ -41954,7 +41959,7 @@ async function openExpenseApprovalForm(expenseId) {
         <tbody>
           ${rowsHtml}
           <tr class="total-row">
-            <td colspan="4" style="text-align:right">합           계${_isOverseasPo ? ' <span style="font-size:10px;color:#6b7280;font-weight:500">/ Total</span>' : ''}</td>
+            <td colspan="4" style="text-align:right">합           계${_isOverseasPo ? ' <span style="font-size:10px;color:#6b7280;font-weight:500">/ Total</span>' : ' <span style="font-size:11px;color:#6b7280;font-weight:500">(부가세 제외)</span>'}</td>
             <td style="text-align:right">${fmtAmt(execTotal)}</td>
           </tr>
           ${(e.category==='po_prepay'||e.category==='po_balance') && percent !== 100 ? `
@@ -41964,6 +41969,18 @@ async function openExpenseApprovalForm(expenseId) {
           </tr>` : ''}
         </tbody>
       </table>
+
+      ${(e.amountManual && e.poAmount != null && (e.category==='po_prepay'||e.category==='po_balance')) ? `
+      <div style="margin:12px 0;padding:12px 14px;border:1.5px solid #fcd34d;border-radius:8px;background:#fffbeb">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px">
+          <span style="font-size:12.5px;color:#92400e">기존 PO${poSerial?` (${poSerial})`:''} 청구금액 <span style="font-size:10.5px;color:#a16207">(부가세 포함)</span></span>
+          <span style="font-size:13px;color:#9ca3af;text-decoration:line-through">${fmtW(Number(e.poAmount))}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <span style="font-size:12.5px;color:#92400e;font-weight:700">${e.amountReason?(String(e.amountReason).replace(/&/g,'&amp;').replace(/</g,'&lt;')+' 사유로 '):''}조정된 실청구 금액 <span style="font-size:10.5px;color:#a16207;font-weight:500">(부가세 포함)</span></span>
+          <span style="font-size:15px;color:#b45309;font-weight:800">${fmtW(amt)}</span>
+        </div>
+      </div>` : ''}
 
       ${_isOverseasPo ? _overseasAmountLineHtml : (_expForeign ? `<div class="amount-line" style="flex-direction:column;align-items:stretch;gap:6px">
         <div style="display:flex;justify-content:space-between;align-items:baseline">
@@ -41975,7 +41992,7 @@ async function openExpenseApprovalForm(expenseId) {
           <span style="color:#b45309">※ 환율 변동에 따라 실제 결제액과 다를 수 있음</span>
         </div>
       </div>` : `<div class="amount-line">
-        <div class="k-amt">금 액 (한글) : 일금 ${amtKor} 원정</div>
+        <div class="k-amt">금 액 (한글) : 일금 ${amtKor} 원정${(!_isOverseasPo && (e.category==='po_prepay'||e.category==='po_balance')) ? ' <span style="font-size:11px;color:#92400e;font-weight:600">(부가세 포함)</span>' : ''}</div>
         <div class="n-amt">${fmtW(amt)}</div>
       </div>`)}
 
