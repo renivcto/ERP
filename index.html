@@ -5828,7 +5828,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.305';
+const ERP_VERSION = 'v2.3.306';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -34383,7 +34383,8 @@ async function _setExpensePaidOverride(e, paidDate, isPaid) {
     }
     // v2.3.251: id·sig 키를 모두 기록 → id 재할당돼도 sig 로 복원. rec.sig 로 id 오탐 차단.
     if (isPaid) { const rec = { paidDate: paidDate || '', ts: Date.now(), sig: _expensePaidSig(e) || '' }; keys.forEach(k => { map[k] = rec; }); }
-    else keys.forEach(k => { delete map[k]; });
+    // v2.3.306: 해제(되돌리기)도 삭제 대신 'notPaid' override 로 기록 → 지출문서 저장이 실패(stale paid 로드)해도 지급요청으로 강제 복원
+    else { const rec = { paidDate: '', ts: Date.now(), sig: _expensePaidSig(e) || '', notPaid: true }; keys.forEach(k => { map[k] = rec; }); }
     if (typeof saveSharedSetting === 'function') await saveSharedSetting('expense_paid_overrides', map);
     console.log('💾 [override] ' + (isPaid ? '지급완료' : '해제') + ' 기록: ' + keys.join('  '));
   } catch(err) { console.warn('[expense override] 저장 실패:', err); }
@@ -34394,8 +34395,8 @@ function _applyExpensePaidOverrides() {
     if (!map || typeof map !== 'object') return 0;
     let applied = 0;
     (DB.expenses||[]).forEach(e => {
-      if (!e || e.paidStatus === 'paid') return;
-      // v2.3.251: po / id / sig 후보 키 중 하나라도 맞으면 paid 강제 복원.
+      if (!e) return;
+      // v2.3.251: po / id / sig 후보 키 중 하나라도 맞으면 강제 복원.
       //   단 'id:' 키는 다른 expense 가 같은 id 를 재사용했을 때 오탐할 수 있으므로,
       //   기록에 sig 가 있으면 현재 expense sig 와 일치할 때만 인정(po/sig 키는 이미 정밀해 무조건 인정).
       const eSig = _expensePaidSig(e);
@@ -34407,11 +34408,12 @@ function _applyExpensePaidOverrides() {
         if (k.indexOf('id:') === 0 && r.sig && eSig && r.sig !== eSig) continue;  // id 재사용 오탐 차단
         rec = r; break;
       }
-      if (rec) {
-        e.paidStatus = 'paid';
-        if (rec.paidDate && !e.paidDate) e.paidDate = rec.paidDate;
-        e.updatedAt = Date.now();
-        applied++;
+      if (!rec) return;
+      if (rec.notPaid) {
+        // v2.3.306: 해제 override — 지출문서가 stale paid 로 로드돼도 지급요청으로 강제 복원(되돌리기 영속)
+        if (e.paidStatus === 'paid') { e.paidStatus = 'requested'; e.paidDate = ''; e.updatedAt = Date.now(); applied++; }
+      } else {
+        if (e.paidStatus !== 'paid') { e.paidStatus = 'paid'; if (rec.paidDate && !e.paidDate) e.paidDate = rec.paidDate; e.updatedAt = Date.now(); applied++; }
       }
     });
     if (applied > 0) console.log('💳 [override] 지급완료 상태 ' + applied + '건 강제 복원');
