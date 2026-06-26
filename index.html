@@ -5816,7 +5816,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.297';
+const ERP_VERSION = 'v2.3.298';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7303,6 +7303,27 @@ async function _doSaveDataInner() {
         }
         if (!_shopOrdersSaved) {
           throw new Error('shopOrders Firestore 저장 실패 (3회 재시도 후)');
+        }
+      }
+      // v2.3.298: expenses 등 사용자 직접입력 컬렉션도 재시도 + 경고.
+      //   기존엔 무음 실패(console만) → 저장 실패 시 작성자 localStorage 엔 있으나 Firestore 엔 없어
+      //   "관리자만 보이고 다른 직원에겐 안 보이는" 지출결의서 버그가 발생했음.
+      if (['expenses','approvals','approvalComments','feedPosts','samples'].indexOf(key) >= 0) {
+        let _ukSaved = false;
+        for (let retry = 1; retry <= 3; retry++) {
+          try {
+            await new Promise(r => setTimeout(r, 500 * retry));
+            await setDoc(docRef(db, 'erp_data', key), payload);
+            _ukSaved = true;
+            console.log('✅ ' + key + ' 저장 재시도 ' + retry + ' 성공!');
+            break;
+          } catch(retryErr) {
+            console.error('❌ ' + key + ' 재시도 ' + retry + ' 실패:', retryErr.message, '크기:', payload.data.length);
+          }
+        }
+        if (!_ukSaved) {
+          const _kb = Math.round((payload.data.length||0)/1024);
+          try { showNotif('⚠️ ' + key + ' 클라우드 저장 실패 (' + _kb + 'KB) — 다른 직원에게 안 보일 수 있습니다. ' + (_kb>1000?'첨부 용량이 너무 큽니다(분할 저장 필요).':'잠시 후 새로고침 후 다시 시도하세요.'), 'error'); } catch(_){}
         }
       }
     }
