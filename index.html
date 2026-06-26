@@ -5816,7 +5816,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.295';
+const ERP_VERSION = 'v2.3.296';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -37820,6 +37820,13 @@ function _applySlackApprovalInboxEntries(comments, inbox, nowMs) {
         .slice().sort((a, b) => (Number(a.createdAt)||0) - (Number(b.createdAt)||0));
       if (tops.length) parentId = tops[tops.length - 1].id;
     }
+    // v2.3.296: 삭제된 의견(콘텐츠 sig tombstone)과 동일 본문이면 슬랙 재유입 차단(부활 방지)
+    try {
+      if (typeof _apCommentSig === 'function' && Array.isArray(DB._deletedCommentSigs) && DB._deletedCommentSigs.length) {
+        const _wsig = _apCommentSig({ text: text });
+        if (_wsig && DB._deletedCommentSigs.some(x => x && String(x.sig) === _wsig)) { applied.push(en); return; }
+      }
+    } catch(_){}
     // 결정적 id (슬랙 ts 기반) — 어느 클라이언트가 적용해도 동일 → 머지 중복/부활 방지
     const cid = Math.round((parseFloat(en.ts) || 0) * 1000000) || (nowMs * 1000 + Math.floor(Math.random() * 1000));
     const cms = Math.round((parseFloat(en.ts) || 0) * 1000) || (Number(en.at) || nowMs);
@@ -40600,7 +40607,7 @@ function deleteComment(commentId) {
   console.log('🗑️ [COMMENT DELETE] ' + idsToRemove.size + '건 (' + Array.from(idsToRemove).join(',') + ') sig=' + _removedSigs.length + ' | id매칭=' + _diagMatchById + ' 제거=' + _diagRemoved);
   // v1.9.661: 즉시 저장 (디바운스 우회)
   if (typeof saveDataNow === 'function') {
-    saveDataNow().then(() => console.log('✅ [SAVE] comment delete OK')).catch(e => { console.error('❌ comment delete 저장 실패:', e); try { showNotif('⚠️ 삭제 저장 실패: ' + (e.message||e), 'error'); } catch(_){} });
+    saveDataNow().then(() => console.warn('✅ [DELETE-SAVED v2.3.296] idTomb=' + DB._deletedCommentIds.length + ' sigTomb=' + DB._deletedCommentSigs.length + ' / 남은의견=' + DB.approvalComments.length)).catch(e => { console.error('❌ comment delete 저장 실패:', e); try { showNotif('⚠️ 삭제 저장 실패: ' + (e.message||e), 'error'); } catch(_){} });
   } else {
     try { saveData(); } catch(_){}
   }
@@ -52848,6 +52855,7 @@ function initERPWhenReady() {
           const removedS = beforeS - merged.approvalComments.length;
           if (removedS > 0) console.warn('🪦 [v2.3.288] comment sig tombstone 으로 ' + removedS + '건 부활 차단');
         }
+        try { console.warn('[SIG-DIAG v2.3.296] sig톰=' + cmSigSet.size + ' idLom=' + cmTombSet.size + ' 의견수=' + (Array.isArray(merged.approvalComments)?merged.approvalComments.length:'-')); } catch(_){}
         // v1.9.682: 샘플 구매 tombstone 머지
         const fsSmT = Array.isArray(firestoreDB._deletedSampleIds) ? firestoreDB._deletedSampleIds : [];
         const lcSmT = Array.isArray(localDB._deletedSampleIds) ? localDB._deletedSampleIds : [];
