@@ -3091,10 +3091,22 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
               <div class="fg"><label>쇼핑몰명<span class="req">*</span></label><input class="fi" id="shop-name" placeholder="예: 쿠팡, 스마트스토어"></div>
               <div class="fg"><label>API 연동 여부</label><select class="fs" id="shop-api"><option value="true">연동 (자동 수집)</option><option value="false">미연동 (수동 업로드)</option></select></div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-              <div class="fg"><label>정산 주기</label><input class="fi" id="shop-settle" placeholder="예: D+7, 월정산 등"></div>
-              <div class="fg"><label>담당자</label><input class="fi" id="shop-manager" placeholder="담당자 이름"></div>
+            <div class="fg"><label>정산 주기 <span style="font-size:11px;color:#94a3b8;font-weight:400">— 입금예정일 자동 계산용</span></label>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+                <select class="fs" id="shop-settle-type" onchange="_shopSettleTypeChange();_shopSettlePreview()" style="width:auto;flex:0 0 auto">
+                  <option value="tplus">판매 후 N일 (T+N)</option>
+                  <option value="weekly">주 정산</option>
+                  <option value="monthly">월 정산 (특정일)</option>
+                  <option value="free">직접 입력</option>
+                </select>
+                <span id="shop-settle-p-tplus" style="display:inline-flex;gap:4px;align-items:center;font-size:13px">판매 후 <input class="fi" id="shop-settle-days" type="number" min="0" oninput="_shopSettlePreview()" style="width:64px" placeholder="7"> 일 입금</span>
+                <span id="shop-settle-p-weekly" style="display:none;gap:4px;align-items:center;font-size:13px">매주 <select class="fs" id="shop-settle-weekday" onchange="_shopSettlePreview()" style="width:auto"><option value="0">일</option><option value="1">월</option><option value="2">화</option><option value="3">수</option><option value="4">목</option><option value="5" selected>금</option><option value="6">토</option></select>요일, <select class="fs" id="shop-settle-weeks" onchange="_shopSettlePreview()" style="width:auto"><option value="0">당주</option><option value="1" selected>다음주</option><option value="2">2주 후</option></select> 입금</span>
+                <span id="shop-settle-p-monthly" style="display:none;gap:4px;align-items:center;font-size:13px"><select class="fs" id="shop-settle-monthoffset" onchange="_shopSettlePreview()" style="width:auto"><option value="0">당월</option><option value="1" selected>익월</option><option value="2">익익월</option></select> <select class="fs" id="shop-settle-day" onchange="_shopSettlePreview()" style="width:auto"><option value="5">5일</option><option value="10">10일</option><option value="15">15일</option><option value="20">20일</option><option value="25">25일</option><option value="last">말일</option></select> 입금</span>
+                <input class="fi" id="shop-settle" style="display:none;flex:1;min-width:140px" placeholder="예: D+7, 월정산 등">
+              </div>
+              <div id="shop-settle-preview" style="font-size:11.5px;color:#2563eb;margin-top:5px;font-weight:600"></div>
             </div>
+            <div class="fg"><label>담당자</label><input class="fi" id="shop-manager" placeholder="담당자 이름"></div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
               <div class="fg">
                 <label>채널 유형</label>
@@ -5816,7 +5828,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.301';
+const ERP_VERSION = 'v2.3.302';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -18298,7 +18310,7 @@ function shopShowDetail(idx) {
     + '<div class="pcr"><div class="pcl">배송비</div><div class="pcv">' + (s.shippingCost || 0).toLocaleString() + '원</div></div>'
     + '<div class="pcr"><div class="pcl">무료배송 기준</div><div class="pcv">' + (s.freeShippingThreshold || 0).toLocaleString() + '원</div></div>'
     + '<div class="pcr"><div class="pcl">쿠폰 자부담률</div><div class="pcv">' + (s.couponBorneRate || 0) + '%</div></div>'
-    + '<div class="pcr"><div class="pcl">정산 주기</div><div class="pcv">' + safe(s.settlementCycle || '-') + '</div></div>'
+    + '<div class="pcr"><div class="pcl">정산 주기</div><div class="pcv">' + safe((typeof _shopSettleLabel==='function' ? _shopSettleLabel(s.settlement) : '') || s.settlementCycle || '-') + '</div></div>'
     + '<div class="pcr"><div class="pcl">담당자</div><div class="pcv">' + safe(s.manager || '-') + '</div></div>'
     + '<div class="pcr"><div class="pcl">API 연동</div><div class="pcv">' + apiTxt + '</div></div>'
     + (s.memo ? '<div class="pcr"><div class="pcl">비고</div><div class="pcv" style="line-height:1.6;white-space:pre-wrap;word-break:break-word">' + safe(s.memo) + '</div></div>' : '')
@@ -18324,6 +18336,54 @@ function shopEditMode(idx) {
   if ($('shop-detail-mode-badge')) $('shop-detail-mode-badge').textContent = '수정 모드';
 }
 function selectShop(idx) { shopEditMode(idx); }
+// v2.3.302: 정산 주기 구조화 — 입금예정일 자동 계산
+//   settle = { type:'tplus', days } | { type:'weekly', weekday, weeks } | { type:'monthly', monthOffset, day('last'|N) } | { type:'free', text }
+function _shopSettleDate(settle, baseStr){
+  try{
+    if(!settle || !settle.type || settle.type==='free') return '';
+    const base = new Date(String(baseStr).slice(0,10) + 'T00:00:00');
+    if(isNaN(base.getTime())) return '';
+    let r;
+    if(settle.type==='tplus'){ r=new Date(base); r.setDate(r.getDate()+(Number(settle.days)||0)); }
+    else if(settle.type==='weekly'){ const wd=isNaN(Number(settle.weekday))?5:Number(settle.weekday); r=new Date(base); const add=(wd-r.getDay()+7)%7; r.setDate(r.getDate()+add+(Number(settle.weeks)||0)*7); }
+    else if(settle.type==='monthly'){ const mo=Number(settle.monthOffset)||0; const y=base.getFullYear(), m=base.getMonth()+mo; if(settle.day==='last'){ r=new Date(y,m+1,0); } else { const lastDay=new Date(y,m+1,0).getDate(); r=new Date(y,m,Math.min(Number(settle.day)||1,lastDay)); } }
+    else return '';
+    const yy=r.getFullYear(), mm=String(r.getMonth()+1).padStart(2,'0'), dd=String(r.getDate()).padStart(2,'0');
+    return yy+'-'+mm+'-'+dd;
+  }catch(_){ return ''; }
+}
+function _shopSettleLabel(settle){
+  if(!settle || !settle.type) return '';
+  if(settle.type==='free') return settle.text || '';
+  if(settle.type==='tplus') return '판매 후 '+(Number(settle.days)||0)+'일 (T+'+(Number(settle.days)||0)+')';
+  if(settle.type==='weekly'){ const W=['일','월','화','수','목','금','토']; const wk=Number(settle.weeks)||0; return '주 정산 ('+(wk===0?'당주 ':wk===1?'다음주 ':wk+'주 후 ')+(W[Number(settle.weekday)]||'금')+'요일 입금)'; }
+  if(settle.type==='monthly'){ const mo=Number(settle.monthOffset)||0; const ml=mo===0?'당월':mo===1?'익월':mo===2?'익익월':mo+'개월 후'; return ml+' '+(settle.day==='last'?'말일':(Number(settle.day)||1)+'일'); }
+  return '';
+}
+function _shopSettleFromForm(){
+  const _v=id=>{ const el=document.getElementById(id); return el?el.value:''; };
+  const type=_v('shop-settle-type')||'tplus';
+  if(type==='tplus') return { type:'tplus', days: Number(_v('shop-settle-days'))||0 };
+  if(type==='weekly') return { type:'weekly', weekday: Number(_v('shop-settle-weekday'))||0, weeks: Number(_v('shop-settle-weeks'))||0 };
+  if(type==='monthly'){ const dv=_v('shop-settle-day'); return { type:'monthly', monthOffset: Number(_v('shop-settle-monthoffset'))||0, day: (dv==='last'?'last':Number(dv)||1) }; }
+  return { type:'free', text: _v('shop-settle')||'' };
+}
+function _shopSettleTypeChange(){
+  const t=(document.getElementById('shop-settle-type')||{}).value||'tplus';
+  const show=(id,on,disp)=>{ const el=document.getElementById(id); if(el) el.style.display = on?disp:'none'; };
+  show('shop-settle-p-tplus', t==='tplus', 'inline-flex');
+  show('shop-settle-p-weekly', t==='weekly', 'inline-flex');
+  show('shop-settle-p-monthly', t==='monthly', 'inline-flex');
+  show('shop-settle', t==='free', 'block');
+}
+function _shopSettlePreview(){
+  const el=document.getElementById('shop-settle-preview'); if(!el) return;
+  const settle=_shopSettleFromForm();
+  if(settle.type==='free'){ el.textContent=''; return; }
+  const today=new Date(); const ts=today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
+  const dep=_shopSettleDate(settle, ts);
+  el.textContent = dep ? ('💡 오늘('+ts+') 판매 시 → 입금예정 '+dep+'  ('+_shopSettleLabel(settle)+')') : '';
+}
 function loadShopDetail(idx) {
   const s = DB.shops[idx]; if (!s) return;
   window._currentShopIdx = idx;
@@ -18333,7 +18393,19 @@ function loadShopDetail(idx) {
   if (detail) detail.style.display = '';
   if($('shop-name')) $('shop-name').value = s.name || '';
   if($('shop-api')) $('shop-api').value = s.apiLinked ? 'true' : 'false';
-  if($('shop-settle')) $('shop-settle').value = s.settlementCycle || '';
+  // v2.3.302: 구조화 정산 주기 복원 (구버전은 settlementCycle 텍스트 → 직접입력으로 마이그레이션)
+  try {
+    const st = (s.settlement && s.settlement.type) ? s.settlement : { type:'free', text: s.settlementCycle||'' };
+    if($('shop-settle-type')) $('shop-settle-type').value = st.type;
+    if($('shop-settle-days')) $('shop-settle-days').value = (st.type==='tplus' && st.days!=null) ? st.days : '';
+    if($('shop-settle-weekday')) $('shop-settle-weekday').value = (st.type==='weekly' && st.weekday!=null) ? st.weekday : 5;
+    if($('shop-settle-weeks')) $('shop-settle-weeks').value = (st.type==='weekly' && st.weeks!=null) ? st.weeks : 1;
+    if($('shop-settle-monthoffset')) $('shop-settle-monthoffset').value = (st.type==='monthly' && st.monthOffset!=null) ? st.monthOffset : 1;
+    if($('shop-settle-day')) $('shop-settle-day').value = (st.type==='monthly' && st.day!=null) ? String(st.day) : 'last';
+    if($('shop-settle')) $('shop-settle').value = (st.type==='free') ? (st.text||s.settlementCycle||'') : '';
+    if(typeof _shopSettleTypeChange==='function') _shopSettleTypeChange();
+    if(typeof _shopSettlePreview==='function') _shopSettlePreview();
+  } catch(_){}
   if($('shop-manager')) $('shop-manager').value = s.manager || '';
   if($('shop-memo')) $('shop-memo').value = s.memo || '';
   if($('shop-commission')) $('shop-commission').value = s.commissionBase || 0;
@@ -18384,7 +18456,9 @@ function saveShopInfo() {
   const s = DB.shops[idx];
   s.name = $('shop-name')?.value || s.name;
   s.apiLinked = $('shop-api')?.value === 'true';
-  s.settlementCycle = $('shop-settle')?.value || '';
+  // v2.3.302: 구조화 정산 주기 저장 + 사람이 읽는 라벨을 settlementCycle 에 자동 생성(표시·하위호환)
+  try { const _st=_shopSettleFromForm(); s.settlement=_st; s.settlementCycle = _shopSettleLabel(_st) || ($('shop-settle')?.value||''); }
+  catch(_){ s.settlementCycle = $('shop-settle')?.value || ''; }
   s.manager = $('shop-manager')?.value || '';
   s.memo = $('shop-memo')?.value || '';
   s.commissionBase = parseFloat($('shop-commission')?.value) || 0;
