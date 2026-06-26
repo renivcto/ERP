@@ -5816,7 +5816,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.292';
+const ERP_VERSION = 'v2.3.293';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -40573,6 +40573,9 @@ function deleteComment(commentId) {
   };
   const idsToRemove = collectIds(_cidStr, new Set());
   const _now = Date.now();
+  // v2.3.293 진단: 삭제가 안 되는 원인 파악용 — id 매칭/제거 건수를 화면에 표시
+  const _diagBeforeLen = DB.approvalComments.length;
+  const _diagMatchById = DB.approvalComments.filter(x => x && idsToRemove.has(String(x.id))).length;
   // v2.3.288: 삭제 대상의 콘텐츠 sig 수집 (의미있는 sig 만 — 전부 빈값이면 제외)
   const _removedSigs = [];
   DB.approvalComments.forEach(x => { if (x && idsToRemove.has(String(x.id))) { const s = _apCommentSig(x); if (s && s !== '|||') _removedSigs.push(s); } });
@@ -40591,7 +40594,10 @@ function deleteComment(commentId) {
   // v2.1.8: String 키 Set 비교 + v2.3.288: sig 매칭(다른 id 의 동일내용 dup)도 제거
   const _sigSet = new Set(_removedSigs);
   DB.approvalComments = DB.approvalComments.filter(x => x && !idsToRemove.has(String(x.id)) && !(_sigSet.size && _sigSet.has(_apCommentSig(x))));
-  console.log('🗑️ [COMMENT DELETE] ' + idsToRemove.size + '건 (' + Array.from(idsToRemove).join(',') + ') sig=' + _removedSigs.length);
+  const _diagRemoved = _diagBeforeLen - DB.approvalComments.length;
+  console.log('🗑️ [COMMENT DELETE] ' + idsToRemove.size + '건 (' + Array.from(idsToRemove).join(',') + ') sig=' + _removedSigs.length + ' | id매칭=' + _diagMatchById + ' 제거=' + _diagRemoved);
+  // v2.3.293 진단 알림(원인 파악 후 제거 예정)
+  try { showNotif('🗑 삭제진단 ' + (typeof ERP_VERSION!=='undefined'?ERP_VERSION:'') + ' · 받은id=' + _cidStr + ' · id매칭=' + _diagMatchById + ' · 제거=' + _diagRemoved, _diagRemoved>0?'success':'warning'); } catch(_){}
   // v1.9.661: 즉시 저장 (디바운스 우회)
   if (typeof saveDataNow === 'function') {
     saveDataNow().then(() => console.log('✅ [SAVE] comment delete OK')).catch(e => { console.error('❌ comment delete 저장 실패:', e); try { showNotif('⚠️ 삭제 저장 실패: ' + (e.message||e), 'error'); } catch(_){} });
