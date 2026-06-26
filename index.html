@@ -5816,7 +5816,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.294';
+const ERP_VERSION = 'v2.3.295';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -40553,11 +40553,12 @@ function cancelCommentEdit(commentId) {
 //   이 의견만 정확히 식별(부활 차단/삭제). 지급완료 override sig(v2.3.251)와 동형.
 function _apCommentSig(c){
   if(!c) return '';
-  const t = String(c.text==null?'':c.text).trim();
-  if(!t) return '';  // 빈 본문 → sig 무효(무차별 삭제 방지)
-  // v2.3.292: approvalId 제외 — 같은 의견이 다른 approvalId(중복 PO 결재 레코드)로 흩어진 ghost 까지
-  //   tombstone 으로 잡기 위함. author|text|createdAt 로 콘텐츠 동일성 식별(approvalId 가 리매핑/중복돼도 동일).
-  return [String(c.author==null?'':c.author).trim(), t, String(c.createdAt==null?'':c.createdAt)].join('|');
+  // v2.3.295: 본문(text)만으로 콘텐츠 동일성 식별 — 같은 의견이 다른 id/approvalId/author/createdAt 의
+  //   중복본(ghost)으로 흩어져도 tombstone 으로 일괄 차단(부활 방지). 공백 정규화로 사소한 차이 흡수.
+  //   (v2.3.292 의 author|text|createdAt 는 ghost 의 createdAt/author 가 달라 부활을 못 막았음)
+  const t = String(c.text==null?'':c.text).replace(/\s+/g,' ').trim();
+  if(t.length < 4) return '';  // 너무 짧은 본문은 서로 다른 결재의 동일 단어 동반삭제 위험 → sig 무효
+  return 'T:' + t;
 }
 function deleteComment(commentId) {
   if (!confirm('이 의견을 삭제하시겠습니까? (딸린 답글도 함께 삭제됩니다)')) return;
