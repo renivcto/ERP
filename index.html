@@ -2976,7 +2976,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div style="background:#EFF6FF;border-radius:8px;padding:10px;text-align:center"><div style="font-size:11px;color:#2563eb;font-weight:600">취소/반품</div><div style="font-size:19px;font-weight:700" id="so-cancel-count">0</div></div>
         </div>
         <div class="card"><div class="card-body" style="overflow-x:auto;padding:0">
-          <table class="tbl" style="text-align:center"><thead><tr><th style="width:30px"><input type="checkbox" onchange="toggleAllShopOrders(this)"></th><th>주문일</th><th>쇼핑몰</th><th>주문번호</th><th>고객명</th><th>연락처</th><th>상품명</th><th>수량</th><th>결제금액</th><th style="width:56px;white-space:nowrap"></th></tr></thead><tbody id="shop-order-table"></tbody></table>
+          <table class="tbl" style="text-align:center"><thead><tr><th style="width:30px"><input type="checkbox" onchange="toggleAllShopOrders(this)"></th><th>주문일</th><th>쇼핑몰</th><th>주문번호</th><th>고객명</th><th>연락처</th><th>상품명</th><th>수량</th><th>결제금액</th><th>입금예정일</th><th>입금예정액<br><span style="font-size:9px;font-weight:400;color:#94a3b8">(실수령)</span></th><th style="width:56px;white-space:nowrap"></th></tr></thead><tbody id="shop-order-table"></tbody></table>
         </div></div>
       </div>
       <!-- 주문 업로드 모달 -->
@@ -5828,7 +5828,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.304';
+const ERP_VERSION = 'v2.3.305';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10680,6 +10680,18 @@ function _finBuildCashEvents(fromDate, toDate){
   ((typeof DB!=='undefined'&&DB.expenses)||[]).forEach(e=>{ if(!e||e.paidStatus==='paid') return; const d=String(e.dueDate||'').slice(0,10); if(!d||d<fromDate||d>toDate) return; ev.push({ date:d, delta:-(Number(e.amount)||0), name:e.title||_finCatLabel(e.category), kind:'미지급' }); });
   _finExpandRecurring(window._FIN.recurring, fromDate, toDate).forEach(r=> ev.push({ date:r.date, delta:-(Number(r.amount)||0), name:r.name, kind:'고정비' }));
   (window._FIN.planItems||[]).forEach(p=>{ if(!p||p.status==='done') return; const d=String(p.date||'').slice(0,10); if(!d||d<fromDate||d>toDate) return; ev.push({ date:d, delta:(p.dir==='in'?1:-1)*(Number(p.amount)||0), name:p.name||'', kind:'예정' }); });
+  // v2.3.305: 쇼핑몰 정산 입금 예정 (주문별 입금예정일·예정금액, 미수령·미취소) → 예정 입금
+  try {
+    ((typeof DB!=='undefined'&&DB.shopOrders)||[]).forEach(o=>{
+      if(!o || o.depositReceived) return;
+      if(o.status==='취소' || o.status==='반품') return;
+      const d=(typeof _orderDepositDate==='function')?_orderDepositDate(o):'';
+      if(!d || d<fromDate || d>toDate) return;
+      const amt=(typeof _orderDepositAmount==='function')?_orderDepositAmount(o):0;
+      if(!amt) return;
+      ev.push({ date:d, delta:Number(amt)||0, name:'정산입금 '+(o.shopName||'')+(o.orderNo?(' #'+o.orderNo):''), kind:'정산입금' });
+    });
+  } catch(_){}
   return ev;
 }
 
@@ -10733,7 +10745,7 @@ function _finTabPlan(){
   const today=_finToday(); const horizon=F.planHorizon||90; const to=_finAddDays(today,horizon);
   const events=_finBuildCashEvents(today,to);
   const proj=_finProjectCashflow(start, events);
-  const kindColor={ '미지급':'#dc2626','고정비':'#d97706','예정':'#6366f1' };
+  const kindColor={ '미지급':'#dc2626','고정비':'#d97706','예정':'#6366f1','정산입금':'#059669' };
   const hBtn=(n)=>`<button onclick="_finSetPlanHorizon(${n})" style="background:${horizon===n?'#6366f1':'#eef2ff'};color:${horizon===n?'#fff':'#4338ca'};border:1px solid #c7d2fe;border-radius:6px;padding:4px 11px;font-size:12px;font-weight:700;cursor:pointer">${n}일</button>`;
   const rows=proj.rows.map(r=>{ const neg=r.balance<0; const dpos=r.delta>=0;
     return `<tr style="border-bottom:1px solid #f1f5f9;background:${neg?'#fef2f2':'transparent'}">
@@ -10763,7 +10775,7 @@ function _finTabPlan(){
       <span>최저 예상 잔액 <b style="color:${proj.minBal<0?'#dc2626':'#0f172a'}">${_finWon(proj.minBal)}</b>${proj.minDate?` <span style="color:#94a3b8">(${proj.minDate})</span>`:''}</span>
     </div>
     ${proj.minBal<0?`<div style="margin:8px 0;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px 12px;font-size:12.5px;font-weight:600">⚠️ ${proj.minDate} 경 예상 잔액이 ${_finWon(proj.minBal)} 로 마이너스가 됩니다. 입금 일정 조정·자금 확보가 필요합니다.</div>`:''}
-    <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">예정 지출 = 미지급 지출결의서(예정일 기준) + 고정비 + 아래 수동 예정 입·출금. 예정 입금 = 아래 수동 입금.</div>
+    <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">예정 지출 = 미지급 지출결의서(예정일 기준) + 고정비 + 아래 수동 예정 출금. 예정 입금 = 쇼핑몰 정산입금(주문별 입금예정, 미수령) + 아래 수동 입금.</div>
     <table style="width:100%;border-collapse:collapse;font-size:13px">
       <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left">날짜</th><th style="padding:6px 8px;text-align:left">구분</th><th style="padding:6px 8px;text-align:left">내용</th><th style="padding:6px 8px;text-align:right">증감</th><th style="padding:6px 8px;text-align:right">예상 잔액</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="5" style="padding:14px;text-align:center;color:#94a3b8">향후 ${horizon}일 예정 입·출금이 없습니다</td></tr>`}</tbody>
@@ -16143,6 +16155,46 @@ window.superDedupShopOrders = function() {
 console.log('%c💡 v2.3.7 도구: diagOrder("주문번호") / superDedupShopOrders()','background:#3b82f6;color:#fff;padding:3px 8px');
 })();
 
+// v2.3.305: 주문별 입금예정일·예정금액 (쇼핑몰 정산주기 자동 계산 + 수동 override)
+function _orderShop(o){ if(!o) return null; return (DB.shops||[]).find(s=>s && String(s.id)===String(o.shopId)) || (DB.shops||[]).find(s=>s && s.name===o.shopName) || null; }
+function _orderDepositDate(o){
+  if(!o) return '';
+  if(o.expectedDepositDate) return String(o.expectedDepositDate).slice(0,10);
+  const sh=_orderShop(o);
+  if(sh && sh.settlement && typeof _shopSettleDate==='function') return _shopSettleDate(sh.settlement, (o.orderDate||'').slice(0,10));
+  return '';
+}
+function _orderGrossAmount(o){ return Number((o&&(o.paymentAmount||o.totalPrice))||0)||0; }
+function _orderDepositAmount(o){
+  if(!o) return 0;
+  if(o.expectedDepositAmount!=null && o.expectedDepositAmount!=='') return Number(o.expectedDepositAmount)||0;
+  const sh=_orderShop(o); const fee=sh?(Number(sh.commissionBase)||0):0;
+  return Math.round(_orderGrossAmount(o)*(1-fee/100));
+}
+function _orderDepositSaveRerender(){ try{ if(typeof saveDataNow==='function') saveDataNow(); else if(typeof saveData==='function') saveData(); }catch(_){} try{ renderShopOrderTable(); }catch(_){} }
+function _editOrderDepositDate(id){
+  const o=(DB.shopOrders||[]).find(x=>String(x.id)===String(id)); if(!o) return;
+  const sh=_orderShop(o); const auto=(sh&&sh.settlement&&typeof _shopSettleDate==='function')?_shopSettleDate(sh.settlement,(o.orderDate||'').slice(0,10)):'';
+  const v=prompt('입금예정일 (YYYY-MM-DD)\n비우면 쇼핑몰 정산주기로 자동 계산'+(auto?(' (현재 자동: '+auto+')'):' (이 쇼핑몰 정산주기 미설정)'), _orderDepositDate(o)||'');
+  if(v===null) return;
+  const t=(v||'').trim();
+  if(t && !/^\d{4}-\d{2}-\d{2}$/.test(t)){ try{ showNotif('YYYY-MM-DD 형식으로 입력하세요','warning'); }catch(_){} return; }
+  if(t) o.expectedDepositDate=t; else delete o.expectedDepositDate;
+  _orderDepositSaveRerender();
+}
+function _editOrderDepositAmount(id){
+  const o=(DB.shopOrders||[]).find(x=>String(x.id)===String(id)); if(!o) return;
+  const v=prompt('입금예정금액 (원)\n비우면 결제금액 − 판매수수료 로 자동 계산', _orderDepositAmount(o));
+  if(v===null) return;
+  const n=String(v).replace(/[^0-9.\-]/g,'');
+  if(n==='') delete o.expectedDepositAmount; else o.expectedDepositAmount=Number(n)||0;
+  _orderDepositSaveRerender();
+}
+function _toggleOrderDeposit(id, checked){
+  const o=(DB.shopOrders||[]).find(x=>String(x.id)===String(id)); if(!o) return;
+  o.depositReceived=!!checked;
+  _orderDepositSaveRerender();
+}
 function renderShopOrderTable() {
   const tbody = $('shop-order-table'); if (!tbody) return;
   // v1.9.784: 합쳐진 중복 자동 정리
@@ -16216,7 +16268,7 @@ function renderShopOrderTable() {
   // 일괄 처리 바 숨김
   const bulkBar = $('so-bulk-bar'); if (bulkBar) bulkBar.style.display = 'none';
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--gray-400);padding:30px">주문 데이터가 없습니다. "📤 주문 업로드"로 엑셀/CSV를 업로드하세요.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--gray-400);padding:30px">주문 데이터가 없습니다. "📤 주문 업로드"로 엑셀/CSV를 업로드하세요.</td></tr>';
     return;
   }
   const sorted = [...list].sort((a,b) => (b.orderDate||'').localeCompare(a.orderDate||''));
@@ -16255,6 +16307,8 @@ function renderShopOrderTable() {
       ${productCell}
       <td style="font-size:13.5px;cursor:pointer;color:#b91c1c;font-weight:700;transition:all .15s" onclick="event.stopPropagation();editOrderQty(${o.id})" onmouseenter="this.style.color='#7f1d1d';this.style.background='#fef2f2'" onmouseleave="this.style.color='#b91c1c';this.style.background=''" title="클릭해서 수량 수정 (재고 자동 연동)">${o.qty||0}</td>
       <td style="font-variant-numeric:tabular-nums;font-size:13px">${amt.toLocaleString()}원</td>
+      <td style="white-space:nowrap;font-size:12px;cursor:pointer;${o.depositReceived?'opacity:.45':''}" onclick="event.stopPropagation();_editOrderDepositDate('${String(o.id).replace(/'/g,'&#39;')}')" title="클릭해서 입금예정일 수정 (비우면 정산주기 자동)"><input type="checkbox" ${o.depositReceived?'checked':''} onclick="event.stopPropagation()" onchange="_toggleOrderDeposit('${String(o.id).replace(/'/g,'&#39;')}',this.checked)" title="입금 완료 체크 → 자금계획에서 제외" style="vertical-align:middle;margin-right:4px">${_orderDepositDate(o)||'<span style="color:#cbd5e1">미설정</span>'}</td>
+      <td style="white-space:nowrap;font-size:12.5px;font-variant-numeric:tabular-nums;cursor:pointer;color:#0f766e;font-weight:600;${o.depositReceived?'opacity:.45;text-decoration:line-through':''}" onclick="event.stopPropagation();_editOrderDepositAmount('${String(o.id).replace(/'/g,'&#39;')}')" title="클릭해서 입금예정금액 수정 (비우면 결제금액−수수료 자동)">${_orderDepositAmount(o).toLocaleString()}원</td>
       <td style="white-space:nowrap;text-align:center"><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 10px;color:var(--red-500);white-space:nowrap;word-break:keep-all;display:inline-block;min-width:36px" onclick="deleteShopOrder('${String(o.id).replace(/'/g, '&#39;')}')">삭제</button></td>
     </tr>`;
   }).join('');
