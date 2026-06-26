@@ -5831,7 +5831,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.313';
+const ERP_VERSION = 'v2.3.314';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -43118,8 +43118,6 @@ function renderKanban() {
 function renderWorkflowSummary() {
   const host = document.getElementById('workflow-summary');
   if (!host) return;
-  const _isDone = c => !!(c.dueComplete || (c.badges && c.badges.dueComplete) || c.isComplete);
-  const _todayYmd = _ymd(new Date());
   const _daysFromToday = ymd => {
     const t = new Date(); t.setHours(0,0,0,0);
     const d = new Date(ymd + 'T00:00:00');
@@ -43133,61 +43131,53 @@ function renderWorkflowSummary() {
     { name:'홈쇼핑 준비',     icon:'🏠', cards:DB._trelloCards3 || [], manager:'',      container:'kanban-board-3', text:'#b91c1c', accent:'#dc2626', bg:'linear-gradient(135deg,#fef2f2,#fee2e2)', border:'#fecaca' }
   ];
 
-  let gTotal = 0, gDone = 0, gSoon = 0, gOver = 0, gLoaded = 0;
+  let gTotal = 0, gProg = 0, gSoon = 0, gOver = 0, gLoaded = 0;
   const cardsHtml = BOARDS.map(b => {
     const total = b.cards.length;
     if (total) gLoaded++;
-    let done = 0, soon = 0, over = 0;
+    // 마감일 기준 상호배타 분류: 지연(마감 지남) / 임박(7일 이내) / 진행 중(그 외·마감일 없음)
+    let soon = 0, over = 0;
     b.cards.forEach(c => {
-      const dn = _isDone(c);
-      if (dn) done++;
-      if (c.due && !dn) {
+      if (c.due) {
         const dy = _daysFromToday(_ymd(c.due));
         if (dy !== null) { if (dy < 0) over++; else if (dy <= 7) soon++; }
       }
     });
-    const inProg = total - done;
-    const pct = total ? Math.round(done / total * 100) : 0;
-    gTotal += total; gDone += done; gSoon += soon; gOver += over;
-    const chip = (bg, color, txt) => `<span style="background:${bg};color:${color};border-radius:6px;padding:2px 7px;white-space:nowrap">${txt}</span>`;
+    const inProg = total - soon - over;
+    gTotal += total; gProg += inProg; gSoon += soon; gOver += over;
+    const chip = (bg, color, txt) => `<span style="background:${bg};color:${color};border-radius:6px;padding:2px 8px;white-space:nowrap">${txt}</span>`;
     const chips = [
-      chip('rgba(34,197,94,.14)', '#15803d', '✅ 완료 ' + done),
-      chip('rgba(0,0,0,.05)',     '#475569', '🔄 진행 ' + inProg),
+      chip('rgba(59,130,246,.10)', '#1d4ed8', '🔄 진행 중 ' + inProg),
       soon ? chip('rgba(245,158,11,.16)', '#b45309', '⏰ 임박 ' + soon) : '',
-      over ? chip('rgba(239,68,68,.15)',  '#b91c1c', '🚨 지연 ' + over) : ''
+      over ? chip('rgba(239,68,68,.13)',  '#b91c1c', '🚨 지연 ' + over) : ''
     ].filter(Boolean).join('');
     const body = total
-      ? `<div style="display:flex;align-items:baseline;gap:5px;margin-bottom:7px">
-           <span style="font-size:25px;font-weight:800;color:${b.text};line-height:1">${total}</span>
-           <span style="font-size:11px;color:${b.text};opacity:.65">장 · 완료율 ${pct}%</span>
+      ? `<div style="display:flex;align-items:baseline;gap:5px;margin-bottom:10px">
+           <span style="font-size:26px;font-weight:800;color:${b.text};line-height:1">${total}</span>
+           <span style="font-size:11px;color:#94a3b8">장</span>
          </div>
-         <div style="height:7px;background:rgba(0,0,0,.07);border-radius:99px;overflow:hidden;margin-bottom:9px">
-           <div style="height:100%;width:${pct}%;background:${b.accent};border-radius:99px;transition:width .4s"></div>
-         </div>
-         <div style="display:flex;gap:5px;flex-wrap:wrap;font-size:11px;font-weight:600">${chips}</div>`
+         <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:11px;font-weight:600">${chips}</div>`
       : `<div style="font-size:12px;color:#94a3b8;padding:14px 0 10px;text-align:center">아직 동기화된 카드가 없습니다<br><span style="font-size:10.5px">🔄 Trello 동기화를 눌러주세요</span></div>`;
     const _toggleId = 'kanban-toggle-' + (b.container === 'kanban-board' ? '1' : b.container.slice(-1));
     return `
       <div onclick="_workflowSummaryJump('${b.container}','${_toggleId}')"
-        style="flex:1 1 230px;min-width:215px;background:${b.bg};border:1px solid ${b.border};border-radius:12px;padding:12px 14px;cursor:pointer;transition:transform .12s,box-shadow .12s"
+        style="flex:1 1 230px;min-width:215px;background:#fff;border:1.5px solid ${b.border};border-radius:12px;padding:12px 14px;cursor:pointer;transition:transform .12s,box-shadow .12s"
         onmouseenter="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 16px rgba(0,0,0,.08)'"
         onmouseleave="this.style.transform='translateY(0)';this.style.boxShadow='none'">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;gap:6px">
           <span style="font-weight:700;font-size:13.5px;color:${b.text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${b.icon} ${b.name}</span>
-          ${b.manager ? `<span style="font-size:10.5px;color:${b.text};opacity:.7;white-space:nowrap;flex-shrink:0">👤 ${b.manager}</span>` : ''}
+          ${b.manager ? `<span style="font-size:10.5px;color:#94a3b8;white-space:nowrap;flex-shrink:0">👤 ${b.manager}</span>` : ''}
         </div>
         ${body}
       </div>`;
   }).join('');
 
-  const gPct = gTotal ? Math.round(gDone / gTotal * 100) : 0;
   const sep = '<span style="color:#cbd5e1">·</span>';
   const overall = gLoaded
     ? `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px;color:#334155;margin-bottom:11px;padding:0 2px">
          <span style="font-weight:800;font-size:14px;color:#0f172a">📊 워크플로우 현황</span>
          <span>전체 <b style="color:#0f172a">${gTotal}</b>장</span> ${sep}
-         <span>완료 <b style="color:#15803d">${gDone}</b> (${gPct}%)</span> ${sep}
-         <span>진행 <b style="color:#475569">${gTotal - gDone}</b></span> ${sep}
+         <span>🔄 진행 중 <b style="color:#1d4ed8">${gProg}</b></span> ${sep}
          <span>⏰ 이번주 마감 <b style="color:#b45309">${gSoon}</b></span> ${sep}
          <span>🚨 지연 <b style="color:#b91c1c">${gOver}</b></span>
        </div>`
