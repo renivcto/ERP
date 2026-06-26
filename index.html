@@ -5816,7 +5816,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.288';
+const ERP_VERSION = 'v2.3.289';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27317,7 +27317,7 @@ function _syncOverseasPoApprovalExpense(orderId) {
       expPre.title = `[해외 선급금] ${vendorName}`;
       expPre.vendor = vendorName;
       expPre.note = noteP;
-      expPre.amount = _prepayAmt;
+      expPre.poAmount = _prepayAmt; if (!expPre.amountManual) expPre.amount = _prepayAmt;  // v2.3.289: 실지급 override 보존
       expPre.urgent = !!o.urgentPrepay;  // v2.2.40: urgent 갱신
       expPre.__krwConverted = false;
       expPre.updatedAt = Date.now();
@@ -27377,7 +27377,7 @@ function _syncOverseasPoApprovalExpense(orderId) {
     exp.vendor = vendorName;
     exp.note = note;
     if (!exp.dueDate) exp.dueDate = dueDate || '';
-    exp.amount = _balanceAmt;
+    exp.poAmount = _balanceAmt; if (!exp.amountManual) exp.amount = _balanceAmt;  // v2.3.289: 실지급 override 보존
     exp.urgent = !!o.urgentBalance;  // v2.2.40: urgent 갱신
     exp.__krwConverted = false;
     exp.updatedAt = Date.now();
@@ -32307,7 +32307,7 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
     } else {
       expPre.title = `[선입금 ${pctDisp}%] ${vendorName(o.vendorId)}`;
       expPre.vendor = vendorName(o.vendorId);
-      expPre.amount = prepay;
+      expPre.poAmount = prepay; if (!expPre.amountManual) expPre.amount = prepay;  // v2.3.289: 실지급 override 보존
       expPre.urgent = !!o.urgentPrepay;  // v1.9.210
       expPre.note = `${pctDisp}% 선입금 (발주금액 VAT포함 ${fmtWon(total)})`;
     }
@@ -32345,7 +32345,7 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
     } else {
       expBal.title = `[잔금 ${balPctDisp}%] ${(o.isOverseas && o.supplier && o.supplier.company) ? o.supplier.company : vendorName(o.vendorId)}`;
       expBal.vendor = (o.isOverseas && o.supplier && o.supplier.company) ? o.supplier.company : vendorName(o.vendorId);
-      expBal.amount = balance;
+      expBal.poAmount = balance; if (!expBal.amountManual) expBal.amount = balance;  // v2.3.289: 실지급 override 보존
       expBal.dueDate = o.balanceDueDate || o.payDate || expBal.dueDate || '';
       expBal.urgent = !!o.urgentBalance;  // v1.9.210
       expBal.note = `${balPctDisp}% 잔금 (발주금액 VAT포함 ${fmtWon(total)})`;
@@ -34585,10 +34585,14 @@ function renderApprovalExpenseTable() {
     const linkedOrderForBtn = isPoLinked ? (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId))) : null;
     const isOrphan = isPoLinked && !linkedOrderForBtn;
     // v2.2.27: 해외 PO 면 openOverseasPoModal 호출
-    const editHandler = isPoLinked
-      ? ((linkedOrderForBtn && linkedOrderForBtn.isOverseas) ? `openOverseasPoModal(${e.orderId})` : `editOrder(${e.orderId})`)
-      : `editExpense(${e.id})`;
-    const editTitle = isOrphan ? '⚠️ 연결 발주서 없음 — 수정 불가' : (isPoLinked ? '발주서 수정 페이지로 이동' : '수정');
+    // v2.3.289: 발주 선급금/잔금(발주서 연결)은 '실지급 금액' 조정 모달로(모달 안에 발주서 수정 링크 포함)
+    const _poAdjustable = isPoLinked && linkedOrderForBtn && (e.category === 'po_prepay' || e.category === 'po_balance');
+    const editHandler = _poAdjustable
+      ? `_openExpenseAmountOverride(${e.id})`
+      : (isPoLinked
+          ? ((linkedOrderForBtn && linkedOrderForBtn.isOverseas) ? `openOverseasPoModal(${e.orderId})` : `editOrder(${e.orderId})`)
+          : `editExpense(${e.id})`);
+    const editTitle = _poAdjustable ? '실지급 금액 수정 (발주서 청구액 유지)' : (isOrphan ? '⚠️ 연결 발주서 없음 — 수정 불가' : (isPoLinked ? '발주서 수정 페이지로 이동' : '수정'));
     const editBtn = `<button class="btn btn-sm" title="${editTitle}" style="background:${isOrphan?'#fef3c7':'#eff6ff'};color:${isOrphan?'#92400e':'#1e40af'};border:1px solid ${isOrphan?'#fcd34d':'#bfdbfe'};padding:2px 7px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;line-height:1" onclick="${editHandler}">${isOrphan?'⚠️':'✏️'}</button>`;
     // v1.9.262 — 비연결 또는 고아 상태는 삭제 가능
     const delBtn = (!isPoLinked || isOrphan)
@@ -34626,7 +34630,7 @@ function renderApprovalExpenseTable() {
       <td style="text-align:center">${catBadge}</td>
       <td style="text-align:center;font-weight:400">${e.vendor||'-'}</td>
       <td style="text-align:center;padding:8px 10px"><div style="font-size:12.5px;font-weight:400;cursor:pointer;color:var(--sky-700);max-width:240px;margin:0 auto;white-space:normal;word-break:break-word;overflow-wrap:anywhere;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden" class="po-item-link" title="클릭하면 지출결의서 PDF 열기" onclick="openExpenseApprovalForm(${e.id})">${itemName}</div></td>
-      <td style="text-align:center;font-weight:400;color:${paid?'#0f172a':'#b91c1c'}">${_fmtExpenseAmount(e)}</td>
+      <td style="text-align:center;font-weight:400;color:${paid?'#0f172a':'#b91c1c'}">${_fmtExpenseAmount(e)}${(e.amountManual && e.poAmount!=null && Number(e.poAmount)!==Number(e.amount)) ? `<div style="font-size:10px;color:#94a3b8;font-weight:400;margin-top:1px;line-height:1.2">청구 ${fmtWon(Number(e.poAmount))} <span style="color:#7c3aed;font-weight:700">· 실지급 조정</span></div>` : ''}</td>
       <td style="text-align:center">${dueCell}</td>
       <td style="text-align:center">${closingCell}</td>
       <td style="text-align:center">${payBtn}</td>
@@ -36555,8 +36559,8 @@ function editExpense(id) {
   //   광고비(ad), 기타 등은 발주서와 무관하므로 수정 허용
   if (e.orderId && (e.category === 'po_prepay' || e.category === 'po_balance')) {
     const linkedOrder = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
-    if (linkedOrder) { alert('발주서와 연결된 지출결의서는 발주서에서 수정해 주세요.'); return; }
-    // 고아 — 발주서가 없으므로 수정 허용
+    // v2.3.289: 발주서 연결 지출은 '실지급 금액' 조정 모달로(발주서 청구액 유지). 고아면 일반 수정 허용.
+    if (linkedOrder) { _openExpenseAmountOverride(e.id); return; }
   }
   _editingExpenseId = id;
   _apeAttachments = Array.isArray(e.attachments) ? e.attachments.slice() : [];
@@ -36606,6 +36610,77 @@ function editExpense(id) {
   }
   try { onApeCategoryChange(); } catch(_){}
   renderApeAttachList();
+}
+
+// v2.3.289: 발주서 연결 지출의 '실지급 금액' 조정 — 발주서 청구액(poAmount)은 유지, amount(실지급)만 override.
+//   발주서 재저장 resync 가 amountManual 이면 amount 를 안 덮어씀(27320/27380/32310/32348 가드).
+function _openExpenseAmountOverride(expId){
+  const e = (DB.expenses||[]).find(x => x && String(x.id) === String(expId));
+  if (!e) { try { showNotif('지출결의서를 찾을 수 없습니다','warning'); } catch(_){} return; }
+  const poAmt = (e.poAmount != null) ? Number(e.poAmount) : Number(e.amount||0);
+  const cur = Number(e.amount||0);
+  const ord = e.orderId ? (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId))) : null;
+  const _goPo = ord ? (ord.isOverseas ? `openOverseasPoModal(${e.orderId})` : `editOrder(${e.orderId})`) : '';
+  _closeExpenseAmountOverride();
+  const ov = document.createElement('div');
+  ov.id = '_expAmtOvOverlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML = `<div style="background:#fff;border-radius:16px;padding:22px 24px;width:min(440px,94vw);box-shadow:0 20px 60px rgba(0,0,0,.3)" onclick="event.stopPropagation()">
+    <div style="font-size:16px;font-weight:800;color:#0f172a;margin-bottom:4px">💳 실지급 금액 수정</div>
+    <div style="font-size:12.5px;color:#64748b;margin-bottom:16px;line-height:1.5">발주서 청구액은 그대로 두고 <b>실제 지급할 금액만</b> 조정합니다.<br>(생산 완료 후 수량 변동 등으로 청구액과 지급액이 다를 때)</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:12px">
+      <span style="font-size:13px;color:#475569">발주서 청구액</span>
+      <span style="font-size:14px;font-weight:700;color:#0f172a">${fmtWon(poAmt)}</span>
+    </div>
+    <label style="font-size:13px;font-weight:700;color:#0f172a;display:block;margin-bottom:6px">실지급 금액 (원)</label>
+    <input id="_expAmtOvInput" type="number" value="${cur}" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:15px;text-align:right;font-weight:700" placeholder="실제 지급 금액">
+    <div id="_expAmtOvDiff" style="font-size:12px;margin-top:6px;text-align:right;min-height:16px"></div>
+    <div style="display:flex;gap:8px;margin-top:18px;justify-content:space-between;align-items:center;flex-wrap:wrap">
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${e.amountManual ? `<button onclick="_clearExpenseAmountOverride('${e.id}')" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer" title="발주서 청구액으로 되돌리고 자동계산 복귀">↩ 청구액으로 복귀</button>` : ''}
+        ${_goPo ? `<button onclick="_closeExpenseAmountOverride();${_goPo}" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer" title="발주서 자체(청구 수량/금액)를 수정">📝 발주서 수정</button>` : ''}
+      </div>
+      <div style="display:flex;gap:8px">
+        <button onclick="_closeExpenseAmountOverride()" style="background:#fff;color:#64748b;border:1px solid #e2e8f0;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer">취소</button>
+        <button onclick="_saveExpenseAmountOverride('${e.id}')" style="background:#0f172a;color:#fff;border:0;border-radius:8px;padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer">저장</button>
+      </div>
+    </div>
+  </div>`;
+  ov.addEventListener('click', function(ev){ if (ev.target === ov) _closeExpenseAmountOverride(); });
+  document.body.appendChild(ov);
+  const inp = document.getElementById('_expAmtOvInput');
+  const diffEl = document.getElementById('_expAmtOvDiff');
+  const upd = function(){ const v = Number(inp.value||0); const d = v - poAmt; if (d===0){ diffEl.textContent='발주서 청구액과 동일'; diffEl.style.color='#94a3b8'; } else { diffEl.textContent=(d>0?'+ ':'- ')+fmtWon(Math.abs(d))+(d>0?' 더 지급':' 덜 지급'); diffEl.style.color=d>0?'#dc2626':'#2563eb'; } };
+  if (inp){ inp.addEventListener('input', upd); upd(); try{ inp.focus(); inp.select(); }catch(_){} }
+}
+function _closeExpenseAmountOverride(){ const ov=document.getElementById('_expAmtOvOverlay'); if(ov) ov.remove(); }
+async function _saveExpenseAmountOverride(expId){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const e = (DB.expenses||[]).find(x => x && String(x.id) === String(expId));
+  if (!e) { _closeExpenseAmountOverride(); return; }
+  const inp = document.getElementById('_expAmtOvInput');
+  const v = Number((inp&&inp.value)||0);
+  if (!isFinite(v) || v < 0) { try { showNotif('올바른 금액을 입력하세요','warning'); } catch(_){} return; }
+  if (e.poAmount == null) e.poAmount = Number(e.amount||0);  // 최초 1회 발주서 파생액 보존
+  e.amount = v;
+  e.amountManual = true;
+  e.updatedAt = Date.now();
+  _closeExpenseAmountOverride();
+  try { if (typeof saveDataNow === 'function') await saveDataNow(); else if (typeof saveData==='function') saveData(); } catch(_){}
+  try { if (typeof renderApprovalPage === 'function') renderApprovalPage(); } catch(_){}
+  try { showNotif('실지급 금액이 저장되었습니다','success'); } catch(_){}
+}
+async function _clearExpenseAmountOverride(expId){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const e = (DB.expenses||[]).find(x => x && String(x.id) === String(expId));
+  if (!e) { _closeExpenseAmountOverride(); return; }
+  e.amountManual = false;
+  if (e.poAmount != null) e.amount = Number(e.poAmount);  // 발주서 청구액으로 복귀
+  e.updatedAt = Date.now();
+  _closeExpenseAmountOverride();
+  try { if (typeof saveDataNow === 'function') await saveDataNow(); else if (typeof saveData==='function') saveData(); } catch(_){}
+  try { if (typeof renderApprovalPage === 'function') renderApprovalPage(); } catch(_){}
+  try { showNotif('발주서 청구액으로 복귀했습니다','info'); } catch(_){}
 }
 
 // v2.3.235: 충돌 없는 approval id — 타임스탬프*1000+난수 기반 글로벌 유니크.
