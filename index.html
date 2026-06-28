@@ -5845,7 +5845,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.319';
+const ERP_VERSION = 'v2.3.320';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10764,10 +10764,15 @@ function _finTabPlan(){
   const F=window._FIN; const inS='border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px';
   const start=_finTotalBalance();
   const today=_finToday();
-  const rng=_finRange();                          // v2.3.319: 상단 월/분기/연 선택을 자금 계획 조회 범위로 사용
-  const isPast=rng.end<today;                      // 선택 기간이 완전히 과거인지
-  const periodEnd=isPast?today:rng.end;            // 미래 끝까지 이벤트 누적
-  const dispStart=rng.start<today?today:rng.start; // 과거는 표시하지 않음(오늘부터)
+  const rng=_finRange();                          // v2.3.320: 상단 월/분기/연 선택 반영
+  const isPast=rng.end<today;                      // 선택 기간이 완전히 과거
+  const fwd = F.period==='year' ? _finAddDays(today,366) : (F.period==='quarter' ? _finAddDays(today,93) : _finAddDays(today,31));
+  let dispStart, periodEnd, rangeLabel;
+  if (isPast){ dispStart=today; periodEnd=today; rangeLabel=rng.label; }
+  // 현재(오늘 포함) 기간: 달력 말일까지면 월말 근처엔 거의 비어보임 → 오늘부터 forward(1개월/3개월/1년)로 보장
+  else if (rng.start<=today){ dispStart=today; periodEnd=(rng.end>fwd?rng.end:fwd); rangeLabel='오늘부터 '+(F.period==='year'?'1년':F.period==='quarter'?'3개월':'1개월'); }
+  // 미래 특정 기간: 그 기간(시작~말) 그대로
+  else { dispStart=rng.start; periodEnd=rng.end; rangeLabel=rng.label; }
   const events=_finBuildCashEvents(today,periodEnd);
   const proj=_finProjectCashflow(start, events);
   const dispRows=proj.rows.filter(x=> x.date>=dispStart && x.date<=periodEnd);
@@ -10795,19 +10800,19 @@ function _finTabPlan(){
   <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:16px">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
       <div style="font-size:14px;font-weight:800;color:#0f172a">📈 자금 계획 (현금흐름 예측)</div>
-      <div style="font-size:12px;color:#64748b">조회 기간 <b style="color:#4338ca">${rng.label}</b> <span style="color:#cbd5e1">·</span> 상단 <b>년 · 월/분기/연</b> 선택을 따릅니다</div>
+      <div style="font-size:12px;color:#64748b">조회 기간 <b style="color:#4338ca">${rangeLabel}</b>${isPast?'':` <span style="color:#cbd5e1">·</span> ${dispStart} ~ ${periodEnd}`} <span style="color:#cbd5e1">·</span> 상단 월/분기/연 선택을 따릅니다</div>
     </div>
     ${isPast?`<div style="margin:8px 0;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:10px 12px;font-size:12.5px;font-weight:600">ℹ️ 선택한 기간(${rng.label})은 이미 지난 기간입니다. 자금 계획은 <b>오늘 이후</b>만 예측합니다 — 위에서 이번 달·분기·연 또는 미래 기간을 선택하세요.</div>`:''}
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px;font-size:13px">
       <span>${dispStart===today?'시작 잔액(현재 총잔액)':(rng.label+' 시작 예상 잔액')} <b>${_finWon(opening)}</b></span>
-      <span>${rng.label} 말 예상 <b style="color:${endBal<0?'#dc2626':'#0f172a'}">${_finWon(endBal)}</b></span>
+      <span>예상 종료 잔액 <b style="color:${endBal<0?'#dc2626':'#0f172a'}">${_finWon(endBal)}</b></span>
       <span>최저 예상 잔액 <b style="color:${minBal<0?'#dc2626':'#0f172a'}">${_finWon(minBal)}</b>${minDate?` <span style="color:#94a3b8">(${minDate})</span>`:''}</span>
     </div>
     ${minBal<0?`<div style="margin:8px 0;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px 12px;font-size:12.5px;font-weight:600">⚠️ ${minDate} 경 예상 잔액이 ${_finWon(minBal)} 로 마이너스가 됩니다. 입금 일정 조정·자금 확보가 필요합니다.</div>`:''}
     <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">예정 지출 = 미지급 지출결의서(예정일 기준) + 고정비 + 아래 수동 예정 출금. 예정 입금 = 쇼핑몰 정산입금(주문별 입금예정, 미수령) + 아래 수동 입금.</div>
     <table style="width:100%;border-collapse:collapse;font-size:13px">
       <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left">날짜</th><th style="padding:6px 8px;text-align:left">구분</th><th style="padding:6px 8px;text-align:left">내용</th><th style="padding:6px 8px;text-align:right">증감</th><th style="padding:6px 8px;text-align:right">예상 잔액</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="5" style="padding:14px;text-align:center;color:#94a3b8">${rng.label} 예정 입·출금이 없습니다</td></tr>`}</tbody>
+      <tbody>${rows || `<tr><td colspan="5" style="padding:14px;text-align:center;color:#94a3b8">${rangeLabel} 예정 입·출금이 없습니다</td></tr>`}</tbody>
     </table>
   </div>
   <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px">
