@@ -5845,7 +5845,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.320';
+const ERP_VERSION = 'v2.3.321';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10777,8 +10777,10 @@ function _finTabPlan(){
   const proj=_finProjectCashflow(start, events);
   const dispRows=proj.rows.filter(x=> x.date>=dispStart && x.date<=periodEnd);
   const opening=_finBalanceAsOf(start, events, _finAddDays(dispStart,-1)); // 구간 진입 시 예상 잔액
-  let endBal=opening, minBal=opening, minDate=dispStart;
-  dispRows.forEach(x=>{ endBal=x.balance; if(x.balance<minBal){ minBal=x.balance; minDate=x.date; } });
+  let endBal=opening, minBal=opening, minDate=dispStart, inSum=0, outSum=0;
+  dispRows.forEach(x=>{ endBal=x.balance; if(x.balance<minBal){ minBal=x.balance; minDate=x.date; } if(x.delta>=0) inSum+=x.delta; else outSum+=-x.delta; });
+  const netSum=inSum-outSum;
+  const totCard=(lbl,sign,val,color,sub)=>`<div style="flex:1;min-width:150px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px"><div style="font-size:11.5px;color:#64748b;font-weight:600;margin-bottom:5px">${lbl}</div><div style="font-size:18px;font-weight:800;color:${color}">${sign}${_finWon(val)}</div>${sub?`<div style="font-size:10.5px;color:#94a3b8;margin-top:2px">${sub}</div>`:''}</div>`;
   const kindColor={ '미지급':'#dc2626','고정비':'#d97706','예정':'#6366f1','정산입금':'#059669' };
   const rows=dispRows.map(r=>{ const neg=r.balance<0; const dpos=r.delta>=0;
     return `<tr style="border-bottom:1px solid #f1f5f9;background:${neg?'#fef2f2':'transparent'}">
@@ -10809,6 +10811,11 @@ function _finTabPlan(){
       <span>최저 예상 잔액 <b style="color:${minBal<0?'#dc2626':'#0f172a'}">${_finWon(minBal)}</b>${minDate?` <span style="color:#94a3b8">(${minDate})</span>`:''}</span>
     </div>
     ${minBal<0?`<div style="margin:8px 0;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px 12px;font-size:12.5px;font-weight:600">⚠️ ${minDate} 경 예상 잔액이 ${_finWon(minBal)} 로 마이너스가 됩니다. 입금 일정 조정·자금 확보가 필요합니다.</div>`:''}
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 12px">
+      ${totCard('예상 입금 합계','+',inSum,'#059669','정산입금 · 수동 입금')}
+      ${totCard('예상 지출 합계','−',outSum,'#dc2626','미지급 · 고정비 · 수동 출금')}
+      ${totCard('예상 순증감 (입금−지출)',netSum>=0?'+':'−',Math.abs(netSum),netSum>=0?'#059669':'#dc2626','선택 기간 순현금흐름')}
+    </div>
     <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">예정 지출 = 미지급 지출결의서(예정일 기준) + 고정비 + 아래 수동 예정 출금. 예정 입금 = 쇼핑몰 정산입금(주문별 입금예정, 미수령) + 아래 수동 입금.</div>
     <table style="width:100%;border-collapse:collapse;font-size:13px">
       <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left">날짜</th><th style="padding:6px 8px;text-align:left">구분</th><th style="padding:6px 8px;text-align:left">내용</th><th style="padding:6px 8px;text-align:right">증감</th><th style="padding:6px 8px;text-align:right">예상 잔액</th></tr></thead>
