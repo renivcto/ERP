@@ -5845,7 +5845,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.322';
+const ERP_VERSION = 'v2.3.323';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10723,6 +10723,10 @@ function _finTabDashboard(){
   const totalBal=_finTotalBalance();
   let inSum=0,outSum=0; _finAcctTxnsAll('').forEach(t=>{ if(_finInRange(t.date,r)){ if(t.dir==='in')inSum+=Number(t.amount)||0; else outSum+=Number(t.amount)||0; } });
   let cardSum=0; Object.keys(F.cardTxns||{}).forEach(y=>(F.cardTxns[y]||[]).forEach(t=>{ if(_finInRange(t.date,r)) cardSum+=Number(t.amount)||0; }));
+  // v2.3.323: 실제 업무 데이터 반영 — 기간 수입=쇼핑몰 매출, 기간 지출=지출결의서 실적(지급완료/예정 토글) + 계좌 입력분 합산
+  let saleSum=0; ((typeof DB!=='undefined'&&DB.shopOrders)||[]).forEach(o=>{ if(!o||o.status==='취소'||o.status==='반품') return; const d=String(o.orderDate||o.date||'').slice(0,10); if(!d||!_finInRange(d,r)) return; saleSum+=Number(o.paymentAmount||o.totalPrice||0)||0; });
+  let expSum=0; ((typeof DB!=='undefined'&&DB.expenses)||[]).forEach(e=>{ if(!e) return; let d; if(F.basis==='paid'){ if(e.paidStatus!=='paid') return; d=e.paidDate||e.dueDate||''; } else { d=e.dueDate||e.paidDate||''; } d=String(d||'').slice(0,10); if(!d||!_finInRange(d,r)) return; expSum+=Number(e.amount)||0; });
+  const incomeTotal=inSum+saleSum, expenseTotal=outSum+expSum;
   const months=_finMonthsInPeriod();
   let tBud=0,tAct=0; BUDGET_CATS.forEach(c=>{ tBud+=_finBudgetItemSum(F.year,c.key,months); tAct+=_finActualByExpCats((typeof DB!=='undefined'&&DB.expenses)||[], r, F.basis, c.expCats); });
   const budRate=tBud>0?Math.round(tAct/tBud*100):0; const budColor=budRate>=100?'#dc2626':budRate>=80?'#d97706':'#059669';
@@ -10738,8 +10742,8 @@ function _finTabDashboard(){
   return `
   <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
     ${_finKpi('법인계좌 총잔액', _finWon(totalBal), totalBal<0?'#dc2626':'#0f172a', (F.accounts||[]).length+'개 계좌')}
-    ${_finKpi('기간 수입', _finWon(inSum), '#059669', r.label)}
-    ${_finKpi('기간 지출', _finWon(outSum), '#dc2626', '계좌 출금')}
+    ${_finKpi('기간 수입', _finWon(incomeTotal), '#059669', '쇼핑몰 매출'+(inSum?' + 계좌입금':''))}
+    ${_finKpi('기간 지출', _finWon(expenseTotal), '#dc2626', '지출결의서('+(F.basis==='paid'?'지급완료':'지급예정')+')'+(outSum?' + 계좌출금':''))}
     ${_finKpi('카드 사용액', _finWon(cardSum), '#0f172a', r.label)}
     ${_finKpi('예산 소진율', tBud>0?budRate+'%':'—', budColor, '실적 '+_finWon(tAct)+' / 예산 '+_finWon(tBud))}
   </div>
