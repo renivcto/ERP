@@ -5845,7 +5845,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.326';
+const ERP_VERSION = 'v2.3.327';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9691,6 +9691,13 @@ const FIN_CATS = [
   { key:'sample', label:'샘플 구매' }, { key:'ad', label:'광고비' },
   { key:'other', label:'기타' }, { key:'cash_reimburse', label:'직원 환급' }
 ];
+// v2.3.327: 법인 카드 전용 분류 — 카드 지출 성격(식대·회식·배송 등). FIN_CATS 는 계좌·고정비와 공유라 분리.
+const FIN_CARD_CATS = [
+  { key:'meal', label:'식대' }, { key:'team_dinner', label:'회식비' }, { key:'entertain', label:'접대비' },
+  { key:'sample', label:'샘플 구매' }, { key:'shipping', label:'배송비' }, { key:'office', label:'사무용품' },
+  { key:'subscription', label:'소프트웨어·구독' }, { key:'ad', label:'광고비' }, { key:'transport', label:'교통비' },
+  { key:'other', label:'기타' }
+];
 // v2.3.219: 예산 카테고리 — 직원환급 제거, 지적재산권·임상시험비 추가. expCats=실적(expenses) 매핑(이중계상 방지)
 const BUDGET_CATS = [
   { key:'po_prepay', label:'발주 선급금', expCats:['po_prepay'] },
@@ -9701,7 +9708,7 @@ const BUDGET_CATS = [
   { key:'clinical', label:'임상시험비', expCats:[] },
   { key:'other', label:'기타', expCats:['other','cash_reimburse'] }
 ];
-function _finCatLabel(k){ const c = FIN_CATS.find(x=>x.key===k) || BUDGET_CATS.find(x=>x.key===k); return c ? c.label : (k||'-'); }
+function _finCatLabel(k){ const c = FIN_CATS.find(x=>x.key===k) || FIN_CARD_CATS.find(x=>x.key===k) || BUDGET_CATS.find(x=>x.key===k); return c ? c.label : (k||'-'); }
 function _finNum(v){ const n = parseFloat(String(v==null?'':v).replace(/[^0-9.\-]/g,'')); return isNaN(n)?0:n; }
 function _finId(prefix){ return prefix + '_' + Date.now() + '_' + Math.floor(Math.random()*100000); }
 function _finEsc(s){ return (typeof escapeHtml==='function') ? escapeHtml(s) : String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -10257,7 +10264,7 @@ function _finTabCards(){
       <td style="padding:3px 6px;text-align:center">${_finReceiptCellHtml(t)}</td>
       <td style="padding:5px 4px;text-align:center"><button onclick="_finDelCardTxn('${t.id}')" style="background:none;border:0;color:#cbd5e1;cursor:pointer;font-size:14px" title="삭제">✕</button></td>
     </tr>`; }).join('');
-  const catOpts='<option value="">분류</option>'+FIN_CATS.map(c=>`<option value="${c.key}">${c.label}</option>`).join('');
+  const catOpts='<option value="">분류</option>'+FIN_CARD_CATS.map(c=>`<option value="${c.key}">${c.label}</option>`).join('');  // v2.3.327: 카드 전용 분류
   const cardOptsFilter='<option value="">전체 카드</option>'+cards.map(c=>`<option value="${c.id}" ${String(F.cardFilter)===String(c.id)?'selected':''}>${_finEsc(c.alias||c.cardName||c.id)}</option>`).join('');
   const cardSel=cards.length?`<select id="fin-ct-card" style="${inS}">${cards.map(c=>`<option value="${c.id}">${_finEsc(c.alias||c.cardName||c.id)}</option>`).join('')}</select>`:'';
   const catBreakdown=Object.keys(byCat).filter(k=>byCat[k]>0).map(k=>`<span style="background:#f1f5f9;border-radius:5px;padding:2px 8px;font-size:11.5px;color:#475569">${_finEsc(_finCatLabel(k)||'미분류')} ${_finWon(byCat[k])}</span>`).join(' ');
