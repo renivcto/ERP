@@ -5845,7 +5845,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.325';
+const ERP_VERSION = 'v2.3.326';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -49942,6 +49942,14 @@ async function _loadSharedApiKeys() {
     window._sharedApiKeys.gemini = (typeof gem === 'string' && gem) ? gem : '';
     window._sharedApiKeys.claude = (typeof clau === 'string' && clau) ? clau : '';
     console.log('🔑 회사 공용 API Key 로드 완료 — Gemini:', !!window._sharedApiKeys.gemini, 'Claude:', !!window._sharedApiKeys.claude);
+    // v2.3.326: settings/→shared/ 라우팅 변경 자동 이관 — shared 가 비었는데 이 기기(관리자)에 키가 있으면 shared/ 로 푸시.
+    //   직원 기기는 로컬 키가 없으니 no-op. 이로써 관리자가 키를 재입력하지 않아도 직원이 읽을 수 있게 됨.
+    try {
+      const _lg = localStorage.getItem('reniv_gemini_key') || localStorage.getItem('reniv_gemini_api_key') || '';
+      if (!window._sharedApiKeys.gemini && _lg) { await saveSharedSetting('gemini_api_key', _lg); window._sharedApiKeys.gemini = _lg; console.log('🔑 Gemini 키 shared/ 자동 이관 완료'); }
+      const _lc = localStorage.getItem('reniv_claude_key') || localStorage.getItem('reniv_claude_api_key') || '';
+      if (!window._sharedApiKeys.claude && _lc) { await saveSharedSetting('claude_api_key', _lc); window._sharedApiKeys.claude = _lc; }
+    } catch(_){}
   } catch(e) {
     console.warn('공유 API Key 로드 실패:', e);
     if (window._sharedApiKeys.gemini === null) window._sharedApiKeys.gemini = '';
@@ -51697,8 +51705,12 @@ function _sharedSettingCollection(key) {
   // v2.3.273: trello_config(자격증명)·trello_automation(cfg)·trello_auto_cards(카드맵) 는
   //   전 직원(쓰기권한 직원도 발주 가능)이 읽어야 자동화가 동작 → shared/ 로 라우팅.
   //   (trello_config 는 API 토큰 포함 → 쓰기권한자에게 노출되는 트레이드오프 수용. 나머지 둘은 비밀 아님)
+  // v2.3.326: gemini/claude API Key 도 shared/ — 직원이 영수증 인식(Gemini) 등 AI 기능을 쓰려면
+  //   본인 브라우저에서 키를 읽어 직접 호출해야 함(백엔드 없음). settings/(관리자 read 전용)면 직원은 키를
+  //   못 읽어 'API Key가 없습니다' 오류. 쓰기권한자에게 키가 노출되는 트레이드오프는 client-side 호출의 불가피한 특성(수용).
   if (/^finance_/.test(k) || /^budget_/.test(k) || k === 'expense_paid_overrides' || k === 'company_info'
-      || k === 'trello_config' || k === 'trello_automation' || k === 'trello_auto_cards') return 'shared';
+      || k === 'trello_config' || k === 'trello_automation' || k === 'trello_auto_cards'
+      || k === 'gemini_api_key' || k === 'claude_api_key') return 'shared';
   return 'settings';
 }
 async function saveSharedSetting(key, value) {
