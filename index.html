@@ -5845,7 +5845,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.327';
+const ERP_VERSION = 'v2.3.328';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -16391,9 +16391,10 @@ function updateSoBulkBar() {
 // 일괄 배송완료 처리
 async function bulkShipComplete() {
   if (!requireWrite()) return;
-  const ids = [...document.querySelectorAll('.so-row-check:checked')].map(cb => parseInt(cb.value));
+  const ids = [...document.querySelectorAll('.so-row-check:checked')].map(cb => cb.value);  // v2.3.328: id 문자열 보존(쿠팡 등 문자열 id)
   if (!ids.length) return;
-  const targets = (DB.shopOrders||[]).filter(o => ids.includes(o.id) && o.status !== '배송완료');
+  const idSet = new Set(ids.map(String));
+  const targets = (DB.shopOrders||[]).filter(o => idSet.has(String(o.id)) && o.status !== '배송완료');
   if (!targets.length) { alert('선택된 주문 중 배송완료 처리할 건이 없습니다.'); return; }
   if (!confirm(`${targets.length}건을 배송완료 처리하시겠습니까?\n(재고 차감이 함께 진행됩니다)`)) return;
   let deducted = 0, failList = [];
@@ -16412,10 +16413,11 @@ async function bulkShipComplete() {
 }
 async function bulkCancelOrders() {
   if (!requireWrite()) return;
-  const ids = [...document.querySelectorAll('.so-row-check:checked')].map(cb => parseInt(cb.value));
+  const ids = [...document.querySelectorAll('.so-row-check:checked')].map(cb => cb.value);  // v2.3.328: id 문자열 보존
   if (!ids.length) return;
   if (!confirm(`${ids.length}건을 취소 처리하시겠습니까?`)) return;
-  (DB.shopOrders||[]).filter(o => ids.includes(o.id)).forEach(o => { o.status = '취소'; });
+  const idSet = new Set(ids.map(String));
+  (DB.shopOrders||[]).filter(o => idSet.has(String(o.id))).forEach(o => { o.status = '취소'; });
   await saveDataNow(); renderShopOrderTable();
 }
 
@@ -16592,12 +16594,36 @@ async function bulkDeleteOrders() {
   const checked = [...document.querySelectorAll('.so-row-check:checked')];
   if (checked.length > 0) {
     // 선택된 주문 삭제
-    const ids = checked.map(cb => parseInt(cb.value));
+    const ids = checked.map(cb => cb.value);  // v2.3.328: id 문자열 보존 — parseInt 하면 문자열 id(쿠팡 등) 와 안 맞아 삭제 무반응
     if (!confirm(`선택한 ${ids.length}건의 주문을 삭제하시겠습니까?`)) return;
-    const delSet = new Set(ids);
-    DB.shopOrders = (DB.shopOrders||[]).filter(o => !delSet.has(o.id));
+    const delSet = new Set(ids.map(String));
+    const targets = (DB.shopOrders||[]).filter(o => o && delSet.has(String(o.id)));
+    // v2.3.328: 단건 삭제와 동일하게 재고복구 + tombstone + perma-block 등록(동기화 후 부활 방지)
+    if (!Array.isArray(DB._deletedShopOrderSigs)) DB._deletedShopOrderSigs = [];
+    if (!Array.isArray(DB._permaBlockedShopOrders)) DB._permaBlockedShopOrders = [];
+    targets.forEach(o => {
+      if (o.stockDeducted && o.itemId) {
+        const item = (DB.items||[]).find(i => i && i.id === o.itemId);
+        if (item) {
+          const rq = (typeof o.stockDeductedQty === 'number') ? o.stockDeductedQty : (parseInt(o.qty)||0);
+          if (rq > 0) { item.stock = (item.stock||0)+rq; try{ DB.stockHistory.push({ id: nextId('stock'), itemId:o.itemId, type:'in', qty:rq, price:item.price||0, date:new Date().toISOString().slice(0,10), lot:item.lot||'', note:`주문일괄삭제 재고복구 [${o.orderNo}] ${rq}개` }); }catch(_){} }
+        }
+      }
+      const sig = 'manual:' + String(o.orderNo||'') + ':' + String(o.customerName||'');
+      if (!DB._deletedShopOrderSigs.some(x => x && x.sig === sig && String(x.id||x.dupId) === String(o.id))) {
+        DB._deletedShopOrderSigs.push({ sig, id:o.id, dupId:o.id, ts:Date.now(), orderNo:o.orderNo, customerName:o.customerName, reason:'bulk-delete' });
+      }
+      if (!o.cafe24OriginalOrderId && o.orderNo) {
+        const _on=String(o.orderNo||'').trim(), _cn=String(o.customerName||'').trim();
+        if (!DB._permaBlockedShopOrders.some(b => b && String(b.orderNo||'').trim()===_on && String(b.customerName||'').trim()===_cn)) {
+          DB._permaBlockedShopOrders.push({ orderNo:_on, customerName:_cn, reason:'bulk-delete-auto-block', ts:Date.now() });
+        }
+      }
+    });
+    DB.shopOrders = (DB.shopOrders||[]).filter(o => !delSet.has(String(o.id)));
+    try { if (typeof _applyPermaBlocks === 'function') _applyPermaBlocks(); } catch(_){}
     await saveDataNow(); renderShopOrderTable();
-    alert(`${ids.length}건이 삭제되었습니다.`);
+    alert(`${targets.length}건이 삭제되었습니다.`);
   } else {
     // 선택된 게 없으면 → 필터 적용된 전체 또는 전체 삭제
     const total = (DB.shopOrders||[]).length;
