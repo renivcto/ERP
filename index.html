@@ -5849,7 +5849,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.334';
+const ERP_VERSION = 'v2.3.335';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7293,7 +7293,15 @@ async function _doSaveDataInner() {
                     });
                     console.log('🔀 [COUNT-GUARD] ' + key + ' 자동 병합: ' + val.length + ' + 서버전용 ' + _keepIds.length + ' = ' + _merged.length);
                     try { if (DB && Array.isArray(DB[key])) DB[key] = _merged; } catch(_){}
-                    payload.data = JSON.stringify(_merged);
+                    // v2.3.335: expenses 병합 후 지급완료 override 재적용 + PO 쌍둥이 collapse(저장 트리거 없이) →
+                    //   COUNT-GUARD 가 되살린 미지급 쌍둥이를 paid 로 강제하고 1건으로 정리. "지급완료가 새로고침 후 지급요청으로 되돌아감" 차단.
+                    if (key === 'expenses') {
+                      try { if (typeof _applyExpensePaidOverrides === 'function') _applyExpensePaidOverrides(); } catch(_){}
+                      try { if (typeof _dedupPoExpensesSafe === 'function') _dedupPoExpensesSafe(true); } catch(_){}
+                      payload.data = JSON.stringify(Array.isArray(DB.expenses) ? DB.expenses : _merged);
+                    } else {
+                      payload.data = JSON.stringify(_merged);
+                    }
                     try { showNotif('⚠️ 다른 사용자/기기 데이터 차이 감지 — ' + key + ' 자동 병합 (' + _merged.length + '건)', 'info'); } catch(_){}
                   } else {
                     console.warn('⚠️ [COUNT-GUARD] ' + key + ' 서버 전용 레코드가 모두 tombstone — 덮어쓰기 진행');
@@ -32653,7 +32661,7 @@ function resyncOrderExpenses(orderId) {
 //     잔금·선급금 expense 가 중복 생성되는 사례 발견 (예: orderId=8 의 po_balance 가 2건).
 //     v409 에서 자동 dedup 이 비활성화됐지만, po_balance/po_prepay 는 (orderId, category)
 //     당 1건이 강한 invariant 라 좁게 자동 정리 안전.
-function _dedupPoExpensesSafe() {
+function _dedupPoExpensesSafe(skipSave) {  // v2.3.335: skipSave — COUNT-GUARD(저장중) 내 호출 시 재진입 저장 방지
   try {
     if (!Array.isArray(DB.expenses)) return 0;
     var grp = new Map();
@@ -32683,7 +32691,7 @@ function _dedupPoExpensesSafe() {
     rmIds.forEach(function(id){ if (!DB._deletedExpenseIds.includes(id)) DB._deletedExpenseIds.push(id); });
     var rmSet = new Set(rmIds.map(String));
     DB.expenses = DB.expenses.filter(function(e){ return e && !rmSet.has(String(e.id)); });
-    try { if (typeof _doSaveData === 'function') _doSaveData(); else saveData(); } catch(_){}
+    if (!skipSave) { try { if (typeof _doSaveData === 'function') _doSaveData(); else saveData(); } catch(_){} }
     return rmIds.length;
   } catch(e){ console.warn('_dedupPoExpensesSafe:', e); return 0; }
 }
