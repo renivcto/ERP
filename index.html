@@ -5849,7 +5849,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.335';
+const ERP_VERSION = 'v2.3.336';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -36092,6 +36092,15 @@ function _apnAttachBlockHtml(a) {
       <div style="display:flex;flex-direction:column;gap:5px">${cards}</div>
     </div>`;
 }
+// v2.3.336: 결재 본문 텍스트 내 http(s) URL 을 클릭 가능한 링크로 (HTML 이스케이프 후 링크화 — XSS 안전)
+function _linkifyText(t) {
+  const esc = String(t == null ? '' : t).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return esc.replace(/(https?:\/\/[^\s<>"']+)/g, function(m) {
+    const clean = m.replace(/[.,;:)\]}"'>]+$/, '');  // 끝 문장부호/괄호는 링크에서 제외
+    const tail = m.slice(clean.length);
+    return '<a href="' + clean + '" target="_blank" rel="noopener" style="color:#2563eb;text-decoration:underline;word-break:break-all">' + clean + '</a>' + tail;
+  });
+}
 // v2.3.334: dataURL → Blob (data: URL 새 탭 이동이 브라우저에 차단되는 문제 회피 + 다운로드용)
 function _dataUrlToBlob(dataUrl) {
   const m = /^data:([^;,]*)(;base64)?,([\s\S]*)$/.exec(dataUrl || '');
@@ -36134,7 +36143,8 @@ async function _openApnAttachInNewTab(approvalId, attachIdx) {
     let url = data;
     try { url = URL.createObjectURL(_dataUrlToBlob(data)); } catch(_){ url = data; }
     if (isPdf || isImage) {
-      const w = window.open(url, '_blank', 'noopener');
+      // v2.3.336: noopener 제거 — noopener 면 성공해도 window.open 이 null 반환해 팝업차단 경고가 잘못 떴음
+      const w = window.open(url, '_blank');
       if (!w) { try { showNotif('팝업이 차단되어 새 탭으로 열 수 없습니다 — 브라우저 팝업 차단을 해제해 주세요', 'warning'); } catch(_){} }
     } else {
       const el = document.createElement('a'); el.href = url; el.download = name; document.body.appendChild(el); el.click(); el.remove();
@@ -39409,7 +39419,7 @@ function openNonPoApprovalDetail(approvalId) {
   // ── 본문 (legacy "1. 구분" 블록 제거 + 번호 재정렬) ──
   const sanitizedNote = _sanitizeDraftNote(a.note||'');
   const noteHtml = sanitizedNote
-    ? `<div style="white-space:pre-wrap;line-height:1.85;font-size:13.5px;color:#1e293b;font-family:'Noto Sans KR','Nanum Gothic',sans-serif;min-height:60px">${sanitizedNote.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`
+    ? `<div style="white-space:pre-wrap;line-height:1.85;font-size:13.5px;color:#1e293b;font-family:'Noto Sans KR','Nanum Gothic',sans-serif;min-height:60px">${_linkifyText(sanitizedNote)}</div>`
     : `<div style="color:#94a3b8;font-size:12.5px;font-style:italic;text-align:center;padding:30px 0">(본문 내용 없음)</div>`;
 
   // ── 결어 (v1.9.328 — 기안자 이름 대신 회사명 + 원형 인감으로 공식 문서화) ──
@@ -40141,7 +40151,7 @@ function openNonPoApprovalPage(approvalId) {
 
   const sanitizedNote = _sanitizeDraftNote(a.note||'');
   const noteHtml = sanitizedNote
-    ? `<div style="white-space:pre-wrap;line-height:1.85;font-size:13.5px;color:#1e293b;font-family:'Noto Sans KR','Nanum Gothic',sans-serif;min-height:60px">${sanitizedNote.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`
+    ? `<div style="white-space:pre-wrap;line-height:1.85;font-size:13.5px;color:#1e293b;font-family:'Noto Sans KR','Nanum Gothic',sans-serif;min-height:60px">${_linkifyText(sanitizedNote)}</div>`
     : `<div style="color:#94a3b8;font-size:12.5px;font-style:italic;text-align:center;padding:30px 0">(본문 내용 없음)</div>`;
 
   const closingHtml = `
