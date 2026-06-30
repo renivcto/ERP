@@ -1549,7 +1549,9 @@ exports.fetchSmartstoreOrders = functions
   .runWith({
     secrets: ['NAVER_CLIENT_ID', 'NAVER_CLIENT_SECRET', 'SLACK_ORDERS_WEBHOOK'],
     timeoutSeconds: 240,
-    memory: '256MB'
+    memory: '256MB',
+    vpcConnector: 'erp-coupang-vpc-conn',
+    vpcConnectorEgressSettings: 'ALL_TRAFFIC'
   })
   .pubsub.schedule('*/10 * * * *')
   .timeZone('Asia/Seoul')
@@ -1591,7 +1593,9 @@ exports.manualFetchSmartstoreOrders = functions
   .runWith({
     secrets: ['NAVER_CLIENT_ID', 'NAVER_CLIENT_SECRET', 'SLACK_ORDERS_WEBHOOK'],
     timeoutSeconds: 240,
-    memory: '256MB'
+    memory: '256MB',
+    vpcConnector: 'erp-coupang-vpc-conn',
+    vpcConnectorEgressSettings: 'ALL_TRAFFIC'
   })
   .https.onCall(async (data, context) => {
     if (!context.auth) throw new functions.https.HttpsError('unauthenticated', '로그인이 필요합니다.');
