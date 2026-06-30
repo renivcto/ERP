@@ -13,6 +13,7 @@
   import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
   import { getFirestore, doc, getDoc, getDocFromServer, getDocFromCache, setDoc, collection, getDocs, waitForPendingWrites } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
   import { getStorage, ref as _storageRefFn, uploadString as _storageUploadString, getDownloadURL as _storageGetUrl, deleteObject as _storageDelete } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
+  import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";  // v2.3.341: onCall(스마트스토어 수동수집)
 
   const firebaseConfig = {
     apiKey: "AIzaSyDP8KBmUQzvH9iH9YQlFa-A87fcOIV09aM",
@@ -50,6 +51,12 @@
   window._firestoreWaitForPendingWrites = () => waitForPendingWrites(db);
   window._firestoreCollection = collection;
   window._firestoreGetDocs = getDocs;
+  // v2.3.341: Cloud Functions(asia-northeast3) onCall 호출 SDK — 스마트스토어 수동 수집 등
+  try {
+    const _fns = getFunctions(app, 'asia-northeast3');
+    window._firebaseFunctions = _fns;
+    window._httpsCallable = httpsCallable;
+  } catch(e) { console.warn('Firebase Functions 초기화 실패:', e); }
   // v2.3.202: Firebase Storage — 댓글의 1MB 초과 파일 첨부용(Firestore 1MB 한계 우회).
   //   storageBucket 은 firebaseConfig 에 이미 설정됨. Storage 활성화 + 보안규칙 필요(설치가이드 참고).
   try {
@@ -2963,6 +2970,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <select class="fs" id="shop-order-shop-filter" onchange="renderShopOrderTable()" style="width:140px;padding:7px 10px;font-size:12.5px;height:34px"><option value="">전체 쇼핑몰</option></select>
           <div style="margin-left:auto;display:flex;gap:6px">
             <button class="btn btn-outline btn-sm pg-topbar-btn" style="color:var(--red-500);border-color:var(--red-200)" onclick="bulkDeleteOrders()">🗑 선택 삭제</button>
+            <button id="btn-ss-fetch" class="btn btn-outline btn-sm pg-topbar-btn" style="color:#15803d;border-color:#bbf7d0" onclick="_testSmartstoreFetch()" title="스마트스토어 주문을 지금 수집합니다 (관리자 · 최근 24시간)">🌳 스마트스토어 수집</button>
             <button class="btn btn-outline btn-sm pg-topbar-btn" onclick="downloadOrderTemplate()">📥 엑셀 양식</button>
             <button class="btn btn-primary btn-sm pg-topbar-btn" onclick="openOrderUploadModal()">📤 주문 업로드</button>
           </div>
@@ -5850,7 +5858,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.340';
+const ERP_VERSION = 'v2.3.341';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -15175,6 +15183,28 @@ function filterOrderShop(shopId, el) {
   const shopSel = $('shop-order-shop-filter');
   if (shopSel) { shopSel.value = shopId === 'all' ? '' : shopId; }
   renderShopOrderTable();
+}
+// v2.3.341: 스마트스토어 주문 수집 테스트 — 관리자 onCall(manualFetchSmartstoreOrders) 호출 후 결과 표시
+async function _testSmartstoreFetch() {
+  if (!(window._currentUser && window._currentUser.isAdmin === true)) { showNotif('관리자만 사용할 수 있습니다', 'warning'); return; }
+  if (!window._firebaseFunctions || !window._httpsCallable) { showNotif('Functions 미초기화 — 새로고침 후 다시 시도하세요', 'warning'); return; }
+  const btn = document.getElementById('btn-ss-fetch');
+  const _orig = btn ? btn.textContent : '';
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ 수집 중…'; }
+    showNotif('스마트스토어 주문 수집 중… (최대 1~2분 소요)', 'info');
+    const callable = window._httpsCallable(window._firebaseFunctions, 'manualFetchSmartstoreOrders');
+    const res = await callable({ minutesBack: 1440 });
+    const d = (res && res.data) || {};
+    showNotif('✅ 스마트스토어 수집 완료 — 가져옴 ' + (d.fetched||0) + '건 / 신규 ' + (d.added||0) + '건' + (d.range ? (' · ' + d.range) : ''), 'success');
+    if ((d.added||0) > 0) { setTimeout(() => { try { showNotif('신규 ' + d.added + '건 적재됨 — 새로고침(F5)하면 목록에 표시됩니다', 'info'); } catch(_){} }, 1200); }
+  } catch(e) {
+    console.error('[스마트스토어 수집] 실패:', e);
+    const msg = (e && (e.message || e.code)) || e;
+    showNotif('❌ 수집 실패: ' + msg, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = _orig || '🌳 스마트스토어 수집'; }
+  }
 }
 // ══════════════ 주문 업로드/관리 ══════════════
 function openOrderUploadModal() {
