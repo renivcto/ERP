@@ -5843,7 +5843,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.331';
+const ERP_VERSION = 'v2.3.332';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9542,11 +9542,12 @@ function backfillProductionsFromOrders() {
         productId: itemId,
         productName: item ? item.name : row.name,
         orderDate: o.orderDate || today(),
-        inDate: o.inDate || '',
+        inDate: o.inDate || (o.isOverseas ? (o.deliveryDate || '') : ''),  // v2.3.332: 해외 PO 는 deliveryDate 를 입고예정으로
         payDate: o.payDate || '',
         qty: row.qty || 0,
         amount: (row.qty || 0) * (row.price || (item ? item.price : 0)),
         vendorId: o.vendorId || null,
+        vendorName: o.isOverseas ? ((o.supplier && o.supplier.company) || '') : '',  // v2.3.332: 해외 PO free-text 공급자명
         progress: isComplete ? 100 : 10,
         status: isComplete ? '생산완료' : '생산중',
         checks: isComplete ? [true,true,true,true,true] : [false,false,false,false,false],
@@ -25863,6 +25864,10 @@ function renderProdTable() {
   $('prod-table').innerHTML = filtered.map(p => {
     const item = getItem(p.productId);
     const vendor = getVendor(p.vendorId);
+    // v2.3.332: 연결 발주서 1회 조회 — 생산레코드에 입고예정/업체 없으면 발주서에서 보강(해외 PO 는 deliveryDate / supplier.company)
+    const _linkedOrd = p.orderId ? (DB.orders||[]).find(o=>o&&o.id===p.orderId) : (p.serial ? (DB.orders||[]).find(o=>o&&o.serial===p.serial) : null);
+    const inDateDisp = p.inDate || (_linkedOrd ? (_linkedOrd.inDate || (_linkedOrd.isOverseas ? (_linkedOrd.deliveryDate||'') : '')) : '') || '';
+    const vendorName = vendor.company || p.vendorName || (_linkedOrd && _linkedOrd.isOverseas ? ((_linkedOrd.supplier && _linkedOrd.supplier.company) || '') : '') || '';
     const col = statusColor[p.status]||'var(--gray-400)';
     const checkCount = (p.checks||[]).filter(Boolean).length;
     const displayName = (item && item.name) ? item.name : (p.productName || '-');
@@ -25870,10 +25875,7 @@ function renderProdTable() {
     const typeLabel = item ? (item.type||'-') : '-';
     // v1.9.199: 결제일(payDate) → 잔금예정일(balanceDueDate) 우선, payDate fallback
     let payDate = p.payDate || '';
-    if (!payDate) {
-      const linked = p.orderId ? DB.orders.find(o=>o.id===p.orderId) : (p.serial ? DB.orders.find(o=>o.serial===p.serial) : null);
-      if (linked) payDate = linked.balanceDueDate || linked.payDate || '';
-    }
+    if (!payDate && _linkedOrd) { payDate = _linkedOrd.balanceDueDate || _linkedOrd.payDate || ''; }
     // v1.9.108 — 발주/판매 페이지와 동일한 스타일의 라운드 필 배지 (인라인)
     const ddayBadge = (dateStr, onlyActive) => {
       if (!dateStr) return '';
@@ -25900,9 +25902,9 @@ function renderProdTable() {
         }
       </td>
       <td style="text-align:center">${fmt(p.qty)}${qtyUnit}</td>
-      <td style="white-space:nowrap;text-align:center"><span style="display:inline-block;position:relative">${p.inDate||'-'}<span style="position:absolute;left:100%;top:50%;transform:translateY(-50%);margin-left:2px">${ddayBadge(p.inDate, true)}</span></span></td>
+      <td style="white-space:nowrap;text-align:center"><span style="display:inline-block;position:relative">${inDateDisp||'-'}<span style="position:absolute;left:100%;top:50%;transform:translateY(-50%);margin-left:2px">${ddayBadge(inDateDisp, true)}</span></span></td>
       <td style="text-align:center">${p.orderDate||'-'}</td>
-      <td class="lnk" style="text-align:center;max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" onclick="viewVendor(${p.vendorId})" title="${(vendor.company||'').replace(/"/g,'&quot;')}">${(()=>{ const _n=vendor.company||'-'; return _n.length>12 ? _n.slice(0,12)+'…' : _n; })()}</td>
+      <td class="${p.vendorId?'lnk':''}" style="text-align:center;max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" ${p.vendorId?`onclick="viewVendor(${p.vendorId})"`:''} title="${(vendorName||'').replace(/"/g,'&quot;')}">${(()=>{ const _n=vendorName||'-'; return _n.length>12 ? _n.slice(0,12)+'…' : _n; })()}</td>
       <td style="text-align:center"><button title="수정" onclick="editProd(${p.id})" style="background:#eef2ff;color:#6366f1;border:1px solid #e0e7ff;width:24px;height:22px;padding:0;border-radius:5px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1">✏️</button></td>
     </tr>`;
   }).join('') || '<tr><td colspan="8" class="empty">등록된 생산이 없습니다</td></tr>';
