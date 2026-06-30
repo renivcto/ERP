@@ -5849,7 +5849,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.333';
+const ERP_VERSION = 'v2.3.334';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -36058,6 +36058,45 @@ function addApnNamedAttachment(silent) {
 }
 
 // v1.9.701: 일반 결재 첨부 — 새 탭에서 열기 (PDF/이미지 inline, 그 외 다운로드 안내)
+// v2.3.334: 결재 문서 첨부 렌더 공통 헬퍼 — 클릭 시 _openApnAttachInNewTab 로 마커(__idb__) 해석 + 열기/다운로드.
+//   기존엔 각 문서뷰가 raw at.data 를 href/img src 에 직접 써서, __idb__ 마커(타 기기)·data: URL 차단(전 기기)으로 안 열렸음.
+function _apnAttachBlockHtml(a) {
+  const attaches = (a && Array.isArray(a.attachments)) ? a.attachments : [];
+  if (!attaches.length) return '';
+  const _aid = String((a && a.id) != null ? a.id : '').replace(/'/g, "\\'");
+  const cards = attaches.map((at, idx) => {
+    const isImg = (at.type||'').startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(at.name||'');
+    const isPdf = (at.type||'') === 'application/pdf' || /\.pdf$/i.test(at.name||'');
+    const sz = at.size ? (at.size >= 1024*1024 ? (at.size/1024/1024).toFixed(1)+'MB' : Math.round(at.size/1024)+'KB') : '';
+    const ic = isImg ? '🖼️' : isPdf ? '📄' : '📎';
+    const act = (isImg || isPdf) ? '🔍 보기' : '⬇️ 다운로드';
+    return `<div onclick="_openApnAttachInNewTab('${_aid}',${idx})" style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;display:flex;align-items:center;gap:8px;cursor:pointer" title="클릭해 ${(isImg||isPdf)?'열기':'다운로드'}">
+      <div style="font-size:18px">${ic}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(at.name||'파일').replace(/</g,'&lt;')}</div>
+        <div style="font-size:10.5px;color:#64748b">${sz}</div>
+      </div>
+      <span style="font-size:11px;color:#4338ca;font-weight:700;white-space:nowrap">${act}</span>
+    </div>`;
+  }).join('');
+  return `<div style="margin-top:18px;padding-top:14px;border-top:1px dashed #cbd5e1">
+      <div style="font-size:12px;font-weight:800;color:#475569;margin-bottom:8px;letter-spacing:1px">■ 첨 부 (${attaches.length})</div>
+      <div style="display:flex;flex-direction:column;gap:5px">${cards}</div>
+    </div>`;
+}
+// v2.3.334: dataURL → Blob (data: URL 새 탭 이동이 브라우저에 차단되는 문제 회피 + 다운로드용)
+function _dataUrlToBlob(dataUrl) {
+  const m = /^data:([^;,]*)(;base64)?,([\s\S]*)$/.exec(dataUrl || '');
+  if (!m) return new Blob([dataUrl || ''], { type: 'application/octet-stream' });
+  const mime = m[1] || 'application/octet-stream';
+  if (m[2]) {  // base64
+    const bin = atob(m[3] || '');
+    const len = bin.length, arr = new Uint8Array(len);
+    for (let i = 0; i < len; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime });
+  }
+  return new Blob([decodeURIComponent(m[3] || '')], { type: mime });
+}
 async function _openApnAttachInNewTab(approvalId, attachIdx) {
   try {
     // v1.9.722: ID 비교 lenient (Firestore 라운드트립 후 string/number 변경 대응)
@@ -36081,20 +36120,18 @@ async function _openApnAttachInNewTab(approvalId, attachIdx) {
     }
     if (!data) { try { showNotif('파일 데이터를 찾을 수 없습니다 — 결재 수정 화면에서 다시 첨부해주세요', 'warning'); } catch(_){} return; }
     const name = at.name || '첨부파일';
-    const isPdf = /^data:application\/pdf/i.test(data);
-    const isImage = /^data:image\//i.test(data);
-    const w = window.open('', '_blank');
-    if (!w) { alert('팝업이 차단되어 있습니다. 브라우저 팝업 차단을 해제해 주세요.'); return; }
-    const title = '📎 ' + name + ' — ' + (a.title || '');
-    const safeName = name.replace(/</g,'&lt;');
-    const bodyHtml = isPdf
-      ? '<iframe src="' + data + '" style="width:100vw;height:100vh;border:none"></iframe>'
-      : isImage
-        ? '<div style="min-height:100vh;background:#111;display:flex;align-items:center;justify-content:center;padding:20px"><img src="' + data + '" style="max-width:100%;max-height:95vh;object-fit:contain;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.4)"></div>'
-        : '<div style="padding:40px;font-family:system-ui,sans-serif"><h2>미리보기를 지원하지 않는 형식입니다</h2><p><a href="' + data + '" download="' + safeName + '">💾 ' + safeName + ' 다운로드</a></p></div>';
-    w.document.open();
-    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + title.replace(/</g,'&lt;') + '</title><style>html,body{margin:0;padding:0}</style></head><body>' + bodyHtml + '</body></html>');
-    w.document.close();
+    // v2.3.334: PDF·이미지 → 브라우저에서 바로 보기(blob URL, data: 차단 우회) / 그 외 → 다운로드
+    const isPdf = /^data:application\/pdf/i.test(data) || (at.type||'') === 'application/pdf' || /\.pdf$/i.test(name);
+    const isImage = /^data:image\//i.test(data) || /^image\//i.test(at.type||'') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
+    let url = data;
+    try { url = URL.createObjectURL(_dataUrlToBlob(data)); } catch(_){ url = data; }
+    if (isPdf || isImage) {
+      const w = window.open(url, '_blank', 'noopener');
+      if (!w) { try { showNotif('팝업이 차단되어 새 탭으로 열 수 없습니다 — 브라우저 팝업 차단을 해제해 주세요', 'warning'); } catch(_){} }
+    } else {
+      const el = document.createElement('a'); el.href = url; el.download = name; document.body.appendChild(el); el.click(); el.remove();
+    }
+    if (url && url !== data) setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 60000);
   } catch(e) {
     console.warn('_openApnAttachInNewTab failed:', e);
     try { showNotif('첨부 열기 실패: ' + (e.message||e), 'error'); } catch(_){}
@@ -39210,31 +39247,7 @@ function openApprovalDetail(approvalId) {
   const isNonPo = a.type === 'non_po_approval';
   const amountSpan = !isNonPo && a.amount ? `<span>💰 ${fmtWon(a.amount||0)}</span>` : '';
   const attaches = Array.isArray(a.attachments) ? a.attachments : [];
-  const attachHtml = attaches.length ? `
-    <div style="margin-top:10px">
-      <div style="font-size:12px;font-weight:700;color:var(--gray-700);margin-bottom:6px">📎 첨부 파일 (${attaches.length})</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px">
-        ${attaches.map((at,i) => {
-          const isImg = (at.type||'').startsWith('image/');
-          const sizeKb = at.size ? (at.size >= 1024*1024 ? (at.size/1024/1024).toFixed(1)+'MB' : Math.round(at.size/1024)+'KB') : '';
-          if (isImg) {
-            return `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:6px;cursor:pointer" onclick="window.open('${at.data}','_blank')" title="클릭해 크게 보기">
-              <img src="${at.data}" style="width:100%;height:90px;object-fit:cover;border-radius:4px">
-              <div style="font-size:10.5px;font-weight:600;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${at.name||''}</div>
-              <div style="font-size:10px;color:#64748b">${sizeKb}</div>
-            </div>`;
-          }
-          return `<a href="${at.data}" download="${(at.name||'file').replace(/"/g,'&quot;')}" style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px;display:flex;align-items:center;gap:6px;text-decoration:none;color:#0f172a">
-            <div style="font-size:20px">📄</div>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${at.name||'파일'}</div>
-              <div style="font-size:10px;color:#64748b">${sizeKb}</div>
-            </div>
-          </a>`;
-        }).join('')}
-      </div>
-    </div>
-  ` : '';
+  const attachHtml = _apnAttachBlockHtml(a);  // v2.3.334: 첨부 열기/다운로드 통일(마커 해석)
   // v1.9.288: 기안자 정보 표시 — v1.9.309: 아바타 + 단계 배지 + 문서형 레이아웃
   const _avatar = (a.authorName && typeof feedAvatarHtml === 'function')
     ? feedAvatarHtml(a.authorName, a.authorEmail||'', 32)
@@ -39383,32 +39396,7 @@ function openNonPoApprovalDetail(approvalId) {
 
   // ── 첨부 ──
   const attaches = Array.isArray(a.attachments) ? a.attachments : [];
-  const imgs = attaches.filter(at => (at.type||'').startsWith('image/'));
-  const files = attaches.filter(at => !(at.type||'').startsWith('image/'));
-  const attachBlock = attaches.length ? `
-    <div style="margin-top:18px;padding-top:14px;border-top:1px dashed #cbd5e1">
-      <div style="font-size:12px;font-weight:800;color:#475569;margin-bottom:8px;letter-spacing:1px">■ 첨 부 (${attaches.length})</div>
-      ${imgs.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-bottom:${files.length?'10px':'0'}">
-        ${imgs.map(at => `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:6px;cursor:zoom-in" onclick="window.open('${at.data}','_blank')" title="클릭해 크게 보기">
-          <img src="${at.data}" style="width:100%;height:100px;object-fit:cover;border-radius:4px;display:block">
-          <div style="font-size:10.5px;font-weight:600;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(at.name||'').replace(/</g,'&lt;')}</div>
-        </div>`).join('')}
-      </div>` : ''}
-      ${files.length ? `<div style="display:flex;flex-direction:column;gap:5px">
-        ${files.map(at => {
-          const sizeKb = at.size ? (at.size >= 1024*1024 ? (at.size/1024/1024).toFixed(1)+'MB' : Math.round(at.size/1024)+'KB') : '';
-          // v1.9.732: download 속성 제거 + target=_blank → 자동 다운로드 차단, 새 탭에서 열기
-          return `<a href="${at.data}" target="_blank" rel="noopener" style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;display:flex;align-items:center;gap:8px;text-decoration:none;color:#0f172a">
-            <div style="font-size:18px">📄</div>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(at.name||'파일').replace(/</g,'&lt;')}</div>
-              <div style="font-size:10.5px;color:#64748b">${sizeKb}</div>
-            </div>
-            <span style="font-size:11px;color:#4338ca;font-weight:700">🔍 보기</span>
-          </a>`;
-        }).join('')}
-      </div>` : ''}
-    </div>` : '';
+  const attachBlock = _apnAttachBlockHtml(a);  // v2.3.334: 첨부 열기/다운로드 통일(마커 해석)
 
   // ── 본문 (legacy "1. 구분" 블록 제거 + 번호 재정렬) ──
   const sanitizedNote = _sanitizeDraftNote(a.note||'');
@@ -40141,31 +40129,7 @@ function openNonPoApprovalPage(approvalId) {
     : `<span style="display:inline-block;background:${urgent?'#fecaca':'#fef3c7'};color:${urgent?'#991b1b':'#92400e'};border:1px solid ${urgent?'#fca5a5':'#fde68a'};font-size:11px;font-weight:800;padding:3px 10px;border-radius:4px">${urgent?'🚨 응급 · ':''}⏳ 결재 대기</span>`;
 
   const attaches = Array.isArray(a.attachments) ? a.attachments : [];
-  const imgs = attaches.filter(at => (at.type||'').startsWith('image/'));
-  const files = attaches.filter(at => !(at.type||'').startsWith('image/'));
-  const attachBlock = attaches.length ? `
-    <div style="margin-top:18px;padding-top:14px;border-top:1px dashed #cbd5e1">
-      <div style="font-size:12px;font-weight:800;color:#475569;margin-bottom:8px;letter-spacing:1px">■ 첨 부 (${attaches.length})</div>
-      ${imgs.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-bottom:${files.length?'10px':'0'}">
-        ${imgs.map(at => `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:6px;cursor:zoom-in" onclick="window.open('${at.data}','_blank')" title="클릭해 크게 보기">
-          <img src="${at.data}" style="width:100%;height:100px;object-fit:cover;border-radius:4px;display:block">
-          <div style="font-size:10.5px;font-weight:600;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(at.name||'').replace(/</g,'&lt;')}</div>
-        </div>`).join('')}
-      </div>` : ''}
-      ${files.length ? `<div style="display:flex;flex-direction:column;gap:5px">
-        ${files.map(at => {
-          const sizeKb = at.size ? (at.size >= 1024*1024 ? (at.size/1024/1024).toFixed(1)+'MB' : Math.round(at.size/1024)+'KB') : '';
-          return `<a href="${at.data}" download="${(at.name||'file').replace(/"/g,'&quot;')}" style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;display:flex;align-items:center;gap:8px;text-decoration:none;color:#0f172a">
-            <div style="font-size:18px">📄</div>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(at.name||'파일').replace(/</g,'&lt;')}</div>
-              <div style="font-size:10.5px;color:#64748b">${sizeKb}</div>
-            </div>
-            <span style="font-size:10.5px;color:#4338ca;font-weight:700">⬇️</span>
-          </a>`;
-        }).join('')}
-      </div>` : ''}
-    </div>` : '';
+  const attachBlock = _apnAttachBlockHtml(a);  // v2.3.334: 첨부 열기/다운로드 통일(마커 해석)
 
   const sanitizedNote = _sanitizeDraftNote(a.note||'');
   const noteHtml = sanitizedNote
