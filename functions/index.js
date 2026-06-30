@@ -85,6 +85,7 @@ const admin = require('firebase-admin');
 const firestore = require('@google-cloud/firestore');
 const {Storage} = require('@google-cloud/storage');
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');   // 네이버 커머스API 전자서명용
 
 admin.initializeApp();
 
@@ -1271,6 +1272,348 @@ exports.manualFetchCafe24Orders = functions
         webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
         titlePrefix: ''
       });
+      throw new functions.https.HttpsError('internal', err.message);
+    }
+  });
+
+// =============================================================================
+// v2.16 — 네이버 스마트스토어(커머스API) 주문 자동 수집 → ERP shopOrders
+// =============================================================================
+//   인증: 애플리케이션ID/시크릿 → bcrypt 전자서명 → oauth2/token(client_credentials)
+//   조회: 변경 상품주문(last-changed-statuses) 폴링 → 상세조회(product-orders/query)
+//   적재: erp_data/shopOrders 에 runTransaction 으로 dedupe append (source:'smartstore_auto')
+//   멱등: orderNo(상품주문ID)+customerName 중복 skip + system/smartstore_state 처리이력
+//   시크릿: NAVER_CLIENT_ID / NAVER_CLIENT_SECRET (Secret Manager) — ERP Firestore 저장 금지
+// =============================================================================
+
+const NAVER_API_BASE   = 'https://api.commerce.naver.com';
+const SS_STATE_DOC      = 'system/smartstore_state';   // {processedIds[], lastPolledAt}
+const SS_PROCESSED_CAP  = 8000;
+
+// 모듈 전역 토큰 캐시 (콜드스타트 시 재발급)
+let _ssTokenCache = { token: '', exp: 0 };
+
+// 네이버 전자서명 (bcrypt) → base64
+function naverSign(clientId, clientSecret, timestampMs) {
+  const pwd = `${clientId}_${timestampMs}`;
+  const hashed = bcrypt.hashSync(pwd, clientSecret);   // clientSecret 자체가 bcrypt salt($2a$..)
+  return Buffer.from(hashed, 'utf-8').toString('base64');
+}
+
+// 액세스 토큰 발급 (client_credentials, type=SELF)
+async function naverGetToken(clientId, clientSecret) {
+  const now = Date.now();
+  if (_ssTokenCache.token && now < _ssTokenCache.exp - 60000) return _ssTokenCache.token;
+
+  const ts = now;
+  const sign = naverSign(clientId, clientSecret, ts);
+  const body = new URLSearchParams({
+    client_id: clientId,
+    timestamp: String(ts),
+    grant_type: 'client_credentials',
+    client_secret_sign: sign,
+    type: 'SELF'
+  });
+  const resp = await fetch(`${NAVER_API_BASE}/external/v1/oauth2/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString()
+  });
+  if (!resp.ok) {
+    const t = await resp.text().catch(() => '(body unreadable)');
+    throw new Error(`네이버 토큰 발급 ${resp.status}: ${t.slice(0, 400)}`);
+  }
+  const j = await resp.json();
+  if (!j.access_token) throw new Error('네이버 토큰 응답에 access_token 없음: ' + JSON.stringify(j).slice(0, 300));
+  const ttl = (Number(j.expires_in) || 10800) * 1000;   // 보통 3시간
+  _ssTokenCache = { token: j.access_token, exp: now + ttl };
+  return j.access_token;
+}
+
+// KST '+09:00' ISO8601 (lastChangedFrom 용)
+function naverKstIso(ms) {
+  const k = new Date(ms + 9 * 3600 * 1000);
+  const p = (n, l = 2) => String(n).padStart(l, '0');
+  return `${k.getUTCFullYear()}-${p(k.getUTCMonth() + 1)}-${p(k.getUTCDate())}T${p(k.getUTCHours())}:${p(k.getUTCMinutes())}:${p(k.getUTCSeconds())}.000+09:00`;
+}
+
+// ISO → 'YYYY-MM-DD HH:MM' (KST, 분까지) — ERP가 시간 표시
+function naverToKstMinute(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso).slice(0, 16).replace('T', ' ');
+  return d.toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 16);  // 'YYYY-MM-DD HH:MM'
+}
+
+// 변경 상품주문 폴링 (lastChangedFrom 이후) — moreSequence 페이지네이션
+async function naverFetchChangedProductOrderIds(token, fromMs) {
+  const ids = new Set();
+  let moreSequence = null;
+  let guard = 0;
+  do {
+    const qs = new URLSearchParams({ lastChangedFrom: naverKstIso(fromMs) });
+    if (moreSequence) qs.set('moreSequence', moreSequence);
+    const resp = await fetch(`${NAVER_API_BASE}/external/v1/pay-order/seller/product-orders/last-changed-statuses?${qs.toString()}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!resp.ok) {
+      const t = await resp.text().catch(() => '');
+      throw new Error(`변경주문 조회 ${resp.status}: ${t.slice(0, 400)}`);
+    }
+    const j = await resp.json();
+    const data = j && j.data ? j.data : {};
+    const list = Array.isArray(data.lastChangeStatuses) ? data.lastChangeStatuses : [];
+    for (const x of list) { if (x && x.productOrderId) ids.add(String(x.productOrderId)); }
+    moreSequence = data.more ? data.moreSequence : null;
+    guard++;
+  } while (moreSequence && guard < 30);
+  return Array.from(ids);
+}
+
+// 상세조회 (productOrderIds → 상세) — 최대 300개씩
+async function naverQueryProductOrders(token, productOrderIds) {
+  const out = [];
+  for (let i = 0; i < productOrderIds.length; i += 300) {
+    const chunk = productOrderIds.slice(i, i + 300);
+    const resp = await fetch(`${NAVER_API_BASE}/external/v1/pay-order/seller/product-orders/query`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productOrderIds: chunk })
+    });
+    if (!resp.ok) {
+      const t = await resp.text().catch(() => '');
+      throw new Error(`상세조회 ${resp.status}: ${t.slice(0, 400)}`);
+    }
+    const j = await resp.json();
+    const data = (j && Array.isArray(j.data)) ? j.data : [];
+    for (const e of data) out.push(e);
+  }
+  return out;
+}
+
+// 네이버 상품주문 상태 → ERP status
+function mapNaverStatus(s) {
+  switch (String(s || '').toUpperCase()) {
+    case 'PAYMENT_WAITING': case 'PLACE_ORDER': case 'PAYED': return '배송 전';
+    case 'DELIVERING': case 'DISPATCHED': return '배송중';
+    case 'DELIVERED': case 'PURCHASE_DECIDED': return '배송완료';
+    case 'CANCELED': case 'CANCELED_BY_NOPAYMENT': return '취소';
+    case 'RETURNED': return '반품';
+    default: return '배송 전';
+  }
+}
+
+// 네이버 상세조회 1건(e = {order, productOrder}) → ERP shopOrders 객체 (브리핑 §2 데이터계약)
+function mapNaverToErpOrder(e, shopId, shopName) {
+  const order = e.order || {};
+  const po = e.productOrder || {};
+  const ship = po.shippingAddress || {};
+  const productOrderId = String(po.productOrderId || e.productOrderId || '');
+  const opt = po.productOption || po.optionCode || '';
+  const productName = (po.productName || '') + (opt ? ` [${opt}]` : '');
+  const amount = Number(po.totalPaymentAmount || po.totalProductAmount || po.unitPrice || 0) || 0;
+  return {
+    id: 'ss_' + productOrderId,
+    orderNo: productOrderId,                         // 상품주문번호(전역고유)
+    orderDate: naverToKstMinute(order.orderDate || po.orderDate || ''),   // 시간 포함
+    customerName: order.ordererName || '',
+    customerPhone: fmtPhoneKr(order.ordererTel || order.ordererTelNo || ''),
+    email: '',
+    productName,
+    qty: Number(po.quantity) || 1,
+    paymentAmount: amount,
+    recipientName: ship.name || '',
+    recipientPhone: fmtPhoneKr(ship.tel1 || ship.tel2 || ''),
+    zipCode: ship.zipCode || '',
+    address: `${ship.baseAddress || ''} ${ship.detailedAddress || ''}`.trim(),
+    deliveryNote: po.shippingMemo || ship.shippingMemo || '',
+    paymentDate: (order.paymentDate || '').slice(0, 10),
+    shipDate: '',
+    shippingFee: Number(po.deliveryFeeAmount) || 0,
+    trackingNo: po.trackingNumber || '',
+    status: mapNaverStatus(po.productOrderStatus),
+    shopId,
+    shopName,                                         // '스마트스토어'
+    source: 'smartstore_auto',
+    smartstoreStatus: po.productOrderStatus || '',
+    cafe24OriginalOrderId: String(order.orderId || ''),  // 다상품 묶음 그룹핑(ERP 필드 재사용)
+    fetchedAt: Date.now(),
+  };
+}
+
+// erp_data/shops 에서 스마트스토어 shop 찾기
+async function findSmartstoreShop(firestoreDb) {
+  const snap = await firestoreDb.doc('erp_data/shops').get();
+  if (!snap.exists) return null;
+  const raw = snap.data().data;
+  let shops = [];
+  if (typeof raw === 'string') { try { shops = JSON.parse(raw) || []; } catch (_) {} }
+  else if (Array.isArray(raw)) shops = raw;
+  const m = (n) => {
+    if (!n) return false; const l = String(n).toLowerCase();
+    return n.includes('스마트스토어') || l.includes('smartstore') || n.includes('네이버') || l.includes('naver');
+  };
+  return shops.find(s => s && m(s.name)) || null;
+}
+
+// 처리이력 상태 로드/저장 (perma: 한번 적재한 productOrderId 는 재삽입 안 함 = 사용자 삭제 존중)
+async function ssLoadState(db) {
+  const snap = await db.doc(SS_STATE_DOC).get();
+  if (!snap.exists) return { processedIds: [], lastPolledAt: 0 };
+  const d = snap.data() || {};
+  return { processedIds: Array.isArray(d.processedIds) ? d.processedIds : [], lastPolledAt: Number(d.lastPolledAt) || 0 };
+}
+async function ssSaveState(db, processedIds, lastPolledAt) {
+  const capped = processedIds.slice(-SS_PROCESSED_CAP);
+  await db.doc(SS_STATE_DOC).set({ processedIds: capped, lastPolledAt, ts: Date.now() }, { merge: true });
+}
+
+// shopOrders 트랜잭션 머지 (read→dedupe→write) — 브리핑 §4
+async function mergeSmartstoreOrdersTx(db, newOrders, processedSet) {
+  const ref = db.doc('erp_data/shopOrders');
+  let added = 0, sampleNew = [];
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    let existing = [];
+    if (snap.exists) {
+      const raw = snap.data().data;
+      if (typeof raw === 'string') { try { existing = JSON.parse(raw) || []; } catch (_) {} }
+      else if (Array.isArray(raw)) existing = raw;
+    }
+    const keyset = new Set(existing.map(o => String(o.orderNo) + '|' + (o.customerName || '')));
+    const trulyNew = [];
+    for (const o of newOrders) {
+      const key = String(o.orderNo) + '|' + (o.customerName || '');
+      if (keyset.has(key)) continue;                 // 이미 존재
+      if (processedSet.has(String(o.orderNo))) continue;  // 과거 적재분(사용자 삭제 가능) → 재삽입 금지
+      keyset.add(key); trulyNew.push(o);
+    }
+    if (trulyNew.length) tx.set(ref, { data: JSON.stringify(existing.concat(trulyNew)), ts: Date.now() });
+    added = trulyNew.length; sampleNew = trulyNew.slice(0, 3);
+  });
+  return { added, sampleNew };
+}
+
+// 메인 인입 로직
+async function ingestSmartstoreOrders({ minutesBack = 30 } = {}) {
+  const clientId = (process.env.NAVER_CLIENT_ID || '').trim();
+  const clientSecret = (process.env.NAVER_CLIENT_SECRET || '').trim();
+  if (!clientId || !clientSecret) throw new Error('NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 시크릿 미설정');
+
+  const db = admin.firestore();
+  const shop = await findSmartstoreShop(db);
+  if (!shop) throw new Error('쇼핑몰 관리에 "스마트스토어"가 등록되어 있지 않습니다. ERP에서 먼저 등록해주세요.');
+  const shopId = shop.id;
+  const shopName = shop.name || '스마트스토어';
+
+  const state = await ssLoadState(db);
+  // 폴링 시작점: 마지막 폴링 -5분 겹침, 없으면 minutesBack 전. 24h 초과 방지.
+  const overlap = 5 * 60 * 1000;
+  let fromMs = state.lastPolledAt ? (state.lastPolledAt - overlap) : (Date.now() - minutesBack * 60 * 1000);
+  const minFrom = Date.now() - 24 * 3600 * 1000 + 60000;
+  if (fromMs < minFrom) fromMs = minFrom;
+
+  const token = await naverGetToken(clientId, clientSecret);
+  const changedIds = await naverFetchChangedProductOrderIds(token, fromMs);
+  if (changedIds.length === 0) {
+    await ssSaveState(db, state.processedIds, Date.now());
+    return { fetched: 0, added: 0, range: `${naverKstIso(fromMs)} ~ now`, sampleNew: [] };
+  }
+
+  const details = await naverQueryProductOrders(token, changedIds);
+  const erpOrders = details.map(e => mapNaverToErpOrder(e, shopId, shopName)).filter(o => o.orderNo);
+
+  // 자동 상품 매핑 적용 (쿠팡/Cafe24와 동일 헬퍼 재사용)
+  try { await applyProductMappingsToOrders(db, erpOrders, shopId); } catch (e) { console.warn('[SS] 매핑 적용 실패:', e.message); }
+
+  const processedSet = new Set(state.processedIds.map(String));
+  const merge = await mergeSmartstoreOrdersTx(db, erpOrders, processedSet);
+
+  // 처리이력 갱신: 이번에 조회된 모든 상품주문ID 를 처리완료로 기록 (재삽입 방지)
+  const newProcessed = Array.from(new Set(state.processedIds.concat(erpOrders.map(o => String(o.orderNo)))));
+  await ssSaveState(db, newProcessed, Date.now());
+
+  return {
+    fetched: erpOrders.length,
+    added: merge.added,
+    range: `${naverKstIso(fromMs)} ~ now`,
+    sampleNew: merge.sampleNew.map(o => ({ orderNo: o.orderNo, customer: o.customerName, product: o.productName, qty: o.qty, amount: o.paymentAmount }))
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 스마트스토어 자동 수집 — 10분마다 (KST)
+// ─────────────────────────────────────────────────────────────
+exports.fetchSmartstoreOrders = functions
+  .region(REGION)
+  .runWith({
+    secrets: ['NAVER_CLIENT_ID', 'NAVER_CLIENT_SECRET', 'SLACK_ORDERS_WEBHOOK'],
+    timeoutSeconds: 240,
+    memory: '256MB'
+  })
+  .pubsub.schedule('*/10 * * * *')
+  .timeZone('Asia/Seoul')
+  .onRun(async () => {
+    try {
+      const result = await ingestSmartstoreOrders({ minutesBack: 30 });
+      if (result.added > 0) {
+        const sampleText = result.sampleNew.length
+          ? '\n\n*신규 주문 샘플:*\n' + result.sampleNew.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`).join('\n')
+          : '';
+        await notifySlack({
+          title: `스마트스토어 자동 주문 수집 — 신규 ${result.added}건`,
+          level: 'success',
+          details: `📦 가져옴: ${result.fetched}건\n✅ 신규 추가: ${result.added}건${sampleText}`,
+          webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+          titlePrefix: ''
+        });
+      }
+      console.log('[SMARTSTORE SCHED] 성공:', JSON.stringify(result));
+      return result;
+    } catch (err) {
+      console.error('[SMARTSTORE SCHED] 실패:', err);
+      await notifySlack({
+        title: '스마트스토어 자동 주문 수집 실패',
+        level: 'error',
+        details: `❌ 오류: ${err.message}\n\n*확인:* 1) NAVER_CLIENT_ID/SECRET 시크릿  2) 커머스API 권한(상품주문 조회)  3) Functions 로그`,
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+        titlePrefix: ''
+      });
+      throw err;
+    }
+  });
+
+// ─────────────────────────────────────────────────────────────
+// 스마트스토어 수동 트리거 (관리자) — 테스트/즉시 수집
+// ─────────────────────────────────────────────────────────────
+exports.manualFetchSmartstoreOrders = functions
+  .region(REGION)
+  .runWith({
+    secrets: ['NAVER_CLIENT_ID', 'NAVER_CLIENT_SECRET', 'SLACK_ORDERS_WEBHOOK'],
+    timeoutSeconds: 240,
+    memory: '256MB'
+  })
+  .https.onCall(async (data, context) => {
+    if (!context.auth) throw new functions.https.HttpsError('unauthenticated', '로그인이 필요합니다.');
+    const uid = context.auth.uid;
+    const userDoc = await admin.firestore().doc(`users/${uid}`).get();
+    if (!userDoc.exists || userDoc.data().isAdmin !== true) {
+      throw new functions.https.HttpsError('permission-denied', '관리자 권한이 필요합니다.');
+    }
+    const userName = userDoc.data().name || userDoc.data().email || uid;
+    const minutesBack = Math.min(Math.max(parseInt((data && data.minutesBack) || 1440, 10) || 1440, 10), 1440);
+    try {
+      const result = await ingestSmartstoreOrders({ minutesBack });
+      await notifySlack({
+        title: `스마트스토어 수동 주문 수집 (관리자 ${userName})`,
+        level: 'info',
+        details: `👤 ${userName}\n📦 가져옴 ${result.fetched}건 / 신규 ${result.added}건\n📅 ${result.range}`,
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+        titlePrefix: ''
+      });
+      return result;
+    } catch (err) {
+      console.error('[SMARTSTORE MANUAL] 실패:', err);
       throw new functions.https.HttpsError('internal', err.message);
     }
   });
