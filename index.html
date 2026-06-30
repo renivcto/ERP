@@ -5843,7 +5843,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.330';
+const ERP_VERSION = 'v2.3.331';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -37877,11 +37877,36 @@ async function testSlackWebhook() {
   }
 }
 
+// v2.3.331: 슬랙 알림 멱등 가드 — 같은 알림(type+내용)이 짧은 시간(10분) 내 재전송되는 것 차단.
+//   증상: 지급완료(pay_done) 등이 id충돌 중복레코드·재렌더·머지 사이클로 단시간에 여러 번 발송됨(9중복).
+//   localStorage 기반이라 재렌더·새로고침에도 유효. 기기별이지만 한 사용자의 한 액션 폭주를 잡음.
+function _slackDedupKey(type, p) {
+  p = p || {};
+  // id 제외 — 내용(분류·업체·제목·금액·지급/예정일) 기반. id 충돌로 생긴 서로 다른 id의 중복 레코드도 같은 키로 묶어 차단.
+  return [type, p.category || '', p.vendor || '', p.title || '', String(p.amount != null ? p.amount : ''), p.paidDate || '', p.dueDate || ''].join('|');
+}
+function _slackShouldSend(type, payload) {
+  try {
+    const k = _slackDedupKey(type, payload);
+    const now = Date.now();
+    const WINDOW = 10 * 60 * 1000; // 10분
+    let store = {};
+    try { store = JSON.parse(localStorage.getItem('reniv_slack_sent') || '{}') || {}; } catch(_) { store = {}; }
+    if (now - (Number(store[k]) || 0) < WINDOW) return false;  // 최근에 같은 알림 보냄 → 차단
+    store[k] = now;
+    const ks = Object.keys(store);
+    if (ks.length > 150) ks.forEach(kk => { if (now - (Number(store[kk]) || 0) > WINDOW) delete store[kk]; });
+    try { localStorage.setItem('reniv_slack_sent', JSON.stringify(store)); } catch(_){}
+    return true;
+  } catch(_) { return true; }
+}
 async function slackNotify(type, payload) {
   try {
     if (!DB.appSettings || !DB.appSettings.slackEnabled) return;
     const url = _cleanWebhookUrl(DB.appSettings.slackWebhookUrl);
     if (!url) return;
+    // 일회성 '완료' 알림만 멱등 차단(반복 가능한 요청/리마인더/루프 발송은 제외)
+    if ((type === 'pay_done' || type === 'approval_done') && !_slackShouldSend(type, payload)) { console.warn('[slackNotify] 중복 완료알림 차단:', type, payload && payload.title); return; }
     const kind = _detectWebhookKind(url);
     const body = _buildWebhookPayload(kind, type, payload);
     await _postWebhook(url, kind, body);
