@@ -2218,6 +2218,12 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 
           <!-- 비고 -->
           <div class="fg" style="margin-bottom:0"><label>비고 / Notes</label><textarea class="fta" id="po-note" rows="2" placeholder=""></textarea></div>
+          <!-- v2.3.333: 해외 PO 도 '날인 필요 없음' 지원 (국내 발주서와 동일 stampNotRequired 플래그) -->
+          <label for="po-stamp-not-required" style="display:flex;align-items:center;gap:6px;margin-top:12px;font-size:12.5px;font-weight:500;color:var(--gray-700);cursor:pointer;user-select:none">
+            <input type="checkbox" id="po-stamp-not-required" style="cursor:pointer;width:15px;height:15px">
+            <span>🔴 결재 완료 — 날인 필요 없음</span>
+            <span style="font-size:10.5px;color:var(--gray-400);font-weight:400">(체크 시 결재 목록에서 '날인 불필요'로 표시)</span>
+          </label>
         </div>
         <div class="modal-ft" style="display:flex;justify-content:space-between;align-items:center">
           <button class="btn btn-danger btn-sm" id="po-delete-btn" onclick="deletePoFromEdit()" style="display:none">🗑 삭제</button>
@@ -5843,7 +5849,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.332';
+const ERP_VERSION = 'v2.3.333';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27048,6 +27054,7 @@ function openOverseasPoModal(editId) {
     document.getElementById('po-number').value = order.poNumber || '';
     document.getElementById('po-date').value = order.orderDate || today();
     document.getElementById('po-delivery-date').value = order.deliveryDate || '';
+    if (document.getElementById('po-stamp-not-required')) document.getElementById('po-stamp-not-required').checked = !!order.stampNotRequired;  // v2.3.333
     document.getElementById('po-payment').value = order.payment || 'Credit Card';
     document.getElementById('po-shipping').value = order.shippingTerm || 'Paid by Buyer';
     document.getElementById('po-currency').value = order.currency || 'USD';
@@ -27118,6 +27125,7 @@ function openOverseasPoModal(editId) {
     document.getElementById('po-number').value = _genPoNumber();
     document.getElementById('po-date').value = today();
     document.getElementById('po-delivery-date').value = '';
+    if (document.getElementById('po-stamp-not-required')) document.getElementById('po-stamp-not-required').checked = false;  // v2.3.333
     document.getElementById('po-payment').value = 'Credit Card';
     document.getElementById('po-shipping').value = 'Paid by Buyer';
     document.getElementById('po-currency').value = 'USD';
@@ -27524,6 +27532,14 @@ function _syncOverseasPoApprovalExpense(orderId) {
     ap.title = `[해외 PO] ${vendorName}`;
     ap.amount = grandTotal;
     ap.updatedAt = Date.now();
+    // v2.3.333: 날인 상태(stampNotRequired/stampData) → 결재 상태 동기화 (체크 시 approved, 해제 시 pending)
+    const _shouldApprove = !!(o.stampData || o.stampName || o.stampNotRequired);
+    if (_shouldApprove && ap.status !== 'approved') {
+      ap.status = 'approved'; ap.approvedAt = Date.now();
+      try { slackNotify('approval_done', Object.assign({}, ap, { vendor: vendorName })); } catch(_){}
+    } else if (!_shouldApprove && ap.status === 'approved') {
+      ap.status = 'pending'; ap.approvedAt = 0;
+    }
   }
 
   // v2.2.23: 선결제 % 가 있으면 po_prepay expense 도 생성, 잔금은 (100-prepayPct)%
@@ -27735,6 +27751,7 @@ function savePo() {
     orderDate: document.getElementById('po-date').value || today(),
     deliveryDate: document.getElementById('po-delivery-date').value || '',
     inDate: document.getElementById('po-delivery-date').value || '',  // v2.3.309: 해외 PO Delivery Date 를 입고예정일(inDate)에 반영 (국내 발주서와 동일)
+    stampNotRequired: !!(document.getElementById('po-stamp-not-required') && document.getElementById('po-stamp-not-required').checked),  // v2.3.333: 날인 불필요
     payment: document.getElementById('po-payment').value,
     shippingTerm: document.getElementById('po-shipping').value,
     currency: document.getElementById('po-currency').value || 'USD',
