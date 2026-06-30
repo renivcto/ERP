@@ -5850,7 +5850,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.338';
+const ERP_VERSION = 'v2.3.339';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -36117,7 +36117,6 @@ function _dataUrlToBlob(dataUrl) {
   return new Blob([decodeURIComponent(m[3] || '')], { type: mime });
 }
 async function _openApnAttachInNewTab(approvalId, attachIdx) {
-  // v1.9.722: ID 비교 lenient (Firestore 라운드트립 후 string/number 변경 대응)
   const a = (DB.approvals||[]).find(x => x && String(x.id) === String(approvalId));
   if (!a || !Array.isArray(a.attachments) || !a.attachments[attachIdx]) {
     try { showNotif('첨부 파일을 찾을 수 없습니다', 'warning'); } catch(_){}
@@ -36125,45 +36124,51 @@ async function _openApnAttachInNewTab(approvalId, attachIdx) {
   }
   const at = a.attachments[attachIdx];
   const name = at.name || '첨부파일';
-  // v2.3.337: 타입은 동기적으로 판정(파일명/type) — 데이터 로드 전에 결정
-  const isPdf = (at.type||'') === 'application/pdf' || /\.pdf$/i.test(name) || /^data:application\/pdf/i.test(at.data||'');
-  const isImage = /^image\//i.test(at.type||'') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name) || /^data:image\//i.test(at.data||'');
-  // ⭐ v2.3.337: await 후 window.open 은 'user gesture' 가 끊겨 팝업차단됨(특히 __idb__ 마커라 공유로드 await 하는 관리자/타직원).
-  //   → PDF/이미지는 클릭 즉시 '빈 탭'을 동기로 먼저 열어두고, 데이터 받아온 뒤 그 탭 주소만 설정한다.
-  let w = null;
-  if (isPdf || isImage) { try { w = window.open('', '_blank'); } catch(_){ w = null; } }
-  try {
-    let data = at.data || '';
-    if (!data || data === '__idb__' || data === '__stored__') {
-      try { data = await idbGet('approval_attach_' + a.id + '_' + attachIdx); } catch(_){}
-    }
-    if (!data || data === '__idb__') {
-      try { data = await _loadSharedApnAttach(a.id, attachIdx); } catch(_){}
-      if (data) {
-        try { idbSet('approval_attach_' + a.id + '_' + attachIdx, data); } catch(_){}
-        try { at.data = data; } catch(_){}
-      }
-    }
-    if (!data) {
-      if (w) { try { w.close(); } catch(_){} }
-      try { showNotif('파일 데이터를 찾을 수 없습니다 — 작성자가 결재 수정 화면에서 파일을 다시 첨부·저장해야 모두가 볼 수 있습니다', 'warning'); } catch(_){}
-      return;
-    }
-    let url = data;
-    try { url = URL.createObjectURL(_dataUrlToBlob(data)); } catch(_){ url = data; }
-    if (isPdf || isImage) {
-      if (w && !w.closed) { try { w.location.href = url; } catch(_){ try { window.open(url, '_blank'); } catch(__){} } }
-      else { const w2 = window.open(url, '_blank'); if (!w2) { try { showNotif('팝업이 차단되어 새 탭으로 열 수 없습니다 — 브라우저 팝업 차단을 해제해 주세요', 'warning'); } catch(_){} } }
-    } else {
-      // 그 외 파일 → 다운로드 (다운로드는 await 후에도 허용됨)
-      const el = document.createElement('a'); el.href = url; el.download = name; document.body.appendChild(el); el.click(); el.remove();
-    }
-    if (url && url !== data) setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 60000);
-  } catch(e) {
-    if (w) { try { w.close(); } catch(_){} }
-    console.warn('_openApnAttachInNewTab failed:', e);
-    try { showNotif('첨부 열기 실패: ' + (e.message||e), 'error'); } catch(_){}
+  try { showNotif('첨부 여는 중…', 'info'); } catch(_){}
+  // 데이터 해석: 인라인 → 로컬 IDB → 공유 Firestore
+  let data = at.data || '';
+  if (!data || data === '__idb__' || data === '__stored__') { try { data = await idbGet('approval_attach_' + a.id + '_' + attachIdx); } catch(_){} }
+  if (!data || data === '__idb__') {
+    try { data = await _loadSharedApnAttach(a.id, attachIdx); } catch(_){}
+    if (data) { try { idbSet('approval_attach_' + a.id + '_' + attachIdx, data); } catch(_){} try { at.data = data; } catch(_){} }
   }
+  if (!data || typeof data !== 'string' || data === '__idb__' || data === '__stored__') {
+    try { showNotif('파일 데이터를 찾을 수 없습니다 — 작성자가 결재 수정 화면에서 파일을 다시 첨부·저장해야 모두가 볼 수 있습니다', 'warning'); } catch(_){}
+    return;
+  }
+  const isPdf = (at.type||'') === 'application/pdf' || /\.pdf$/i.test(name) || /^data:application\/pdf/i.test(data);
+  const isImage = /^image\//i.test(at.type||'') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name) || /^data:image\//i.test(data);
+  let url = data;
+  try { url = URL.createObjectURL(_dataUrlToBlob(data)); } catch(_){ url = data; }
+  if (!isPdf && !isImage) {
+    // 미리보기 불가 형식 → 다운로드
+    const el = document.createElement('a'); el.href = url; el.download = name; document.body.appendChild(el); el.click(); el.remove();
+    if (url && url !== data) setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 60000);
+    return;
+  }
+  // ⭐ v2.3.339: PDF/이미지는 인-페이지 모달(iframe/img)로 표시 — 팝업차단/async-gesture 문제 완전 회피.
+  //   모달 안의 '새 탭/다운로드' 는 사용자 클릭이라 차단 안 됨. (async window.open 차단 우회)
+  const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;z-index:999999;background:rgba(15,23,42,.9);display:flex;flex-direction:column';
+  ov.innerHTML =
+    '<div style="display:flex;align-items:center;gap:8px;padding:10px 16px;background:#0f172a;color:#fff;flex-shrink:0">'
+    + '<span style="flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📎 ' + esc(name) + '</span>'
+    + '<a href="' + url + '" target="_blank" rel="noopener" style="color:#fff;background:#334155;border:1px solid #475569;border-radius:6px;padding:5px 11px;font-size:12px;text-decoration:none;font-weight:600">↗ 새 탭</a>'
+    + '<a href="' + url + '" download="' + esc(name) + '" style="color:#fff;background:#334155;border:1px solid #475569;border-radius:6px;padding:5px 11px;font-size:12px;text-decoration:none;font-weight:600">⬇ 다운로드</a>'
+    + '<button type="button" data-close="1" style="color:#fff;background:#dc2626;border:0;border-radius:6px;padding:6px 13px;font-size:12px;font-weight:700;cursor:pointer">✕ 닫기</button>'
+    + '</div>'
+    + '<div style="flex:1;min-height:0;background:#111">'
+    + (isImage
+        ? '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box"><img src="' + url + '" style="max-width:100%;max-height:100%;object-fit:contain"></div>'
+        : '<iframe src="' + url + '" style="width:100%;height:100%;border:0;display:block"></iframe>')
+    + '</div>';
+  const close = () => { try { ov.remove(); } catch(_){} try { document.removeEventListener('keydown', onKey); } catch(_){} if (url && url !== data) setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 1500); };
+  const onKey = e => { if (e.key === 'Escape') close(); };
+  try { ov.querySelector('[data-close]').addEventListener('click', close); } catch(_){}
+  ov.addEventListener('click', e => { if (e.target === ov) close(); });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(ov);
 }
 
 
