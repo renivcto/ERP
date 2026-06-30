@@ -5843,7 +5843,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.329';
+const ERP_VERSION = 'v2.3.330';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7247,8 +7247,17 @@ async function _doSaveDataInner() {
                   let _keepIds = onlyOnServer.slice();
                   try {
                     if (Array.isArray(DB[_tombArrName])) {
-                      const _tIds = new Set(DB[_tombArrName].map(x => String(x && typeof x === 'object' ? x.id : x)));
-                      _keepIds = _keepIds.filter(id => !_tIds.has(String(id)));
+                      // v2.3.330: expenses 는 id tombstone 도 "삭제(ts) 이후 createdAt 으로 생성된 서버 레코드"면 보존.
+                      //   id 카운터 재사용으로 새 지출이 과거 삭제 id 와 겹쳐, 타 직원 저장 시 COUNT-GUARD 가 신규를
+                      //   조용히 지우던 버그(작성자만 보이고 타인엔 안 보임) 차단. sig tombstone 의 createdAt 가드와 동형.
+                      const _tsById = new Map();
+                      DB[_tombArrName].forEach(x => { const xid = String(x && typeof x === 'object' ? x.id : x); const xts = (x && typeof x === 'object') ? (Number(x.ts) || 0) : 0; if (!_tsById.has(xid) || xts > _tsById.get(xid)) _tsById.set(xid, xts); });
+                      const _srvByIdT = (key === 'expenses') ? new Map(srvArr.map(o => [o && o.id, o])) : null;
+                      _keepIds = _keepIds.filter(id => {
+                        if (!_tsById.has(String(id))) return true;          // tombstone 아님 → 보존
+                        if (key === 'expenses' && _srvByIdT) { const o = _srvByIdT.get(id); if (o && (Number(o.createdAt) || 0) > _tsById.get(String(id))) return true; }  // 삭제 이후 생성 = 새 입력 → 보존
+                        return false;                                       // tombstone → 제외
+                      });
                     }
                     if (key === 'expenses' && Array.isArray(DB._deletedExpenseSigs) && DB._deletedExpenseSigs.length > 0 && typeof _isExpenseSigTombstoned === 'function') {
                       // v1.9.940: 서버 전용 레코드도 삭제시점 이후 생성건이면 보존 (새 입력 보호)
