@@ -5850,7 +5850,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.339';
+const ERP_VERSION = 'v2.3.340';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -39507,6 +39507,10 @@ function _printNonPoApproval(approvalId) {
   const src = document.getElementById('npDocRoot');
   if (!src) { alert('인쇄할 문서를 불러오지 못했습니다.'); return; }
   const docTitle = (a.title||'기안서').replace(/[<>"']/g,'').slice(0,60);
+  // v2.3.340: 인쇄 팝업엔 부모 함수가 없어 첨부 onclick 이 실패 → 부모에서 첨부를 blob URL 로 해석해 두고
+  //   팝업의 자체 _openApnAttachInNewTab 이 그 URL 을 연다. (팝업은 동기 open 으로 gesture 유지)
+  try { Object.values(window._printAttachUrls||{}).forEach(u=>{ try{ URL.revokeObjectURL(u); }catch(_){} }); } catch(_){}
+  window._printAttachUrls = {}; window._printAttachReady = false;
   const w = window.open('', '_blank', 'width=900,height=1100');
   if (!w) { alert('팝업이 차단되었습니다. 브라우저에서 팝업을 허용해주세요.'); return; }
   w.document.open();
@@ -39529,9 +39533,24 @@ function _printNonPoApproval(approvalId) {
       <button onclick="window.print()">🖨️ 인쇄 / PDF 저장</button>
     </div>
     <div id="wrap">${src.outerHTML}</div>
-    <script>setTimeout(function(){try{window.focus();window.print();}catch(e){}}, 350);<\/script>
+    <script>function _openApnAttachInNewTab(id,idx){try{var m=window.opener&&window.opener._printAttachUrls;var u=m&&m[idx];if(u){window.open(u,'_blank');return;}if(window.opener&&!window.opener._printAttachReady){alert('첨부 준비 중입니다. 잠시 후 다시 클릭해 주세요.');return;}alert('첨부 데이터를 찾을 수 없습니다 — 작성자가 결재 수정에서 파일을 다시 첨부·저장해야 모두가 볼 수 있습니다.');}catch(e){alert('첨부 열기 실패: '+(e&&e.message||e));}}setTimeout(function(){try{window.focus();window.print();}catch(e){}}, 350);<\/script>
   </body></html>`);
   w.document.close();
+  // v2.3.340: 팝업 연 뒤 부모 컨텍스트에서 첨부 데이터(IDB→공유 Firestore) 해석 → blob URL 준비
+  (async () => {
+    try {
+      const ats = Array.isArray(a.attachments) ? a.attachments : [];
+      for (let i = 0; i < ats.length; i++) {
+        try {
+          const at = ats[i]; let data = (at && at.data) || '';
+          if (!data || data === '__idb__' || data === '__stored__') { try { data = await idbGet('approval_attach_' + a.id + '_' + i); } catch(_){} }
+          if (!data || data === '__idb__') { try { data = await _loadSharedApnAttach(a.id, i); } catch(_){} }
+          if (data && typeof data === 'string' && data !== '__idb__') { window._printAttachUrls[i] = URL.createObjectURL(_dataUrlToBlob(data)); }
+        } catch(_){}
+      }
+    } catch(_){}
+    window._printAttachReady = true;
+  })();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -39809,7 +39828,11 @@ async function openPoApprovalDetail(orderId) {
 // ═══════════════════════════════════════════════════════
 
 // 공통 래퍼 — doc HTML + 인쇄/닫기 버튼 chrome
-function _openApprovalDocInNewTab(docTitle, docNo, innerHtml) {
+function _openApprovalDocInNewTab(docTitle, docNo, innerHtml, approvalId) {
+  // v2.3.340: 독립 문서 팝업엔 부모 함수가 없어 첨부 onclick 실패 → 부모에서 첨부를 blob URL 로 해석해 두고
+  //   팝업에 주입한 _openApnAttachInNewTab 이 그 URL 을 연다(클릭=동기 user gesture 라 차단 안 됨).
+  try { Object.values(window._printAttachUrls||{}).forEach(u=>{ try{ URL.revokeObjectURL(u); }catch(_){} }); } catch(_){}
+  window._printAttachUrls = {}; window._printAttachReady = false;
   const w = window.open('', '_blank');
   if (!w) { try { showNotif && showNotif('팝업이 차단되었습니다. 팝업 허용 후 다시 시도해주세요.', 'warning'); } catch(_){ alert('팝업이 차단되었습니다. 팝업 허용 후 다시 시도해주세요.'); } return; }
   w.document.write(`<!DOCTYPE html><html lang="ko"><head>
@@ -39844,8 +39867,25 @@ function _openApprovalDocInNewTab(docTitle, docNo, innerHtml) {
   </div>
   ${innerHtml}
 </div>
+<script>function _openApnAttachInNewTab(id,idx){try{var m=window.opener&&window.opener._printAttachUrls;var u=m&&m[idx];if(u){window.open(u,'_blank');return;}if(window.opener&&!window.opener._printAttachReady){alert('첨부 준비 중입니다. 잠시 후 다시 클릭해 주세요.');return;}alert('첨부 데이터를 찾을 수 없습니다 — 작성자가 결재 수정에서 파일을 다시 첨부·저장해야 모두가 볼 수 있습니다.');}catch(e){alert('첨부 열기 실패: '+(e&&e.message||e));}}<\/script>
 </body></html>`);
   w.document.close();
+  // v2.3.340: 팝업 연 뒤 부모 컨텍스트에서 첨부(IDB→공유 Firestore) 해석 → blob URL 준비
+  (async () => {
+    try {
+      const _a = (DB.approvals||[]).find(x => x && String(x.id) === String(approvalId));
+      const ats = (_a && Array.isArray(_a.attachments)) ? _a.attachments : [];
+      for (let i = 0; i < ats.length; i++) {
+        try {
+          const at = ats[i]; let data = (at && at.data) || '';
+          if (!data || data === '__idb__' || data === '__stored__') { try { data = await idbGet('approval_attach_' + _a.id + '_' + i); } catch(_){} }
+          if (!data || data === '__idb__') { try { data = await _loadSharedApnAttach(_a.id, i); } catch(_){} }
+          if (data && typeof data === 'string' && data !== '__idb__') { window._printAttachUrls[i] = URL.createObjectURL(_dataUrlToBlob(data)); }
+        } catch(_){}
+      }
+    } catch(_){}
+    window._printAttachReady = true;
+  })();
 }
 
 // 발주 품의서 — 독립 페이지 버전
@@ -40126,7 +40166,7 @@ async function openPoApprovalPage(orderId) {
       </div>
     </div>`;
 
-  _openApprovalDocInNewTab('발주 품의서', docNo, innerHtml);
+  _openApprovalDocInNewTab('발주 품의서', docNo, innerHtml, ap.id);
 }
 
 // 기안서(일반 결재) — 독립 페이지 버전
@@ -40216,7 +40256,7 @@ function openNonPoApprovalPage(approvalId) {
       </div>
     </div>`;
 
-  _openApprovalDocInNewTab(docLabel, docNo, innerHtml);
+  _openApprovalDocInNewTab(docLabel, docNo, innerHtml, a.id);
 }
 
 // v1.9.317: 결재 ID 충돌 자동 복구 — v1.9.756: 후순위 제거로 변경 (zombie 부활 방지)
