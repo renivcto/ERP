@@ -5861,7 +5861,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.345';
+const ERP_VERSION = 'v2.3.346';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26393,7 +26393,9 @@ async function openWarehouseManager(){
         <div style="font-size:12px;color:#475569;font-weight:700;margin-bottom:8px">+ 새 창고 추가</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
           <div style="flex:1;min-width:150px"><label style="${_fl}">창고 이름 *</label><input class="fi" id="wh-new-name" placeholder="예: 쿠팡 창고" onkeydown="if(event.key==='Enter')addWarehouse()"></div>
-          <div style="flex:1;min-width:150px"><label style="${_fl}">업체(위치) <span style="font-size:10px;color:#94a3b8;font-weight:400">(선택 시 주소·담당자·연락처 자동입력)</span></label><select class="fs" id="wh-new-vendor" onchange="_whVendorAutofill('wh-new')"></select></div>
+          <div style="flex:1;min-width:150px"><label style="${_fl}">업체(위치) <span style="font-size:10px;color:#94a3b8;font-weight:400">(선택 시 주소·담당자·연락처 자동입력)</span></label>
+            <input class="fi" id="wh-new-vendor-search" placeholder="🔍 협력사·쇼핑몰 등 검색" style="margin-bottom:5px;font-size:12px;padding:5px 10px" oninput="_fillWhVendorSelect('wh-new-vendor', null, this.value)">
+            <select class="fs" id="wh-new-vendor" onchange="_whVendorAutofill('wh-new')"></select></div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
           <div style="flex:2;min-width:200px"><label style="${_fl}">주소</label><input class="fi" id="wh-new-address" placeholder="창고 주소"></div>
@@ -26413,24 +26415,40 @@ async function openWarehouseManager(){
   _renderWhList();
   openModal('warehouse-modal');
 }
-function _fillWhVendorSelect(selId, selectedVendorId){
+// v2.3.346: 모든 업체 소스 통합 — 협력사(cooperators)·판매업체(sellers)·거래처(vendors)·쇼핑몰(shops).
+//   composite key = '<src>:<id>' 로 소스 충돌 방지. 각 소스의 주소·담당자·연락처 필드를 정규화.
+function _whPartnerList(){
+  const out=[]; const firstLine=s=>String(s||'').split('\n')[0].trim();
+  const c1=v=>{ const c=(Array.isArray(v.contacts)&&v.contacts.length)?v.contacts[0]:null; return { name:(c&&c.name)||firstLine(v.contact), phone:(c&&c.phone)||firstLine(v.phone) }; };
+  (DB.cooperators||[]).forEach(v=>{ if(v&&v.company){ const ct=c1(v); out.push({key:'coop:'+v.id, tag:'협력사', company:v.company, address:v.address||v.addr||'', manager:ct.name, phone:ct.phone}); }});
+  (DB.sellers||[]).forEach(v=>{ if(v&&v.company){ const ct=c1(v); out.push({key:'seller:'+v.id, tag:'판매업체', company:v.company, address:v.address||v.addr||'', manager:ct.name, phone:ct.phone}); }});
+  (DB.vendors||[]).forEach(v=>{ if(v&&v.company){ const ct=c1(v); out.push({key:'vendor:'+v.id, tag:'거래처', company:v.company, address:v.addr||v.address||'', manager:ct.name, phone:ct.phone}); }});
+  (DB.shops||[]).forEach(s=>{ if(s&&(s.name||s.company)){ const nm=s.name||s.company; out.push({key:'shop:'+s.id, tag:'쇼핑몰', company:nm, address:s.address||s.addr||'', manager:s.manager||'', phone:s.phone||''}); }});
+  return out;
+}
+function _whPartnerByKey(key){ if(key==null||key==='') return null; return _whPartnerList().find(p=>String(p.key)===String(key))||null; }
+// 레거시 warehouse.vendorId(구 DB.vendors 숫자 id) → composite key 매핑
+function _whNormVendorKey(v){ if(v==null||v==='') return ''; const s=String(v); return s.indexOf(':')>=0 ? s : ('vendor:'+s); }
+function _fillWhVendorSelect(selId, selectedKey, keyword){
   const sel = document.getElementById(selId||'wh-new-vendor'); if(!sel) return;
-  const vs = DB.vendors||[];
-  sel.innerHTML = '<option value="">— 업체 선택(선택) —</option>' + vs.map(v=>`<option value="${v.id}">${_whEsc(v.company)}</option>`).join('');
-  if(selectedVendorId!=null && selectedVendorId!=='') sel.value=String(selectedVendorId);
+  const kw=String(keyword||'').toLowerCase().trim();
+  let list=_whPartnerList();
+  if(kw) list=list.filter(p=>(p.company||'').toLowerCase().includes(kw)||(p.tag||'').toLowerCase().includes(kw)||(p.manager||'').toLowerCase().includes(kw));
+  list.sort((a,b)=>(a.company||'').localeCompare(b.company||'','ko'));
+  sel.innerHTML = '<option value="">— 업체 선택 —</option>' + list.map(p=>`<option value="${p.key}">[${p.tag}] ${_whEsc(p.company)}</option>`).join('');
+  const sk=(selectedKey!=null&&selectedKey!=='')?_whNormVendorKey(selectedKey):'';
+  if(sk) sel.value=sk;
 }
 // v2.3.344: 업체 선택 시 그 업체의 주소·담당자·연락처를 자동 채움(이후 수정 가능). prefix = 'wh-new' | 'wh-edit'
 function _whVendorAutofill(prefix){
   prefix = prefix || 'wh-new';
   const ven=document.getElementById(prefix+'-vendor'); if(!ven) return;
-  const v=(DB.vendors||[]).find(x=>String(x.id)===String(ven.value));
-  if(!v) return; // '— 업체 선택 —' 로 되돌리면 기존 입력 유지
-  const c=(Array.isArray(v.contacts)&&v.contacts.length)?v.contacts[0]:null;
-  const firstLine=s=>String(s||'').split('\n')[0].trim();
+  const p=_whPartnerByKey(ven.value);
+  if(!p) return; // '— 업체 선택 —' 로 되돌리면 기존 입력 유지
   const set=(id,val)=>{ const el=document.getElementById(id); if(el) el.value=val||''; };
-  set(prefix+'-address', v.addr||'');
-  set(prefix+'-manager', (c&&c.name)||firstLine(v.contact));
-  set(prefix+'-phone', (c&&c.phone)||firstLine(v.phone));
+  set(prefix+'-address', p.address);
+  set(prefix+'-manager', p.manager);
+  set(prefix+'-phone', p.phone);
 }
 function _renderWhList(){
   const wrap = document.getElementById('wh-list-wrap'); if(!wrap) return;
@@ -26461,15 +26479,16 @@ async function addWarehouse(){
   const name=((nameEl&&nameEl.value)||'').trim();
   if(!name){ showNotif('창고 이름을 입력하세요','warning'); return; }
   if((window._WH.list||[]).some(w=>w.name===name)){ showNotif('같은 이름의 창고가 이미 있습니다','warning'); return; }
-  const vId = venEl && venEl.value ? venEl.value : '';
-  const ven = vId ? (DB.vendors||[]).find(v=>String(v.id)===String(vId)) : null;
+  const key = venEl && venEl.value ? venEl.value : '';
+  const p = _whPartnerByKey(key);
   const gv=id=>((document.getElementById(id)||{}).value||'').trim();
   const id = 'wh_'+Date.now()+'_'+Math.floor(Math.random()*1000);
   window._WH.list = window._WH.list||[];
-  window._WH.list.push({ id, name, vendorId: ven?ven.id:'', vendorName: ven?ven.company:'', address:gv('wh-new-address'), manager:gv('wh-new-manager'), phone:gv('wh-new-phone'), createdAt: Date.now() });
+  window._WH.list.push({ id, name, vendorId: key||'', vendorName: p?p.company:'', address:gv('wh-new-address'), manager:gv('wh-new-manager'), phone:gv('wh-new-phone'), createdAt: Date.now() });
   await _whSaveList();
-  ['wh-new-name','wh-new-address','wh-new-manager','wh-new-phone'].forEach(x=>{ const el=document.getElementById(x); if(el) el.value=''; });
+  ['wh-new-name','wh-new-address','wh-new-manager','wh-new-phone','wh-new-vendor-search'].forEach(x=>{ const el=document.getElementById(x); if(el) el.value=''; });
   if(venEl) venEl.value='';
+  _fillWhVendorSelect('wh-new-vendor');
   _renderWhList();
   showNotif('창고가 추가되었습니다','success');
 }
@@ -26485,7 +26504,9 @@ async function openWhEditModal(id){
     <div class="modal-body">
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
         <div style="flex:1;min-width:150px"><label style="${_fl}">창고 이름 *</label><input class="fi" id="wh-edit-name"></div>
-        <div style="flex:1;min-width:150px"><label style="${_fl}">업체(위치) <span style="font-size:10px;color:#94a3b8;font-weight:400">(선택 시 자동입력)</span></label><select class="fs" id="wh-edit-vendor" onchange="_whVendorAutofill('wh-edit')"></select></div>
+        <div style="flex:1;min-width:150px"><label style="${_fl}">업체(위치) <span style="font-size:10px;color:#94a3b8;font-weight:400">(선택 시 자동입력)</span></label>
+          <input class="fi" id="wh-edit-vendor-search" placeholder="🔍 협력사·쇼핑몰 등 검색" style="margin-bottom:5px;font-size:12px;padding:5px 10px" oninput="_fillWhVendorSelect('wh-edit-vendor', null, this.value)">
+          <select class="fs" id="wh-edit-vendor" onchange="_whVendorAutofill('wh-edit')"></select></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <div style="flex:2;min-width:200px"><label style="${_fl}">주소</label><input class="fi" id="wh-edit-address"></div>
@@ -26512,9 +26533,9 @@ async function saveWhEdit(){
   const name=gv('wh-edit-name');
   if(!name){ showNotif('창고 이름을 입력하세요','warning'); return; }
   if((window._WH.list||[]).some(x=>x.name===name && String(x.id)!==String(id))){ showNotif('같은 이름의 창고가 이미 있습니다','warning'); return; }
-  const venEl=document.getElementById('wh-edit-vendor'); const vId=venEl&&venEl.value?venEl.value:'';
-  const ven=vId?(DB.vendors||[]).find(v=>String(v.id)===String(vId)):null;
-  w.name=name; w.vendorId=ven?ven.id:''; w.vendorName=ven?ven.company:''; w.address=gv('wh-edit-address'); w.manager=gv('wh-edit-manager'); w.phone=gv('wh-edit-phone'); w.updatedAt=Date.now();
+  const venEl=document.getElementById('wh-edit-vendor'); const key=venEl&&venEl.value?venEl.value:'';
+  const p=_whPartnerByKey(key);
+  w.name=name; w.vendorId=key||''; w.vendorName=p?p.company:''; w.address=gv('wh-edit-address'); w.manager=gv('wh-edit-manager'); w.phone=gv('wh-edit-phone'); w.updatedAt=Date.now();
   await _whSaveList();
   closeModal('warehouse-edit-modal');
   _renderWhList();
