@@ -5861,7 +5861,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.350';
+const ERP_VERSION = 'v2.3.351';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9629,6 +9629,10 @@ function repairIncorrectProductionCompletion() {
   let repaired = 0;
   (DB.productions||[]).forEach((p, idx) => {
     if (p.status !== '생산완료') return;
+    // v2.3.351: 사용자가 명시적으로 완료 처리한 레코드(manualDone)는 존중 — 발주서가 미입고여도 원복하지 않음.
+    //   (이 함수가 로드마다 수동 완료를 '생산중'으로 매번 되돌리던 버그. v1.9.108 이 막던 matchItem
+    //    자동 오완료는 플래그 없는 레코드라 방어 그대로 유지)
+    if (p.manualDone === true) return;
     // 연결된 발주서 탐색 (orderId 우선, 없으면 serial)
     let linked = null;
     // v1.9.984: id 타입 무관
@@ -26103,10 +26107,18 @@ function saveProduction() {
       ...oldProd,
       productId, orderDate: prodDate, inDate: prodDate,
       qty, amount: Math.round(totalCost),
-      status: '생산완료', progress: 100
+      status: '생산완료', progress: 100,
+      // v2.3.351: 사용자가 모달 저장으로 명시적으로 완료 처리한 표식 —
+      //   repairIncorrectProductionCompletion(로드마다 실행)이 발주 연결 레코드의 생산완료를
+      //   "발주서 미입고" 이유로 매번 '생산중' 원복하던 버그 차단. updatedAt 은 머지 EDIT RECOVERY 보호.
+      manualDone: true, updatedAt: Date.now()
     };
 
-    saveData(); closeModal('add-production'); renderProdTable();
+    // v2.3.351: 즉시 저장 — 완료 처리 직후 새로고침 시 800ms 디바운스로 유실되는 race 차단
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+    if (typeof saveDataNow === 'function') saveDataNow().catch(e=>console.error('생산 수정 저장 실패:', e));
+    else saveData();
+    closeModal('add-production'); renderProdTable();
     if (typeof renderStock === 'function') renderStock();
     updateBadges();
     showNotif('생산 수정 및 BOM 재고가 반영되었습니다','success');
