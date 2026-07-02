@@ -5861,7 +5861,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.356';
+const ERP_VERSION = 'v2.3.357';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -5913,7 +5913,13 @@ function _fsUpFp(data) {
   try { return String(data.length) + ':' + String(data).slice(-24); } catch(_) { return ''; }
 }
 function _fsUpMap() {
-  try { return JSON.parse(localStorage.getItem('reniv_fs_uploaded') || '{}') || {}; } catch(_) { return {}; }
+  // v2.3.357: 인메모리 캐시 — localStorage 가 quota 로 못 써도 세션 내 업로드 dedup 유지.
+  //   (기존: 매번 localStorage 재파싱 → quota 로 map 저장 실패 시 dedup 무력 → 매 저장마다 전체
+  //    첨부 재업로드 → Firestore resource-exhausted(쓰기 큐 초과)로 품목·창고 등 본 저장까지 실패)
+  if (window._fsUpMapCache) return window._fsUpMapCache;
+  try { window._fsUpMapCache = JSON.parse(localStorage.getItem('reniv_fs_uploaded') || '{}') || {}; }
+  catch(_) { window._fsUpMapCache = {}; }
+  return window._fsUpMapCache;
 }
 function _fsUpTryUpload(key, data, doUpload) {
   try {
@@ -6691,8 +6697,8 @@ async function _doSaveDataInner() {
       v.quotes.forEach((q, qi) => {
         if (q.data && q.data.length > 100) {
           idbSet('vendor_quote_' + v.id + '_' + qi, q.data);
-          // v1.9.713: Firestore 에도 백업 (IDB 손실 시 복구용)
-          try { _saveSharedVendorQuote(v.id, qi, q.data, q.fileName || q.name); } catch(_){}
+          // v1.9.713: Firestore 에도 백업 (IDB 손실 시 복구용) — v2.3.357: dedup 경로로 flood 차단
+          try { _fsUpTryUpload('vq_' + v.id + '_' + qi, q.data, (d) => _saveSharedVendorQuote(v.id, qi, d, q.fileName || q.name)); } catch(_){}
           dbToSave.vendors[vi].quotes[qi] = { ...q, data: '__idb__' };
         }
       });
@@ -6701,8 +6707,8 @@ async function _doSaveDataInner() {
       v.attachments.forEach((a, ai) => {
         if (a.data && a.data.length > 100) {
           idbSet('vendor_attach_' + v.id + '_' + ai, a.data);
-          // v1.9.713: Firestore 에도 백업
-          try { _saveSharedVendorAttach(v.id, ai, a.data, a.fileName || a.name); } catch(_){}
+          // v1.9.713: Firestore 에도 백업 — v2.3.357: dedup 경로로 flood 차단
+          try { _fsUpTryUpload('va_' + v.id + '_' + ai, a.data, (d) => _saveSharedVendorAttach(v.id, ai, d, a.fileName || a.name)); } catch(_){}
           dbToSave.vendors[vi].attachments[ai] = { ...a, data: '__idb__' };
         }
       });
@@ -6717,7 +6723,8 @@ async function _doSaveDataInner() {
       if (!at) return;
       if (at.data && typeof at.data === 'string' && at.data !== '__idb__' && at.data.length > 100) {
         try { idbSet('approval_attach_' + ap.id + '_' + ai, at.data); _apnOffloadCount++; } catch(e){ console.warn('IDB save failed approval_attach_' + ap.id + '_' + ai, e); }
-        try { _saveSharedApnAttach(ap.id, ai, at.data, at.name||''); } catch(_){}
+        // v2.3.357: dedup 경로로 — 같은 첨부를 매 저장마다 재업로드하던 flood(→ Firestore resource-exhausted) 차단
+        try { _fsUpTryUpload('apnatt_' + ap.id + '_' + ai, at.data, (d) => _saveSharedApnAttach(ap.id, ai, d, at.name||'')); } catch(_){}
         dbToSave.approvals[pi].attachments[ai] = { ...at, data: '__idb__' };
       }
     });
@@ -52564,19 +52571,20 @@ async function _loadSharedExpenseFile(expId, kind, idx) {
 
 // v1.9.713: 업체 견적서 Firestore 백업 (IDB 손실 시 복구용)
 async function _saveSharedVendorQuote(vendorId, idx, dataUrl, fileName) {
-  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return;
-  if (!dataUrl || dataUrl === '__idb__' || dataUrl === '__stored__') return;
-  if (typeof dataUrl !== 'string') return;
+  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return false;
+  if (!dataUrl || dataUrl === '__idb__' || dataUrl === '__stored__') return true;
+  if (typeof dataUrl !== 'string') return true;
   if (dataUrl.length > 900000) {
     console.log('📦 [VQ BACKUP] vendor ' + vendorId + ' quote ' + idx + ' 너무 큼 (' + dataUrl.length + ' bytes), Firestore 백업 안 함');
-    return;
+    return true;
   }
   try {
     const docId = 'vendor_' + vendorId + '_quote_' + idx;
     const ref = window._firestoreDoc(window._firebaseDb, 'vendorQuotes', docId);
     await window._firestoreSetDoc(ref, { data: dataUrl, name: fileName||'', ts: Date.now() });
     console.log('✅ [VQ BACKUP] vendor ' + vendorId + ' quote ' + idx + ' Firestore 백업 OK');
-  } catch(e) { console.warn('vendor quote Firestore 저장 실패:', e); }
+    return true;
+  } catch(e) { console.warn('vendor quote Firestore 저장 실패:', e); return false; }
 }
 
 async function _loadSharedVendorQuote(vendorId, idx) {
@@ -52591,15 +52599,16 @@ async function _loadSharedVendorQuote(vendorId, idx) {
 }
 
 async function _saveSharedVendorAttach(vendorId, idx, dataUrl, fileName) {
-  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return;
-  if (!dataUrl || dataUrl === '__idb__' || dataUrl === '__stored__') return;
-  if (typeof dataUrl !== 'string') return;
-  if (dataUrl.length > 900000) return;
+  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return false;
+  if (!dataUrl || dataUrl === '__idb__' || dataUrl === '__stored__') return true;
+  if (typeof dataUrl !== 'string') return true;
+  if (dataUrl.length > 900000) return true;
   try {
     const docId = 'vendor_' + vendorId + '_attach_' + idx;
     const ref = window._firestoreDoc(window._firebaseDb, 'vendorQuotes', docId);
     await window._firestoreSetDoc(ref, { data: dataUrl, name: fileName||'', ts: Date.now() });
-  } catch(e) { console.warn('vendor attach Firestore 저장 실패:', e); }
+    return true;
+  } catch(e) { console.warn('vendor attach Firestore 저장 실패:', e); return false; }
 }
 
 async function _loadSharedVendorAttach(vendorId, idx) {
@@ -52615,19 +52624,21 @@ async function _loadSharedVendorAttach(vendorId, idx) {
 
 // v1.9.735: 일반 결재 첨부 Firestore 백업
 async function _saveSharedApnAttach(approvalId, idx, dataUrl, fileName) {
-  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return;
-  if (!dataUrl || dataUrl === '__idb__' || dataUrl === '__stored__') return;
-  if (typeof dataUrl !== 'string') return;
+  // v2.3.357: 성공/스킵 시 true, 실제 오류 시 false 반환 — _fsUpTryUpload dedup 기록용.
+  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return false;
+  if (!dataUrl || dataUrl === '__idb__' || dataUrl === '__stored__') return true;
+  if (typeof dataUrl !== 'string') return true;
   if (dataUrl.length > 900000) {
-    console.log('📦 [APN BACKUP] approval ' + approvalId + ' attach ' + idx + ' 너무 큼 (' + dataUrl.length + 'B), Firestore 백업 안 함');
-    return;
+    console.log('📦 [APN BACKUP] approval ' + approvalId + ' attach ' + idx + ' 너무 큼 (' + dataUrl.length + 'B), Firestore 백업 안 함(IDB만)');
+    return true;
   }
   try {
     const docId = 'approval_' + approvalId + '_attach_' + idx;
     const ref = window._firestoreDoc(window._firebaseDb, 'approvalAttachments', docId);
     await window._firestoreSetDoc(ref, { data: dataUrl, name: fileName||'', ts: Date.now() });
     console.log('✅ [APN BACKUP] approval ' + approvalId + ' attach ' + idx + ' Firestore 백업 OK');
-  } catch(e) { console.warn('approval attach Firestore 저장 실패:', e); }
+    return true;
+  } catch(e) { console.warn('approval attach Firestore 저장 실패:', e); return false; }
 }
 async function _loadSharedApnAttach(approvalId, idx) {
   if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return null;
