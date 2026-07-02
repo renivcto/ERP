@@ -5861,7 +5861,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.348';
+const ERP_VERSION = 'v2.3.349';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -51750,16 +51750,40 @@ function saveAccount() {
     url:     document.getElementById('acc-url').value.trim(),
     note:    document.getElementById('acc-note').value.trim(),
   };
+  let _accVerifyId = _accountEditId;
+  let _accIdxDiag = '(new)';
   if (_accountEditId) {
     const idx = DB.accounts.findIndex(a=>a.id===_accountEditId);
+    _accIdxDiag = idx;
     if (idx>=0) DB.accounts[idx] = { ...DB.accounts[idx], ...data, id: _accountEditId, updatedAt: Date.now() };
     showNotif('계정이 수정되었습니다','success');
   } else {
-    DB.accounts.push({ ...data, id:'acc_'+Date.now()+'_'+Math.floor(Math.random()*1000), createdAt: Date.now(), updatedAt: Date.now() });
+    _accVerifyId = 'acc_'+Date.now()+'_'+Math.floor(Math.random()*1000);
+    DB.accounts.push({ ...data, id:_accVerifyId, createdAt: Date.now(), updatedAt: Date.now() });
     showNotif('계정이 추가되었습니다','success');
   }
-  if (typeof saveDataNow === 'function') saveDataNow().catch(e=>console.error(e));
-  else saveData();
+  // v2.3.349 진단: note 가 (1)입력에서 읽힘 (2)DB에 반영 되는지 + 저장 후 (3)서버 반영 확인
+  try {
+    const _savedRec = DB.accounts.find(a=>String(a.id)===String(_accVerifyId));
+    console.log('💾 [ACC SAVE v2.3.349] editId=', _accountEditId, 'idx=', _accIdxDiag,
+      '| note입력값=', JSON.stringify(data.note),
+      '| DB저장후note=', _savedRec ? JSON.stringify(_savedRec.note) : 'REC없음(idx불일치!)',
+      '| 총', DB.accounts.length, '건');
+  } catch(_){}
+  if (typeof saveDataNow === 'function') {
+    saveDataNow().then(async () => {
+      try {
+        const _sg = window._firestoreGetDocFromServer || window._firestoreGetDoc;
+        if (_sg && window._firestoreDoc && window._firebaseDb) {
+          const _snap = await _sg(window._firestoreDoc(window._firebaseDb, 'erp_data', 'accounts'));
+          const _arr = _snap.exists() ? JSON.parse(_snap.data().data) : [];
+          const _rec = _arr.find(a => a && String(a.id) === String(_accVerifyId));
+          console.log('🔍 [ACC VERIFY v2.3.349] 서버 note=', _rec ? JSON.stringify(_rec.note) : 'REC없음(서버에 이 id 없음!)',
+            '| 서버 accounts', _arr.length, '건');
+        }
+      } catch(e) { console.warn('[ACC VERIFY v2.3.349] 서버 확인 실패:', e); }
+    }).catch(e=>console.error(e));
+  } else saveData();
   closeModal('add-account');
   renderAccountsPage();
 }
