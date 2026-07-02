@@ -5861,7 +5861,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.351';
+const ERP_VERSION = 'v2.3.352';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -51786,24 +51786,44 @@ function saveAccount() {
       '| DB저장후note=', _savedRec ? JSON.stringify(_savedRec.note) : 'REC없음(idx불일치!)',
       '| 총', DB.accounts.length, '건');
   } catch(_){}
-  if (typeof saveDataNow === 'function') saveDataNow().catch(e=>console.error('[ACC] saveDataNow 실패:', e));
-  else saveData();
-  // v2.3.350 진단: saveDataNow 프라미스와 독립적으로 3.5초 후 서버 accounts 문서를 직접 재조회
-  //   → note 가 Firestore 에 실제 반영됐는지 확실히 로깅(프라미스 reject 여부와 무관).
-  setTimeout(async () => {
+  closeModal('add-account');
+  renderAccountsPage();
+  // v2.3.352: accounts 문서를 즉시 '직접' 선기록 — 근본원인(진단 v2.3.349/350 확정):
+  //   saveDataNow 는 vendors→items→…→accounts 순차 저장 + GUARD_KEYS 마다 서버 선조회라
+  //   accounts 기록까지 수 초 소요. "저장되었습니다" 알림 후 바로 새로고침하면 accounts 가
+  //   아직 안 써진 채 페이지 종료 → 유실 (DB엔 새 note, 3.5초 후 서버엔 옛 note 로 확인).
+  //   해법: 단독 setDoc 으로 accounts 만 먼저 기록 → 성공 알림 → 나머지는 saveDataNow.
+  (async () => {
+    let _directOk = false;
+    try {
+      if (window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
+        await window._firestoreSetDoc(
+          window._firestoreDoc(window._firebaseDb, 'erp_data', 'accounts'),
+          { data: JSON.stringify(DB.accounts||[]), ts: Date.now() }
+        );
+        _directOk = true;
+        console.log('✅ [ACC DIRECT v2.3.352] accounts 문서 직접 저장 완료:', (DB.accounts||[]).length, '건');
+        try { showNotif('✅ 계정이 클라우드에 저장되었습니다', 'success'); } catch(_){}
+      }
+    } catch(e) {
+      console.error('❌ [ACC DIRECT v2.3.352] 직접 저장 실패:', e);
+      try { showNotif('⚠️ 계정 클라우드 저장 실패(' + (e.code||e.message) + ') — 새로고침하지 말고 다시 저장하세요', 'error'); } catch(_){}
+    }
+    // 전체 저장(localStorage/타 컬렉션 정합)은 후속으로 — 실패해도 accounts 는 이미 기록됨
+    try { if (typeof saveDataNow === 'function') await saveDataNow(); else saveData(); }
+    catch(e){ console.error('[ACC] saveDataNow 실패:', e); }
+    // 검증: 서버 accounts 문서에서 note 실제 반영 확인
     try {
       const _sg = window._firestoreGetDocFromServer || window._firestoreGetDoc;
       if (_sg && window._firestoreDoc && window._firebaseDb) {
         const _snap = await _sg(window._firestoreDoc(window._firebaseDb, 'erp_data', 'accounts'));
         const _arr = _snap.exists() ? JSON.parse(_snap.data().data) : [];
         const _rec = _arr.find(a => a && String(a.id) === String(_accVerifyId));
-        console.log('🔍 [ACC VERIFY v2.3.350] 서버 note=', _rec ? JSON.stringify(_rec.note) : 'REC없음(서버에 이 id 없음!)',
+        console.log('🔍 [ACC VERIFY v2.3.352] 직접저장=' + _directOk + ' | 서버 note=', _rec ? JSON.stringify(_rec.note) : 'REC없음',
           '| 서버 accounts', _arr.length, '건');
       }
-    } catch(e) { console.warn('[ACC VERIFY v2.3.350] 서버 확인 실패:', e); }
-  }, 3500);
-  closeModal('add-account');
-  renderAccountsPage();
+    } catch(e) { console.warn('[ACC VERIFY v2.3.352] 서버 확인 실패:', e); }
+  })();
 }
 
 function deleteAccount() {
