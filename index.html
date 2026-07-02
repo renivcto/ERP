@@ -5861,7 +5861,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.354';
+const ERP_VERSION = 'v2.3.355';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7042,6 +7042,7 @@ async function _doSaveDataInner() {
     _lsJson = JSON.stringify(dbToSave);
   }
 
+  let _mainQuotaHit = false;
   try {
     const lsJson = _lsJson;
     localStorage.setItem(STORE_KEY, lsJson);
@@ -7052,6 +7053,20 @@ async function _doSaveDataInner() {
     // v2.3.172: Quota 초과 — 무거운 Firestore-백업 컬렉션을 localStorage 사본에서 점진 제외 후 재시도.
     //   메모리 DB / Firestore 는 그대로 유지(데이터 손실 없음). 로드 시 Firestore 머지가 자동 복원.
     if (e && e.name === 'QuotaExceededError') {
+      _mainQuotaHit = true;
+      // v2.3.355: 슬림 이전에 — Firestore/IDB 로 이미 백업된 중복 standalone 백업을 먼저 비워
+      //   공간을 확보하고 '전체'(비-슬림) 저장을 재시도. 성공하면 fast-path localStorage 가
+      //   최신 유지 → 최근 변경분(예: 입고완료)이 새로고침 시 뒤늦게 정정되던 깜빡임 제거.
+      let _fullOk = false;
+      try {
+        ['reniv_expenses_backup','reniv_approvals_backup','reniv_samples_backup','reniv_samples_backup_ts',
+         'reniv_approvalComments_backup','reniv_accounts_backup','reniv_orders_backup','reniv_partspecs_backup',
+         'reniv_sellers_backup','reniv_cooperators_backup'].forEach(k=>{ try{ localStorage.removeItem(k); }catch(_){}});
+        localStorage.setItem(STORE_KEY, _lsJson);
+        _fullOk = true;
+        console.warn('💾 [v2.3.355] 중복 백업 정리 후 전체 저장 성공 — fast-path 최신 유지');
+      } catch(_qeFull) { /* 여전히 초과 → 아래 슬림 */ }
+      if (!_fullOk) {
       const _heavyKeys = ['feedPosts','stockHistory','approvalComments','archivedItems','cs','insights','newProducts','qcs','partSpecs','quotes'];
       let _slimSaved = false;
       try {
@@ -7080,6 +7095,7 @@ async function _doSaveDataInner() {
           }
         } catch(_){}
       }
+      }
     }
   }
 
@@ -7091,6 +7107,9 @@ async function _doSaveDataInner() {
     const _bk = (lsKey, arr) => {
       if (!Array.isArray(arr) || arr.length === 0) return;
       const _j = JSON.stringify(arr);
+      // v2.3.355: 이번 저장에서 메인 blob 이 quota 를 쳤으면(공간 확보 후 전체저장 성공) 중복 백업은
+      //   localStorage 를 다시 채우지 않고 바로 IDB 로 — fast-path 최신 상태 유지.
+      if (_mainQuotaHit) { try { if (typeof idbSet === 'function') idbSet(lsKey, _j); } catch(_){} return; }
       try { localStorage.setItem(lsKey, _j); }
       catch(e) {
         console.warn('결재 그룹웨어 백업 실패(' + lsKey + ', ' + Math.round(_j.length/1024) + 'KB) → IDB 폴백:', e && e.name);
@@ -7098,7 +7117,7 @@ async function _doSaveDataInner() {
       }
     };
     _bk('reniv_samples_backup', dbToSave.samples);
-    try { if ((dbToSave.samples||[]).length > 0) localStorage.setItem('reniv_samples_backup_ts', String(Date.now())); } catch(_){}
+    try { if (!_mainQuotaHit && (dbToSave.samples||[]).length > 0) localStorage.setItem('reniv_samples_backup_ts', String(Date.now())); } catch(_){}
     _bk('reniv_approvals_backup', dbToSave.approvals);
     _bk('reniv_expenses_backup', dbToSave.expenses);
     _bk('reniv_approvalComments_backup', dbToSave.approvalComments);
