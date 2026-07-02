@@ -5861,7 +5861,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.347';
+const ERP_VERSION = 'v2.3.348';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7370,7 +7370,7 @@ async function _doSaveDataInner() {
       // v2.3.298: expenses 등 사용자 직접입력 컬렉션도 재시도 + 경고.
       //   기존엔 무음 실패(console만) → 저장 실패 시 작성자 localStorage 엔 있으나 Firestore 엔 없어
       //   "관리자만 보이고 다른 직원에겐 안 보이는" 지출결의서 버그가 발생했음.
-      if (['expenses','approvals','approvalComments','feedPosts','samples'].indexOf(key) >= 0) {
+      if (['expenses','approvals','approvalComments','feedPosts','samples','accounts'].indexOf(key) >= 0) {
         let _ukSaved = false;
         for (let retry = 1; retry <= 3; retry++) {
           try {
@@ -51755,7 +51755,7 @@ function saveAccount() {
     if (idx>=0) DB.accounts[idx] = { ...DB.accounts[idx], ...data, id: _accountEditId, updatedAt: Date.now() };
     showNotif('계정이 수정되었습니다','success');
   } else {
-    DB.accounts.push({ ...data, id:'acc_'+Date.now()+'_'+Math.floor(Math.random()*1000), createdAt: Date.now() });
+    DB.accounts.push({ ...data, id:'acc_'+Date.now()+'_'+Math.floor(Math.random()*1000), createdAt: Date.now(), updatedAt: Date.now() });
     showNotif('계정이 추가되었습니다','success');
   }
   if (typeof saveDataNow === 'function') saveDataNow().catch(e=>console.error(e));
@@ -53947,6 +53947,23 @@ function initERPWhenReady() {
       // 문서가 "없으면" localDB 우선 (최초 사용 또는 저장 실패 시 seed/localStorage 보존)
       if (firestoreDB._accountsDocExists === true) {
         merged.accounts = Array.isArray(firestoreDB.accounts) ? firestoreDB.accounts : [];
+        // v2.3.348: EDIT RECOVERY — 같은 id 가 서버·로컬 양쪽에 있고 로컬 updatedAt 이 더 최신이면
+        //   로컬 수정본으로 교체(비고 등 새 편집이 server-wins 로 되돌아가던 버그, insights v1.9.999 와 동형).
+        //   서버 목록만 순회하므로 삭제(서버에서 제거)는 부활하지 않음 — tombstone 없는 accounts 삭제 시맨틱 보존.
+        try {
+          const _lcAcc = Array.isArray(localDB.accounts) ? localDB.accounts : [];
+          if (_lcAcc.length && merged.accounts.length) {
+            const _lcAccById = new Map(_lcAcc.map(a => [String(a && a.id), a]));
+            let _accRec = 0;
+            merged.accounts = merged.accounts.map(fa => {
+              if (!fa || fa.id == null) return fa;
+              const la = _lcAccById.get(String(fa.id));
+              if (la && (Number(la.updatedAt)||0) > (Number(fa.updatedAt)||0)) { _accRec++; return la; }
+              return fa;
+            });
+            if (_accRec > 0) console.warn('🛟 [EDIT RECOVERY v2.3.348] accounts: 로컬 최신 수정본 ' + _accRec + '건 보존');
+          }
+        } catch(e){ console.warn('accounts EDIT RECOVERY 실패:', e); }
         console.log('✅ accounts: Firestore 문서에서 로드 —', merged.accounts.length, '건');
       } else if (Array.isArray(localDB.accounts) && localDB.accounts.length > 0) {
         merged.accounts = localDB.accounts;
