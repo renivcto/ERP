@@ -5861,7 +5861,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.353';
+const ERP_VERSION = 'v2.3.354';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6673,6 +6673,16 @@ async function _doSaveDataInner() {
       try { idbSet('order_astamp_' + o.id, o.approvalStampImage); } catch(e) { console.warn('IDB save astamp 실패:', e); }
       _fsUpTryUpload('order_' + o.id + '_astamp', o.approvalStampImage, (d) => _saveSharedOrderPdf(o.id, 'astamp', d, ''));
       dbToSave.orders[i].approvalStampImage = '__idb__';
+    }
+    // v2.3.354: 발주 품목행 이미지(rows[].image) base64 도 오프로드 — orders 문서 1MB 초과 추가 원인.
+    if (Array.isArray(o.rows) && o.rows.length > 0) {
+      dbToSave.orders[i].rows = o.rows.map((r, ri) => {
+        if (r && r.image && typeof r.image === 'string' && r.image !== '__idb__' && r.image.length > 100) {
+          try { idbSet('order_rowimg_' + o.id + '_' + ri, r.image); } catch(e) { console.warn('IDB save row image 실패:', e); }
+          return { ...r, image: '__idb__' };
+        }
+        return r;
+      });
     }
   });
   // 업체 견적서/첨부파일/통장사본 바이너리 → IndexedDB 분리 (Firestore 1MB 한도 회피)
@@ -7723,6 +7733,16 @@ async function restoreIDBData() {
         if (f && f.data === '__idb__') {
           const d = await idbGet('order_other_' + DB.orders[i].id + '_' + fi);
           if (d) DB.orders[i].otherFiles[fi].data = d;
+        }
+      }
+    }
+    // v2.3.354: 품목행 이미지(rows[].image) 복원 — 마커 보존
+    if (Array.isArray(DB.orders[i].rows)) {
+      for (let ri = 0; ri < DB.orders[i].rows.length; ri++) {
+        const r = DB.orders[i].rows[ri];
+        if (r && r.image === '__idb__') {
+          const d = await idbGet('order_rowimg_' + DB.orders[i].id + '_' + ri);
+          if (d) DB.orders[i].rows[ri].image = d;
         }
       }
     }
@@ -29739,6 +29759,23 @@ function confirmStockInQty(orderId) {
   try { completeRelatedProductions(receivedRows, o.serial || '', o.id); } catch(_){}
   // v1.9.982: 즉시 저장 — 디바운스 saveData() 는 다음 머지 전 미저장 위험
   try { if (typeof _doSaveData === 'function') _doSaveData().catch(function(e){ console.warn('입고완료 저장 실패:', e); }); else saveData(); } catch(_){ try { saveData(); } catch(__){} }
+  // v2.3.354 진단: 저장 후 서버 orders 문서에서 이 발주의 stockStatus 실제 반영 + 문서 크기(KB) 확인.
+  //   문서가 여전히 1MB(≈1024KB) 근처면 setDoc 무음 실패 → 추가 오프로드 필요. 서버가 '입고완료' 면 저장 성공.
+  (function(_oid){
+    setTimeout(async function(){
+      try {
+        const _sg = window._firestoreGetDocFromServer || window._firestoreGetDoc;
+        if (_sg && window._firestoreDoc && window._firebaseDb) {
+          const _snap = await _sg(window._firestoreDoc(window._firebaseDb, 'erp_data', 'orders'));
+          const _raw = _snap.exists() ? (_snap.data().data || '') : '';
+          const _arr = _raw ? JSON.parse(_raw) : [];
+          const _rec = _arr.find(x => x && String(x.id) === String(_oid));
+          console.log('🔍 [STOCKIN VERIFY v2.3.354] 서버 stockStatus=', _rec ? _rec.stockStatus : 'REC없음',
+            '| orders 문서', Math.round(_raw.length/1024), 'KB /', _arr.length, '건');
+        }
+      } catch(e){ console.warn('[STOCKIN VERIFY v2.3.354] 서버 확인 실패:', e); }
+    }, 3500);
+  })(o.id);
   if (_m) _m.remove();
   try { renderOrderTable(); } catch(_){}
   try { renderProdTable(); } catch(_){}
