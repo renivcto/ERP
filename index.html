@@ -5861,7 +5861,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.355';
+const ERP_VERSION = 'v2.3.356';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26439,15 +26439,34 @@ function _itemWhAssigned(item){
 }
 function _itemWhAssignedSum(item){ const a=_itemWhAssigned(item); return Object.keys(a).reduce((s,k)=>s+(Number(a[k])||0),0); }
 function _itemWhUnassigned(item){ return (Number(item&&item.stock)||0) - _itemWhAssignedSum(item); }
+// v2.3.356: 표시·이동용 실효 창고맵 — 명시 배정(whStock) + 미배정 잔여를 '기본 창고(defaultWh)'에 귀속.
+//   기본 창고가 없으면 잔여는 '__un__'(미지정). 합계는 항상 item.stock 과 일치.
+//   → 기본 창고만 지정해도 재고현황 배지가 '미지정' 대신 그 창고로 표시됨.
+function _itemWhEffective(item){
+  const eff = Object.assign({}, _itemWhAssigned(item));
+  const stock = Number(item&&item.stock)||0;
+  const remainder = stock - Object.keys(eff).reduce((s,k)=>s+(Number(eff[k])||0),0);
+  if (remainder !== 0){
+    const dw = (item && item.defaultWh && _whById(item.defaultWh)) ? String(item.defaultWh) : null;
+    const key = dw || '__un__';
+    eff[key] = (Number(eff[key])||0) + remainder;
+    if (eff[key] === 0) delete eff[key];
+  }
+  return eff;
+}
 // 재고현황 '창고' 열 배지
 function _stockWhBadges(item){
   const stock = Number(item&&item.stock)||0;
-  const assigned = _itemWhAssigned(item);
-  const keys = Object.keys(assigned);
-  const un = stock - keys.reduce((s,k)=>s+(Number(assigned[k])||0),0);
+  const eff = _itemWhEffective(item);
+  const keys = Object.keys(eff);
   if (keys.length===0 && stock===0) return '<span style="color:var(--gray-300)">-</span>';
-  const parts = keys.map(k=>`<span style="display:inline-block;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:600;margin:1px 2px;white-space:nowrap">${_whEsc(_whName(k))} <b>${fmt(assigned[k])}</b></span>`);
-  if (un !== 0 || keys.length===0) parts.push(`<span style="display:inline-block;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:500;margin:1px 2px;white-space:nowrap">미지정 <b>${fmt(un)}</b></span>`);
+  const parts = [];
+  keys.forEach(k=>{
+    if (k === '__un__') return;
+    parts.push(`<span style="display:inline-block;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:600;margin:1px 2px;white-space:nowrap">${_whEsc(_whName(k))} <b>${fmt(eff[k])}</b></span>`);
+  });
+  if (eff['__un__'] != null && eff['__un__'] !== 0) parts.push(`<span style="display:inline-block;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:500;margin:1px 2px;white-space:nowrap">미지정 <b>${fmt(eff['__un__'])}</b></span>`);
+  if (parts.length === 0) return '<span style="color:var(--gray-300)">-</span>';
   return parts.join('');
 }
 function _ensureOverlay(id){
@@ -26713,11 +26732,13 @@ function _wmOnItem(){
   if(!sel) return;
   const it=(DB.items||[]).find(i=>String(i.id)===String(sel.value));
   if(!it){ if(cur) cur.style.display='none'; if(av) av.textContent=''; return; }
-  const assigned=_itemWhAssigned(it); const un=_itemWhUnassigned(it);
-  const bits=[`전체 ${fmt(it.stock)}`, `미지정 ${fmt(un)}`].concat(Object.keys(assigned).map(k=>`${_whEsc(_whName(k))} ${fmt(assigned[k])}`));
+  const eff=_itemWhEffective(it);
+  const bits=[`전체 ${fmt(it.stock)}`];
+  if(eff['__un__']!=null && eff['__un__']!==0) bits.push(`미지정 ${fmt(eff['__un__'])}`);
+  Object.keys(eff).forEach(k=>{ if(k!=='__un__') bits.push(`${_whEsc(_whName(k))} ${fmt(eff[k])}`); });
   if(cur){ cur.style.display='block'; cur.innerHTML='현재 분포 — '+bits.join(' · '); }
   const from=document.getElementById('wm-from');
-  if(from&&av){ const fk=from.value; const avail = fk==='__un__'?un:(Number(assigned[fk])||0); av.textContent=`출발 창고 가용 수량: ${fmt(avail)}`; }
+  if(from&&av){ const fk=from.value; const avail = Number(eff[fk])||0; av.textContent=`출발 창고 가용 수량: ${fmt(avail)}`; }
 }
 async function saveStockMove(){
   const sel=document.getElementById('wm-item'); const it=(DB.items||[]).find(i=>String(i.id)===String(sel&&sel.value));
@@ -26726,12 +26747,17 @@ async function saveStockMove(){
   const qty=parseInt(document.getElementById('wm-qty').value)||0;
   if(from===to){ showNotif('출발과 도착 창고가 같습니다','warning'); return; }
   if(qty<=0){ showNotif('이동 수량을 입력하세요','warning'); return; }
-  const assigned=_itemWhAssigned(it); const un=_itemWhUnassigned(it);
-  const avail = from==='__un__'?un:(Number(assigned[from])||0);
+  const eff=_itemWhEffective(it);
+  const avail = Number(eff[from])||0;
   if(qty>avail){ showNotif(`가용 수량(${fmt(avail)})을 초과했습니다`,'warning'); return; }
-  if(!it.whStock||typeof it.whStock!=='object') it.whStock={};
-  if(from!=='__un__'){ it.whStock[from]=(Number(it.whStock[from])||0)-qty; if(it.whStock[from]===0) delete it.whStock[from]; }
-  if(to!=='__un__'){ it.whStock[to]=(Number(it.whStock[to])||0)+qty; }
+  // v2.3.356: 실효맵에 이동 적용 후 whStock 재구성 — '__un__' 과 기본창고(defaultWh)는 잔여로 남겨(암묵)
+  //   나머지 실 창고만 명시 저장. 외부 재고변동(자동차감 등)이 잔여를 자동 흡수하도록 유지.
+  eff[from]=(Number(eff[from])||0)-qty;
+  eff[to]=(Number(eff[to])||0)+qty;
+  const dw=(it.defaultWh && _whById(it.defaultWh))?String(it.defaultWh):null;
+  const newWh={};
+  Object.keys(eff).forEach(k=>{ if(k==='__un__') return; if(dw && k===dw) return; const q=Number(eff[k])||0; if(q!==0) newWh[k]=q; });
+  it.whStock=newWh;
   it.updatedAt=Date.now();
   const fromName = from==='__un__'?'미지정':_whName(from);
   const toName = to==='__un__'?'미지정':_whName(to);
