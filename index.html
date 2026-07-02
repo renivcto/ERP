@@ -5861,7 +5861,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.352';
+const ERP_VERSION = 'v2.3.353';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6664,6 +6664,16 @@ async function _doSaveDataInner() {
         return f;
       });
     }
+    // v2.3.353: ERP양식 결재 도장/사인(approvalStampImage) 오프로드 — 인라인 base64 누적으로
+    //   erp_data/orders 문서가 1MB 초과 → setDoc 무음 실패 → 입고완료 등 발주 변경이 새로고침에
+    //   되돌아가던 주범(해외 PO 입고완료 revert). pdfData 와 동일 패턴(IDB + orderPdfs 공유 백업 + 마커).
+    if (o.approvalStampImage && typeof o.approvalStampImage === 'string'
+        && o.approvalStampImage !== '__idb__' && o.approvalStampImage !== '__stored__' && o.approvalStampImage !== '__stripped__'
+        && o.approvalStampImage.length > 100) {
+      try { idbSet('order_astamp_' + o.id, o.approvalStampImage); } catch(e) { console.warn('IDB save astamp 실패:', e); }
+      _fsUpTryUpload('order_' + o.id + '_astamp', o.approvalStampImage, (d) => _saveSharedOrderPdf(o.id, 'astamp', d, ''));
+      dbToSave.orders[i].approvalStampImage = '__idb__';
+    }
   });
   // 업체 견적서/첨부파일/통장사본 바이너리 → IndexedDB 분리 (Firestore 1MB 한도 회피)
   (dbToSave.vendors||[]).forEach((v, vi) => {
@@ -7374,7 +7384,7 @@ async function _doSaveDataInner() {
       // v2.3.298: expenses 등 사용자 직접입력 컬렉션도 재시도 + 경고.
       //   기존엔 무음 실패(console만) → 저장 실패 시 작성자 localStorage 엔 있으나 Firestore 엔 없어
       //   "관리자만 보이고 다른 직원에겐 안 보이는" 지출결의서 버그가 발생했음.
-      if (['expenses','approvals','approvalComments','feedPosts','samples','accounts'].indexOf(key) >= 0) {
+      if (['expenses','approvals','approvalComments','feedPosts','samples','accounts','orders'].indexOf(key) >= 0) {
         let _ukSaved = false;
         for (let retry = 1; retry <= 3; retry++) {
           try {
@@ -7690,6 +7700,16 @@ async function restoreIDBData() {
       const stamp = await idbGet('order_stamp_' + DB.orders[i].id);
       if (stamp) DB.orders[i].stampData = stamp;
       // else: keep marker intact
+    }
+    // v2.3.353: 결재 도장/사인(approvalStampImage) 복원 — 마커 보존, IDB 미스 시 orderPdfs 공유 백업 fallback
+    const astampMark = DB.orders[i].approvalStampImage;
+    if (astampMark === '__idb__' || astampMark === '__stored__') {
+      let _as = await idbGet('order_astamp_' + DB.orders[i].id);
+      if (!_as && typeof _loadSharedOrderPdf === 'function') {
+        try { _as = await _loadSharedOrderPdf(DB.orders[i].id, 'astamp'); if (_as) idbSet('order_astamp_' + DB.orders[i].id, _as); } catch(_){}
+      }
+      if (_as) DB.orders[i].approvalStampImage = _as;
+      // else: 마커 유지 (존재여부 배지 truthy 판정 유지)
     }
     // v2.3.21: 해외 PO invoiceFile / otherFiles 복원 — 마커 보존
     if (DB.orders[i].invoiceFile && DB.orders[i].invoiceFile.data === '__idb__') {
@@ -28224,6 +28244,11 @@ function savePo() {
   if (editId) {
     const idx = DB.orders.findIndex(o => o && String(o.id) === String(editId));
     if (idx >= 0) {
+      // v2.3.353: 편집 시 진행상태·입고상태는 기존 값 보존 — data 의 하드코딩('진행중'/'입고전')이
+      //   입고완료된 해외 PO 를 수정만 해도 '입고전'으로 조용히 리셋하던 버그(리셋이 updatedAt 최신으로
+      //   전 기기 전파까지 됐음). 국내 saveOrder 의 현재값 보존과 동형.
+      data.status = DB.orders[idx].status || data.status;
+      data.stockStatus = DB.orders[idx].stockStatus || data.stockStatus;
       DB.orders[idx] = { ...DB.orders[idx], ...data };
       _savedOrderId = DB.orders[idx].id;
       showNotif('✅ 해외 PO 수정 완료', 'success');
