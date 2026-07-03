@@ -1638,21 +1638,15 @@ exports.manualFetchSmartstoreOrders = functions
 // =============================================================================
 const PLUSCL_BASE = 'https://service.pluscl.com';
 // ── 요청 파라미터(테스트로 조정할 값) ─ '(미확인)'은 실제 응답 보고 맞춤 ──────
+// ✅ v2.19c: 실제 API 호출로 확정(2026-07 검증). base_data 조회로 확보한 르니브 코드 사용.
 const PLUSCL_REQ = {
-  // ⚠️ path: PlusCL 은 실제 API URL 을 문서에 공개하지 않고 등록업체에 별도 통보(문서 변경이력
-  //   2022/03/15 "API용 URL경로 변경, 기존 URL 미공개 전환"). service.pluscl.com 의 모든 추측 경로
-  //   40여개가 404. → PlusCL 에서 정확한 전체 URL 을 받아 아래 fullUrl 에 넣어야 동작.
-  fullUrl: '',                                    // 예: 'https://service.pluscl.com/xxx/yyy' (PlusCL 확인 필요)
-  path: '/openapi',                               // fullUrl 비었을 때만 사용(fallback, 현재 404)
-  company_code: 'F103',                           // 업체코드
-  company_id: '8276',                             // 등록번호
-  warehouse_code: '',                             // 창고코드 (필요시 채움)
-  warehouse_type_code: '',                        // 창고타입 코드
-  seller_code: '',                                // 화주사 코드
-  job_type: 'report_order',                       // 작업구분 (문서 nav title 기준 — 유력)
-  type: 'report_order_out_list',                  // 작업구분 상세 = 주문 출고 내역 (문서 nav title 기준 — 유력)
-  dateStartField: 's_date',                       // data 내 조회 시작일 필드 (확인 필요)
-  dateEndField: 'e_date',                         // data 내 조회 종료일 필드 (확인 필요)
+  fullUrl: 'https://service.pluscl.com/open/order_report',  // 주문 레포트 엔드포인트
+  company_code: 'F103',                           // 업체코드(=화주코드)
+  warehouse_code: 'GLXY',                         // 더갤럭시펫 창고 (base_data warehouse_type 조회 확인)
+  warehouse_type_code: '0000',                    // 적치존
+  seller_code: 'F103',                            // 화주사 코드(르니브_화장품, seller_id 8276)
+  job_type: 'search',                             // 조회구분 고정
+  type: 'out',                                    // out=출고 내역 (order=접수, cancel=취소 …)
 };
 
 function plusclDateStr(d) {
@@ -1688,37 +1682,40 @@ async function findShopByName(firestoreDb, name) {
 async function plusclFetchShipments({ sDate, eDate }) {
   const authKey = (process.env.PLUSCL_AUTH_KEY || '').trim();
   if (!authKey) throw new Error('PLUSCL_AUTH_KEY 시크릿 미설정');
-  const data = {};
-  data[PLUSCL_REQ.dateStartField] = sDate;
-  data[PLUSCL_REQ.dateEndField] = eDate;
-  const body = {
-    company_code: PLUSCL_REQ.company_code,
-    company_id: PLUSCL_REQ.company_id,
-    warehouse_code: PLUSCL_REQ.warehouse_code,
-    warehouse_type_code: PLUSCL_REQ.warehouse_type_code,
-    seller_code: PLUSCL_REQ.seller_code,
-    job_type: PLUSCL_REQ.job_type,
-    type: PLUSCL_REQ.type,
-    data: data,
-  };
-  const url = PLUSCL_REQ.fullUrl || (PLUSCL_BASE + PLUSCL_REQ.path);
-  console.log('[PLUSCL] 요청 URL:', url);
-  console.log('[PLUSCL] 요청 body:', JSON.stringify(body));
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'auth_key': authKey },
-    body: JSON.stringify(body),
-  });
-  const textBody = await resp.text();
-  console.log('[PLUSCL] 응답 status:', resp.status);
-  console.log('[PLUSCL] 응답 body(앞 2000자):', textBody.slice(0, 2000));
-  let json = null;
-  try { json = JSON.parse(textBody); }
-  catch (_) { throw new Error(`PlusCL 응답 JSON 파싱 실패 (status ${resp.status}): ${textBody.slice(0, 300)}`); }
-  if (json && json.r_code !== undefined && String(json.r_code) !== '0') {
-    throw new Error(`PlusCL 오류 r_code=${json.r_code} r_msg=${json.r_msg || ''}`);
+  const url = PLUSCL_REQ.fullUrl;
+  const all = [];
+  // 페이지당 최대 1,000건 → 1,000 이면 다음 페이지 조회(문서 규정). 안전 상한 50페이지.
+  let page = 1;
+  while (page <= 50) {
+    const body = {
+      company_code: PLUSCL_REQ.company_code,
+      warehouse_code: PLUSCL_REQ.warehouse_code,
+      warehouse_type_code: PLUSCL_REQ.warehouse_type_code,
+      seller_code: PLUSCL_REQ.seller_code,
+      job_type: PLUSCL_REQ.job_type,
+      type: PLUSCL_REQ.type,
+      data: { begin_date: sDate, end_date: eDate, page: String(page) },
+    };
+    if (page === 1) { console.log('[PLUSCL] 요청 URL:', url); console.log('[PLUSCL] 요청 body:', JSON.stringify(body)); }
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'auth_key': authKey },
+      body: JSON.stringify(body),
+    });
+    const textBody = await resp.text();
+    let json = null;
+    try { json = JSON.parse(textBody); }
+    catch (_) { throw new Error(`PlusCL 응답 JSON 파싱 실패 (status ${resp.status}, page ${page}): ${textBody.slice(0, 200)}`); }
+    if (json && json.r_code !== undefined && String(json.r_code) !== '0') {
+      throw new Error(`PlusCL 오류 r_code=${json.r_code} r_msg=${json.r_msg || ''}`);
+    }
+    const rows = Array.isArray(json && json.data) ? json.data : [];
+    console.log(`[PLUSCL] page ${page}: ${rows.length}건`);
+    all.push(...rows);
+    if (rows.length < 1000) break;   // 마지막 페이지
+    page++;
   }
-  return Array.isArray(json && json.data) ? json.data : [];
+  return all;
 }
 
 // PlusCL 출고행 → ERP shopOrders 객체
