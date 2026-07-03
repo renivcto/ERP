@@ -3789,6 +3789,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
               <button class="btn btn-outline" onclick="exportAllData()">📥 전체 데이터 내보내기 (JSON)</button>
               <button class="btn btn-outline" onclick="document.getElementById('import-file').click()">📤 데이터 가져오기 (JSON)</button>
               <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
+              <button class="btn btn-outline" onclick="_reconcileToServer()" style="color:#7c3aed;border-color:#ddd6fe" title="관리자(내) 데이터를 서버에 안전 동기화 — 서버전용 레코드 보존, 삭제건 부활 없음. 관리자↔직원 화면 불일치 복구용">🔄 서버 데이터 동기화 (관리자 복구)</button>
               <button class="btn btn-danger btn-sm" onclick="if(confirm('모든 데이터를 초기화합니까?'))resetData()">🗑️ 데이터 초기화</button>
             </div>
           </div>
@@ -5861,7 +5862,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.362';
+const ERP_VERSION = 'v2.3.363';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -5923,6 +5924,7 @@ function _fsUpMap() {
 }
 function _fsUpTryUpload(key, data, doUpload) {
   try {
+    if (window._skipFsUpload) return;   // v2.3.363: 복구 동기화 중 첨부 재업로드 flood(resource-exhausted) 차단
     if (!data || typeof data !== 'string' || data.length <= 10 || data === '__idb__') return;
     window._fsUpInFlight = window._fsUpInFlight || {};
     const fp = _fsUpFp(data);
@@ -52384,6 +52386,51 @@ async function forceLoadFromFirestore() {
   }
 }
 
+// v2.3.363: 관리자↔직원 데이터 불일치 안전 복구 —
+//   서버(다른 직원)에만 있는 레코드는 보존(내가 삭제한 tombstone 은 제외 = 부활 방지),
+//   같은 id 는 관리자(내) 값 우선, 첨부 재업로드 flood 없이 컬렉션 문서만 서버에 기록.
+//   근본원인=데이터 31MB 초과로 서버 저장 불안정 → 이 복구로 관리자 기준 union 확정.
+const _RECONCILE_TOMB = {
+  expenses:'_deletedExpenseIds', approvals:'_deletedApprovalIds', items:'_deletedItemIds',
+  samples:'_deletedSampleIds', approvalComments:'_deletedCommentIds', feedPosts:'_deletedFeedPostIds',
+  newProducts:'_deletedNewProductIds'
+};
+async function _reconcileToServer() {
+  if (!(window._currentUser && window._currentUser.isAdmin === true)) { showNotif('관리자만 사용할 수 있습니다','warning'); return; }
+  if (!confirm('서버(다른 직원)에만 있는 데이터는 보존하면서, 관리자(내) 데이터를 서버에 동기화합니다.\n· 같은 항목이 다르면 내 값 우선\n· 내가 삭제한 건은 부활하지 않음\n진행할까요?')) return;
+  const gd = window._firestoreGetDocFromServer || window._firestoreGetDoc;
+  const docFn = window._firestoreDoc, db = window._firebaseDb;
+  if (!gd || !docFn || !db) { showNotif('Firestore 미준비 — 새로고침 후 다시 시도','warning'); return; }
+  showNotif('서버 데이터 확인·합치는 중… (잠시 소요)','info');
+  const cols = ['expenses','approvals','productions','samples','approvalComments','feedPosts','newProducts','items','vendors','cooperators','sellers'];
+  const report = [];
+  let addedTotal = 0;
+  for (const key of cols) {
+    try {
+      const snap = await gd(docFn(db, 'erp_data', key));
+      const srv = snap.exists() ? (JSON.parse(snap.data().data || '[]') || []) : [];
+      const local = Array.isArray(DB[key]) ? DB[key] : [];
+      const localIds = new Set(local.map(r => String(r && r.id)));
+      let tomb = new Set();
+      const tf = _RECONCILE_TOMB[key];
+      if (tf && Array.isArray(DB[tf])) tomb = new Set(DB[tf].map(t => String(t && (typeof t === 'object' ? t.id : t))));
+      const serverOnly = srv.filter(r => r && r.id != null && !localIds.has(String(r.id)) && !tomb.has(String(r.id)));
+      if (serverOnly.length) { DB[key] = local.concat(serverOnly); addedTotal += serverOnly.length; }
+      report.push(`${key}: 로컬 ${local.length} + 서버전용 ${serverOnly.length} → ${(DB[key]||[]).length}`);
+    } catch(e) { report.push(`${key}: 조회실패 ${e && e.message}`); console.warn('[RECONCILE]', key, e); }
+  }
+  console.log('🔧 [RECONCILE] union 결과:\n' + report.join('\n'));
+  window._skipFsUpload = true;   // 첨부 재업로드 flood 차단(컬렉션 문서만 기록)
+  try {
+    await saveDataNow();
+    console.log('✅ [RECONCILE] 서버 저장 완료 (서버전용 보존 ' + addedTotal + '건 포함)');
+    showNotif('✅ 서버 동기화 완료 — 서버전용 ' + addedTotal + '건 보존. 다른 직원이 새로고침하면 반영됩니다','success');
+  } catch(e) {
+    console.error('[RECONCILE] 저장 실패:', e);
+    showNotif('❌ 저장 실패: ' + (e && e.message || e) + ' — 백업이 있으니 안전합니다. 다시 시도하세요','error');
+  } finally { window._skipFsUpload = false; }
+  return report;
+}
 function exportAllData() {
   const blob = new Blob([JSON.stringify(DB, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
