@@ -2972,7 +2972,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <select class="fs" id="shop-order-shop-filter" onchange="renderShopOrderTable()" style="width:140px;padding:7px 10px;font-size:12.5px;height:34px"><option value="">전체 쇼핑몰</option></select>
           <div style="margin-left:auto;display:flex;gap:6px">
             <button class="btn btn-outline btn-sm pg-topbar-btn" style="color:var(--red-500);border-color:var(--red-200)" onclick="bulkDeleteOrders()">🗑 선택 삭제</button>
-            <button id="btn-ss-fetch" class="btn btn-outline btn-sm pg-topbar-btn" style="color:#15803d;border-color:#bbf7d0" onclick="_testSmartstoreFetch()" title="스마트스토어 주문을 지금 수집합니다 (관리자 · 최근 24시간)">🌳 스마트스토어 수집</button>
+            <button id="btn-pluscl-fetch" class="btn btn-outline btn-sm pg-topbar-btn" style="color:#7c3aed;border-color:#ddd6fe" onclick="_testPlusclFetch()" title="물류(PlusCL) 배송정보를 지금 수집합니다 (관리자 · 최근 3일). 쿠팡·자사몰·스마트스토어 주문을 물류사에서 한번에 가져옵니다">🚚 물류 배송정보 수집</button>
             <button class="btn btn-outline btn-sm pg-topbar-btn" onclick="downloadOrderTemplate()">📥 엑셀 양식</button>
             <button class="btn btn-primary btn-sm pg-topbar-btn" onclick="openOrderUploadModal()">📤 주문 업로드</button>
           </div>
@@ -5861,7 +5861,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.359';
+const ERP_VERSION = 'v2.3.360';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -15281,6 +15281,30 @@ async function _testSmartstoreFetch() {
     showNotif('❌ 수집 실패: ' + msg, 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = _orig || '🌳 스마트스토어 수집'; }
+  }
+}
+// v2.3.360: 물류(PlusCL) 배송정보 수집 테스트 — 관리자 onCall(manualFetchPlusclShipments).
+//   쿠팡/자사몰/스마트스토어 개별 크롤링을 대체 — 물류사에서 출고내역을 가져와 쇼핑몰별로 태깅.
+async function _testPlusclFetch() {
+  if (!(window._currentUser && window._currentUser.isAdmin === true)) { showNotif('관리자만 사용할 수 있습니다', 'warning'); return; }
+  if (!window._firebaseFunctions || !window._httpsCallable) { showNotif('Functions 미초기화 — 새로고침 후 다시 시도하세요', 'warning'); return; }
+  const btn = document.getElementById('btn-pluscl-fetch');
+  const _orig = btn ? btn.textContent : '';
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ 수집 중…'; }
+    showNotif('물류 배송정보 수집 중… (최대 1~2분 소요)', 'info');
+    const callable = window._httpsCallable(window._firebaseFunctions, 'manualFetchPlusclShipments');
+    const res = await callable({ daysBack: 3 });
+    const d = (res && res.data) || {};
+    const mall = (d.byMall && typeof d.byMall === 'object') ? Object.entries(d.byMall).map(([m,c])=>m+' '+c).join(', ') : '';
+    showNotif('✅ 물류 수집 완료 — 가져옴 ' + (d.fetched||0) + '건 / 신규 ' + (d.added||0) + '건' + (mall?(' · '+mall):'') + (d.range ? (' · ' + d.range) : ''), 'success');
+    if ((d.added||0) > 0) { setTimeout(() => { try { showNotif('신규 ' + d.added + '건 적재됨 — 새로고침(F5)하면 목록에 표시됩니다', 'info'); } catch(_){} }, 1200); }
+  } catch(e) {
+    console.error('[물류 배송정보 수집] 실패:', e);
+    const msg = (e && (e.message || e.code)) || e;
+    showNotif('❌ 수집 실패: ' + msg + ' (콘솔에서 상세 오류 확인)', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = _orig || '🚚 물류 배송정보 수집'; }
   }
 }
 // ══════════════ 주문 업로드/관리 ══════════════

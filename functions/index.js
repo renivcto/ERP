@@ -738,7 +738,9 @@ async function ingestCoupangOrders({ daysBack = 7 } = {}) {
 // ─────────────────────────────────────────────────────────────
 // 4) 쿠팡 주문 자동 수집 — 매일 KST 09:00 / 13:00 / 18:00
 // ─────────────────────────────────────────────────────────────
-exports.fetchCoupangOrders = functions
+// v2.19: PlusCL(3PL 물류) 배송정보 수집으로 전환 — 쿠팡 자동 크롤러 비활성(export 제거 → 배포 시 삭제).
+//   코드는 롤백 대비 보존. 스케줄 트리거는 export 안 되면 등록/실행되지 않음.
+const _off_fetchCoupangOrders = functions
   .region(REGION)
   .runWith({
     secrets: ['COUPANG_ACCESS_KEY', 'COUPANG_SECRET_KEY', 'COUPANG_VENDOR_ID', 'SLACK_ORDERS_WEBHOOK'],
@@ -1179,7 +1181,8 @@ async function ingestCafe24Orders({ daysBack = 1 } = {}) {
 // ─────────────────────────────────────────────────────────────
 // 6) Cafe24 자동 수집 — KST 9/13/18시 (쿠팡과 동일 스케줄)
 // ─────────────────────────────────────────────────────────────
-exports.fetchCafe24Orders = functions
+// v2.19: PlusCL 전환 — 자사몰(Cafe24) 자동 크롤러 비활성(export 제거 → 배포 시 삭제).
+const _off_fetchCafe24Orders = functions
   .region(REGION)
   .runWith({
     secrets: ['CAFE24_MALL_ID', 'CAFE24_CLIENT_ID', 'CAFE24_CLIENT_SECRET', 'CAFE24_REFRESH_TOKEN', 'SLACK_ORDERS_WEBHOOK'],
@@ -1544,7 +1547,8 @@ async function ingestSmartstoreOrders({ minutesBack = 30 } = {}) {
 // ─────────────────────────────────────────────────────────────
 // 스마트스토어 자동 수집 — 10분마다 (KST)
 // ─────────────────────────────────────────────────────────────
-exports.fetchSmartstoreOrders = functions
+// v2.19: PlusCL 전환 — 스마트스토어 자동 크롤러 비활성(export 제거 → 배포 시 삭제).
+const _off_fetchSmartstoreOrders = functions
   .region(REGION)
   .runWith({
     secrets: ['NAVER_CLIENT_ID', 'NAVER_CLIENT_SECRET', 'SLACK_ORDERS_WEBHOOK'],
@@ -1618,6 +1622,257 @@ exports.manualFetchSmartstoreOrders = functions
       return result;
     } catch (err) {
       console.error('[SMARTSTORE MANUAL] 실패:', err);
+      throw new functions.https.HttpsError('internal', err.message);
+    }
+  });
+
+// =============================================================================
+// v2.19 — PlusCL(3PL 물류) 배송정보 자동 수집 → ERP shopOrders
+//   기존 쿠팡/자사몰/스마트스토어 개별 크롤링을 대체. 각 쇼핑몰 주문이 PlusCL 에
+//   물류 위탁되며, 여기서 '주문 출고 내역'(출고완료)을 가져와 shopOrders 로 적재.
+//   쇼핑몰 구분 = ord_comp_name(주문사 명) → 쿠팡/스마트스토어/자사몰 태깅.
+//
+//   ⚠️ 요청 형식(경로/job_type/type/날짜 파라미터)은 PDF에 응답 스펙만 있어 best-effort.
+//      배포 후 manualFetchPlusclShipments 로 테스트하며 아래 PLUSCL_REQ 상수를 조정.
+//   시크릿: PLUSCL_AUTH_KEY  (값: 인증키)
+// =============================================================================
+const PLUSCL_BASE = 'https://service.pluscl.com';
+// ── 요청 파라미터(테스트로 조정할 값) ─ '(미확인)'은 실제 응답 보고 맞춤 ──────
+const PLUSCL_REQ = {
+  path: '/openapi',                               // Base URL 뒤 경로 (미확인)
+  company_code: 'F103',                           // 업체코드
+  company_id: '8276',                             // 등록번호
+  warehouse_code: '',                             // 창고코드 (미확인 — 필요시 채움)
+  warehouse_type_code: '',                        // 창고타입 코드 (미확인)
+  seller_code: '',                                // 화주사 코드 (미확인)
+  job_type: 'order',                              // 작업구분 (미확인)
+  type: 'shipment',                               // 작업구분 상세 = 주문 출고 내역 (미확인)
+  dateStartField: 's_date',                       // data 내 조회 시작일 필드 (미확인)
+  dateEndField: 'e_date',                         // data 내 조회 종료일 필드 (미확인)
+};
+
+function plusclDateStr(d) {
+  // yyyymmdd (KST)
+  const k = new Date(d.getTime() + 9 * 3600 * 1000);
+  return k.toISOString().slice(0, 10).replace(/-/g, '');
+}
+
+// PlusCL 주문사명(ord_comp_name) → ERP 쇼핑몰명
+function plusclMallName(ordCompName) {
+  const n = String(ordCompName || '');
+  const lower = n.toLowerCase();
+  if (n.includes('쿠팡') || lower.includes('coupang') || lower.includes('rocket')) return '쿠팡';
+  if (n.includes('스마트') || n.includes('네이버') || lower.includes('smartstore') || lower.includes('naver')) return '스마트스토어';
+  if (n.includes('자사') || n.includes('카페24') || lower.includes('cafe24') || n.includes('와디즈') || n.includes('르니브')) return '자사몰';
+  return n || '기타';
+}
+
+async function findShopByName(firestoreDb, name) {
+  const snap = await firestoreDb.doc('erp_data/shops').get();
+  if (!snap.exists) return null;
+  const raw = snap.data().data;
+  let shops = [];
+  if (typeof raw === 'string') { try { shops = JSON.parse(raw) || []; } catch (_) {} }
+  else if (Array.isArray(raw)) shops = raw;
+  const target = String(name || '');
+  return shops.find(s => s && s.name && (s.name === target || s.name.includes(target) || target.includes(s.name))) || null;
+}
+
+// PlusCL API 호출 (주문 출고 내역) — 상세 로깅으로 테스트 시 스펙 조정 용이
+async function plusclFetchShipments({ sDate, eDate }) {
+  const authKey = (process.env.PLUSCL_AUTH_KEY || '').trim();
+  if (!authKey) throw new Error('PLUSCL_AUTH_KEY 시크릿 미설정');
+  const data = {};
+  data[PLUSCL_REQ.dateStartField] = sDate;
+  data[PLUSCL_REQ.dateEndField] = eDate;
+  const body = {
+    company_code: PLUSCL_REQ.company_code,
+    company_id: PLUSCL_REQ.company_id,
+    warehouse_code: PLUSCL_REQ.warehouse_code,
+    warehouse_type_code: PLUSCL_REQ.warehouse_type_code,
+    seller_code: PLUSCL_REQ.seller_code,
+    job_type: PLUSCL_REQ.job_type,
+    type: PLUSCL_REQ.type,
+    data: data,
+  };
+  const url = PLUSCL_BASE + PLUSCL_REQ.path;
+  console.log('[PLUSCL] 요청 URL:', url);
+  console.log('[PLUSCL] 요청 body:', JSON.stringify(body));
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'auth_key': authKey },
+    body: JSON.stringify(body),
+  });
+  const textBody = await resp.text();
+  console.log('[PLUSCL] 응답 status:', resp.status);
+  console.log('[PLUSCL] 응답 body(앞 2000자):', textBody.slice(0, 2000));
+  let json = null;
+  try { json = JSON.parse(textBody); }
+  catch (_) { throw new Error(`PlusCL 응답 JSON 파싱 실패 (status ${resp.status}): ${textBody.slice(0, 300)}`); }
+  if (json && json.r_code !== undefined && String(json.r_code) !== '0') {
+    throw new Error(`PlusCL 오류 r_code=${json.r_code} r_msg=${json.r_msg || ''}`);
+  }
+  return Array.isArray(json && json.data) ? json.data : [];
+}
+
+// PlusCL 출고행 → ERP shopOrders 객체
+function mapPlusclToErpOrder(r, shopId, shopName) {
+  const ordNo = String(r.ord_no1 || r.ord_inner_seq || '');
+  const itemSeq = Number(r.item_seq) || 1;
+  const uid = String(r.ord_inner_seq || ordNo) + '_' + itemSeq;
+  const prodName = [r.item_name || r.ord_item_name || '', r.option_name || r.ord_item_opt1 || ''].filter(Boolean).join(' ').trim();
+  const shipDt = String(r.regdatetime || '');   // yyyymmddhhnnss (출고완료일시)
+  const shipDate = shipDt.length >= 8 ? `${shipDt.slice(0,4)}-${shipDt.slice(4,6)}-${shipDt.slice(6,8)}` : '';
+  const ordDate = String(r.ord_date || '');       // yyyymmdd
+  const orderDate = ordDate.length >= 8 ? `${ordDate.slice(0,4)}-${ordDate.slice(4,6)}-${ordDate.slice(6,8)}` : '';
+  const hasInvoice = !!(r.invoice_no && String(r.invoice_no).trim());
+  return {
+    id: Date.now() + Math.floor(Math.random() * 100000),
+    orderNo: itemSeq > 1 ? (ordNo + '-' + itemSeq) : ordNo,
+    cafe24OriginalOrderId: ordNo,                 // 다상품 그룹핑(ERP 중복정리 호환)
+    orderDate: orderDate,
+    customerName: r.ord_name || r.rcv_name || '',
+    customerPhone: fmtPhoneKr(r.ord_hp || r.ord_tel || ''),
+    email: r.ord_email || '',
+    productName: prodName,
+    qty: Number(r.qty) || 1,
+    paymentAmount: Number(r.amount) || ((Number(r.sell_price) || 0) * (Number(r.qty) || 1)) || 0,
+    recipientName: r.rcv_name || '',
+    recipientPhone: fmtPhoneKr(r.rcv_hp || r.rcv_tel || ''),
+    zipCode: r.rcv_zipno || '',
+    address: r.rcv_addr || '',
+    deliveryNote: r.ord_memo || '',
+    paymentDate: '',
+    shipDate: shipDate,
+    shippingFee: Number(r.fare_price) || 0,
+    trackingNo: String(r.invoice_no || ''),
+    status: hasInvoice ? '배송완료' : '배송 전',
+    shopId: shopId || '',
+    shopName: shopName,
+    source: 'pluscl_auto',
+    plusclUid: uid,                               // 멱등 dedupe 키(내부 주문번호+상품순번)
+    plusclOrdCompName: r.ord_comp_name || '',
+    plusclTranCode: r.tran_comp_code || '',
+    fetchedAt: Date.now(),
+  };
+}
+
+// PlusCL 전용 머지 — plusclUid 로 dedupe(몰 orderNo 충돌 무관, 재폴링 중복 방지)
+async function mergePlusclOrders(firestoreDb, newOrders) {
+  const docRef = firestoreDb.doc('erp_data/shopOrders');
+  const snap = await docRef.get();
+  let existing = [];
+  if (snap.exists) {
+    const raw = snap.data().data;
+    if (typeof raw === 'string') { try { existing = JSON.parse(raw) || []; } catch (_) {} }
+    else if (Array.isArray(raw)) existing = raw;
+  }
+  const seenUid = new Set(existing.filter(o => o && o.plusclUid).map(o => String(o.plusclUid)));
+  const trulyNew = newOrders.filter(o => o.plusclUid && !seenUid.has(String(o.plusclUid)));
+  if (trulyNew.length === 0) return { added: 0, total: existing.length, sampleNew: [] };
+  const merged = existing.concat(trulyNew);
+  await docRef.set({ data: JSON.stringify(merged), ts: Date.now() });
+  return { added: trulyNew.length, total: merged.length, sampleNew: trulyNew.slice(0, 3) };
+}
+
+// 메인 인입 로직
+async function ingestPlusclShipments({ daysBack = 1 } = {}) {
+  const now = new Date();
+  const from = new Date(now); from.setDate(from.getDate() - daysBack);
+  const sDate = plusclDateStr(from);
+  const eDate = plusclDateStr(now);
+  const rows = await plusclFetchShipments({ sDate, eDate });
+  console.log('[PLUSCL] 수신 행수:', rows.length);
+  const firestoreDb = admin.firestore();
+  const shopCache = {};
+  const erpOrders = [];
+  for (const r of rows) {
+    const mall = plusclMallName(r.ord_comp_name);
+    if (!(mall in shopCache)) {
+      const shop = await findShopByName(firestoreDb, mall);
+      shopCache[mall] = shop ? { id: shop.id, name: shop.name } : { id: '', name: mall };
+    }
+    const sc = shopCache[mall];
+    erpOrders.push(mapPlusclToErpOrder(r, sc.id, sc.name));
+  }
+  // 쇼핑몰별 상품 매핑 자동 적용(가능한 경우)
+  try {
+    for (const mall of Object.keys(shopCache)) {
+      const sid = shopCache[mall].id;
+      if (sid) await applyProductMappingsToOrders(firestoreDb, erpOrders.filter(o => o.shopId === sid), sid);
+    }
+  } catch (e) { console.warn('[PLUSCL] 매핑 적용 실패:', e.message); }
+  const merge = await mergePlusclOrders(firestoreDb, erpOrders);
+  const byMall = {};
+  erpOrders.forEach(o => { byMall[o.shopName] = (byMall[o.shopName] || 0) + 1; });
+  return {
+    fetched: erpOrders.length,
+    added: merge.added,
+    total: merge.total,
+    range: `${sDate} ~ ${eDate}`,
+    byMall,
+    sampleNew: merge.sampleNew.map(o => ({ orderNo: o.orderNo, mall: o.shopName, customer: o.customerName, product: o.productName, qty: o.qty, amount: o.paymentAmount, tracking: o.trackingNo })),
+  };
+}
+
+// 스케줄: 매일 KST 16:00 (하루 1회) — 슬랙 요약 1건
+exports.fetchPlusclShipments = functions
+  .region(REGION)
+  .runWith({ secrets: ['PLUSCL_AUTH_KEY', 'SLACK_ORDERS_WEBHOOK'], timeoutSeconds: 300, memory: '256MB' })
+  .pubsub.schedule('0 16 * * *')
+  .timeZone('Asia/Seoul')
+  .onRun(async () => {
+    try {
+      const result = await ingestPlusclShipments({ daysBack: 1 });
+      const mallText = Object.keys(result.byMall).length
+        ? '\n\n*쇼핑몰별:* ' + Object.entries(result.byMall).map(([m, c]) => `${m} ${c}건`).join(' · ') : '';
+      const sampleText = result.sampleNew.length
+        ? '\n\n*신규 샘플:*\n' + result.sampleNew.map(s => `• [${s.mall}] ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} ×${s.qty} / 송장 ${s.tracking || '-'}`).join('\n') : '';
+      await notifySlack({
+        title: `물류(PlusCL) 배송정보 수집 — 신규 ${result.added}건`,
+        level: result.added > 0 ? 'success' : 'info',
+        details: `📦 가져옴 ${result.fetched}건 / ✅ 신규 ${result.added}건\n📅 ${result.range}` + mallText + sampleText,
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+        titlePrefix: ''
+      });
+      console.log('[PLUSCL SCHED] 성공:', JSON.stringify(result));
+      return result;
+    } catch (err) {
+      console.error('[PLUSCL SCHED] 실패:', err);
+      await notifySlack({
+        title: '물류(PlusCL) 배송정보 수집 실패',
+        level: 'error',
+        details: `❌ ${err.message}\n\n<https://console.firebase.google.com/project/${PROJECT_ID}/functions/logs|Functions 로그 확인>`,
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+        titlePrefix: ''
+      });
+      throw err;
+    }
+  });
+
+// 수동 트리거(관리자) — 테스트/즉시 수집. daysBack 1~31 (기본 3)
+exports.manualFetchPlusclShipments = functions
+  .region(REGION)
+  .runWith({ secrets: ['PLUSCL_AUTH_KEY', 'SLACK_ORDERS_WEBHOOK'], timeoutSeconds: 300, memory: '256MB' })
+  .https.onCall(async (data, context) => {
+    if (!context.auth) throw new functions.https.HttpsError('unauthenticated', '로그인이 필요합니다.');
+    const uid = context.auth.uid;
+    const userDoc = await admin.firestore().doc(`users/${uid}`).get();
+    if (!userDoc.exists || userDoc.data().isAdmin !== true) throw new functions.https.HttpsError('permission-denied', '관리자 권한이 필요합니다.');
+    const userName = userDoc.data().name || userDoc.data().email || uid;
+    const daysBack = Math.min(Math.max(parseInt((data && data.daysBack) || 3, 10) || 3, 1), 31);
+    try {
+      const result = await ingestPlusclShipments({ daysBack });
+      await notifySlack({
+        title: `물류(PlusCL) 수동 수집 (관리자 ${userName})`,
+        level: 'info',
+        details: `👤 ${userName}\n📦 가져옴 ${result.fetched}건 / 신규 ${result.added}건\n📅 ${result.range}`,
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+        titlePrefix: ''
+      });
+      return result;
+    } catch (err) {
+      console.error('[PLUSCL MANUAL] 실패:', err);
       throw new functions.https.HttpsError('internal', err.message);
     }
   });
