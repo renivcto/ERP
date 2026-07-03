@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.367';
+const ERP_VERSION = 'v2.3.368';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -46664,9 +46664,11 @@ function _pmSave(opts) {
     try { localStorage.setItem('reniv_shared_product_map', json); }
     catch(e) { console.warn('🗺️ productMap localStorage 저장 실패:', e); }
     // 2) Firestore 백그라운드 저장
+    // v2.3.368: settings/ → shared/ 이전 — settings/ 는 규칙상 관리자만 read 가능해
+    //   타 직원에게 포트폴리오가 빈 화면으로 보였음(관리자는 localStorage 폴백으로 가려짐).
     if (window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
       try {
-        const ref = window._firestoreDoc(window._firebaseDb, 'settings', 'product_map');
+        const ref = window._firestoreDoc(window._firebaseDb, 'shared', 'product_map');
         window._firestoreSetDoc(ref, { value: json }, { merge:true })
           .then(function(){ if (!opts.silent) console.log('🗺️ [v900] productMap Firestore 저장 완료'); })
           .catch(function(e){ console.warn('🗺️ productMap Firestore 저장 실패:', e); });
@@ -46681,10 +46683,11 @@ function _pmSave(opts) {
 // ── 로드 (Firestore / localStorage updatedAt 비교) ──
 async function _pmLoad() {
   _ensureProductMap();
-  let fsData = null, lcData = null;
+  let fsData = null, lcData = null, lgData = null;
+  // v2.3.368: 새 위치 shared/product_map (전 직원 read 가능)
   try {
     if (window._firestoreGetDoc && window._firestoreDoc && window._firebaseDb) {
-      const ref = window._firestoreDoc(window._firebaseDb, 'settings', 'product_map');
+      const ref = window._firestoreDoc(window._firebaseDb, 'shared', 'product_map');
       const snap = await window._firestoreGetDoc(ref);
       if (snap && snap.exists()) {
         const v = snap.data().value;
@@ -46692,15 +46695,30 @@ async function _pmLoad() {
       }
     }
   } catch(e) { console.warn('🗺️ productMap Firestore 로드 실패:', e); }
+  // v2.3.368: 구 위치 settings/product_map 마이그레이션 읽기 — 관리자만 성공하고
+  //   비관리자는 permission-denied 로 조용히 실패(정상). 구본이 최신이면 아래에서
+  //   채택 + shared/ 재저장 → 관리자가 한 번 열면 자동 이전 완료.
+  try {
+    if (window._firestoreGetDoc && window._firestoreDoc && window._firebaseDb) {
+      const refL = window._firestoreDoc(window._firebaseDb, 'settings', 'product_map');
+      const snapL = await window._firestoreGetDoc(refL);
+      if (snapL && snapL.exists()) {
+        const vL = snapL.data().value;
+        lgData = (typeof vL === 'string') ? JSON.parse(vL) : vL;
+      }
+    }
+  } catch(e) { /* 비관리자 permission-denied — 정상 */ }
   try {
     const s = localStorage.getItem('reniv_shared_product_map');
     if (s) lcData = JSON.parse(s);
   } catch(e) {}
   const curTs = Number(window._productMapData.updatedAt) || 0;
   const fsTs = (fsData && Number(fsData.updatedAt)) || 0;
+  const lgTs = (lgData && Number(lgData.updatedAt)) || 0;
   const lcTs = (lcData && Number(lcData.updatedAt)) || 0;
   let best = null, bestTs = curTs;
   if (fsData && fsTs > bestTs) { best = fsData; bestTs = fsTs; }
+  if (lgData && lgTs > bestTs) { best = lgData; bestTs = lgTs; }
   if (lcData && lcTs > bestTs) { best = lcData; bestTs = lcTs; }
   let changed = false;
   if (best) {
@@ -46709,8 +46727,8 @@ async function _pmLoad() {
     changed = true;
     console.log('🗺️ [v900] productMap 최신본 로드 (updatedAt=' + bestTs + ')');
   }
-  // localStorage 가 Firestore 보다 최신 → Firestore 재동기화 (새로고침 손실 방지)
-  if (lcData && lcTs > fsTs) {
+  // 최신본이 shared/ 에 없으면 재동기화 (구 settings 본·localStorage 본 → shared 마이그레이션 겸용)
+  if (bestTs > fsTs) {
     try { _pmSave({ noTouch:true, silent:true }); } catch(e) {}
   }
   return changed;
