@@ -5861,7 +5861,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.357';
+const ERP_VERSION = 'v2.3.358';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -39395,7 +39395,16 @@ async function _maybeSendLateInbound() {
     // 선점(하루 1회 보장) — 지연 0건이어도 당일 재시도 안 함
     try { if (typeof saveSharedSetting === 'function') await saveSharedSetting('slack_ops_latein', { lastSentDate: today, ts: Date.now() }); } catch(_){}
     try { localStorage.setItem('reniv_ops_latein_sent', today); } catch(_){}
-    const late = (DB.orders||[]).filter(o => o && o.stockStatus === '입고전' && o.inDate && o.inDate < today)
+    // v2.3.358: 발주가 아직 '입고전' 이어도, 연결 생산이 이미 생산완료/입고완료면 사실상 입고된 것 →
+    //   지연에서 제외(생산완료인데 '입고 지연' 오알림 방지). 발주 stockStatus 가 일시적으로 되돌아가도
+    //   생산완료(manualDone 등)가 지연 오알림을 막음.
+    const _ordDone = (o) => {
+      try {
+        return (DB.productions||[]).some(p => p && (p.status === '생산완료' || p.status === '입고완료') &&
+          ((o.id != null && String(p.orderId) === String(o.id)) || (o.serial && p.serial === o.serial)));
+      } catch(_){ return false; }
+    };
+    const late = (DB.orders||[]).filter(o => o && o.stockStatus === '입고전' && o.inDate && o.inDate < today && !_ordDone(o))
       .sort((a,b) => String(a.inDate).localeCompare(String(b.inDate)));
     if (!late.length) return;
     const L = ['🕒 *입고 지연 ' + late.length + '건*'];
