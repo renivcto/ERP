@@ -1662,12 +1662,14 @@ function plusclDateStr(d) {
 }
 
 // PlusCL 주문사명(ord_comp_name) → ERP 쇼핑몰명
+// ord_comp_name 실제 값 = PlusCL CL_comp_name (앱 etc_company_code.json 확인):
+//   K034 쿠팡 / K000 자사주문 / K012 카페24 / K032 스토어팜 / K033 네이버체크아웃 등.
 function plusclMallName(ordCompName) {
   const n = String(ordCompName || '');
   const lower = n.toLowerCase();
   if (n.includes('쿠팡') || lower.includes('coupang') || lower.includes('rocket')) return '쿠팡';
-  if (n.includes('스마트') || n.includes('네이버') || lower.includes('smartstore') || lower.includes('naver')) return '스마트스토어';
-  if (n.includes('자사') || n.includes('카페24') || lower.includes('cafe24') || n.includes('와디즈') || n.includes('르니브')) return '자사몰';
+  if (n.includes('스마트') || n.includes('네이버') || n.includes('스토어팜') || lower.includes('smartstore') || lower.includes('naver') || lower.includes('storefarm')) return '스마트스토어';
+  if (n.includes('자사') || n.includes('카페24') || n.includes('메이크샵') || n.includes('고도몰') || n.includes('아임웹') || lower.includes('cafe24') || n.includes('와디즈') || n.includes('르니브')) return '자사몰';
   return n || '기타';
 }
 
