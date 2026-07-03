@@ -1879,3 +1879,53 @@ exports.manualFetchPlusclShipments = functions
       throw new functions.https.HttpsError('internal', err.message);
     }
   });
+
+// ── PlusCL 현재고 조회 (완제품 탭 'PlusCL 현재고' 열용) ──────────────────────
+//   /open/stock_qty — 물류창고(GLXY) 실시간 재고. 검증: r_code:0, item_code/item_name/qty.
+async function ingestPlusclStock() {
+  const authKey = (process.env.PLUSCL_AUTH_KEY || '').trim();
+  if (!authKey) throw new Error('PLUSCL_AUTH_KEY 시크릿 미설정');
+  const body = {
+    company_code: PLUSCL_REQ.company_code,
+    warehouse_code: PLUSCL_REQ.warehouse_code,
+    warehouse_type_code: PLUSCL_REQ.warehouse_type_code,
+    seller_code: PLUSCL_REQ.seller_code,
+    data: '',
+  };
+  const resp = await fetch('https://service.pluscl.com/open/stock_qty', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'auth_key': authKey },
+    body: JSON.stringify(body),
+  });
+  const t = await resp.text();
+  let json = null;
+  try { json = JSON.parse(t); } catch (_) { throw new Error(`PlusCL 재고 JSON 파싱 실패 (status ${resp.status}): ${t.slice(0, 200)}`); }
+  if (json && json.r_code !== undefined && String(json.r_code) !== '0') {
+    throw new Error(`PlusCL 오류 r_code=${json.r_code} r_msg=${json.r_msg || ''}`);
+  }
+  const list = (Array.isArray(json && json.data) ? json.data : []).map(r => ({
+    code: String(r.item_code || ''),
+    name: r.item_name || '',
+    option: r.option_name || '',
+    qty: Number(r.qty) || 0,
+    state: String(r.item_state || ''),   // 1:판매 2:단종 3:품절 4:일시품절
+  }));
+  console.log('[PLUSCL STOCK] 조회:', list.length, '건');
+  return { count: list.length, list, ts: Date.now() };
+}
+
+exports.manualFetchPlusclStock = functions
+  .region(REGION)
+  .runWith({ secrets: ['PLUSCL_AUTH_KEY'], timeoutSeconds: 120, memory: '256MB' })
+  .https.onCall(async (data, context) => {
+    if (!context.auth) throw new functions.https.HttpsError('unauthenticated', '로그인이 필요합니다.');
+    const uid = context.auth.uid;
+    const userDoc = await admin.firestore().doc(`users/${uid}`).get();
+    if (!userDoc.exists || userDoc.data().isAdmin !== true) throw new functions.https.HttpsError('permission-denied', '관리자 권한이 필요합니다.');
+    try {
+      return await ingestPlusclStock();
+    } catch (err) {
+      console.error('[PLUSCL STOCK] 실패:', err);
+      throw new functions.https.HttpsError('internal', err.message);
+    }
+  });

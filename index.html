@@ -1832,7 +1832,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div class="card-body p0 tbl-wrap">
             <table>
               <colgroup><col style="width:58px"><col style="width:85px"><col style="width:220px"><col style="width:65px"><col style="width:75px"><col style="width:95px"><col style="width:55px"></colgroup>
-              <thead><tr><th style="text-align:center">분류</th><th style="text-align:center">품목코드</th><th style="text-align:center">품목명</th><th style="text-align:center">용량</th><th style="text-align:center">창고</th><th style="text-align:center">재고 수량</th><th style="text-align:center">재고평가액</th><th style="text-align:center">관리</th></tr></thead>
+              <thead><tr><th style="text-align:center">분류</th><th style="text-align:center">품목코드</th><th style="text-align:center">품목명</th><th style="text-align:center">용량</th><th style="text-align:center">창고</th><th style="text-align:center">재고 수량</th><th id="pluscl-stock-th" style="text-align:center;display:none;white-space:nowrap">PlusCL 현재고 <button onclick="_loadPlusclStock()" title="PlusCL 물류창고 실재고 새로고침(관리자)" style="background:#ede9fe;color:#7c3aed;border:1px solid #ddd6fe;border-radius:5px;font-size:10px;padding:1px 5px;cursor:pointer;vertical-align:middle">🔄</button></th><th style="text-align:center">재고평가액</th><th style="text-align:center">관리</th></tr></thead>
               <tbody id="stock-table"></tbody>
             </table>
           </div>
@@ -5861,7 +5861,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.360';
+const ERP_VERSION = 'v2.3.361';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26810,9 +26810,71 @@ async function populateItemWhSelect(selectedId){
   if(selectedId!=null && selectedId!=='') sel.value=String(selectedId);
 }
 
+// ========================= PlusCL 현재고 (완제품 탭 열) — v2.3.361 =========================
+//   물류창고(GLXY) 실재고를 manualFetchPlusclStock 로 받아 완제품별로 표시. ERP↔PlusCL 품목명이
+//   달라 자동매칭 불가 → 완제품마다 PlusCL 품목을 1회 연결(매핑) 후 실재고 자동표기.
+//   저장: shared/pluscl_stock(현재고 스냅샷) · shared/pluscl_item_map(품목 연결).
+window._PLUSCL = window._PLUSCL || { stock: null, map: null, loaded: false };
+async function _ensurePlusclLoaded(force){
+  if (window._PLUSCL.loaded && !force) return;
+  try { window._PLUSCL.stock = (await loadSharedSetting('pluscl_stock')) || { list: [], ts: 0 }; } catch(_){ window._PLUSCL.stock = { list: [], ts: 0 }; }
+  try { window._PLUSCL.map = (await loadSharedSetting('pluscl_item_map')) || {}; } catch(_){ window._PLUSCL.map = {}; }
+  window._PLUSCL.loaded = true;
+}
+function _plusclStockList(){ return (window._PLUSCL && window._PLUSCL.stock && Array.isArray(window._PLUSCL.stock.list)) ? window._PLUSCL.stock.list : []; }
+function _plusclMapGet(){ return (window._PLUSCL && window._PLUSCL.map) || {}; }
+function _plusclCellHtml(item){
+  if (!item || item.type !== '완제품') return '<span style="color:var(--gray-300)">-</span>';
+  const code = _plusclMapGet()[item.id];
+  if (code) {
+    const rec = _plusclStockList().find(s => String(s.code) === String(code));
+    if (rec) {
+      const col = rec.state==='2' ? '#ef4444' : ((rec.state==='3'||rec.state==='4') ? '#f59e0b' : '#7c3aed');
+      return `<b style="color:${col};font-variant-numeric:tabular-nums">${fmt(rec.qty)}</b>`
+        + ` <span title="${_whEsc(rec.name)}${rec.option?(' / '+_whEsc(rec.option)):''} — 연결변경" style="cursor:pointer;color:#c4b5fd;font-size:11px" onclick="_plusclMapPick(${item.id})">✎</span>`;
+    }
+    return `<span style="color:#f59e0b;font-size:11px;cursor:pointer" onclick="_plusclMapPick(${item.id})" title="연결된 PlusCL 품목이 현재고에 없음 — 클릭해 재연결">미조회 ✎</span>`;
+  }
+  return `<button class="btn btn-outline btn-xs" style="font-size:10px;color:#7c3aed;border-color:#ddd6fe" onclick="_plusclMapPick(${item.id})">🔗 연결</button>`;
+}
+function _plusclMapPick(itemId){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const list = _plusclStockList();
+  if (!list.length){ showNotif('먼저 열 머리의 🔄 로 PlusCL 현재고를 불러오세요','warning'); return; }
+  const item = (DB.items||[]).find(x=>String(x.id)===String(itemId));
+  const lines = list.map((s,idx)=>`${idx+1}. ${s.name}${s.option?(' / '+s.option):''}  (재고 ${s.qty})`).join('\n');
+  const ans = prompt(`[${item?item.name:''}] 에 연결할 PlusCL 재고 번호:\n\n${lines}\n\n(0 = 연결 해제)`);
+  if (ans===null) return;
+  const n = parseInt(ans, 10);
+  window._PLUSCL.map = window._PLUSCL.map || {};
+  if (n===0) delete window._PLUSCL.map[itemId];
+  else if (n>=1 && n<=list.length) window._PLUSCL.map[itemId] = list[n-1].code;
+  else { showNotif('잘못된 번호입니다','warning'); return; }
+  try { saveSharedSetting('pluscl_item_map', window._PLUSCL.map); } catch(_){}
+  renderStockTable();
+}
+async function _loadPlusclStock(){
+  if (!(window._currentUser && window._currentUser.isAdmin === true)) { showNotif('관리자만 사용할 수 있습니다','warning'); return; }
+  if (!window._firebaseFunctions || !window._httpsCallable){ showNotif('Functions 미초기화 — 새로고침 후 다시 시도','warning'); return; }
+  showNotif('PlusCL 물류창고 현재고 불러오는 중…','info');
+  try {
+    const callable = window._httpsCallable(window._firebaseFunctions, 'manualFetchPlusclStock');
+    const res = await callable({});
+    const d = (res && res.data) || {};
+    window._PLUSCL = window._PLUSCL || {};
+    window._PLUSCL.stock = { list: Array.isArray(d.list) ? d.list : [], ts: Date.now() };
+    window._PLUSCL.loaded = true;
+    try { await saveSharedSetting('pluscl_stock', window._PLUSCL.stock); } catch(_){}
+    showNotif('✅ PlusCL 현재고 ' + (d.count||0) + '건 불러옴', 'success');
+    renderStockTable();
+  } catch(e){ console.error('[PlusCL 현재고]', e); showNotif('❌ PlusCL 현재고 실패: ' + ((e&&e.message)||e), 'error'); }
+}
+
 function renderStock() {
   // v2.3.342: 창고 목록 지연 로드 후 재렌더(창고 배지 반영)
   if (!window._WH || !window._WH.loaded) { try { _whEnsureLoaded().then(()=>{ try{ renderStockTable(); }catch(_){}}).catch(()=>{}); } catch(_){} }
+  // v2.3.361: PlusCL 현재고 스냅샷·매핑 지연 로드
+  if (!window._PLUSCL || !window._PLUSCL.loaded) { try { _ensurePlusclLoaded().then(()=>{ try{ renderStockTable(); }catch(_){}}).catch(()=>{}); } catch(_){} }
   renderStockTable();
   renderStockHistory();
   renderLotTable();
@@ -26999,6 +27061,9 @@ function renderStockTable() {
   const totalVal = items.reduce((s,i) => s + ((i.type === 'OEM' || i.type === '외주가공') ? 0 : (i.stock||0)*(i.price||0)), 0);
   const tvEl = $('stock-total-value');
   if (tvEl) tvEl.textContent = fmtW(totalVal);
+  // v2.3.361: PlusCL 현재고 열 — 완제품 탭에서만 노출
+  const _showPl = (_stockTypeFilter === '완제품');
+  const _plTh = document.getElementById('pluscl-stock-th'); if (_plTh) _plTh.style.display = _showPl ? '' : 'none';
   const typeRowBg = {원자재:'#fafef9', 부자재:'#fefaff', OEM:'#fafcff', 완제품:'#fffefa', 외주가공:'#fafbfc'};
   $('stock-table').innerHTML = items.map(i => {
     const pct = stockPct(i);
@@ -27014,6 +27079,7 @@ function renderStockTable() {
       <td style="font-size:12px;color:var(--gray-500);text-align:center">${i.spec||'-'}</td>
       <td style="text-align:center;line-height:1.7">${_isOemRow2 ? '<span style="color:var(--gray-300)">-</span>' : _stockWhBadges(i)}</td>
       <td style="text-align:center;font-size:13px"><strong>${fmt(i.stock)}</strong></td>
+      <td style="text-align:center;font-size:13px;${_showPl?'':'display:none'}">${_showPl ? _plusclCellHtml(i) : ''}</td>
       <td style="text-align:center;color:var(--sky-700);font-weight:500;font-size:13px;font-variant-numeric:tabular-nums">${fmtW(stockVal)}</td>
       <td style="text-align:center">
         ${i._archived ? '<span style="font-size:11px;color:var(--gray-400)">-</span>' : `<button title="수정" onclick="openStockEditModal(${i.id})" style="background:#eef2ff;color:#6366f1;border:1px solid #e0e7ff;width:24px;height:22px;padding:0;border-radius:5px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1">✏️</button>`}
@@ -52446,7 +52512,8 @@ function _sharedSettingCollection(key) {
   //   못 읽어 'API Key가 없습니다' 오류. 쓰기권한자에게 키가 노출되는 트레이드오프는 client-side 호출의 불가피한 특성(수용).
   if (/^finance_/.test(k) || /^budget_/.test(k) || k === 'expense_paid_overrides' || k === 'company_info'
       || k === 'trello_config' || k === 'trello_automation' || k === 'trello_auto_cards'
-      || k === 'gemini_api_key' || k === 'claude_api_key' || k === 'warehouse_list') return 'shared';
+      || k === 'gemini_api_key' || k === 'claude_api_key' || k === 'warehouse_list'
+      || k === 'pluscl_stock' || k === 'pluscl_item_map') return 'shared';
   return 'settings';
 }
 async function saveSharedSetting(key, value) {
