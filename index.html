@@ -3790,6 +3790,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
               <button class="btn btn-outline" onclick="document.getElementById('import-file').click()">📤 데이터 가져오기 (JSON)</button>
               <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
               <button class="btn btn-outline" onclick="_reconcileToServer()" style="color:#7c3aed;border-color:#ddd6fe" title="관리자(내) 데이터를 서버에 안전 동기화 — 서버전용 레코드 보존, 삭제건 부활 없음. 관리자↔직원 화면 불일치 복구용">🔄 서버 데이터 동기화 (관리자 복구)</button>
+              <button class="btn btn-outline" onclick="_migrateAttachmentsToStorage()" style="color:#0e7490;border-color:#a5f3fc" title="지출/발주의 첨부(영수증·계약서·PDF)를 Firebase Storage 로 이전해 저장 데이터를 대폭 축소. 원본 백업은 유지되어 안전">📦 첨부 Storage 이전 (데이터 축소)</button>
               <button class="btn btn-danger btn-sm" onclick="if(confirm('모든 데이터를 초기화합니까?'))resetData()">🗑️ 데이터 초기화</button>
             </div>
           </div>
@@ -5862,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.364';
+const ERP_VERSION = 'v2.3.365';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -5947,6 +5948,98 @@ function _fsUpTryUpload(key, data, doUpload) {
     }).catch(() => { delete window._fsUpInFlight[key]; });
   } catch(_) {}
 }
+
+// ═══════ v2.3.365: 첨부 base64 → Firebase Storage 오프로드 (DB 비대 근절) ═══════
+//   지출/발주의 영수증·계약서·PDF 등 base64 첨부를 저장 시 Storage 에 업로드하고,
+//   성공하면 "인메모리 DB 의 필드값 자체"를 https 다운로드 URL 로 치환 → 다음 저장에서
+//   URL(수백 바이트)이 서버 문서에 실려 문서가 급격히 가벼워짐(1MB 한도·quota 근절).
+//   실패하면 아무것도 바꾸지 않음 → 현행 3단(마커+IDB+공유 Firestore)이 그대로 동작 = 유실 0.
+//   ⚠️ URL 로 바뀐 필드는 각 오프로드 분기의 _stoIsHttp 가드로 IDB/마커 치환을 스킵해야 함.
+function _stoIsHttp(v) { return typeof v === 'string' && (v.indexOf('https://') === 0 || v.indexOf('http://') === 0); }
+window._stoIsHttp = _stoIsHttp;
+window._stoUpSession = window._stoUpSession || {};
+function _stoMigrate(key, dataUrl, apply) {
+  try {
+    if (typeof window._storageUploadDataUrl !== 'function') return;
+    if (window._skipFsUpload) return;   // 복구 동기화 중엔 업로드 flood 차단(v2.3.363 과 동일 정책)
+    if (typeof dataUrl !== 'string' || dataUrl.indexOf('data:') !== 0 || dataUrl.length < 100) return;
+    if (window._stoUpSession[key] === dataUrl.length) return;   // 세션 내 중복 방지(내용 바뀌면 길이 달라져 재업로드)
+    window._stoUpSession[key] = dataUrl.length;
+    window._storageUploadDataUrl('erp/' + key, dataUrl).then((url) => {
+      if (!url || !_stoIsHttp(url)) return;
+      try { apply(url); } catch(_){}
+      // URL 을 서버에 영속 — 업로드 버스트가 끝난 뒤 한 번만 저장(저장→업로드→저장 루프는
+      // URL 이 된 필드가 data: 가드에서 스킵되므로 1회로 수렴).
+      clearTimeout(window._stoPersistT);
+      window._stoPersistT = setTimeout(() => {
+        try { console.log('📦 [STORAGE] 첨부 URL 영속 저장 (오프로드 완료분 반영)'); saveData(); } catch(_){}
+      }, 5000);
+    }).catch((e) => {
+      delete window._stoUpSession[key];   // 다음 저장에서 재시도
+      console.warn('📦 [STORAGE] 업로드 실패(기존 IDB/공유 백업으로 계속 동작):', key, e && (e.code || e.message));
+    });
+  } catch(_){}
+}
+// Storage URL 을 다시 base64 로 — 도장 PDF 생성(html2canvas) 등 data: 가 필요한 곳에서 사용.
+// firebasestorage 다운로드 URL 은 CORS(Access-Control-Allow-Origin:*) 를 지원해 fetch 가능.
+window._stoFetchAsDataUrl = async function(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const blob = await res.blob();
+  return await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = reject;
+    fr.readAsDataURL(blob);
+  });
+};
+
+// v2.3.365: 기존 지출/발주 첨부 일괄 Storage 이전 (설정 > 데이터 관리 버튼).
+//   원본(IDB·공유 Firestore 백업)은 지우지 않으므로 실패해도 현행 그대로 동작 = 유실 0.
+window._migrateAttachmentsToStorage = async function() {
+  if (typeof window._storageUploadDataUrl !== 'function') { alert('⚠️ Firebase Storage 미설정 — 이전 불가'); return; }
+  if (!confirm('지출/발주의 첨부(영수증·계약서·PDF 등)를 Firebase Storage 로 이전합니다.\n\n· 원본 백업(IDB/클라우드)은 지우지 않아 안전합니다\n· 완료 후 저장 데이터가 크게 가벼워집니다\n\n진행할까요?')) return;
+  const stat = { up: 0, skip: 0, miss: 0, fail: 0 };
+  const _hyd365 = async (val, idbKey, fsLoad) => {
+    if (typeof val === 'string' && val.indexOf('data:') === 0) return val;
+    if (val === '__idb__' || val === '__stored__') {
+      try { const v = await idbGet(idbKey); if (typeof v === 'string' && v.indexOf('data:') === 0) return v; } catch(_){}
+      if (typeof fsLoad === 'function') { try { const v = await fsLoad(); if (typeof v === 'string' && v.indexOf('data:') === 0) return v; } catch(_){} }
+    }
+    return null;
+  };
+  const _one = async (idbKey, val, fsLoad, apply) => {
+    try {
+      if (_stoIsHttp(val)) { stat.skip++; return; }
+      if (!val) return;
+      const b64 = await _hyd365(val, idbKey, fsLoad);
+      if (!b64) { if (val === '__idb__' || val === '__stored__') { stat.miss++; console.warn('📦 [MIGRATE] 원본 못찾음(구 데이터):', idbKey); } return; }
+      const url = await window._storageUploadDataUrl('erp/' + idbKey, b64);
+      if (url && _stoIsHttp(url)) { apply(url); window._stoUpSession[idbKey] = b64.length; stat.up++; }
+      else stat.fail++;
+    } catch(e) { stat.fail++; console.warn('📦 [MIGRATE] 업로드 실패:', idbKey, e && (e.code || e.message)); }
+  };
+  showNotif('📦 첨부 Storage 이전 시작 — 첨부 수에 따라 수 분 걸릴 수 있습니다', 'info');
+  for (const o of (DB.orders || [])) {
+    if (!o) continue;
+    await _one('order_pdf_' + o.id, o.pdfData, () => (typeof _loadSharedOrderPdf === 'function' ? _loadSharedOrderPdf(o.id, 'pdf') : null), u => { o.pdfData = u; });
+    await _one('order_stamp_' + o.id, o.stampData, () => (typeof _loadSharedOrderPdf === 'function' ? _loadSharedOrderPdf(o.id, 'stamp') : null), u => { o.stampData = u; });
+    await _one('order_astamp_' + o.id, o.approvalStampImage, () => (typeof _loadSharedOrderPdf === 'function' ? _loadSharedOrderPdf(o.id, 'astamp') : null), u => { o.approvalStampImage = u; });
+    if (o.invoiceFile) await _one('order_invoice_' + o.id, o.invoiceFile.data, null, u => { o.invoiceFile.data = u; });
+    if (Array.isArray(o.closingDocs)) for (let di = 0; di < o.closingDocs.length; di++) { const d0 = o.closingDocs[di]; if (d0) await _one('order_closing_' + o.id + '_' + di, d0.data, () => (typeof _loadSharedOrderClosing === 'function' ? _loadSharedOrderClosing(o.id, di) : null), u => { d0.data = u; }); }
+    if (Array.isArray(o.otherFiles)) for (let fi = 0; fi < o.otherFiles.length; fi++) { const f0 = o.otherFiles[fi]; if (f0) await _one('order_other_' + o.id + '_' + fi, f0.data, null, u => { f0.data = u; }); }
+    if (Array.isArray(o.rows)) for (let ri = 0; ri < o.rows.length; ri++) { const r0 = o.rows[ri]; if (r0 && r0.image) await _one('order_rowimg_' + o.id + '_' + ri, r0.image, null, u => { r0.image = u; }); }
+  }
+  for (const ex of (DB.expenses || [])) {
+    if (!ex) continue;
+    if (Array.isArray(ex.attachments)) for (let ai = 0; ai < ex.attachments.length; ai++) { const a0 = ex.attachments[ai]; if (a0) await _one('expense_attach_' + ex.id + '_' + ai, a0.data, () => (typeof _loadSharedExpenseFile === 'function' ? _loadSharedExpenseFile(ex.id, 'attach', ai) : null), u => { a0.data = u; }); }
+    if (Array.isArray(ex.quotes)) for (let qi = 0; qi < ex.quotes.length; qi++) { const q0 = ex.quotes[qi]; if (q0) await _one('expense_quote_' + ex.id + '_' + qi, q0.data, () => (typeof _loadSharedExpenseFile === 'function' ? _loadSharedExpenseFile(ex.id, 'quote', qi) : null), u => { q0.data = u; }); }
+  }
+  console.log('📦 [MIGRATE] 완료:', JSON.stringify(stat));
+  try { await saveDataNow(); } catch(e) { console.warn('📦 [MIGRATE] 저장 실패(다음 저장에서 반영됨):', e); }
+  alert('📦 첨부 Storage 이전 완료\n\n· 업로드: ' + stat.up + '건\n· 이미 이전됨: ' + stat.skip + '건\n· 원본 못찾음(옛 데이터): ' + stat.miss + '건\n· 실패: ' + stat.fail + '건\n\n' + (stat.fail > 0 ? '실패 건은 기존 방식(IDB/클라우드 백업)으로 계속 동작합니다.' : '이제 저장 데이터가 크게 가벼워졌습니다.'));
+  showNotif('📦 첨부 이전 완료: ' + stat.up + '건 업로드', 'success');
+};
 
 // v1.9.928: BOM 전용 저장소 — 메인 DB 와 별개로 BOM 만 작은 전용 키에 저장.
 //   BOM 데이터는 작아서 localStorage 용량초과의 영향을 받지 않음 → 손실 방지.
@@ -6648,24 +6741,30 @@ async function _doSaveDataInner() {
     }
   } catch(_){}
   dbToSave.orders.forEach((o, i) => {
-    if (o.pdfData && o.pdfData.length > 10) {
+    // v2.3.365: 각 분기에 _stoIsHttp 가드 — Storage 이전된 필드(https URL)는 그대로 서버 문서에
+    //   실림(수백 바이트). URL 을 마커로 치환하면 타 기기에서 복원 불가가 되므로 가드 필수.
+    //   base64 인 동안엔 현행(IDB+공유백업+마커) 그대로 + Storage 업로드를 병행 시도(_stoMigrate).
+    if (o.pdfData && o.pdfData.length > 10 && !_stoIsHttp(o.pdfData)) {
       idbSet('order_pdf_' + o.id, o.pdfData);
       // v1.9.608: Firestore 에도 백업 (IDB 손실 시 복구용, 900KB 이하)
       _fsUpTryUpload('order_' + o.id + '_pdf', o.pdfData, (d) => _saveSharedOrderPdf(o.id, 'pdf', d, o.pdfName));
+      { const _b = o.pdfData, _oid = o.id; _stoMigrate('order_pdf_' + _oid, _b, (u) => { const t = (DB.orders||[]).find(x => x && x.id === _oid); if (t && t.pdfData === _b) t.pdfData = u; }); }
       dbToSave.orders[i].pdfData = '__idb__';
     }
-    if (o.stampData && o.stampData.length > 10) {
+    if (o.stampData && o.stampData.length > 10 && !_stoIsHttp(o.stampData)) {
       idbSet('order_stamp_' + o.id, o.stampData);
       _fsUpTryUpload('order_' + o.id + '_stamp', o.stampData, (d) => _saveSharedOrderPdf(o.id, 'stamp', d, o.stampName));
+      { const _b = o.stampData, _oid = o.id; _stoMigrate('order_stamp_' + _oid, _b, (u) => { const t = (DB.orders||[]).find(x => x && x.id === _oid); if (t && t.stampData === _b) t.stampData = u; }); }
       dbToSave.orders[i].stampData = '__idb__';
     }
     // v1.9.787: 마감자료 (다중 첨부) IDB 오프로드 + Firestore 백업
     if (Array.isArray(o.closingDocs) && o.closingDocs.length > 0) {
       dbToSave.orders[i].closingDocs = o.closingDocs.map((doc, di) => {
         if (!doc) return doc;
-        if (doc.data && typeof doc.data === 'string' && doc.data !== '__idb__' && doc.data.length > 100) {
+        if (doc.data && typeof doc.data === 'string' && doc.data !== '__idb__' && doc.data.length > 100 && !_stoIsHttp(doc.data)) {
           try { idbSet('order_closing_' + o.id + '_' + di, doc.data); } catch(e) { console.warn('IDB save closing doc 실패:', e); }
           _fsUpTryUpload('order_' + o.id + '_closing_' + di, doc.data, (d) => _saveSharedOrderClosing(o.id, di, d, doc.name||''));
+          { const _b = doc.data, _oid = o.id, _di = di; _stoMigrate('order_closing_' + _oid + '_' + _di, _b, (u) => { const t = (DB.orders||[]).find(x => x && x.id === _oid); const c = t && Array.isArray(t.closingDocs) && t.closingDocs[_di]; if (c && c.data === _b) c.data = u; }); }
           return { ...doc, data: '__idb__' };
         }
         return doc;
@@ -6673,16 +6772,18 @@ async function _doSaveDataInner() {
     }
     // v2.3.21: 해외 PO 의 invoiceFile (단일) IDB 오프로드 — Firestore 1MB 한도 회피
     if (o.invoiceFile && o.invoiceFile.data && typeof o.invoiceFile.data === 'string'
-        && o.invoiceFile.data !== '__idb__' && o.invoiceFile.data.length > 100) {
+        && o.invoiceFile.data !== '__idb__' && o.invoiceFile.data.length > 100 && !_stoIsHttp(o.invoiceFile.data)) {
       try { idbSet('order_invoice_' + o.id, o.invoiceFile.data); } catch(e) { console.warn('IDB save invoiceFile 실패:', e); }
+      { const _b = o.invoiceFile.data, _oid = o.id; _stoMigrate('order_invoice_' + _oid, _b, (u) => { const t = (DB.orders||[]).find(x => x && x.id === _oid); if (t && t.invoiceFile && t.invoiceFile.data === _b) t.invoiceFile.data = u; }); }
       dbToSave.orders[i].invoiceFile = { ...o.invoiceFile, data: '__idb__' };
     }
     // v2.3.21: 해외 PO 의 otherFiles (다중) IDB 오프로드
     if (Array.isArray(o.otherFiles) && o.otherFiles.length > 0) {
       dbToSave.orders[i].otherFiles = o.otherFiles.map((f, fi) => {
         if (!f) return f;
-        if (f.data && typeof f.data === 'string' && f.data !== '__idb__' && f.data.length > 100) {
+        if (f.data && typeof f.data === 'string' && f.data !== '__idb__' && f.data.length > 100 && !_stoIsHttp(f.data)) {
           try { idbSet('order_other_' + o.id + '_' + fi, f.data); } catch(e) { console.warn('IDB save otherFile 실패:', e); }
+          { const _b = f.data, _oid = o.id, _fi = fi; _stoMigrate('order_other_' + _oid + '_' + _fi, _b, (u) => { const t = (DB.orders||[]).find(x => x && x.id === _oid); const g = t && Array.isArray(t.otherFiles) && t.otherFiles[_fi]; if (g && g.data === _b) g.data = u; }); }
           return { ...f, data: '__idb__' };
         }
         return f;
@@ -6693,16 +6794,18 @@ async function _doSaveDataInner() {
     //   되돌아가던 주범(해외 PO 입고완료 revert). pdfData 와 동일 패턴(IDB + orderPdfs 공유 백업 + 마커).
     if (o.approvalStampImage && typeof o.approvalStampImage === 'string'
         && o.approvalStampImage !== '__idb__' && o.approvalStampImage !== '__stored__' && o.approvalStampImage !== '__stripped__'
-        && o.approvalStampImage.length > 100) {
+        && o.approvalStampImage.length > 100 && !_stoIsHttp(o.approvalStampImage)) {
       try { idbSet('order_astamp_' + o.id, o.approvalStampImage); } catch(e) { console.warn('IDB save astamp 실패:', e); }
       _fsUpTryUpload('order_' + o.id + '_astamp', o.approvalStampImage, (d) => _saveSharedOrderPdf(o.id, 'astamp', d, ''));
+      { const _b = o.approvalStampImage, _oid = o.id; _stoMigrate('order_astamp_' + _oid, _b, (u) => { const t = (DB.orders||[]).find(x => x && x.id === _oid); if (t && t.approvalStampImage === _b) t.approvalStampImage = u; }); }
       dbToSave.orders[i].approvalStampImage = '__idb__';
     }
     // v2.3.354: 발주 품목행 이미지(rows[].image) base64 도 오프로드 — orders 문서 1MB 초과 추가 원인.
     if (Array.isArray(o.rows) && o.rows.length > 0) {
       dbToSave.orders[i].rows = o.rows.map((r, ri) => {
-        if (r && r.image && typeof r.image === 'string' && r.image !== '__idb__' && r.image.length > 100) {
+        if (r && r.image && typeof r.image === 'string' && r.image !== '__idb__' && r.image.length > 100 && !_stoIsHttp(r.image)) {
           try { idbSet('order_rowimg_' + o.id + '_' + ri, r.image); } catch(e) { console.warn('IDB save row image 실패:', e); }
+          { const _b = r.image, _oid = o.id, _ri = ri; _stoMigrate('order_rowimg_' + _oid + '_' + _ri, _b, (u) => { const t = (DB.orders||[]).find(x => x && x.id === _oid); const w = t && Array.isArray(t.rows) && t.rows[_ri]; if (w && w.image === _b) w.image = u; }); }
           return { ...r, image: '__idb__' };
         }
         return r;
@@ -6897,10 +7000,12 @@ async function _doSaveDataInner() {
         ex.attachments.forEach((at, ai) => {
           if (!at || typeof at.data !== 'string') return;
           if (at.data === '__idb__') return;
+          if (_stoIsHttp(at.data)) return;  // v2.3.365: Storage 이전 완료(URL) — 그대로 서버 문서에 실림
           if (at.data.length > 100) {
             try {
               idbSet('expense_attach_' + ex.id + '_' + ai, at.data);
               try { _saveSharedExpenseFile(ex.id, 'attach', ai, at.data); } catch(_){}  // v2.3.269: 공유 저장(타 사용자 열람)
+              { const _b = at.data, _eid = ex.id, _ai = ai; _stoMigrate('expense_attach_' + _eid + '_' + _ai, _b, (u) => { const t = (DB.expenses||[]).find(x => x && x.id === _eid); const a = t && Array.isArray(t.attachments) && t.attachments[_ai]; if (a && a.data === _b) a.data = u; }); }
               _v280Offload.bytes += at.data.length;
               _v280Offload.expenses++;
               dbToSave.expenses[ei].attachments[ai] = { ...at, data: '__idb__' };
@@ -6913,10 +7018,12 @@ async function _doSaveDataInner() {
         ex.quotes.forEach((q, qi) => {
           if (!q || typeof q.data !== 'string') return;
           if (q.data === '__idb__') return;
+          if (_stoIsHttp(q.data)) return;  // v2.3.365: Storage 이전 완료(URL)
           if (q.data.length > 100) {
             try {
               idbSet('expense_quote_' + ex.id + '_' + qi, q.data);
               try { _saveSharedExpenseFile(ex.id, 'quote', qi, q.data); } catch(_){}  // v2.3.269: 공유 저장(타 사용자 열람)
+              { const _b = q.data, _eid = ex.id, _qi = qi; _stoMigrate('expense_quote_' + _eid + '_' + _qi, _b, (u) => { const t = (DB.expenses||[]).find(x => x && x.id === _eid); const g = t && Array.isArray(t.quotes) && t.quotes[_qi]; if (g && g.data === _b) g.data = u; }); }
               _v280Offload.bytes += q.data.length;
               _v280Offload.expenses++;
               dbToSave.expenses[ei].quotes[qi] = { ...q, data: '__idb__' };
@@ -6953,6 +7060,7 @@ async function _doSaveDataInner() {
             if (_expSmallKeys.has(k)) return;
             const v = ex[k];
             if (typeof v !== 'string' || v === '__idb__') return;
+            if (_stoIsHttp(v)) return;  // v2.3.365: Storage URL(~250자)이 200자 threshold 에 걸려 마커화되면 타 기기 복원 불가 — 보호
             if (v.length > 200) {
               try { idbSet('expense_field_' + ex.id + '_' + k, v); dbToSave.expenses[ei][k] = '__idb__'; _2nd++; } catch(_){}
             }
@@ -8065,6 +8173,7 @@ async function _v280MigrateInlineToIdb() {
           const at = ex.attachments[ai];
           if (!at || typeof at.data !== 'string') continue;
           if (at.data === '__idb__') { skipped++; continue; }
+          if (_stoIsHttp(at.data)) { skipped++; continue; }  // v2.3.365: Storage URL 파괴 금지
           if (at.data.length < 100) continue;
           try {
             await idbSet('expense_attach_' + ex.id + '_' + ai, at.data);
@@ -8079,6 +8188,7 @@ async function _v280MigrateInlineToIdb() {
           const q = ex.quotes[qi];
           if (!q || typeof q.data !== 'string') continue;
           if (q.data === '__idb__') { skipped++; continue; }
+          if (_stoIsHttp(q.data)) { skipped++; continue; }  // v2.3.365: Storage URL 파괴 금지
           if (q.data.length < 100) continue;
           try {
             await idbSet('expense_quote_' + ex.id + '_' + qi, q.data);
@@ -8094,7 +8204,7 @@ async function _v280MigrateInlineToIdb() {
     for (const o of (DB.orders||[])) {
       if (!o || o.id == null) continue;
       if (o.invoiceFile && typeof o.invoiceFile.data === 'string'
-          && o.invoiceFile.data !== '__idb__' && o.invoiceFile.data.length > 100) {
+          && o.invoiceFile.data !== '__idb__' && !_stoIsHttp(o.invoiceFile.data) && o.invoiceFile.data.length > 100) {
         try {
           await idbSet('order_invoice_' + o.id, o.invoiceFile.data);
           freed += o.invoiceFile.data.length;
@@ -8107,6 +8217,7 @@ async function _v280MigrateInlineToIdb() {
           const f = o.otherFiles[fi];
           if (!f || typeof f.data !== 'string') continue;
           if (f.data === '__idb__') { skipped++; continue; }
+          if (_stoIsHttp(f.data)) { skipped++; continue; }  // v2.3.365: Storage URL 파괴 금지
           if (f.data.length < 100) continue;
           try {
             await idbSet('order_other_' + o.id + '_' + fi, f.data);
@@ -27462,6 +27573,8 @@ async function viewOrderPDFByIdx(idx, type) {
     showNotif(type==='stamp'?'도장 날인본이 없습니다 (IDB·Firestore 둘 다 없음)':'원본 PDF가 없습니다 (IDB·Firestore 둘 다 없음)','warning');
     return;
   }
+  // v2.3.365: Storage 이전된 첨부(https URL)는 브라우저가 직접 열기 — atob 불가
+  if (_stoIsHttp(data)) { window.open(data, '_blank'); return; }
   // v1.9.578: PDF 는 다운로드 대신 브라우저 내장 뷰어로 인라인 열기
   //   data URL → Blob 변환 → blob URL 을 a target=_blank 로 navigate
   //   (iframe 래퍼 방식보다 호환성 ↑, 다운로드로 빠지지 않음)
@@ -29582,7 +29695,14 @@ async function _generateOrderFormStampedPdf(o) {
               if ((ss[j].textContent || '').indexOf('(인)') >= 0) ss[j].style.visibility = 'hidden';
             }
             var img = document.createElement('img');
-            img.src = o.approvalStampImage;
+            // v2.3.365: Storage 이전된 도장(https URL)은 base64 로 되돌려 사용 —
+            //   html2canvas 캔버스 오염(taint)으로 toDataURL 이 SecurityError 나는 것 방지.
+            var _stampSrc = o.approvalStampImage;
+            if (typeof _stoIsHttp === 'function' && _stoIsHttp(_stampSrc)) {
+              try { _stampSrc = await window._stoFetchAsDataUrl(_stampSrc); }
+              catch(_se) { console.warn('도장 URL→base64 변환 실패, URL 직접 사용:', _se); _stampSrc = o.approvalStampImage; img.crossOrigin = 'anonymous'; }
+            }
+            img.src = _stampSrc;
             img.style.cssText = 'position:absolute;top:50%;right:10px;transform:translateY(-50%);width:58px;height:58px;object-fit:contain;opacity:.88;mix-blend-mode:multiply';
             td.appendChild(img);
             await new Promise(function(r){ if (img.complete) r(); else { img.onload = r; img.onerror = r; setTimeout(r, 1500); } });
@@ -29656,6 +29776,20 @@ async function sendOrderEmail(orderId) {
   } else {
     showNotif('첨부할 발주서 PDF가 없습니다 (수정에서 PDF 업로드 필요)', 'warning');
     return;
+  }
+  // v2.3.365: Storage 이전된 PDF(https URL)는 base64 로 되돌려 이메일 첨부
+  if (_stoIsHttp(pdfData)) {
+    try { pdfData = await window._stoFetchAsDataUrl(pdfData); }
+    catch(e) { console.error('PDF URL→base64 변환 실패:', e); showNotif('PDF 다운로드 실패 — 네트워크 확인 후 다시 시도해 주세요', 'error'); return; }
+  }
+  // v2.3.365: IDB 마커면 복원 시도 (기존엔 형식 오류로 빠지던 케이스)
+  if (pdfData === '__idb__' || pdfData === '__stored__') {
+    const _mk = (o.stampData === pdfData) ? 'stamp' : 'pdf';
+    try {
+      let _re = await idbGet('order_' + _mk + '_' + o.id);
+      if (!_re && typeof _loadSharedOrderPdf === 'function') { try { _re = await _loadSharedOrderPdf(o.id, _mk); } catch(_){} }
+      if (_re) pdfData = _re;
+    } catch(_){}
   }
   // dataURL → base64 — v2.0.3: 중간에 ;filename=... 같은 파라미터가 끼어도 매칭되도록
   //   마지막 ';base64,' 이후 전부를 base64 데이터로 인식
@@ -30274,6 +30408,8 @@ async function viewOrderClosingDoc(idx) {
       }
     } catch(e) { console.warn('마감자료 lazy load 실패:', e); showNotif('파일 로드 실패', 'warning'); return; }
   }
+  // v2.3.365: Storage 이전된 첨부(https URL)는 직접 열기
+  if (_stoIsHttp(d.data)) { window.open(d.data, '_blank'); return; }
   try {
     // base64 data URL → Blob → 새 탭에서 열기
     const parts = d.data.split(',');
@@ -42063,7 +42199,8 @@ function openPoApprovalSheet(orderId) {
           }
         }
         // 2) 저장된 도장 이미지가 있으면 자동 재오버레이
-        var alreadyStamped = !!(o.approvalStampImage && typeof o.approvalStampImage === 'string' && o.approvalStampImage.indexOf('data:') === 0);
+        // v2.3.365: Storage 이전된 도장(https URL)도 날인 완료로 인식
+        var alreadyStamped = !!(o.approvalStampImage && typeof o.approvalStampImage === 'string' && (o.approvalStampImage.indexOf('data:') === 0 || _stoIsHttp(o.approvalStampImage)));
         if (alreadyStamped) {
           try { _overlayStampOnCeoCell(o.approvalStampImage); } catch(_){}
         }
@@ -43098,6 +43235,8 @@ async function openExpenseApprovalForm(expenseId) {
         });
         h += 'window._openFile = function(key) {';
         h += '  const f = window._fileData[key];';
+        // v2.3.365: Storage 이전된 첨부(https URL)는 새 탭에서 직접 열기
+        h += '  if (f && f.data && (f.data.indexOf("https://") === 0 || f.data.indexOf("http://") === 0)) { window.open(f.data, "_blank"); return false; }';
         h += '  if (!f || !f.data || f.data === "__idb__" || f.data.indexOf("data:") !== 0) {';
         // v2.3.20: \n\n 이 raw newline 으로 들어가서 새 창 JS parser 가 syntax error
         // → _openFile 함수 정의 실패 → 클릭 시 아무 일도 안 일어났음
@@ -43156,7 +43295,10 @@ async function openExpenseApprovalForm(expenseId) {
             && dataUrl.length > 100
             && dataUrl !== '__idb__'
             && dataUrl.indexOf('data:') === 0;
-          if (!_isValidDataUrl) {
+          // v2.3.365: Storage 이전된 첨부(https URL)도 유효 — _openFile 이 새 탭으로 엶
+          const _isStorageUrl = typeof dataUrl === 'string'
+            && (dataUrl.indexOf('https://') === 0 || dataUrl.indexOf('http://') === 0);
+          if (!_isValidDataUrl && !_isStorageUrl) {
             try { console.warn('[v2.3.1] 첨부 데이터 invalid — ' + f.kind + ' / ' + (f.name||'?') + ' / data:', typeof dataUrl, dataUrl ? (dataUrl.length > 50 ? dataUrl.slice(0,50) + '...' : dataUrl) : '(empty)'); } catch(_){}
             return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;' + (i < allFiles.length-1 ? 'border-bottom:1px dashed #e2e8f0;' : '') + '">'
               + '<span style="display:inline-block;background:' + kindBg + ';color:' + kindFg + ';padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700;flex-shrink:0">' + f.kind + '</span>'

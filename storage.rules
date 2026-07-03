@@ -1,0 +1,20 @@
+rules_version = '2';
+
+// 르니브 ERP — Firebase Storage 보안규칙
+// 목적: 지출/발주 등 첨부 base64 를 Firestore 문서 밖(Storage)으로 오프로드해
+//       DB 비대(1MB/doc 초과·localStorage 포화)를 근절하기 위한 저장소.
+// 주의: 이 규칙은 배포 시 콘솔의 기존 규칙을 "덮어쓴다".
+//       댓글 첨부(v2.3.202)가 이미 인증사용자 업로드로 동작하므로,
+//       최소 그와 동일한 권한(request.auth != null)을 보장해 회귀를 방지한다.
+//       내부 임직원 전용 도구라 인증사용자=신뢰주체로 본다(Firestore 데이터도
+//       isActive 사용자에게 광범위 read 가능한 것과 동일 수준의 노출).
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // 모든 경로: 로그인(인증)된 사용자만 읽기/쓰기.
+    // (댓글/영수증/피드 등 기존 경로 + 신규 erp/ 오프로드 경로 모두 포함)
+    match /{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
