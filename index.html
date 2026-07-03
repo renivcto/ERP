@@ -5862,7 +5862,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.363';
+const ERP_VERSION = 'v2.3.364';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -5920,6 +5920,12 @@ function _fsUpMap() {
   if (window._fsUpMapCache) return window._fsUpMapCache;
   try { window._fsUpMapCache = JSON.parse(localStorage.getItem('reniv_fs_uploaded') || '{}') || {}; }
   catch(_) { window._fsUpMapCache = {}; }
+  // v2.3.364: IDB 에서도 1회 병합 로드 — localStorage 가 quota 로 못 써도 세션'간' dedup 유지
+  //   (기존: localStorage 만 → 포화 시 매 세션 전체 첨부 재업로드 → resource-exhausted 재발).
+  if (!window._fsUpIdbLoaded) {
+    window._fsUpIdbLoaded = true;
+    try { if (typeof idbGet === 'function') idbGet('reniv_fs_uploaded').then(m => { if (m && typeof m === 'object') window._fsUpMapCache = Object.assign({}, m, window._fsUpMapCache || {}); }).catch(()=>{}); } catch(_){}
+  }
   return window._fsUpMapCache;
 }
 function _fsUpTryUpload(key, data, doUpload) {
@@ -5934,7 +5940,9 @@ function _fsUpTryUpload(key, data, doUpload) {
     Promise.resolve(doUpload(data)).then(ok => {
       delete window._fsUpInFlight[key];
       if (ok === true) {
-        try { const m = _fsUpMap(); m[key] = fp; localStorage.setItem('reniv_fs_uploaded', JSON.stringify(m)); } catch(_) {}
+        const m = _fsUpMap(); m[key] = fp;   // 인메모리 갱신(항상 성공)
+        try { localStorage.setItem('reniv_fs_uploaded', JSON.stringify(m)); } catch(_) {}   // 영속은 best-effort
+        try { if (typeof idbSet === 'function') idbSet('reniv_fs_uploaded', m); } catch(_) {}   // v2.3.364: IDB 영속(대용량, 세션간 dedup)
       }
     }).catch(() => { delete window._fsUpInFlight[key]; });
   } catch(_) {}
@@ -6291,11 +6299,17 @@ function _backupOrdersNow(tag) {
       return c;
     });
     const payload = JSON.stringify(_liteOrders);
-    // 1) 메인 백업 (필수, 실패하면 throw)
-    localStorage.setItem('reniv_orders_backup', payload);
-    localStorage.setItem('reniv_orders_backup_ts', String(Date.now()));
-    localStorage.setItem('reniv_orders_backup_count', String(orders.length));
-    localStorage.setItem('reniv_orders_backup_nextId', String((DB._nextId && DB._nextId.order) || 0));
+    // 1) 메인 백업 — v2.3.364: localStorage quota 초과 시 throw 대신 IDB 폴백(포화·저장중단 방지).
+    //   orders 는 Firestore 가 1차 원본이라 이 백업은 2차 방어선 — quota 로 못 써도 안전.
+    try {
+      localStorage.setItem('reniv_orders_backup', payload);
+      localStorage.setItem('reniv_orders_backup_ts', String(Date.now()));
+      localStorage.setItem('reniv_orders_backup_count', String(orders.length));
+      localStorage.setItem('reniv_orders_backup_nextId', String((DB._nextId && DB._nextId.order) || 0));
+    } catch(_qeOb) {
+      console.warn('[BACKUP] reniv_orders_backup localStorage quota → IDB 폴백:', _qeOb && _qeOb.name);
+      try { if (typeof idbSet === 'function') idbSet('reniv_orders_backup', payload); } catch(_){}
+    }
 
     // 2) 시간별 스냅샷 — 실패해도 메인 백업은 이미 됐으므로 graceful
     const now = new Date();
@@ -6411,11 +6425,13 @@ async function saveDataNow() {
       showNotif('⚠️ 주문 데이터 서버 동기화 미확인 — 페이지를 닫지 마세요', 'error');
     }
     // 🛡️ shopOrders 독립 백업 (Firestore 실패해도 이것으로 복구)
+    // v2.3.364: shopOrders(≈876KB, 1410건)는 이미 IDB 로 오프로드됨 → 이 중복 백업을 localStorage 대신
+    //   IDB 로 저장해 localStorage 포화(quota)를 크게 완화. (localStorage 는 다른 필수 저장에 양보)
     try {
       const backupData = JSON.stringify(DB.shopOrders || []);
-      localStorage.setItem('reniv_shopOrders_backup', backupData);
-      localStorage.setItem('reniv_shopOrders_backup_ts', String(Date.now()));
-      console.log('🛡️ shopOrders 독립 백업 완료:', (DB.shopOrders||[]).length, '건,', backupData.length, 'bytes');
+      try { if (typeof idbSet === 'function') { idbSet('reniv_shopOrders_backup', backupData); idbSet('reniv_shopOrders_backup_ts', String(Date.now())); } }
+      catch(_){ localStorage.setItem('reniv_shopOrders_backup', backupData); localStorage.setItem('reniv_shopOrders_backup_ts', String(Date.now())); }
+      console.log('🛡️ shopOrders 독립 백업 완료(IDB):', (DB.shopOrders||[]).length, '건,', backupData.length, 'bytes');
     } catch(be) { console.warn('shopOrders 백업 실패:', be); }
     // 🛡️ shops 독립 백업
     try {
