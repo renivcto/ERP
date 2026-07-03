@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.365';
+const ERP_VERSION = 'v2.3.366';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6060,8 +6060,10 @@ function _backupNpIns() {
       const _liteIns = DB.insights.map(function(it){
         if (!it) return it;
         const c = Object.assign({}, it);
-        if (Array.isArray(c.thumbs)) c.thumbs = c.thumbs.map(function(t){ return (typeof t === 'string' && t.length > 100) ? '__stripped__' : t; });
-        if (typeof c.thumb === 'string' && c.thumb.length > 100) c.thumb = '__stripped__';
+        // v2.3.366: Storage URL 은 보존 — __stripped__ 백업이 '🛟 전용 백업에서 복구' 경로로
+        //   라이브 DB 를 오염시켜 인사이트 이미지가 전 기기에서 유실된 사고의 재발 방지.
+        if (Array.isArray(c.thumbs)) c.thumbs = c.thumbs.map(function(t){ return (typeof t === 'string' && t.length > 100 && !_stoIsHttp(t)) ? '__stripped__' : t; });
+        if (typeof c.thumb === 'string' && c.thumb.length > 100 && !_stoIsHttp(c.thumb)) c.thumb = '__stripped__';
         return c;
       });
       const _q = JSON.stringify(_liteIns);
@@ -6812,6 +6814,35 @@ async function _doSaveDataInner() {
       });
     }
   });
+  // v2.3.366: 인사이트 썸네일 base64 → Storage 오프로드 — 인사이트는 IDB 오프로드가 없어
+  //   백업 슬림(__stripped__)이 복구 경로로 라이브 DB 를 오염 시 이미지가 유실되던 클래스.
+  //   업로드 성공 시 인메모리 thumbs[i] 를 URL 로 치환 → 이후 백업·서버 모두 URL(작고 안전).
+  try {
+    (dbToSave.insights || []).forEach((it) => {
+      if (!it || it.id == null) return;
+      if (Array.isArray(it.thumbs)) {
+        it.thumbs.forEach((t, ti) => {
+          if (typeof t !== 'string' || t.indexOf('data:') !== 0 || t.length < 100) return;
+          const _b = t, _iid = it.id, _ti = ti;
+          _stoMigrate('insight_thumb_' + _iid + '_' + _ti, _b, (u) => {
+            const rec = (DB.insights || []).find(x => x && x.id === _iid);
+            if (rec && Array.isArray(rec.thumbs) && rec.thumbs[_ti] === _b) {
+              rec.thumbs[_ti] = u;
+              if (rec.thumb === _b) rec.thumb = u;
+            }
+          });
+        });
+      }
+      if (typeof it.thumb === 'string' && it.thumb.indexOf('data:') === 0 && it.thumb.length >= 100
+          && !(Array.isArray(it.thumbs) && it.thumbs.indexOf(it.thumb) >= 0)) {
+        const _b2 = it.thumb, _iid2 = it.id;
+        _stoMigrate('insight_thumb_' + _iid2 + '_single', _b2, (u) => {
+          const rec = (DB.insights || []).find(x => x && x.id === _iid2);
+          if (rec && rec.thumb === _b2) rec.thumb = u;
+        });
+      }
+    });
+  } catch(_){}
   // 업체 견적서/첨부파일/통장사본 바이너리 → IndexedDB 분리 (Firestore 1MB 한도 회피)
   (dbToSave.vendors||[]).forEach((v, vi) => {
     if (v.quotes && v.quotes.length) {
@@ -45736,7 +45767,9 @@ function renderInsightPage() {
     const m = INSIGHT_CAT_META[it.cat] || INSIGHT_CAT_META['기타'];
     const skinTypeBadge = it.skinType ? `<span style="display:inline-block;font-size:11px;padding:3px 10px;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:10px;font-weight:700;white-space:nowrap;margin-left:4px">${escapeHtml(it.skinType)}</span>` : '';
     // 썸네일: 다중 배열 지원 + 레거시 단일 thumb 호환 (왼쪽 작은 썸네일)
-    const thumbs = (it.thumbs && it.thumbs.length) ? it.thumbs : (it.thumb ? [it.thumb] : []);
+    // v2.3.366: __stripped__/__idb__ 등 무효값 필터 — 깨진 이미지 아이콘 대신 카테고리 아이콘 표시
+    const thumbs = ((it.thumbs && it.thumbs.length) ? it.thumbs : (it.thumb ? [it.thumb] : []))
+      .filter(t => typeof t === 'string' && (t.indexOf('data:') === 0 || _stoIsHttp(t)));
     // 라이트박스(확대 보기)용 이미지 배열 저장
     const _insKey = 'insight-' + it.id;
     window._npCardImgs = window._npCardImgs || {};
@@ -45846,7 +45879,9 @@ function openInsightModal(editId) {
   document.getElementById('ins-insight').value = it ? (it.insight||'') : '';
   document.getElementById('ins-note').value = it ? (it.note||'') : '';
   // 썸네일 배열 (레거시 단일 thumb 호환)
-  _insightThumbs = it ? ((it.thumbs && it.thumbs.length) ? it.thumbs.slice() : (it.thumb ? [it.thumb] : [])) : [];
+  // v2.3.366: 무효값(__stripped__ 등) 필터 — 편집 화면에서 깨진 타일 방지 + 재저장 시 무효값 정리
+  _insightThumbs = (it ? ((it.thumbs && it.thumbs.length) ? it.thumbs.slice() : (it.thumb ? [it.thumb] : [])) : [])
+    .filter(t => typeof t === 'string' && (t.indexOf('data:') === 0 || _stoIsHttp(t)));
   renderInsightThumbsPreview();
   const delBtn = document.getElementById('insight-delete-btn');
   if (delBtn) delBtn.style.display = it ? '' : 'none';
