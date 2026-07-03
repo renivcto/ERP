@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.366';
+const ERP_VERSION = 'v2.3.367';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -54570,6 +54570,29 @@ function initERPWhenReady() {
         if (!merged.insights.length) {
           try { const _bI = JSON.parse(localStorage.getItem('reniv_insights_backup') || '[]'); if (Array.isArray(_bI) && _bI.length) { merged.insights = _bI; console.warn('🛟 insights 전용 백업에서 복구 —', _bI.length, '건'); } } catch(_){}
         }
+        // v2.3.367: __stripped__ 오염으로 유실된 썸네일 1회성 자가치유 복구.
+        //   서버 문서를 외부에서 패치해도 활성 세션의 일반 저장이 통째로 덮어써 되돌아가므로
+        //   (실측: 패치 69초 뒤 클라이언트 저장이 clobber), 로드 머지 직후 앱 안에서 복구해야 확실.
+        //   유효 썸네일이 하나도 없는 경우에만 적용 → 사용자가 새 이미지를 올리면 건드리지 않음.
+        try {
+          const _INS_THUMB_REPAIR = {
+            'ins_1776267623522_167': 'https://firebasestorage.googleapis.com/v0/b/reniv-erp-135a3.firebasestorage.app/o/erp%2Finsight_thumb_ins_1776267623522_167_0?alt=media&token=32120c15-a069-44c8-aa34-86c597ab307e',
+            'ins_1776307889033_552': 'https://firebasestorage.googleapis.com/v0/b/reniv-erp-135a3.firebasestorage.app/o/erp%2Finsight_thumb_ins_1776307889033_552_0?alt=media&token=1e0754d5-0841-408e-b225-a8c79ca47462',
+            'ins_1776353620371_171': 'https://firebasestorage.googleapis.com/v0/b/reniv-erp-135a3.firebasestorage.app/o/erp%2Finsight_thumb_ins_1776353620371_171_0?alt=media&token=5dea981b-cdce-45fb-813a-d5e3b21badad'
+          };
+          (merged.insights || []).forEach(r => {
+            if (!r || !_INS_THUMB_REPAIR[r.id]) return;
+            const _all = (Array.isArray(r.thumbs) && r.thumbs.length) ? r.thumbs : (r.thumb ? [r.thumb] : []);
+            const hasValid = _all.some(t => typeof t === 'string' && (t.indexOf('data:') === 0 || _stoIsHttp(t)));
+            if (!hasValid) {
+              r.thumbs = [_INS_THUMB_REPAIR[r.id]];
+              r.thumb = _INS_THUMB_REPAIR[r.id];
+              r.updatedAt = Date.now();
+              _needsResaveToFirestore = true;
+              console.log('🛟 [v2.3.367] 인사이트 썸네일 복구:', r.id);
+            }
+          });
+        } catch(_){}
         console.log('insights 병합 (newer-wins) —', merged.insights.length, '건');
       }
       // v1.9.999: newProducts 머지 — updatedAt 비교 기반 newer-wins
