@@ -1639,16 +1639,20 @@ exports.manualFetchSmartstoreOrders = functions
 const PLUSCL_BASE = 'https://service.pluscl.com';
 // ── 요청 파라미터(테스트로 조정할 값) ─ '(미확인)'은 실제 응답 보고 맞춤 ──────
 const PLUSCL_REQ = {
-  path: '/openapi',                               // Base URL 뒤 경로 (미확인)
+  // ⚠️ path: PlusCL 은 실제 API URL 을 문서에 공개하지 않고 등록업체에 별도 통보(문서 변경이력
+  //   2022/03/15 "API용 URL경로 변경, 기존 URL 미공개 전환"). service.pluscl.com 의 모든 추측 경로
+  //   40여개가 404. → PlusCL 에서 정확한 전체 URL 을 받아 아래 fullUrl 에 넣어야 동작.
+  fullUrl: '',                                    // 예: 'https://service.pluscl.com/xxx/yyy' (PlusCL 확인 필요)
+  path: '/openapi',                               // fullUrl 비었을 때만 사용(fallback, 현재 404)
   company_code: 'F103',                           // 업체코드
   company_id: '8276',                             // 등록번호
-  warehouse_code: '',                             // 창고코드 (미확인 — 필요시 채움)
-  warehouse_type_code: '',                        // 창고타입 코드 (미확인)
-  seller_code: '',                                // 화주사 코드 (미확인)
-  job_type: 'order',                              // 작업구분 (미확인)
-  type: 'shipment',                               // 작업구분 상세 = 주문 출고 내역 (미확인)
-  dateStartField: 's_date',                       // data 내 조회 시작일 필드 (미확인)
-  dateEndField: 'e_date',                         // data 내 조회 종료일 필드 (미확인)
+  warehouse_code: '',                             // 창고코드 (필요시 채움)
+  warehouse_type_code: '',                        // 창고타입 코드
+  seller_code: '',                                // 화주사 코드
+  job_type: 'report_order',                       // 작업구분 (문서 nav title 기준 — 유력)
+  type: 'report_order_out_list',                  // 작업구분 상세 = 주문 출고 내역 (문서 nav title 기준 — 유력)
+  dateStartField: 's_date',                       // data 내 조회 시작일 필드 (확인 필요)
+  dateEndField: 'e_date',                         // data 내 조회 종료일 필드 (확인 필요)
 };
 
 function plusclDateStr(d) {
@@ -1695,7 +1699,7 @@ async function plusclFetchShipments({ sDate, eDate }) {
     type: PLUSCL_REQ.type,
     data: data,
   };
-  const url = PLUSCL_BASE + PLUSCL_REQ.path;
+  const url = PLUSCL_REQ.fullUrl || (PLUSCL_BASE + PLUSCL_REQ.path);
   console.log('[PLUSCL] 요청 URL:', url);
   console.log('[PLUSCL] 요청 body:', JSON.stringify(body));
   const resp = await fetch(url, {
