@@ -5861,7 +5861,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.358';
+const ERP_VERSION = 'v2.3.359';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -32171,8 +32171,11 @@ async function saveFeedPost(){
       const _catLabel = _feedCatLabel(_feedEditingCategory);
       const _author = (u && u.name) ? u.name : '익명';
       const _time = _kstShortTimeMin();
-      // v2.3.173: 본문 포함(평문·길이제한) + 릴레이 경유(스레드 매핑)
-      const _plain = String(content || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+      // v2.3.173: 본문 포함(길이제한) + 릴레이 경유(스레드 매핑)
+      // v2.3.359: 평문 뭉개기 대신 HTML→슬랙 mrkdwn 변환(줄바꿈·서식 보존)
+      const _plain = (typeof _htmlToSlackMrkdwn === 'function')
+        ? _htmlToSlackMrkdwn(content)
+        : String(content || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
       const _bodyLine = _plain ? ('\n\n' + (_plain.length > 700 ? _plain.slice(0, 700) + ' …' : _plain)) : '';
       const _msg = `📝 *르니브 운영 업무 공유 — 새 글*\n*${_catLabel}*  ${title}${_bodyLine}\n\n👤 ${_author}  ·  ⏰ ${_time}`;
       const _pid = (typeof window !== 'undefined' && window._lastSavedFeedPostId) || '';
@@ -38521,6 +38524,30 @@ function _boardRelaySend(postId, kind, text) {
     fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body: body });
     return true;
   } catch(e) { console.warn('[board relay] 실패:', e); return false; }
+}
+// v2.3.359: 피드 본문 HTML → 슬랙 mrkdwn 변환 — 줄바꿈·굵게·기울임·취소선·목록 보존.
+//   (기존엔 태그를 공백으로, \s+ 를 하나로 합쳐 띄어쓰기·줄바꿈·서식이 전부 뭉개졌음)
+function _htmlToSlackMrkdwn(html){
+  let s = String(html == null ? '' : html);
+  // 블록 종료/줄바꿈 요소 → 개행
+  s = s.replace(/<\s*br\s*\/?>/gi, '\n');
+  s = s.replace(/<\/\s*(p|div|h[1-6]|tr|section|article|blockquote)\s*>/gi, '\n');
+  // 목록 항목 시작 → 개행 + 불릿 (</li> 는 개행 안 함 — 항목 간 빈 줄 방지)
+  s = s.replace(/<\s*li[^>]*>/gi, '\n• ');
+  s = s.replace(/<\/\s*li\s*>/gi, '');
+  // 굵게/기울임/취소선 → 슬랙 mrkdwn (밑줄·색상은 슬랙 미지원 → 텍스트만 유지)
+  s = s.replace(/<\s*(strong|b)(\s[^>]*)?>/gi, '*').replace(/<\/\s*(strong|b)\s*>/gi, '*');
+  s = s.replace(/<\s*(em|i)(\s[^>]*)?>/gi, '_').replace(/<\/\s*(em|i)\s*>/gi, '_');
+  s = s.replace(/<\s*(s|strike|del)(\s[^>]*)?>/gi, '~').replace(/<\/\s*(s|strike|del)\s*>/gi, '~');
+  // 나머지 태그 제거
+  s = s.replace(/<[^>]*>/g, '');
+  // HTML 엔티티 디코드
+  s = s.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+       .replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&apos;/g, "'").replace(/&#x27;/gi, "'");
+  // 줄별 우측 공백 제거 + 과도한 빈 줄(3개+) 축소 + 앞뒤 정리
+  s = s.split('\n').map(l => l.replace(/[ \t]+$/, '')).join('\n');
+  s = s.replace(/\n{3,}/g, '\n\n').replace(/^[ \t\n]+/, '').replace(/[ \t\n]+$/, '');
+  return s;
 }
 // 새 글/댓글/대댓글을 릴레이(있으면) 또는 기존 webhook(없으면)으로 전송
 function _boardDispatch(postId, kind, text) {
