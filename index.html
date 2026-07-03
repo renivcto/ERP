@@ -5861,7 +5861,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.361';
+const ERP_VERSION = 'v2.3.362';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -35739,8 +35739,10 @@ async function _restoreNonPoApprovalsFromBackup() {
       }
     } catch(_){}
     if (restored > 0) {
-      console.warn('🛟 [NONPO BACKUP] 일반 결재 ' + restored + '건 복구');
-      try { if (typeof saveData === 'function') saveData(); } catch(_){}
+      console.warn('🛟 [NONPO BACKUP] 일반 결재 ' + restored + '건 복구 — 서버 재동기화(saveDataNow)');
+      // v2.3.362: 디바운스 saveData 는 flood/이탈 시 서버 미반영 → 즉시·확정 저장으로 서버(erp_data/approvals)에
+      //   확실히 재기록해야 타 직원에게도 보인다. (로컬 백업이 서버 부재를 가리던 '작성자만 보임' 버그 근본수정)
+      try { if (typeof saveDataNow === 'function') saveDataNow().catch(e=>console.warn('[NONPO SYNC] 재동기화 실패:', e)); else if (typeof saveData === 'function') saveData(); } catch(_){}
       try { renderApprovalPage(); } catch(_){}
     }
   } catch(e) { console.warn('_restoreNonPoApprovalsFromBackup:', e); }
@@ -35749,6 +35751,18 @@ async function _restoreNonPoApprovalsFromBackup() {
 }
 function renderApprovalNonPoTable() {
   try { _restoreNonPoApprovalsFromBackup(); } catch(_){}
+  // v2.3.362: 세션 1회 강제 서버 동기화 — 작성자 로컬(백업/localStorage)에만 있고 서버 미반영된
+  //   일반결재를 erp_data/approvals 에 확실히 올려 타 직원도 보이게 함. 쓰기권한자·non_po 존재 시에만.
+  //   (복원 restored=0 이라 위 재동기화가 안 걸리는 케이스까지 커버) COUNT-GUARD 가 서버전용 결재는 보존.
+  try {
+    if (!window._nonpoForceSynced && Array.isArray(DB.approvals) && DB.approvals.some(a => a && a.type === 'non_po_approval')) {
+      const _canWr = window._currentUser && (window._currentUser.isAdmin === true || window._currentUser.permission === 'write');
+      if (_canWr && typeof saveDataNow === 'function') {
+        window._nonpoForceSynced = true;
+        saveDataNow().then(()=>console.log('✅ [NONPO SYNC] 일반결재 서버 재동기화 완료')).catch(e=>console.warn('[NONPO SYNC] 실패:', e));
+      }
+    }
+  } catch(_){}
   const tb = $('ap-nonpo-table');
   if (!tb) return;
   // v1.9.271: 작성일자(createdAt) 기준 최신순 DESC — 최근 작성된 결재 요청이 맨 위
