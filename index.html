@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.385';
+const ERP_VERSION = 'v2.3.386';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -24527,11 +24527,14 @@ function showItemDetail(id) {
       ${i.material?`<div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">재질</div><span style="font-size:13px;font-weight:400">${i.material}</span></div>`:''}
       ${i.quoteFileName?`<div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">견적서</div><button onclick="openItemQuoteFile(${i.id})" title="${(i.quoteFileName||'').replace(/\"/g,'&quot;')}" style="display:inline-flex;align-items:center;gap:5px;background:#fdf2f8;color:#c4708a;border:1px solid #f0c0d4;padding:5px 12px;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#d97b9a\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z\"/><polyline points=\"14 2 14 8 20 8\"/></svg>${i.quoteFileName||'견적서'}</button></div>`:''}
       ${i.note?`<div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">비고</div><div style="font-size:13px;font-weight:400;white-space:pre-wrap;line-height:1.7">${i.note}</div></div>`:''}
+      ${(i.type!=='OEM'&&i.type!=='외주가공')?`<div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">보관 창고 <span style="color:#94a3b8;font-weight:400">(전체 ${fmt(i.stock)})</span></div><div id="item-detail-wh"><span style="color:#cbd5e1;font-size:12px">불러오는 중…</span></div></div>`:''}
     </div>
 
   `;
   $('item-detail-edit-btn').onclick = () => { closeModal('item-detail'); editItem(id); };
   openModal('item-detail');
+  // v2.3.386: 보관 창고별 재고 분포 표시(읽기전용) — 창고 목록 로드 후 채움
+  try { if (typeof _whEnsureLoaded==='function') _whEnsureLoaded().then(()=>{ const _el=document.getElementById('item-detail-wh'); if(_el) _el.innerHTML=_itemWhDistHtml(i); }).catch(()=>{}); } catch(_){}
   // v1.9.727: IDB 에서 이미지 비동기 로드 (마커일 경우)
   if (_imgValDetail === '__idb__') {
     try {
@@ -27234,22 +27237,25 @@ async function populateItemWhSelect(selectedId){
   if(selectedId!=null && selectedId!=='') sel.value=String(selectedId);
   try{ _renderItemWhDist(); }catch(_){}
 }
-// v2.3.385: 품목 모달 '보관 창고' — 현재 창고별 재고 분포를 읽기전용 배지로 표시.
+// v2.3.385/386: 품목의 현재 창고별 재고 분포를 읽기전용 배지 HTML 로 반환(공용).
 //   _itemWhEffective 파생값(whStock+미배정 잔여)만 읽음 → 데이터 변경 없음. 수량 수정은 재고관리에서.
-function _renderItemWhDist(){
-  const box=document.getElementById('i-wh-dist'); if(!box) return;
-  const id=(typeof editingId!=='undefined' && editingId)?editingId['add-item']:null;
-  const it=(id!=null&&id!=='')?(DB.items||[]).find(i=>i.id===id):null;
-  if(!it){ box.innerHTML=''; return; }   // 신규 등록: 표시 안 함
+function _itemWhDistHtml(it){
+  if(!it) return '';
   const eff=(typeof _itemWhEffective==='function')?_itemWhEffective(it):{};
   const parts=[];
   Object.keys(eff).forEach(k=>{ if(k==='__un__')return; const q=Number(eff[k])||0; if(q===0)return;
     parts.push(`<span style="display:inline-flex;align-items:center;gap:4px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:600;margin:2px 4px 0 0;white-space:nowrap">${_whEsc(_whName(k))} <b>${fmt(q)}</b></span>`);
   });
   if(eff['__un__']!=null && eff['__un__']!==0) parts.push(`<span style="display:inline-flex;align-items:center;gap:4px;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:999px;padding:2px 9px;font-size:11.5px;margin:2px 4px 0 0;white-space:nowrap">미지정 <b>${fmt(eff['__un__'])}</b></span>`);
-  const total=Number(it.stock)||0;
-  box.innerHTML=`<div style="font-size:11px;color:#64748b;margin-bottom:3px">📦 현재 보관 현황 <span style="color:#94a3b8">(전체 ${fmt(total)} · 수량 변경은 재고관리에서)</span></div>`
-    + (parts.length?`<div>${parts.join('')}</div>`:`<div style="font-size:11.5px;color:#cbd5e1">보관 재고 없음</div>`);
+  return parts.length?parts.join(''):'<span style="font-size:11.5px;color:#cbd5e1">보관 재고 없음</span>';
+}
+// v2.3.385: 품목 등록/수정 모달 '보관 창고' 현황(읽기전용)
+function _renderItemWhDist(){
+  const box=document.getElementById('i-wh-dist'); if(!box) return;
+  const id=(typeof editingId!=='undefined' && editingId)?editingId['add-item']:null;
+  const it=(id!=null&&id!=='')?(DB.items||[]).find(i=>i.id===id):null;
+  if(!it){ box.innerHTML=''; return; }   // 신규 등록: 표시 안 함
+  box.innerHTML=`<div style="font-size:11px;color:#64748b;margin-bottom:3px">📦 현재 보관 현황 <span style="color:#94a3b8">(전체 ${fmt(Number(it.stock)||0)} · 수량 변경은 재고관리에서)</span></div><div>${_itemWhDistHtml(it)}</div>`;
 }
 
 // ========================= PlusCL 현재고 (완제품 탭 열) — v2.3.361 =========================
