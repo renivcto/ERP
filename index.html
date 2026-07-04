@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.373';
+const ERP_VERSION = 'v2.3.374';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26720,6 +26720,30 @@ function _itemWhEffective(item){
   }
   return eff;
 }
+// v2.3.374: 총재고(item.stock) 수정 시 창고 배정(whStock)이 새 총재고를 초과하면 비례 축소.
+//   미지정 = stock - 배정합 이 음수가 되는 것 방지(재고 수정이 '미지정 창고로 이동'처럼 보이던 버그).
+//   배정합 <= 새 재고면 손대지 않음(늘어난 분은 양수 미지정으로 정상 흡수).
+function _reconcileWhToStock(item, newStock){
+  try{
+    if(!item || !item.whStock || typeof item.whStock!=='object') return;
+    newStock=Number(newStock)||0;
+    const keys=Object.keys(item.whStock).filter(k=>_whById(k) && (Number(item.whStock[k])||0)>0);
+    if(!keys.length) return;
+    const assignedSum=keys.reduce((s,k)=>s+(Number(item.whStock[k])||0),0);
+    if(assignedSum<=newStock) return;               // 미지정 음수 아님 → 유지
+    const scale = assignedSum>0 ? newStock/assignedSum : 0;
+    const newWh={};
+    keys.forEach(k=>{ const q=Math.round((Number(item.whStock[k])||0)*scale); if(q>0) newWh[k]=q; });
+    // 반올림 보정 — 합을 정확히 newStock 으로 (가장 큰 창고에서 가감)
+    let sum=Object.keys(newWh).reduce((s,k)=>s+newWh[k],0);
+    const diff=newStock-sum;
+    if(diff!==0){
+      const ks=Object.keys(newWh);
+      if(ks.length){ const big=ks.sort((a,b)=>newWh[b]-newWh[a])[0]; newWh[big]=Math.max(0, newWh[big]+diff); if(newWh[big]<=0) delete newWh[big]; }
+    }
+    item.whStock=newWh;
+  }catch(e){ console.warn('_reconcileWhToStock 실패:', e); }
+}
 // 재고현황 '창고' 열 배지
 function _stockWhBadges(item){
   const stock = Number(item&&item.stock)||0;
@@ -27234,9 +27258,31 @@ async function _loadPlusclStock(){
   } catch(e){ console.error('[PlusCL 현재고]', e); showNotif('❌ PlusCL 현재고 실패: ' + ((e&&e.message)||e), 'error'); }
 }
 
+// v2.3.374: 창고 배정(whStock)이 총재고(stock)를 초과한 품목(음수 미지정) 일회성 자가 재조정.
+//   재고 수동수정 등으로 이미 생긴 불일치를 새로고침만으로 정정. 멱등(정정 후 매칭 0).
+function _reconcileAllWhOnce(){
+  if(window._whReconcileDone) return;
+  if(!window._WH || !window._WH.loaded) return;   // 창고 목록 로드 전엔 스킵(다음 호출에서)
+  window._whReconcileDone = true;
+  let n=0;
+  (DB.items||[]).forEach(it=>{
+    if(!it || !it.whStock || typeof it.whStock!=='object') return;
+    const keys=Object.keys(it.whStock).filter(k=>_whById(k) && (Number(it.whStock[k])||0)>0);
+    if(!keys.length) return;
+    const assignedSum=keys.reduce((s,k)=>s+(Number(it.whStock[k])||0),0);
+    if(assignedSum > (Number(it.stock)||0)){ _reconcileWhToStock(it, Number(it.stock)||0); n++; }
+  });
+  if(n>0){
+    console.log('🔧 [v2.3.374] 창고 배정>재고 불일치 '+n+'건 자동 재조정');
+    try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(_){}
+    try{ if(typeof saveData==='function') saveData(); }catch(_){}
+    try{ showNotif('🔧 창고 재고 불일치 '+n+'건 자동 정정 (미지정 음수 제거)','success'); }catch(_){}
+  }
+}
 function renderStock() {
   // v2.3.342: 창고 목록 지연 로드 후 재렌더(창고 배지 반영)
-  if (!window._WH || !window._WH.loaded) { try { _whEnsureLoaded().then(()=>{ try{ renderStockTable(); }catch(_){}}).catch(()=>{}); } catch(_){} }
+  if (!window._WH || !window._WH.loaded) { try { _whEnsureLoaded().then(()=>{ try{ _reconcileAllWhOnce(); renderStockTable(); }catch(_){}}).catch(()=>{}); } catch(_){} }
+  else { try { _reconcileAllWhOnce(); } catch(_){} }
   // v2.3.361: PlusCL 현재고 스냅샷·매핑 지연 로드
   if (!window._PLUSCL || !window._PLUSCL.loaded) { try { _ensurePlusclLoaded().then(()=>{ try{ renderStockTable(); }catch(_){}}).catch(()=>{}); } catch(_){} }
   renderStockTable();
@@ -27320,7 +27366,11 @@ async function saveStockEdit() {
     });
   }
   const idx = DB.items.findIndex(i => i.id === id);
-  if (idx >= 0) DB.items[idx].stock = newQty;
+  if (idx >= 0){
+    DB.items[idx].stock = newQty;
+    // v2.3.374: 총재고 수정을 창고 배정에 반영 — 배정합이 새 재고 초과 시 비례 축소(음수 미지정 방지)
+    _reconcileWhToStock(DB.items[idx], newQty);
+  }
 
   // v1.9.151 — 즉시 저장 (디바운스 우회) + localStorage 즉시 반영
   //   디바운스 saveData는 800ms 지연되어 저장 직전에 새로고침하면 유실됨 → 재고값 원복 원인
