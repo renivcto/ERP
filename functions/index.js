@@ -1924,7 +1924,10 @@ exports.manualFetchPlusclStock = functions
     if (!context.auth) throw new functions.https.HttpsError('unauthenticated', '로그인이 필요합니다.');
     const uid = context.auth.uid;
     const userDoc = await admin.firestore().doc(`users/${uid}`).get();
-    if (!userDoc.exists || userDoc.data().isAdmin !== true) throw new functions.https.HttpsError('permission-denied', '관리자 권한이 필요합니다.');
+    // v2.3.380: 관리자 전용 → 쓰기 권한자 허용 (활성 + (isAdmin || permission==='write')) — firestore.rules canWrite 와 동일
+    const _u = userDoc.exists ? (userDoc.data() || {}) : {};
+    const _canWrite = _u.status === '활성' && (_u.isAdmin === true || _u.permission === 'write');
+    if (!_canWrite) throw new functions.https.HttpsError('permission-denied', '쓰기 권한이 필요합니다.');
     try {
       return await ingestPlusclStock();
     } catch (err) {
