@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.383';
+const ERP_VERSION = 'v2.3.384';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26480,6 +26480,7 @@ function saveProduction() {
     const use = (r.qty||0) * qty;
     const target = ref.arr[ref.idx];
     target.stock = Math.max(0, (target.stock||0) - use);
+    target.updatedAt = Date.now();   // v2.3.384: 로드 머지 EDIT RECOVERY 가 차감본을 보존하도록(안 찍으면 서버 옛값에 원복)
     DB.stockHistory.push({
       id: nextId('stock'), itemId: r.itemId, type: 'out',
       qty: use, price: target.price||0, date: prodDate, lot: target.lot||'',
@@ -26491,6 +26492,7 @@ function saveProduction() {
   const pIdx = DB.items.findIndex(i => i.id === productId);
   if (pIdx >= 0) {
     DB.items[pIdx].stock = (DB.items[pIdx].stock||0) + qty;
+    DB.items[pIdx].updatedAt = Date.now();   // v2.3.384: 머지 원복 방지
   }
   DB.stockHistory.push({
     id: nextId('stock'), itemId: productId, type: 'in',
@@ -26502,10 +26504,14 @@ function saveProduction() {
   DB.productions.push({
     id: nextId('prod'), productId, orderDate: prodDate, inDate: prodDate, payDate: '',
     qty, amount: Math.round(totalCost), vendorId: 0,
-    status: '생산완료', progress: 100, checks: []
+    status: '생산완료', progress: 100, checks: [], manualDone: true, updatedAt: Date.now()
   });
 
-  saveData(); closeModal('add-production'); renderProdTable();
+  // v2.3.384: 즉시 저장 — 신규 생산도 수정 분기(26443)처럼 디바운스 유실 없이 반영(BOM 차감 원복 차단)
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+  if (typeof saveDataNow === 'function') saveDataNow().catch(e=>console.error('생산 저장 실패:', e));
+  else saveData();
+  closeModal('add-production'); renderProdTable();
   if (typeof renderStock === 'function') renderStock();
   updateBadges();
   showNotif(`완제품 ${fmt(qty)}개 생산 완료, 재고에 반영되었습니다`,'success');
@@ -26576,6 +26582,7 @@ function restoreProductionStock(prod, opts) {
     const restore = (r.qty||0) * qty;
     const target = ref.arr[ref.idx];
     target.stock = (target.stock||0) + restore;
+    target.updatedAt = Date.now();   // v2.3.384: 머지 원복 방지(생산삭제 복구도 대칭)
     DB.stockHistory.push({
       id: nextId('stock'), itemId: r.itemId, type: 'in',
       qty: restore, price: target.price||0, date: today(),
@@ -26587,6 +26594,7 @@ function restoreProductionStock(prod, opts) {
     const pIdx = DB.items.findIndex(i => i.id === prod.productId);
     if (pIdx >= 0) {
       DB.items[pIdx].stock = Math.max(0, (DB.items[pIdx].stock||0) - qty);
+      DB.items[pIdx].updatedAt = Date.now();   // v2.3.384: 머지 원복 방지
       DB.stockHistory.push({
         id: nextId('stock'), itemId: prod.productId, type: 'out',
         qty: qty, price: DB.items[pIdx].price||0, date: today(),
@@ -26612,6 +26620,7 @@ function applyProductionStock(prod, date) {
     const it = ref.arr[ref.idx];
     const use = (r.qty||0) * qty;
     it.stock = Math.max(0, (it.stock||0) - use);
+    it.updatedAt = Date.now();   // v2.3.384: 머지 원복 방지
     totalCost += (it.price||0) * use;
     DB.stockHistory.push({
       id: nextId('stock'), itemId: r.itemId, type: 'out',
@@ -26622,6 +26631,7 @@ function applyProductionStock(prod, date) {
   const pIdx = DB.items.findIndex(i => i.id === prod.productId);
   if (pIdx >= 0) {
     DB.items[pIdx].stock = (DB.items[pIdx].stock||0) + qty;
+    DB.items[pIdx].updatedAt = Date.now();   // v2.3.384: 머지 원복 방지
     DB.stockHistory.push({
       id: nextId('stock'), itemId: prod.productId, type: 'in',
       qty: qty, price: qty>0 ? Math.round(totalCost/qty) : 0, date: useDate, lot: '',
@@ -27450,6 +27460,7 @@ async function saveStockEdit() {
   const idx = DB.items.findIndex(i => i.id === id);
   if (idx >= 0){
     DB.items[idx].stock = newQty;
+    DB.items[idx].updatedAt = Date.now();   // v2.3.384: 머지 EDIT RECOVERY 보존(재조정 안 도는 케이스 대비)
     // v2.3.374: 총재고 수정을 창고 배정에 반영 — 배정합이 새 재고 초과 시 비례 축소(음수 미지정 방지)
     _reconcileWhToStock(DB.items[idx], newQty);
   }
