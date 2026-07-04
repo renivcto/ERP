@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.372';
+const ERP_VERSION = 'v2.3.373';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27010,6 +27010,8 @@ function _wmOnItem(){
 //   반환 {ok, err?, fromName?, toName?}. 창고 이동 모달과 품목 창고 패널이 공용.
 function _applyStockMove(it, from, to, qty){
   if(!it) return {ok:false, err:'품목을 선택하세요'};
+  if(!from) return {ok:false, err:'출발 창고를 선택하세요'};
+  if(!to) return {ok:false, err:'창고를 선택하세요'};
   if(from===to) return {ok:false, err:'출발과 도착 창고가 같습니다'};
   if(qty<=0) return {ok:false, err:'이동 수량을 입력하세요'};
   const eff=_itemWhEffective(it);
@@ -27103,7 +27105,7 @@ function _renderItemWhPanel(itemId){
       <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
         <div style="flex:1;min-width:120px"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">출발 창고</label><select class="fs" id="iwp-from" onchange="_iwpAvail(${it.id})" style="width:100%">${_iwpWhOptions()}</select></div>
         <div style="align-self:center;color:#94a3b8;font-size:16px;padding-bottom:6px">→</div>
-        <div style="flex:1;min-width:120px"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">도착 창고</label><select class="fs" id="iwp-to" style="width:100%">${_iwpWhOptions()}</select></div>
+        <div style="flex:1;min-width:120px"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">도착 창고</label><select class="fs" id="iwp-to" style="width:100%">${_iwpWhOptionsTo()}</select></div>
         <div style="width:88px"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">수량</label><input class="fi" id="iwp-qty" type="number" min="1" placeholder="0" oninput="_iwpAvail(${it.id})" style="width:100%"></div>
         <button class="btn btn-primary" onclick="_iwpMove(${it.id})" style="height:34px;white-space:nowrap">이동</button>
       </div>
@@ -27112,10 +27114,17 @@ function _renderItemWhPanel(itemId){
 
     <div style="font-size:12px;font-weight:700;color:#475569;margin-bottom:6px">🕘 이동 히스토리 <span style="font-size:11px;color:#94a3b8;font-weight:500">(${hist.length}건)</span></div>
     <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;max-height:220px;overflow-y:auto">${histRows}</div>`;
-  // 도착 창고 기본값을 출발과 다르게
-  const toSel=document.getElementById('iwp-to');
-  if(toSel){ const keys=Object.keys(eff).filter(k=>k!=='__un__'); if(keys.length>1) toSel.value=keys[1]; else if((window._WH.list||[]).length) toSel.value=window._WH.list[0].id; }
+  // v2.3.373: 출발 창고 = 현재 재고가 가장 많은 창고(현재 창고)로 기본 선택. 도착은 '창고를 선택하세요' 유지.
+  const fromSel=document.getElementById('iwp-from');
+  if(fromSel){
+    let primary='__un__', best=-Infinity;
+    Object.keys(eff).forEach(k=>{ const q=Number(eff[k])||0; if(q>0 && q>best){ best=q; primary=k; } });
+    fromSel.value=primary;
+  }
   _iwpAvail(it.id);
+}
+function _iwpWhOptionsTo(){
+  return '<option value="">창고를 선택하세요.</option><option value="__un__">미지정 (기본 재고)</option>' + (window._WH.list||[]).map(w=>`<option value="${w.id}">${_whEsc(w.name)}</option>`).join('');
 }
 function _iwpAvail(itemId){
   const it=(DB.items||[]).find(i=>String(i.id)===String(itemId));
