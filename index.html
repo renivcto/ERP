@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.374';
+const ERP_VERSION = 'v2.3.375';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26742,6 +26742,7 @@ function _reconcileWhToStock(item, newStock){
       if(ks.length){ const big=ks.sort((a,b)=>newWh[b]-newWh[a])[0]; newWh[big]=Math.max(0, newWh[big]+diff); if(newWh[big]<=0) delete newWh[big]; }
     }
     item.whStock=newWh;
+    item.updatedAt=Date.now();   // v2.3.375: 머지 newer-wins 에서 이기도록 갱신(안 하면 서버 옛값에 밀림)
   }catch(e){ console.warn('_reconcileWhToStock 실패:', e); }
 }
 // 재고현황 '창고' 열 배지
@@ -27260,7 +27261,7 @@ async function _loadPlusclStock(){
 
 // v2.3.374: 창고 배정(whStock)이 총재고(stock)를 초과한 품목(음수 미지정) 일회성 자가 재조정.
 //   재고 수동수정 등으로 이미 생긴 불일치를 새로고침만으로 정정. 멱등(정정 후 매칭 0).
-function _reconcileAllWhOnce(){
+async function _reconcileAllWhOnce(){
   if(window._whReconcileDone) return;
   if(!window._WH || !window._WH.loaded) return;   // 창고 목록 로드 전엔 스킵(다음 호출에서)
   window._whReconcileDone = true;
@@ -27273,9 +27274,11 @@ function _reconcileAllWhOnce(){
     if(assignedSum > (Number(it.stock)||0)){ _reconcileWhToStock(it, Number(it.stock)||0); n++; }
   });
   if(n>0){
-    console.log('🔧 [v2.3.374] 창고 배정>재고 불일치 '+n+'건 자동 재조정');
+    console.log('🔧 [v2.3.375] 창고 배정>재고 불일치 '+n+'건 자동 재조정');
     try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(_){}
-    try{ if(typeof saveData==='function') saveData(); }catch(_){}
+    try{ if(typeof renderStockTable==='function') renderStockTable(); }catch(_){}
+    // v2.3.375: 디바운스 saveData 는 유실 위험 → 즉시 저장(saveStockEdit 와 동일하게 확실 반영)
+    try{ if(typeof saveDataNow==='function') await saveDataNow(); else if(typeof saveData==='function') saveData(); }catch(e){ console.warn('창고 재조정 저장 실패:', e); }
     try{ showNotif('🔧 창고 재고 불일치 '+n+'건 자동 정정 (미지정 음수 제거)','success'); }catch(_){}
   }
 }
