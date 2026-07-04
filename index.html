@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.370';
+const ERP_VERSION = 'v2.3.371';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27006,16 +27006,15 @@ function _wmOnItem(){
   const from=document.getElementById('wm-from');
   if(from&&av){ const fk=from.value; const avail = Number(eff[fk])||0; av.textContent=`출발 창고 가용 수량: ${fmt(avail)}`; }
 }
-async function saveStockMove(){
-  const sel=document.getElementById('wm-item'); const it=(DB.items||[]).find(i=>String(i.id)===String(sel&&sel.value));
-  if(!it){ showNotif('품목을 선택하세요','warning'); return; }
-  const from=document.getElementById('wm-from').value, to=document.getElementById('wm-to').value;
-  const qty=parseInt(document.getElementById('wm-qty').value)||0;
-  if(from===to){ showNotif('출발과 도착 창고가 같습니다','warning'); return; }
-  if(qty<=0){ showNotif('이동 수량을 입력하세요','warning'); return; }
+// v2.3.371: 이동 로직 코어 — 검증+whStock 재구성+stockHistory 기록(로컬반영까지). 저장(saveDataNow)은 호출측.
+//   반환 {ok, err?, fromName?, toName?}. 창고 이동 모달과 품목 창고 패널이 공용.
+function _applyStockMove(it, from, to, qty){
+  if(!it) return {ok:false, err:'품목을 선택하세요'};
+  if(from===to) return {ok:false, err:'출발과 도착 창고가 같습니다'};
+  if(qty<=0) return {ok:false, err:'이동 수량을 입력하세요'};
   const eff=_itemWhEffective(it);
   const avail = Number(eff[from])||0;
-  if(qty>avail){ showNotif(`가용 수량(${fmt(avail)})을 초과했습니다`,'warning'); return; }
+  if(qty>avail) return {ok:false, err:`가용 수량(${fmt(avail)})을 초과했습니다`};
   // v2.3.356: 실효맵에 이동 적용 후 whStock 재구성 — '__un__' 과 기본창고(defaultWh)는 잔여로 남겨(암묵)
   //   나머지 실 창고만 명시 저장. 외부 재고변동(자동차감 등)이 잔여를 자동 흡수하도록 유지.
   eff[from]=(Number(eff[from])||0)-qty;
@@ -27030,10 +27029,105 @@ async function saveStockMove(){
   DB.stockHistory=DB.stockHistory||[];
   DB.stockHistory.push({ id: nextId('stock'), itemId: it.id, type:'move', qty: qty, price: it.price||0, fromWh: from, toWh: to, date: new Date().toISOString().slice(0,10), lot: it.lot||'', note:`재고이동: ${fromName} → ${toName}` });
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(_){}
+  return {ok:true, fromName, toName};
+}
+async function saveStockMove(){
+  const sel=document.getElementById('wm-item'); const it=(DB.items||[]).find(i=>String(i.id)===String(sel&&sel.value));
+  const from=(document.getElementById('wm-from')||{}).value, to=(document.getElementById('wm-to')||{}).value;
+  const qty=parseInt((document.getElementById('wm-qty')||{}).value)||0;
+  const r=_applyStockMove(it, from, to, qty);
+  if(!r.ok){ showNotif(r.err,'warning'); return; }
   closeModal('stock-move-modal');
   if(typeof renderStock==='function') renderStock();
   showNotif('재고 이동 중…','info');
-  try{ if(typeof saveDataNow==='function') await saveDataNow(); else await _doSaveData(); showNotif(`재고 이동 완료: ${it.name} ${fromName}→${toName} ${fmt(qty)}개`,'success'); }
+  try{ if(typeof saveDataNow==='function') await saveDataNow(); else await _doSaveData(); showNotif(`재고 이동 완료: ${it.name} ${r.fromName}→${r.toName} ${fmt(qty)}개`,'success'); }
+  catch(e){ showNotif('⚠️ 재고 이동 저장 실패: '+(e&&e.message||e),'error'); }
+}
+
+// ── v2.3.371: 품목 창고 패널 — 재고현황 '창고' 셀 클릭 시 열림.
+//   한 화면에서 ① 현재 창고별 분포 ② 즉시 이동 ③ 이동 히스토리(날짜·수량) 모두 표시.
+async function openItemWhPanel(itemId){
+  // 조회(분포·히스토리)는 전 직원 허용, 이동만 쓰기 권한 체크(_iwpMove)
+  await _whEnsureLoaded(true);
+  if (!(window._WH.list||[]).length){ showNotif('먼저 창고를 등록하세요 (🏭 창고 관리)','warning'); return; }
+  const it=(DB.items||[]).find(i=>String(i.id)===String(itemId));
+  if(!it){ showNotif('품목을 찾을 수 없습니다','warning'); return; }
+  const o=_ensureOverlay('item-wh-panel');
+  o.innerHTML = `<div class="modal" style="max-width:600px">
+    <div class="modal-hdr"><span class="modal-ttl">🏭 <span id="iwp-title"></span></span><button class="modal-x" onclick="closeModal('item-wh-panel')">✕</button></div>
+    <div class="modal-body" id="iwp-body"></div>
+    <div class="modal-ft"><button class="btn btn-outline" onclick="closeModal('item-wh-panel')">닫기</button></div>
+  </div>`;
+  openModal('item-wh-panel');
+  _renderItemWhPanel(itemId);
+}
+function _iwpWhOptions(){
+  return '<option value="__un__">미지정 (기본 재고)</option>' + (window._WH.list||[]).map(w=>`<option value="${w.id}">${_whEsc(w.name)}</option>`).join('');
+}
+function _renderItemWhPanel(itemId){
+  const it=(DB.items||[]).find(i=>String(i.id)===String(itemId));
+  const body=document.getElementById('iwp-body'); if(!it||!body) return;
+  const titleEl=document.getElementById('iwp-title'); if(titleEl) titleEl.innerHTML=`${_whEsc(it.name)} <span style="font-size:12px;color:#64748b;font-weight:500">· 전체 ${fmt(it.stock)}</span>`;
+  const eff=_itemWhEffective(it);
+  // ① 현재 분포
+  const distParts=[];
+  Object.keys(eff).forEach(k=>{ if(k==='__un__') return; const q=Number(eff[k])||0; if(q===0) return;
+    distParts.push(`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid #f1f5f9"><span style="font-size:13px;color:#334155">${_whEsc(_whName(k))}</span><b style="font-size:14px;color:#4338ca">${fmt(q)}</b></div>`);
+  });
+  if(eff['__un__']!=null && eff['__un__']!==0) distParts.push(`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid #f1f5f9"><span style="font-size:13px;color:#64748b">미지정 (기본 재고)</span><b style="font-size:14px;color:#64748b">${fmt(eff['__un__'])}</b></div>`);
+  if(!distParts.length) distParts.push('<div style="padding:12px;text-align:center;color:#94a3b8;font-size:12px">재고 없음</div>');
+  // ③ 이동 히스토리
+  const hist=(DB.stockHistory||[]).filter(h=>h && String(h.itemId)===String(it.id) && h.type==='move').slice().reverse();
+  const histRows = hist.length ? hist.map(h=>{
+    const fn=(h.fromWh==='__un__')?'미지정':(_whName(h.fromWh)||h.fromWh||'-');
+    const tn=(h.toWh==='__un__')?'미지정':(_whName(h.toWh)||h.toWh||'-');
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid #f1f5f9;font-size:12px">
+      <span style="color:#94a3b8;white-space:nowrap;font-variant-numeric:tabular-nums">${_whEsc(h.date||'-')}</span>
+      <span style="flex:1;color:#334155">${_whEsc(fn)} <span style="color:#94a3b8">→</span> ${_whEsc(tn)}</span>
+      <b style="white-space:nowrap;color:#0f172a">${fmt(h.qty)}개</b></div>`;
+  }).join('') : '<div style="padding:14px;text-align:center;color:#94a3b8;font-size:12px">이동 기록이 없습니다</div>';
+  body.innerHTML = `
+    <div style="font-size:12px;font-weight:700;color:#475569;margin-bottom:6px">📦 현재 창고별 재고</div>
+    <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:16px">${distParts.join('')}</div>
+
+    <div style="font-size:12px;font-weight:700;color:#475569;margin-bottom:6px">🔁 재고 이동</div>
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:16px">
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div style="flex:1;min-width:120px"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">출발 창고</label><select class="fs" id="iwp-from" onchange="_iwpAvail(${it.id})" style="width:100%">${_iwpWhOptions()}</select></div>
+        <div style="align-self:center;color:#94a3b8;font-size:16px;padding-bottom:6px">→</div>
+        <div style="flex:1;min-width:120px"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">도착 창고</label><select class="fs" id="iwp-to" style="width:100%">${_iwpWhOptions()}</select></div>
+        <div style="width:88px"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">수량</label><input class="fi" id="iwp-qty" type="number" min="1" placeholder="0" oninput="_iwpAvail(${it.id})" style="width:100%"></div>
+        <button class="btn btn-primary" onclick="_iwpMove(${it.id})" style="height:34px;white-space:nowrap">이동</button>
+      </div>
+      <div id="iwp-avail" style="font-size:11px;color:#64748b;margin-top:6px"></div>
+    </div>
+
+    <div style="font-size:12px;font-weight:700;color:#475569;margin-bottom:6px">🕘 이동 히스토리 <span style="font-size:11px;color:#94a3b8;font-weight:500">(${hist.length}건)</span></div>
+    <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;max-height:220px;overflow-y:auto">${histRows}</div>`;
+  // 도착 창고 기본값을 출발과 다르게
+  const toSel=document.getElementById('iwp-to');
+  if(toSel){ const keys=Object.keys(eff).filter(k=>k!=='__un__'); if(keys.length>1) toSel.value=keys[1]; else if((window._WH.list||[]).length) toSel.value=window._WH.list[0].id; }
+  _iwpAvail(it.id);
+}
+function _iwpAvail(itemId){
+  const it=(DB.items||[]).find(i=>String(i.id)===String(itemId));
+  const from=document.getElementById('iwp-from'), av=document.getElementById('iwp-avail');
+  if(!it||!from||!av) return;
+  const eff=_itemWhEffective(it);
+  const avail=Number(eff[from.value])||0;
+  av.textContent=`출발 창고 가용: ${fmt(avail)}개`;
+}
+async function _iwpMove(itemId){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const it=(DB.items||[]).find(i=>String(i.id)===String(itemId));
+  const from=(document.getElementById('iwp-from')||{}).value, to=(document.getElementById('iwp-to')||{}).value;
+  const qty=parseInt((document.getElementById('iwp-qty')||{}).value)||0;
+  const r=_applyStockMove(it, from, to, qty);
+  if(!r.ok){ showNotif(r.err,'warning'); return; }
+  _renderItemWhPanel(itemId);              // 패널(분포+히스토리) 즉시 갱신
+  if(typeof renderStock==='function') renderStock();
+  showNotif('재고 이동 중…','info');
+  try{ if(typeof saveDataNow==='function') await saveDataNow(); else await _doSaveData(); showNotif(`이동 완료: ${r.fromName}→${r.toName} ${fmt(qty)}개`,'success'); }
   catch(e){ showNotif('⚠️ 재고 이동 저장 실패: '+(e&&e.message||e),'error'); }
 }
 // 품목 등록/수정 모달의 '기본 창고' 드롭박스 채우기
@@ -27312,7 +27406,7 @@ function renderStockTable() {
       <td style="font-family:monospace;font-size:12px;font-weight:500;text-align:center">${i.code}</td>
       <td class="lnk" onclick="showItemDetail(${i.id})" style="text-align:center">${i.name}</td>
       <td style="font-size:12px;color:var(--gray-500);text-align:center">${i.spec||'-'}</td>
-      <td style="text-align:center;line-height:1.7">${_isOemRow2 ? '<span style="color:var(--gray-300)">-</span>' : _stockWhBadges(i)}</td>
+      <td style="text-align:center;line-height:1.7">${_isOemRow2 ? '<span style="color:var(--gray-300)">-</span>' : `<div onclick="openItemWhPanel(${i.id})" title="클릭 — 창고 이동 · 이동 히스토리 보기" style="cursor:pointer;border-radius:8px;padding:2px 4px;transition:background .12s" onmouseover="this.style.background='#f5f3ff'" onmouseout="this.style.background='transparent'">${_stockWhBadges(i)}</div>`}</td>
       <td style="text-align:center;font-size:13px"><strong>${fmt(i.stock)}</strong></td>
       <td style="text-align:center;font-size:13px;${_showPl?'':'display:none'}">${_showPl ? _plusclCellHtml(i) : ''}</td>
       <td style="text-align:center;color:var(--sky-700);font-weight:500;font-size:13px;font-variant-numeric:tabular-nums">${fmtW(stockVal)}</td>
