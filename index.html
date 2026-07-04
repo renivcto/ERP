@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.375';
+const ERP_VERSION = 'v2.3.376';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27096,10 +27096,12 @@ function _renderItemWhPanel(itemId){
   const body=document.getElementById('iwp-body'); if(!it||!body) return;
   const titleEl=document.getElementById('iwp-title'); if(titleEl) titleEl.innerHTML=`${_whEsc(it.name)} <span style="font-size:12px;color:#64748b;font-weight:500">· 전체 ${fmt(it.stock)}</span>`;
   const eff=_itemWhEffective(it);
-  // ① 현재 분포
+  // ① 현재 분포 — v2.3.376: 창고명을 드롭박스로(잘못 지정한 창고를 선택만으로 변경 = 전량 이동)
   const distParts=[];
   Object.keys(eff).forEach(k=>{ if(k==='__un__') return; const q=Number(eff[k])||0; if(q===0) return;
-    distParts.push(`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid #f1f5f9"><span style="font-size:13px;color:#334155">${_whEsc(_whName(k))}</span><b style="font-size:14px;color:#4338ca">${fmt(q)}</b></div>`);
+    const opts=(window._WH.list||[]).map(w=>`<option value="${w.id}" ${String(w.id)===String(k)?'selected':''}>${_whEsc(w.name)}</option>`).join('')+`<option value="__un__">미지정 (기본 재고)</option>`;
+    const sel=`<select onchange="_iwpChangeWh(${it.id}, '${k}', this.value)" title="다른 창고로 변경(전량 이동)" style="font-size:13px;color:#334155;font-weight:600;border:1px solid #e2e8f0;border-radius:6px;padding:3px 6px;background:#fff;cursor:pointer;max-width:220px">${opts}</select>`;
+    distParts.push(`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid #f1f5f9">${sel}<b style="font-size:14px;color:#4338ca">${fmt(q)}</b></div>`);
   });
   if(eff['__un__']!=null && eff['__un__']!==0){
     const un=Number(eff['__un__'])||0;
@@ -27188,6 +27190,25 @@ async function _iwpAssignUn(itemId, whId){
   if(typeof renderStock==='function') renderStock();
   showNotif('창고 지정 중…','info');
   try{ if(typeof saveDataNow==='function') await saveDataNow(); else await _doSaveData(); showNotif(`'${wn}' 창고로 ${fmt(un)}개 지정 완료`,'success'); }
+  catch(e){ showNotif('⚠️ 저장 실패: '+(e&&e.message||e),'error'); }
+}
+// v2.3.376: 창고 행 드롭박스로 창고 변경 — 잘못 지정한 창고를 선택만으로 정정(해당 창고 전량 이동).
+async function _iwpChangeWh(itemId, fromWh, toWh){
+  const it=(DB.items||[]).find(i=>String(i.id)===String(itemId));
+  if(!it) return;
+  if(!toWh || String(toWh)===String(fromWh)){ _renderItemWhPanel(itemId); return; }   // 동일 선택 → 원복
+  if (typeof requireWrite==='function' && !requireWrite()){ _renderItemWhPanel(itemId); return; }
+  const qty=Number(_itemWhEffective(it)[fromWh])||0;
+  if(qty<=0){ showNotif('변경할 재고가 없습니다','warning'); _renderItemWhPanel(itemId); return; }
+  const fn=fromWh==='__un__'?'미지정':(_whName(fromWh)||fromWh);
+  const tn=toWh==='__un__'?'미지정':(_whName(toWh)||toWh);
+  if(!confirm(`'${fn}'의 ${fmt(qty)}개를 '${tn}'(으)로 변경할까요?`)){ _renderItemWhPanel(itemId); return; }
+  const r=_applyStockMove(it, fromWh, toWh, qty);
+  if(!r.ok){ showNotif(r.err,'warning'); _renderItemWhPanel(itemId); return; }
+  _renderItemWhPanel(itemId);
+  if(typeof renderStock==='function') renderStock();
+  showNotif('창고 변경 중…','info');
+  try{ if(typeof saveDataNow==='function') await saveDataNow(); else await _doSaveData(); showNotif(`'${tn}'(으)로 ${fmt(qty)}개 변경 완료`,'success'); }
   catch(e){ showNotif('⚠️ 저장 실패: '+(e&&e.message||e),'error'); }
 }
 // 품목 등록/수정 모달의 '기본 창고' 드롭박스 채우기
