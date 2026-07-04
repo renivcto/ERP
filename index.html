@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.371';
+const ERP_VERSION = 'v2.3.372';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27074,7 +27074,15 @@ function _renderItemWhPanel(itemId){
   Object.keys(eff).forEach(k=>{ if(k==='__un__') return; const q=Number(eff[k])||0; if(q===0) return;
     distParts.push(`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid #f1f5f9"><span style="font-size:13px;color:#334155">${_whEsc(_whName(k))}</span><b style="font-size:14px;color:#4338ca">${fmt(q)}</b></div>`);
   });
-  if(eff['__un__']!=null && eff['__un__']!==0) distParts.push(`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid #f1f5f9"><span style="font-size:13px;color:#64748b">미지정 (기본 재고)</span><b style="font-size:14px;color:#64748b">${fmt(eff['__un__'])}</b></div>`);
+  if(eff['__un__']!=null && eff['__un__']!==0){
+    const un=Number(eff['__un__'])||0;
+    // v2.3.372: 미지정 재고를 드롭박스로 창고에 바로 지정(전량 이동, 히스토리 기록). 양수일 때만.
+    const canAssign = un>0 && (window._WH.list||[]).length;
+    const assignSel = canAssign
+      ? `<select onchange="_iwpAssignUn(${it.id}, this.value); this.value='';" title="이 미지정 재고를 선택한 창고로 지정" style="font-size:11px;padding:3px 6px;border:1px solid #c7d2fe;border-radius:6px;color:#4338ca;background:#eef2ff;cursor:pointer;font-weight:600"><option value="">🏭 창고로 지정 ▾</option>${(window._WH.list||[]).map(w=>`<option value="${w.id}">${_whEsc(w.name)}</option>`).join('')}</select>`
+      : '';
+    distParts.push(`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid #f1f5f9"><span style="font-size:13px;color:#64748b">미지정 (기본 재고)</span><div style="display:flex;align-items:center;gap:10px">${assignSel}<b style="font-size:14px;color:#64748b">${fmt(un)}</b></div></div>`);
+  }
   if(!distParts.length) distParts.push('<div style="padding:12px;text-align:center;color:#94a3b8;font-size:12px">재고 없음</div>');
   // ③ 이동 히스토리
   const hist=(DB.stockHistory||[]).filter(h=>h && String(h.itemId)===String(it.id) && h.type==='move').slice().reverse();
@@ -27129,6 +27137,24 @@ async function _iwpMove(itemId){
   showNotif('재고 이동 중…','info');
   try{ if(typeof saveDataNow==='function') await saveDataNow(); else await _doSaveData(); showNotif(`이동 완료: ${r.fromName}→${r.toName} ${fmt(qty)}개`,'success'); }
   catch(e){ showNotif('⚠️ 재고 이동 저장 실패: '+(e&&e.message||e),'error'); }
+}
+// v2.3.372: 미지정 재고 전량을 선택 창고로 지정(= 미지정→창고 이동). 히스토리 기록.
+async function _iwpAssignUn(itemId, whId){
+  if(!whId) return;
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const it=(DB.items||[]).find(i=>String(i.id)===String(itemId));
+  if(!it) return;
+  const un=Number(_itemWhEffective(it)['__un__'])||0;
+  if(un<=0){ showNotif('지정할 미지정 재고가 없습니다','warning'); return; }
+  const wn=_whName(whId)||whId;
+  if(!confirm(`미지정 재고 ${fmt(un)}개를 '${wn}' 창고로 지정할까요?`)) return;
+  const r=_applyStockMove(it, '__un__', whId, un);
+  if(!r.ok){ showNotif(r.err,'warning'); return; }
+  _renderItemWhPanel(itemId);
+  if(typeof renderStock==='function') renderStock();
+  showNotif('창고 지정 중…','info');
+  try{ if(typeof saveDataNow==='function') await saveDataNow(); else await _doSaveData(); showNotif(`'${wn}' 창고로 ${fmt(un)}개 지정 완료`,'success'); }
+  catch(e){ showNotif('⚠️ 저장 실패: '+(e&&e.message||e),'error'); }
 }
 // 품목 등록/수정 모달의 '기본 창고' 드롭박스 채우기
 async function populateItemWhSelect(selectedId){
