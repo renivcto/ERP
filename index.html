@@ -1832,7 +1832,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div class="card-body p0 tbl-wrap">
             <table>
               <colgroup><col style="width:58px"><col style="width:85px"><col style="width:220px"><col style="width:65px"><col style="width:75px"><col style="width:95px"><col style="width:55px"></colgroup>
-              <thead><tr><th style="text-align:center">분류</th><th style="text-align:center">품목코드</th><th style="text-align:center">품목명</th><th style="text-align:center">용량</th><th style="text-align:center">창고</th><th style="text-align:center">재고 수량</th><th id="pluscl-stock-th" style="text-align:center;display:none;white-space:nowrap">PlusCL 현재고 <button onclick="_loadPlusclStock()" title="PlusCL 물류창고 실재고 새로고침(관리자)" style="background:#ede9fe;color:#7c3aed;border:1px solid #ddd6fe;border-radius:5px;font-size:10px;padding:1px 5px;cursor:pointer;vertical-align:middle">🔄</button></th><th style="text-align:center">재고평가액</th><th style="text-align:center">관리</th></tr></thead>
+              <thead><tr><th style="text-align:center">분류</th><th style="text-align:center">품목코드</th><th style="text-align:center">품목명</th><th style="text-align:center">용량</th><th style="text-align:center">창고</th><th style="text-align:center">재고 수량</th><th id="pluscl-stock-th" style="text-align:center;display:none;white-space:nowrap"><span onclick="openPlusclMatchModal()" title="클릭 — 완제품↔PlusCL 품목 연결·현재고 매칭" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px">PlusCL 현재고</span> <button onclick="_loadPlusclStock()" title="PlusCL 물류창고 실재고 새로고침(관리자)" style="background:#ede9fe;color:#7c3aed;border:1px solid #ddd6fe;border-radius:5px;font-size:10px;padding:1px 5px;cursor:pointer;vertical-align:middle">🔄</button></th><th style="text-align:center">재고평가액</th><th style="text-align:center">관리</th></tr></thead>
               <tbody id="stock-table"></tbody>
             </table>
           </div>
@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.376';
+const ERP_VERSION = 'v2.3.377';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27248,20 +27248,8 @@ function _plusclCellHtml(item){
   return `<button class="btn btn-outline btn-xs" style="font-size:10px;color:#7c3aed;border-color:#ddd6fe" onclick="_plusclMapPick(${item.id})">🔗 연결</button>`;
 }
 function _plusclMapPick(itemId){
-  if (typeof requireWrite==='function' && !requireWrite()) return;
-  const list = _plusclStockList();
-  if (!list.length){ showNotif('먼저 열 머리의 🔄 로 PlusCL 현재고를 불러오세요','warning'); return; }
-  const item = (DB.items||[]).find(x=>String(x.id)===String(itemId));
-  const lines = list.map((s,idx)=>`${idx+1}. ${s.name}${s.option?(' / '+s.option):''}  (재고 ${s.qty})`).join('\n');
-  const ans = prompt(`[${item?item.name:''}] 에 연결할 PlusCL 재고 번호:\n\n${lines}\n\n(0 = 연결 해제)`);
-  if (ans===null) return;
-  const n = parseInt(ans, 10);
-  window._PLUSCL.map = window._PLUSCL.map || {};
-  if (n===0) delete window._PLUSCL.map[itemId];
-  else if (n>=1 && n<=list.length) window._PLUSCL.map[itemId] = list[n-1].code;
-  else { showNotif('잘못된 번호입니다','warning'); return; }
-  try { saveSharedSetting('pluscl_item_map', window._PLUSCL.map); } catch(_){}
-  renderStockTable();
+  // v2.3.377: 기존 prompt(번호 입력) → 매칭 테이블 모달로 대체
+  openPlusclMatchModal();
 }
 async function _loadPlusclStock(){
   if (!(window._currentUser && window._currentUser.isAdmin === true)) { showNotif('관리자만 사용할 수 있습니다','warning'); return; }
@@ -27278,6 +27266,71 @@ async function _loadPlusclStock(){
     showNotif('✅ PlusCL 현재고 ' + (d.count||0) + '건 불러옴', 'success');
     renderStockTable();
   } catch(e){ console.error('[PlusCL 현재고]', e); showNotif('❌ PlusCL 현재고 실패: ' + ((e&&e.message)||e), 'error'); }
+}
+// ── v2.3.377: PlusCL 현재고 연결 매칭 모달 — 완제품 ↔ PlusCL 품목을 드롭박스로 직접 매칭 + 수량 표시.
+//   기존 prompt(번호 입력) 방식 대체. 헤더 'PlusCL 현재고' 클릭 / 셀 연결 버튼에서 열림.
+async function openPlusclMatchModal(){
+  await _ensurePlusclLoaded(true);
+  const o=_ensureOverlay('pluscl-match-modal');
+  o.innerHTML = `<div class="modal" style="max-width:740px">
+    <div class="modal-hdr"><span class="modal-ttl">📦 PlusCL 현재고 연결</span><button class="modal-x" onclick="closeModal('pluscl-match-modal')">✕</button></div>
+    <div class="modal-body" id="pcm-body"></div>
+    <div class="modal-ft"><button class="btn btn-outline" onclick="closeModal('pluscl-match-modal')">닫기</button></div>
+  </div>`;
+  openModal('pluscl-match-modal');
+  _renderPlusclMatch();
+}
+function _plusclSnapStr(){
+  const ts=(window._PLUSCL && window._PLUSCL.stock && window._PLUSCL.stock.ts) ? Number(window._PLUSCL.stock.ts) : 0;
+  if(!ts) return '없음';
+  const d=new Date(ts); const p=n=>(n<10?'0':'')+n;
+  return `${d.getFullYear()}.${p(d.getMonth()+1)}.${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function _renderPlusclMatch(){
+  const body=document.getElementById('pcm-body'); if(!body) return;
+  const list=_plusclStockList();
+  const map=_plusclMapGet();
+  const finished=(DB.items||[]).filter(i=>i && i.type==='완제품' && !i.archived && _hasItemCode(i)).slice().sort(sortByCode);
+  const optsFor=(cur)=>'<option value="">— 연결 안 함 —</option>'+list.map(s=>`<option value="${_whEsc(String(s.code))}" ${String(s.code)===String(cur)?'selected':''}>${_whEsc(s.name)}${s.option?(' / '+_whEsc(s.option)):''} (재고 ${fmt(s.qty)})</option>`).join('');
+  let inner;
+  if(!list.length){
+    inner=`<div style="padding:20px;text-align:center;color:#94a3b8;font-size:13px">PlusCL 현재고가 없습니다. 위 <b>🔄 현재고 새로고침</b>으로 먼저 불러오세요.</div>`;
+  } else {
+    const trs=finished.map(it=>{
+      const code=map[it.id];
+      const rec=code?list.find(s=>String(s.code)===String(code)):null;
+      const qtyHtml=rec?`<b style="color:${rec.state==='2'?'#ef4444':((rec.state==='3'||rec.state==='4')?'#f59e0b':'#7c3aed')}">${fmt(rec.qty)}</b>`:(code?'<span style="color:#f59e0b;font-size:11px">미조회</span>':'<span style="color:#cbd5e1">-</span>');
+      return `<tr style="border-bottom:1px solid #f1f5f9">
+        <td style="padding:7px 8px;font-size:12.5px;color:#334155">${_whEsc(it.name)} <span style="color:#94a3b8;font-size:10.5px;font-family:monospace">${_whEsc(it.code)}</span></td>
+        <td style="padding:7px 8px"><select onchange="_plusclMatchSelect(${it.id}, this.value)" style="width:100%;font-size:12px;padding:4px 6px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;cursor:pointer">${optsFor(code)}</select></td>
+        <td style="padding:7px 8px;text-align:right;font-variant-numeric:tabular-nums;font-size:13px">${qtyHtml}</td>
+      </tr>`;
+    }).join('');
+    inner=`<div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;max-height:52vh;overflow-y:auto">
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:#faf5ff;position:sticky;top:0"><th style="text-align:left;padding:7px 8px;font-size:11px;color:#64748b;font-weight:700">완제품</th><th style="text-align:left;padding:7px 8px;font-size:11px;color:#64748b;font-weight:700">PlusCL 품목 연결</th><th style="text-align:right;padding:7px 8px;font-size:11px;color:#64748b;font-weight:700">현재고</th></tr></thead>
+        <tbody>${trs}</tbody></table></div>`;
+  }
+  body.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:12px;color:#64748b;gap:8px;flex-wrap:wrap">
+      <span>현재고 스냅샷: <b style="color:#475569">${_plusclSnapStr()}</b> · ${list.length}개 품목</span>
+      <button class="btn btn-outline btn-sm" onclick="_plusclMatchRefresh()" style="color:#7c3aed;border-color:#ddd6fe;white-space:nowrap">🔄 현재고 새로고침</button>
+    </div>
+    ${inner}
+    <div style="font-size:11px;color:#94a3b8;margin-top:8px">💡 품목마다 PlusCL 품목을 선택하면 즉시 연결·저장되고, 현재고 수량이 바로 표시됩니다.</div>`;
+}
+function _plusclMatchSelect(itemId, code){
+  if (typeof requireWrite==='function' && !requireWrite()){ _renderPlusclMatch(); return; }
+  window._PLUSCL.map = window._PLUSCL.map || {};
+  if(!code) delete window._PLUSCL.map[itemId];
+  else window._PLUSCL.map[itemId]=code;
+  try { saveSharedSetting('pluscl_item_map', window._PLUSCL.map); } catch(_){}
+  _renderPlusclMatch();
+  try{ if(typeof renderStockTable==='function') renderStockTable(); }catch(_){}
+}
+async function _plusclMatchRefresh(){
+  await _loadPlusclStock();
+  _renderPlusclMatch();
 }
 
 // v2.3.374: 창고 배정(whStock)이 총재고(stock)를 초과한 품목(음수 미지정) 일회성 자가 재조정.
