@@ -4179,7 +4179,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="fg full"><label>품목명<span class="req">*</span></label><input class="fi" id="i-name"></div>
         <div class="fg full" id="i-name-en-wrap"><label>영문 품목명</label><input class="fi" id="i-name-en"></div>
         <div class="fg full"><label>업체</label><select class="fs" id="i-vendor"></select></div>
-        <div class="fg full"><label>기본 창고 <span style="font-size:10px;color:var(--gray-400);font-weight:400">(입고 기본 위치 · 재고 이동은 재고관리에서)</span></label><select class="fs" id="i-default-wh"></select></div>
+        <div class="fg full"><label>보관 창고 <span style="font-size:10px;color:var(--gray-400);font-weight:400">(기본 입고 위치 · 재고 이동/수량은 재고관리에서)</span></label><select class="fs" id="i-default-wh"></select><div id="i-wh-dist" style="margin-top:7px"></div></div>
         <div class="fg"><label>재고수량 <span style="font-size:10px;color:var(--gray-400);font-weight:400">(재고관리에서만 수정)</span></label><input class="fi" id="i-stock" type="number" value="0" readonly style="background:var(--gray-50);color:var(--gray-500);cursor:not-allowed"></div>
         <div class="fg"><label>단가<span class="req">*</span></label>
           <div style="display:flex;gap:6px;align-items:stretch">
@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.384';
+const ERP_VERSION = 'v2.3.385';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27225,13 +27225,31 @@ async function _iwpChangeWh(itemId, fromWh, toWh){
   try{ if(typeof saveDataNow==='function') await saveDataNow(); else await _doSaveData(); showNotif(`'${tn}'(으)로 ${fmt(qty)}개 변경 완료`,'success'); }
   catch(e){ showNotif('⚠️ 저장 실패: '+(e&&e.message||e),'error'); }
 }
-// 품목 등록/수정 모달의 '기본 창고' 드롭박스 채우기
+// 품목 등록/수정 모달의 '보관 창고' 드롭박스 채우기 + 현재 보관 현황(읽기전용) 표시
 async function populateItemWhSelect(selectedId){
   const sel=document.getElementById('i-default-wh'); if(!sel) return;
   await _whEnsureLoaded();
   const list=window._WH.list||[];
   sel.innerHTML='<option value="">— 창고 선택(선택) —</option>'+list.map(w=>`<option value="${w.id}">${_whEsc(w.name)}</option>`).join('');
   if(selectedId!=null && selectedId!=='') sel.value=String(selectedId);
+  try{ _renderItemWhDist(); }catch(_){}
+}
+// v2.3.385: 품목 모달 '보관 창고' — 현재 창고별 재고 분포를 읽기전용 배지로 표시.
+//   _itemWhEffective 파생값(whStock+미배정 잔여)만 읽음 → 데이터 변경 없음. 수량 수정은 재고관리에서.
+function _renderItemWhDist(){
+  const box=document.getElementById('i-wh-dist'); if(!box) return;
+  const id=(typeof editingId!=='undefined' && editingId)?editingId['add-item']:null;
+  const it=(id!=null&&id!=='')?(DB.items||[]).find(i=>i.id===id):null;
+  if(!it){ box.innerHTML=''; return; }   // 신규 등록: 표시 안 함
+  const eff=(typeof _itemWhEffective==='function')?_itemWhEffective(it):{};
+  const parts=[];
+  Object.keys(eff).forEach(k=>{ if(k==='__un__')return; const q=Number(eff[k])||0; if(q===0)return;
+    parts.push(`<span style="display:inline-flex;align-items:center;gap:4px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:600;margin:2px 4px 0 0;white-space:nowrap">${_whEsc(_whName(k))} <b>${fmt(q)}</b></span>`);
+  });
+  if(eff['__un__']!=null && eff['__un__']!==0) parts.push(`<span style="display:inline-flex;align-items:center;gap:4px;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:999px;padding:2px 9px;font-size:11.5px;margin:2px 4px 0 0;white-space:nowrap">미지정 <b>${fmt(eff['__un__'])}</b></span>`);
+  const total=Number(it.stock)||0;
+  box.innerHTML=`<div style="font-size:11px;color:#64748b;margin-bottom:3px">📦 현재 보관 현황 <span style="color:#94a3b8">(전체 ${fmt(total)} · 수량 변경은 재고관리에서)</span></div>`
+    + (parts.length?`<div>${parts.join('')}</div>`:`<div style="font-size:11.5px;color:#cbd5e1">보관 재고 없음</div>`);
 }
 
 // ========================= PlusCL 현재고 (완제품 탭 열) — v2.3.361 =========================
