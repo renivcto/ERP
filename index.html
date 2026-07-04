@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.369';
+const ERP_VERSION = 'v2.3.370';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -16589,6 +16589,26 @@ console.log('%c💡 v2.3.7 도구: diagOrder("주문번호") / superDedupShopOrd
 
 // v2.3.305: 주문별 입금예정일·예정금액 (쇼핑몰 정산주기 자동 계산 + 수동 override)
 function _orderShop(o){ if(!o) return null; return (DB.shops||[]).find(s=>s && String(s.id)===String(o.shopId)) || (DB.shops||[]).find(s=>s && s.name===o.shopName) || null; }
+// v2.3.370: 와디즈 오분류 교정(멱등) — PlusCL 크롤러가 와디즈 출고를 '자사몰'로 태깅한 주문 정정.
+//   판정: shopName==='자사몰' && plusclOrdCompName 에 '와디즈' 포함 → 진짜 자사몰(카페24/르니브)은 제외.
+//   변경 건수 반환(0이면 no-op). 콘솔에서 _repairWadizMislabel() 로 수동 실행도 가능.
+function _repairWadizMislabel(){
+  try {
+    const wadizShop = (DB.shops||[]).find(s => s && s.name === '와디즈');
+    const wadizId = wadizShop ? wadizShop.id : 'shop_1775983667586';
+    let n = 0;
+    (DB.shopOrders||[]).forEach(o => {
+      if (!o) return;
+      if (o.shopName === '자사몰' && String(o.plusclOrdCompName||'').includes('와디즈')) {
+        o.shopName = '와디즈';
+        o.shopId = wadizId;
+        n++;
+      }
+    });
+    return n;
+  } catch(e) { console.warn('_repairWadizMislabel 실패:', e); return 0; }
+}
+window._repairWadizMislabel = _repairWadizMislabel;
 function _orderDepositDate(o){
   if(!o) return '';
   if(o.expectedDepositDate) return String(o.expectedDepositDate).slice(0,10);
@@ -54829,6 +54849,20 @@ function initERPWhenReady() {
       _dbFromDefault = false;  // v1.9.955: Firestore 머지 성공 → 실제 데이터 확보 → 쓰기 차단 해제
       _firestoreDataLoaded = true;  // ✅ Firestore 쓰기 허용
       console.log('✅ Firestore 데이터 로드 완료 — Firestore 쓰기 활성화');
+      // v2.3.370: 와디즈 오분류 자동 교정(멱등) — PlusCL 크롤러가 와디즈 출고를 '자사몰'로 잘못
+      //   태깅한 주문(ord_comp_name='와디즈_기본양식', 2026-07-03 541건)을 와디즈로 정정.
+      //   조건이 정확(자사몰 + plusclOrdCompName 에 '와디즈')해 진짜 자사몰(카페24/르니브)은 안 건드림.
+      //   멱등: 교정 후엔 매칭 0 → no-op. 변경 시에만 저장 → 전 직원 반영. (크롤러 함수도 v2.20 수정)
+      try {
+        const _n = (typeof _repairWadizMislabel === 'function') ? _repairWadizMislabel() : 0;
+        if (_n > 0) {
+          console.log('🔧 [v2.3.370] 와디즈 오분류 ' + _n + '건 교정');
+          try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+          try { if (typeof saveData === 'function') saveData(); } catch(_){}
+          try { if (typeof renderShopOrderTable === 'function') renderShopOrderTable(); } catch(_){}
+          try { showNotif('🔧 와디즈 주문 ' + _n + '건이 자사몰에서 와디즈로 자동 정정되었습니다', 'success'); } catch(_){}
+        }
+      } catch(_){}
       // v2.3.171: 지급완료 override 적용 (머지 후 마지막에 강제 — paid 되돌림 영구 차단)
       try {
         if (typeof loadSharedSetting === 'function') {

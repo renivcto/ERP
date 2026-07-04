@@ -1663,7 +1663,10 @@ function plusclMallName(ordCompName) {
   const lower = n.toLowerCase();
   if (n.includes('쿠팡') || lower.includes('coupang') || lower.includes('rocket')) return '쿠팡';
   if (n.includes('스마트') || n.includes('네이버') || n.includes('스토어팜') || lower.includes('smartstore') || lower.includes('naver') || lower.includes('storefarm')) return '스마트스토어';
-  if (n.includes('자사') || n.includes('카페24') || n.includes('메이크샵') || n.includes('고도몰') || n.includes('아임웹') || lower.includes('cafe24') || n.includes('와디즈') || n.includes('르니브')) return '자사몰';
+  // v2.20: 와디즈는 자사몰이 아니라 별도 쇼핑몰 — 기존엔 자사몰로 잘못 태깅돼 판매관리에서 와디즈 주문이
+  //   자사몰로 표기됐다(2026-07-03 541건). ord_comp_name='와디즈_기본양식'. 자사몰 판정보다 먼저 분기.
+  if (n.includes('와디즈') || lower.includes('wadiz')) return '와디즈';
+  if (n.includes('자사') || n.includes('카페24') || n.includes('메이크샵') || n.includes('고도몰') || n.includes('아임웹') || lower.includes('cafe24') || n.includes('르니브')) return '자사몰';
   return n || '기타';
 }
 
