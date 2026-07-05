@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.386';
+const ERP_VERSION = 'v2.3.387';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26724,11 +26724,13 @@ function _itemWhUnassigned(item){ return (Number(item&&item.stock)||0) - _itemWh
 function _itemWhEffective(item){
   const eff = Object.assign({}, _itemWhAssigned(item));
   const stock = Number(item&&item.stock)||0;
-  const remainder = stock - Object.keys(eff).reduce((s,k)=>s+(Number(eff[k])||0),0);
+  // v2.3.387: 소수 kg 잔재 제거 — 0.976−0.976 이 부동소수로 정확히 0 이 안 돼 '미지정 -0' 표시되던 문제.
+  //   잔여를 소수4자리 반올림해 미세 잔재(|x|<0.0001)는 0 으로 처리.
+  let remainder = Math.round((stock - Object.keys(eff).reduce((s,k)=>s+(Number(eff[k])||0),0)) * 10000) / 10000;
   if (remainder !== 0){
     const dw = (item && item.defaultWh && _whById(item.defaultWh)) ? String(item.defaultWh) : null;
     const key = dw || '__un__';
-    eff[key] = (Number(eff[key])||0) + remainder;
+    eff[key] = Math.round(((Number(eff[key])||0) + remainder) * 10000) / 10000;
     if (eff[key] === 0) delete eff[key];
   }
   return eff;
