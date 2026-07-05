@@ -5865,7 +5865,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.389';
+const ERP_VERSION = 'v2.3.390';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -21518,6 +21518,11 @@ function _resyncAdExpensesToShops() {
 //   adsCosts 항목이 아닌 별도 공유맵(shared/ad_refunds)에 '행 키'로 저장. 키: exp:<expenseId> / ad:<id> / grp:<projectId>.
 function _adRowKeyOf(a){ return (a && a.expenseId) ? ('exp:' + a.expenseId) : ('ad:' + (a && a.id)); }
 function _adRefundOf(key){ const m = window._adRefunds || {}; return Number(m[key]) || 0; }
+// v2.3.390: 집계용 항목 환불액 — 그룹은 grp:projectId 로 1회만(seen 세트로 중복 방지), 단일은 행키로.
+function _adEntryRefund(a, seen){
+  if (a && a.projectId){ const k = 'grp:' + a.projectId; if (seen && seen.has(k)) return 0; if (seen) seen.add(k); return _adRefundOf(k); }
+  return _adRefundOf(_adRowKeyOf(a));
+}
 async function _setAdRefund(key, val){
   if (typeof requireWrite === 'function' && !requireWrite()) { try{ renderAdsPage(); }catch(_){}; return; }
   const n = Math.max(0, Math.round(Number(val) || 0));
@@ -21676,12 +21681,15 @@ function renderAdsPage() {
 
   // KPI 계산 — v2.3.135: NET 마진 + CAC + AOV 추가
   let totalAds = 0;
+  let totalRefund = 0;                       // v2.3.390: 환불액 합계(그룹 1회 dedup)
+  const _refSeen = new Set();
   let totalRevenue = 0;
   let totalCogs = 0, totalFee = 0, totalOrderCount = 0;
   // v1.9.867: 프로젝트별 매출 dedup — 같은 프로젝트 광고비 여러 건이면 매출 1번만
   const _revDedupSet = new Set();
   filtered.forEach(a => {
     totalAds += Number(a.cost || 0);
+    totalRefund += _adEntryRefund(a, _refSeen);
     const startDate = a.startDate || a.date || (a.month + '-01');
     const endDate = a.endDate || a.startDate || a.date || (a.month + '-01');
     const dedupKey = (a.projectId ? 'proj:' + a.projectId : 'single:' + a._shopId + '|' + startDate + '|' + endDate);
@@ -21693,11 +21701,13 @@ function renderAdsPage() {
     totalFee += _nd.fee;
     totalOrderCount += _nd.count;
   });
-  const avgRoas = totalAds > 0 ? (totalRevenue / totalAds * 100) : 0;
+  // v2.3.390: 지표는 실 광고비(=지출-환불) 기준 계산. 표시용 총 지출광고비는 totalAds 유지.
+  const totalNetAds = Math.max(0, totalAds - totalRefund);
+  const avgRoas = totalNetAds > 0 ? (totalRevenue / totalNetAds * 100) : 0;
   // v2.3.135: NET 마진 / CAC / AOV
-  const netMargin = totalRevenue - totalCogs - totalFee - totalAds;
+  const netMargin = totalRevenue - totalCogs - totalFee - totalNetAds;
   const netMarginPct = totalRevenue > 0 ? (netMargin / totalRevenue * 100) : 0;
-  const cac = totalOrderCount > 0 ? Math.round(totalAds / totalOrderCount) : 0;
+  const cac = totalOrderCount > 0 ? Math.round(totalNetAds / totalOrderCount) : 0;
   const aov = totalOrderCount > 0 ? Math.round(totalRevenue / totalOrderCount) : 0;
   // v2.3.129: 🎯 손익분기 ROAS — 기여마진율 기반
   //   BEP ROAS = 매출 / (매출 - 원가 - 수수료) × 100
@@ -21746,12 +21756,14 @@ function renderAdsPage() {
   const lastMo = new Date(yr, mo - 1, 1);
   const lastMoEnd = new Date(yr, mo, 0, 23, 59, 59);
   let thisMoAds = 0, lastMoAds = 0;
+  const _thisMoSeen = new Set(), _lastMoSeen = new Set();   // v2.3.390: 실 광고비 기준(환불 차감)
   allAds.forEach(a => {
     const adStart = new Date(a.startDate || a.date || (a.month + '-01'));
     const adEnd = new Date(a.endDate || a.startDate || a.date || (a.month + '-01'));
-    if (!(adEnd < thisMo || adStart > thisMoEnd)) thisMoAds += Number(a.cost || 0);
-    if (!(adEnd < lastMo || adStart > lastMoEnd)) lastMoAds += Number(a.cost || 0);
+    if (!(adEnd < thisMo || adStart > thisMoEnd)) thisMoAds += Number(a.cost || 0) - _adEntryRefund(a, _thisMoSeen);
+    if (!(adEnd < lastMo || adStart > lastMoEnd)) lastMoAds += Number(a.cost || 0) - _adEntryRefund(a, _lastMoSeen);
   });
+  thisMoAds = Math.max(0, thisMoAds); lastMoAds = Math.max(0, lastMoAds);
   const momPct = lastMoAds > 0 ? ((thisMoAds - lastMoAds) / lastMoAds * 100) : 0;
   const momIcon = momPct > 0 ? '▲' : (momPct < 0 ? '▼' : '·');
   const momColor = momPct > 0 ? '#dc2626' : (momPct < 0 ? '#16a34a' : '#94a3b8');
@@ -21768,9 +21780,9 @@ function renderAdsPage() {
     '<div style="font-weight:800;color:' + tc + ';margin-bottom:5px;font-size:12.5px;letter-spacing:-0.2px">' + ttl + '</div>' + dsc + '</div></span>';
   kpiRow.innerHTML = `
     <div style="background:#fdf2f8;border:1px solid #fce7f3;border-radius:14px;padding:18px 14px;text-align:center;box-shadow:0 8px 22px rgba(190,24,93,0.07),0 1px 3px rgba(15,23,42,0.04)">
-      <div style="font-size:12px;color:#9d174d;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px">총 광고비${_tt('#be185d', '#fce7f3', '#9d174d', '총 광고비', '선택 기간 동안 집행된 모든 광고비의 합계입니다.<br><br>지출결의서 광고비 + 광고비 이력에 직접 입력한 항목 모두 포함.')} <span style="color:#be185d;opacity:0.65;font-weight:500;font-size:10px">· ${periodLabelStr}</span></div>
-      <div style="font-size:20px;font-weight:800;color:#be185d;letter-spacing:-0.5px;margin-top:3px">₩${totalAds.toLocaleString()}</div>
-      <div style="font-size:11px;color:#1e3a8a;font-weight:700;margin-top:6px">${filtered.length}건 집행</div>
+      <div style="font-size:12px;color:#9d174d;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px">총 실 광고비${_tt('#be185d', '#fce7f3', '#9d174d', '총 실 광고비', '선택 기간 광고비에서 <strong>환불액을 뺀 실제 지출</strong>입니다.<br>= 지출 광고비 − 환불액<br><br>모든 지표(ROAS·CAC·NET마진·순익)는 이 실 광고비 기준으로 계산됩니다.')} <span style="color:#be185d;opacity:0.65;font-weight:500;font-size:10px">· ${periodLabelStr}</span></div>
+      <div style="font-size:20px;font-weight:800;color:#be185d;letter-spacing:-0.5px;margin-top:3px">₩${totalNetAds.toLocaleString()}</div>
+      <div style="font-size:11px;color:#1e3a8a;font-weight:700;margin-top:6px">${totalRefund > 0 ? '지출 ₩' + totalAds.toLocaleString() + ' · 환불 −₩' + totalRefund.toLocaleString() : filtered.length + '건 집행'}</div>
     </div>
     <div style="background:#f0fdf4;border:1px solid #dcfce7;border-radius:14px;padding:18px 14px;text-align:center;box-shadow:0 8px 22px rgba(22,163,74,0.07),0 1px 3px rgba(15,23,42,0.04)">
       <div style="font-size:12px;color:#166534;font-weight:700;letter-spacing:-0.1px;margin-bottom:8px">평균 ROAS${_tt('#16a34a', '#dcfce7', '#166534', '평균 ROAS', 'Return on Ad Spend (광고 수익률)<br>= 광고로 발생한 매출 ÷ 광고비 × 100%<br><br>100% = 본전, 200% = 광고비 1원당 매출 2원.')} <span style="color:#16a34a;opacity:0.65;font-weight:500;font-size:10px">· ${periodLabelStr}</span></div>
@@ -21813,6 +21825,7 @@ function renderAdsPage() {
   try {
     const _shopAgg = new Map();
     const _shopDedupSet = new Set();
+    const _shopRefundSeen = new Set();   // v2.3.390: 랭킹도 실 광고비(환불 차감)
     filtered.forEach(a => {
       const sid = String(a._shopId);
       if (!_shopAgg.has(sid)) _shopAgg.set(sid, { name: a._shopName, ads: 0, revenue: 0, cogs: 0, fee: 0, count: 0, minStart: '' });
@@ -21820,7 +21833,7 @@ function renderAdsPage() {
       // v2.3.151: 가장 빠른 광고 시작일 추적 (시작 전 여부 판단용)
       const _as151 = a.startDate || a.date || (a.month + '-01');
       if (!agg.minStart || _as151 < agg.minStart) agg.minStart = _as151;
-      agg.ads += Number(a.cost || 0);
+      agg.ads += Math.max(0, Number(a.cost || 0) - _adEntryRefund(a, _shopRefundSeen));
       const _sd = a.startDate || a.date || (a.month + '-01');
       const _ed = a.endDate || a.startDate || a.date || (a.month + '-01');
       const dk = sid + ':' + (a.projectId ? 'proj:' + a.projectId : 'sg:' + _sd + '|' + _ed);
@@ -21914,10 +21927,12 @@ function renderAdsPage() {
       const nd = _periodNetData(sid, minStart, maxEnd);
       revenue += nd.revenue; totalCogs += nd.cogs; totalFee += nd.fee;
     });
-    const roasVal = totalCost > 0 ? (revenue / totalCost * 100) : 0;
+    // v2.3.390: 실 광고비(=지출-환불) 기준 ROAS/NET
+    const _grpNetCost = Math.max(0, totalCost - _adRefundOf('grp:' + projectId));
+    const roasVal = _grpNetCost > 0 ? (revenue / _grpNetCost * 100) : 0;
     const roasStr = roasVal > 0 ? roasVal.toFixed(0) + '%' : '-';
     // v1.9.867: NET 마진 = 매출 - 제품원가 - 쇼핑몰 수수료 - 광고비
-    const netMargin = revenue - totalCogs - totalFee - totalCost;
+    const netMargin = revenue - totalCogs - totalFee - _grpNetCost;
     const netColor = netMargin > 0 ? '#16a34a' : (netMargin < 0 ? '#dc2626' : '#94a3b8');
     const netStr = revenue > 0 ? '₩' + netMargin.toLocaleString() : '-';
     // 쇼핑몰 라벨 (그룹의 첫 항목 기준 또는 다중)
@@ -21961,9 +21976,11 @@ function renderAdsPage() {
     // v1.9.867: NET 마진 = revenue - cogs - fee - ads
     const nd = _periodNetData(a._shopId, startDate, endDate);
     const revenue = nd.revenue;
-    const roasVal = a.cost > 0 ? (revenue / a.cost * 100) : 0;
+    // v2.3.390: 실 광고비(=지출-환불) 기준 ROAS/NET
+    const _sglNetCost = Math.max(0, (Number(a.cost) || 0) - _adRefundOf(_adRowKeyOf(a)));
+    const roasVal = _sglNetCost > 0 ? (revenue / _sglNetCost * 100) : 0;
     const roasStr = roasVal > 0 ? roasVal.toFixed(0) + '%' : '-';
-    const netMargin = revenue - nd.cogs - nd.fee - (parseFloat(a.cost) || 0);
+    const netMargin = revenue - nd.cogs - nd.fee - _sglNetCost;
     const netColor = netMargin > 0 ? '#16a34a' : (netMargin < 0 ? '#dc2626' : '#94a3b8');
     const netStr = revenue > 0 ? '₩' + netMargin.toLocaleString() : '-';
     const isAuto = !!a.expenseId;
