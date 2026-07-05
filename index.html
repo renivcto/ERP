@@ -5864,7 +5864,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.392';
+const ERP_VERSION = 'v2.3.393';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -32270,15 +32270,26 @@ if (typeof esc !== 'function') {
 //   이전 버전은 esc(p.content) 로 모든 HTML 을 literal 문자열로 이스케이프해
 //   사용자가 서식(굵게/색/밑줄/목록 등)을 적용하고 저장해도 피드 카드에서는 전부 텍스트로 보이고
 //   새로고침 시 '서식이 사라졌다'로 느껴지던 버그가 있었다.
+// v2.3.393: 본문 내 bare URL(http/https)을 클릭 가능한 링크로 변환.
+//   기존 <a> 링크와 태그는 그대로 두고 텍스트 노드에서만 치환(태그 단위 분할). javascript: 등은 매칭 안 됨(http/https만).
+function _linkifyFeed(html){
+  try {
+    return String(html).replace(/(<a\b[^>]*>[\s\S]*?<\/a>)|(<[^>]+>)|([^<]+)/gi, function(m, anchor, tag, text){
+      if (anchor) return anchor;
+      if (tag) return tag;
+      return text.replace(/(https?:\/\/[^\s<>"']+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;word-break:break-all">$1</a>');
+    });
+  } catch(_) { return html; }
+}
 function _renderFeedBody(raw){
   if (!raw) return '';
   if (/<[a-z!/]/i.test(raw)) {
-    return (typeof _sanitizeFeedHtml === 'function') ? _sanitizeFeedHtml(raw) : String(raw);
+    return _linkifyFeed((typeof _sanitizeFeedHtml === 'function') ? _sanitizeFeedHtml(raw) : String(raw));
   }
   const _esc = (typeof esc === 'function')
     ? esc
     : (s => String(s==null?'':s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])));
-  return _esc(raw).replace(/\n/g,'<br>');
+  return _linkifyFeed(_esc(raw).replace(/\n/g,'<br>'));
 }
 
 // v1.9.246 — 이미지 캐러셀 네비게이션 (○● 도트 + 좌우 화살표)
