@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.387';
+const ERP_VERSION = 'v2.3.388';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -18984,7 +18984,12 @@ function addNewShop() {
 }
 function saveShopInfo() {
   if (!requireWrite()) return;
-  const idx = window._currentShopIdx; if (idx == null || !DB.shops[idx]) return;
+  let idx = window._currentShopIdx;
+  // v2.3.388: 인덱스가 비면 선택 id 로 재확인(스테일 인덱스 방어)
+  if ((idx == null || !DB.shops[idx]) && window._selectedShopId != null) {
+    idx = (DB.shops||[]).findIndex(x => x && String(x.id) === String(window._selectedShopId));
+  }
+  if (idx == null || idx < 0 || !DB.shops[idx]) { try{ showNotif('저장 대상 쇼핑몰을 찾지 못했습니다 — 다시 열어 저장해 주세요','warning'); }catch(_){}; return; }
   const s = DB.shops[idx];
   s.name = $('shop-name')?.value || s.name;
   s.apiLinked = $('shop-api')?.value === 'true';
@@ -19003,8 +19008,27 @@ function saveShopInfo() {
   // v1.9.655: updatedAt 을 number 로 (머지 비교용)
   s.updatedAt = Date.now();
   console.log('🛒 [SHOP SAVE] id=' + s.id + ' name=' + s.name);
-  if (typeof saveDataNow === 'function') saveDataNow().then(()=>console.log('✅ [SAVE] shop info OK')).catch(e=>{console.error('❌ shop info 저장 실패:',e);try{showNotif('⚠️ 저장 실패: '+(e.message||e),'error')}catch(_){};});
-  else saveData();
+  // v2.3.388: 즉시 localStorage + shops 문서 단독 선기록 — 근본원인: saveDataNow 는 순차저장이라
+  //   shops 기록까지 수 초 지연 → "저장되었습니다" 직후 새로고침하면 shops 미기록 채로 종료 → 서버 옛값 원복.
+  //   (계정 비고 유실 v2.3.352 와 동일 클래스) 해법: localStorage 즉시 + shops 단독 setDoc 선기록 후 saveDataNow.
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+  (async () => {
+    try {
+      if (window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
+        await window._firestoreSetDoc(
+          window._firestoreDoc(window._firebaseDb, 'erp_data', 'shops'),
+          { data: JSON.stringify(DB.shops||[]), ts: Date.now() }
+        );
+        console.log('✅ [SHOP DIRECT v2.3.388] shops 문서 직접 저장 완료:', (DB.shops||[]).length, '건');
+        try { showNotif('✅ 쇼핑몰 정보가 저장되었습니다', 'success'); } catch(_){}
+      }
+    } catch(e) {
+      console.error('❌ [SHOP DIRECT v2.3.388] 직접 저장 실패:', e);
+      try { showNotif('⚠️ 저장 실패(' + (e.code||e.message) + ') — 새로고침하지 말고 다시 저장하세요', 'error'); } catch(_){}
+    }
+    try { if (typeof saveDataNow === 'function') await saveDataNow(); else saveData(); }
+    catch(e){ console.error('[SHOP] saveDataNow 실패:', e); }
+  })();
   // 저장 후 목록으로 돌아감
   shopBackToList();
   alert('저장되었습니다.');
