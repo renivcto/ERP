@@ -1775,10 +1775,10 @@ async function mergePlusclOrders(firestoreDb, newOrders) {
   }
   const seenUid = new Set(existing.filter(o => o && o.plusclUid).map(o => String(o.plusclUid)));
   const trulyNew = newOrders.filter(o => o.plusclUid && !seenUid.has(String(o.plusclUid)));
-  if (trulyNew.length === 0) return { added: 0, total: existing.length, sampleNew: [] };
+  if (trulyNew.length === 0) return { added: 0, total: existing.length, sampleNew: [], newOrders: [] };
   const merged = existing.concat(trulyNew);
   await docRef.set({ data: JSON.stringify(merged), ts: Date.now() });
-  return { added: trulyNew.length, total: merged.length, sampleNew: trulyNew.slice(0, 3) };
+  return { added: trulyNew.length, total: merged.length, sampleNew: trulyNew.slice(0, 3), newOrders: trulyNew };
 }
 
 // 메인 인입 로직
@@ -1809,35 +1809,52 @@ async function ingestPlusclShipments({ daysBack = 1 } = {}) {
     }
   } catch (e) { console.warn('[PLUSCL] 매핑 적용 실패:', e.message); }
   const merge = await mergePlusclOrders(firestoreDb, erpOrders);
+  const newOrders = merge.newOrders || [];
+  // v2.21: 신규 주문 기준 몰별 건수+금액(알림용). 주문 있는 몰만 키에 생김(와디즈 등은 있을 때만 노출).
+  //   PlusCL 금액(paymentAmount)은 출고 데이터라 대부분 0 일 수 있음(사용자 확인: 그대로 표시).
   const byMall = {};
-  erpOrders.forEach(o => { byMall[o.shopName] = (byMall[o.shopName] || 0) + 1; });
+  let totalAmount = 0;
+  newOrders.forEach(o => {
+    const m = o.shopName || '기타';
+    if (!byMall[m]) byMall[m] = { count: 0, amount: 0 };
+    byMall[m].count++;
+    const amt = Number(o.paymentAmount) || 0;
+    byMall[m].amount += amt;
+    totalAmount += amt;
+  });
   return {
     fetched: erpOrders.length,
     added: merge.added,
     total: merge.total,
     range: `${sDate} ~ ${eDate}`,
     byMall,
-    sampleNew: merge.sampleNew.map(o => ({ orderNo: o.orderNo, mall: o.shopName, customer: o.customerName, product: o.productName, qty: o.qty, amount: o.paymentAmount, tracking: o.trackingNo })),
+    totalCount: newOrders.length,
+    totalAmount,
+    sampleNew: newOrders.slice(0, 3).map(o => ({ orderNo: o.orderNo, mall: o.shopName, customer: o.customerName, product: o.productName, qty: o.qty, amount: o.paymentAmount, tracking: o.trackingNo })),
   };
 }
 
-// 스케줄: 매일 KST 16:00 (하루 1회) — 슬랙 요약 1건
+// 스케줄: 월~금 KST 18:00 (평일 하루 1회) — 슬랙 요약 1건.
+//   daysBack:3 — 금요일 크롤 이후 주말(토·일) 출고를 월요일에 포함하려고 3일 조회(plusclUid dedup 으로 중복 없음).
 exports.fetchPlusclShipments = functions
   .region(REGION)
   .runWith({ secrets: ['PLUSCL_AUTH_KEY', 'SLACK_ORDERS_WEBHOOK'], timeoutSeconds: 300, memory: '256MB' })
-  .pubsub.schedule('0 16 * * *')
+  .pubsub.schedule('0 18 * * 1-5')
   .timeZone('Asia/Seoul')
   .onRun(async () => {
     try {
-      const result = await ingestPlusclShipments({ daysBack: 1 });
-      const mallText = Object.keys(result.byMall).length
-        ? '\n\n*쇼핑몰별:* ' + Object.entries(result.byMall).map(([m, c]) => `${m} ${c}건`).join(' · ') : '';
-      const sampleText = result.sampleNew.length
-        ? '\n\n*신규 샘플:*\n' + result.sampleNew.map(s => `• [${s.mall}] ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} ×${s.qty} / 송장 ${s.tracking || '-'}`).join('\n') : '';
+      const result = await ingestPlusclShipments({ daysBack: 3 });
+      // v2.21: 사용자 지정 포맷 — [총 주문 O건 - 금액] + 주문 있는 몰만 (건수 많은 순). 금액은 PlusCL 값 그대로.
+      const won = n => '₩' + Math.round(Number(n) || 0).toLocaleString('en-US');
+      const mallLines = Object.entries(result.byMall)
+        .sort((a, b) => (b[1].count - a[1].count) || (b[1].amount - a[1].amount))
+        .map(([m, v]) => `${m} ${v.count}건 - ${won(v.amount)}`)
+        .join('\n');
+      const body = `[총 주문 ${result.totalCount}건 - ${won(result.totalAmount)}]` + (mallLines ? '\n' + mallLines : '\n(신규 주문 없음)');
       await notifySlack({
-        title: `물류(PlusCL) 배송정보 수집 — 신규 ${result.added}건`,
-        level: result.added > 0 ? 'success' : 'info',
-        details: `📦 가져옴 ${result.fetched}건 / ✅ 신규 ${result.added}건\n📅 ${result.range}` + mallText + sampleText,
+        title: `물류(PlusCL) 배송 주문 요약`,
+        level: result.totalCount > 0 ? 'success' : 'info',
+        details: body,
         webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
         titlePrefix: ''
       });
