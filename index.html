@@ -3232,15 +3232,17 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="card-body" style="overflow-x:auto;padding:0">
           <table class="tbl" style="text-align:center;margin:0;table-layout:fixed">
             <thead><tr>
-              <th style="width:90px">쇼핑몰</th>
-              <th style="width:160px">프로젝트</th>
-              <th style="width:60px">유형</th>
-              <th style="width:170px">기간</th>
-              <th style="width:110px">광고비</th>
-              <th style="width:65px">ROAS</th>
-              <th style="width:110px">매출(기간)</th>
-              <th style="width:110px">Net 마진</th>
-              <th style="width:100px">관리</th>
+              <th style="width:88px">쇼핑몰</th>
+              <th style="width:150px">프로젝트</th>
+              <th style="width:56px">유형</th>
+              <th style="width:150px">기간</th>
+              <th style="width:110px">지출 광고비</th>
+              <th style="width:96px">환불액</th>
+              <th style="width:110px">실 광고비</th>
+              <th style="width:58px">ROAS</th>
+              <th style="width:100px">매출(기간)</th>
+              <th style="width:100px">Net 마진</th>
+              <th style="width:96px">관리</th>
             </tr></thead>
             <tbody id="ads-page-table"></tbody>
           </table>
@@ -5863,7 +5865,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.388';
+const ERP_VERSION = 'v2.3.389';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -21512,7 +21514,34 @@ function _resyncAdExpensesToShops() {
   }
 }
 
+// v2.3.389: 광고비 환불액 — 지출결의서 자동동기화(resync)로 광고항목이 재생성돼도 유지되도록
+//   adsCosts 항목이 아닌 별도 공유맵(shared/ad_refunds)에 '행 키'로 저장. 키: exp:<expenseId> / ad:<id> / grp:<projectId>.
+function _adRowKeyOf(a){ return (a && a.expenseId) ? ('exp:' + a.expenseId) : ('ad:' + (a && a.id)); }
+function _adRefundOf(key){ const m = window._adRefunds || {}; return Number(m[key]) || 0; }
+async function _setAdRefund(key, val){
+  if (typeof requireWrite === 'function' && !requireWrite()) { try{ renderAdsPage(); }catch(_){}; return; }
+  const n = Math.max(0, Math.round(Number(val) || 0));
+  window._adRefunds = window._adRefunds || {};
+  if (n === 0) delete window._adRefunds[key]; else window._adRefunds[key] = n;
+  try { await saveSharedSetting('ad_refunds', window._adRefunds); } catch(e){ console.warn('환불액 저장 실패:', e); }
+  try { renderAdsPage(); } catch(_){}
+}
+// 환불액 입력 셀 + 실 광고비 셀 HTML (그룹/단일 공용). gross=지출광고비.
+function _adRefundCellsHtml(key, gross){
+  const rf = _adRefundOf(key);
+  const actual = (Number(gross)||0) - rf;
+  const _rfCell = `<td style="white-space:nowrap"><input type="number" min="0" step="1" value="${rf||''}" placeholder="0" onclick="event.stopPropagation()" onchange="_setAdRefund('${key}', this.value)" title="환불받은 광고비를 입력 (기본 0)" style="width:84px;padding:3px 6px;border:1px solid #e2e8f0;border-radius:5px;font-size:12px;text-align:right;font-variant-numeric:tabular-nums;color:#0f766e"></td>`;
+  const _acCell = `<td style="font-weight:800;color:#0f766e;font-variant-numeric:tabular-nums;white-space:nowrap">₩${actual.toLocaleString()}</td>`;
+  return _rfCell + _acCell;
+}
 function renderAdsPage() {
+  // v2.3.389: 광고비 환불액 공유맵 1회 지연 로드 (로드되면 재렌더)
+  if (!window._adRefundsLoaded) {
+    window._adRefundsLoaded = true;
+    window._adRefunds = window._adRefunds || {};
+    try { loadSharedSetting('ad_refunds').then(m => { if (m && typeof m === 'object' && !Array.isArray(m)) { window._adRefunds = m; try{ renderAdsPage(); }catch(_){} } }).catch(()=>{}); } catch(_){}
+  }
+  window._adRefunds = window._adRefunds || {};
   // v1.9.877+880: tombstone 적용 (id + sig 둘 다 — 부활/중복 차단)
   try { if (typeof _applyAdProjectTombstones === 'function') _applyAdProjectTombstones(); } catch(_){}
   // v1.9.887: 잘못 연결된 광고비 행 자동 정리 (po_balance 등)
@@ -21848,7 +21877,7 @@ function renderAdsPage() {
     return db - da;
   });
   if (filtered.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" style="padding:24px;color:#94a3b8;font-size:12px">광고비 이력이 없습니다</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" style="padding:24px;color:#94a3b8;font-size:12px">광고비 이력이 없습니다</td></tr>';
     return;
   }
   // v1.9.776: 프로젝트 카드 그리드 렌더
@@ -21912,6 +21941,7 @@ function renderAdsPage() {
       <td style="white-space:nowrap"><span style="background:#ede9fe;color:#6d28d9;padding:2px 8px;border-radius:4px;font-size:10.5px">${typeLabel}</span></td>
       <td style="font-size:12.5px;color:#475569;white-space:nowrap">${periodStr}</td>
       <td style="font-weight:800;color:#be185d;font-variant-numeric:tabular-nums;white-space:nowrap">₩${totalCost.toLocaleString()}<div style="font-size:10px;color:#94a3b8;font-weight:500;margin-top:1px">합계 ${adsList.length}건</div></td>
+      ${_adRefundCellsHtml('grp:' + projectId, totalCost)}
       <td style="font-weight:700;white-space:nowrap;color:${roasVal >= 200 ? '#16a34a' : (roasVal >= 100 ? '#0284c7' : '#dc2626')}">${roasStr}</td>
       <td style="font-variant-numeric:tabular-nums;color:#64748b;white-space:nowrap">${revenue > 0 ? '₩' + revenue.toLocaleString() : '-'}</td>
       <td style="font-weight:700;color:${netColor};font-variant-numeric:tabular-nums;white-space:nowrap">${netStr}</td>
@@ -21961,6 +21991,7 @@ function renderAdsPage() {
       <td style="white-space:nowrap"><span style="background:#f1f5f9;padding:2px 8px;border-radius:4px;font-size:10.5px">${typeLabel}</span></td>
       <td style="font-size:12.5px;color:#475569;white-space:nowrap">${periodStr}</td>
       <td style="font-weight:700;color:#be185d;font-variant-numeric:tabular-nums;white-space:nowrap">₩${Number(a.cost || 0).toLocaleString()}</td>
+      ${_adRefundCellsHtml(_adRowKeyOf(a), Number(a.cost || 0))}
       <td style="font-weight:700;white-space:nowrap;color:${roasVal >= 200 ? '#16a34a' : (roasVal >= 100 ? '#0284c7' : '#dc2626')}">${roasStr}</td>
       <td style="font-variant-numeric:tabular-nums;color:#64748b;white-space:nowrap">${revenue > 0 ? '₩' + revenue.toLocaleString() : '-'}</td>
       <td style="font-weight:700;color:${netColor};font-variant-numeric:tabular-nums;white-space:nowrap">${netStr}</td>
@@ -53182,7 +53213,7 @@ function _sharedSettingCollection(key) {
   if (/^finance_/.test(k) || /^budget_/.test(k) || k === 'expense_paid_overrides' || k === 'company_info'
       || k === 'trello_config' || k === 'trello_automation' || k === 'trello_auto_cards'
       || k === 'gemini_api_key' || k === 'claude_api_key' || k === 'warehouse_list'
-      || k === 'pluscl_stock' || k === 'pluscl_item_map') return 'shared';
+      || k === 'pluscl_stock' || k === 'pluscl_item_map' || k === 'ad_refunds') return 'shared';
   return 'settings';
 }
 async function saveSharedSetting(key, value) {
