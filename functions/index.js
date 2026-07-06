@@ -535,14 +535,18 @@ function _shardShopOrders(allOrders) {
 async function writeShopOrdersSharded(db, allOrders) {
   const shards = _shardShopOrders(allOrders);
   const archN = shards.length - 1;
-  await db.doc('erp_data/shopOrders').set({ data: JSON.stringify(shards[0] || []), ts: Date.now(), arch: archN });
+  const ts = Date.now();
+  // v2.22: 원자적 batch — 라이브(arch 메타)+아카이브를 한 번에 커밋(중간 실패 시 부분 샤드 방지).
+  //   같은 배치에 이전 초과 아카이브 샤드 삭제까지 포함(축소 시 stale 방지).
+  const batch = db.batch();
+  batch.set(db.doc('erp_data/shopOrders'), { data: JSON.stringify(shards[0] || []), ts, arch: archN });
   for (let i = 1; i <= archN; i++) {
-    await db.doc('erp_data/shopOrders_arch' + i).set({ data: JSON.stringify(shards[i]), ts: Date.now() });
+    batch.set(db.doc('erp_data/shopOrders_arch' + i), { data: JSON.stringify(shards[i]), ts });
   }
-  // 축소 시 이전에 더 많던 아카이브 샤드 제거(stale 방지)
   for (let i = archN + 1; i <= archN + SHOP_ORDERS_ARCH_CLEANUP; i++) {
-    try { await db.doc('erp_data/shopOrders_arch' + i).delete(); } catch (_) {}
+    batch.delete(db.doc('erp_data/shopOrders_arch' + i));
   }
+  await batch.commit();
   return { total: (allOrders || []).length, shards: shards.length, archN };
 }
 
