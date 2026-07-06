@@ -2392,7 +2392,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <button id="ap-tab-expense" onclick="switchApprovalTab('expense')" class="ap-tab" style="padding:8px 16px;border:1px solid #0f172a;background:#0f172a;font-size:13px;font-weight:700;cursor:pointer;color:#fff;border-radius:7px;line-height:1.2;transition:all .12s">💳 지출 결의서</button>
         <button id="ap-tab-po" onclick="switchApprovalTab('po')" class="ap-tab" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">📄 발주서 결재</button>
         <button id="ap-tab-nonpo" onclick="switchApprovalTab('nonpo')" class="ap-tab" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">📝 일반 결재</button>
-        <button id="ap-tab-sample" onclick="switchApprovalTab('sample')" class="ap-tab" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">🧪 샘플 구매</button><button onclick="openUnpaidUnifiedView()" class="btn btn-primary btn-sm" style="margin-left:12px;padding:5px 12px;font-size:12.5px">📋 미결재 모아보기</button><button onclick="openApnSignatureRegister()" class="btn btn-sm" title="본부장·대표이사 결재 서명 이미지 등록 (관리자)" style="margin-left:6px;padding:5px 12px;font-size:12.5px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:7px;font-weight:700;cursor:pointer">🖋️ 서명 등록</button>
+        <button id="ap-tab-sample" onclick="switchApprovalTab('sample')" class="ap-tab" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">🧪 샘플 구매</button><button onclick="openUnpaidUnifiedView()" class="btn btn-primary btn-sm" style="margin-left:12px;padding:5px 12px;font-size:12.5px">📋 미결재 모아보기</button>
         <!-- v1.9.418: 월별 → 월/주/일/기간별/전체 5종 필터로 확장 — 발주서 결재 / 일반 결재 / 지출 결의서 / 샘플 구매 공용 -->
         <div class="period-filter" data-prefix="ap" style="margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:nowrap">
           <span style="font-size:12px;color:var(--gray-500);font-weight:500;flex-shrink:0">📅</span>
@@ -5864,7 +5864,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.396';
+const ERP_VERSION = 'v2.3.397';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -36507,56 +36507,9 @@ function renderApprovalNonPoTable() {
 }
 
 // v1.9.911: 일반 결재 처리 모달 — 본부장 전결 / 대표이사 결재 단계 선택
-function approveNonPo(id) {
-  const a = DB.approvals.find(x => x.id === id && x.type === 'non_po_approval');
-  if (!a) {
-    alert('⚠️ 결재 대상을 찾을 수 없습니다. 데이터 정합성 문제일 수 있습니다. 새로고침 후 다시 시도해주세요.');
-    try { _fixApprovalIdCollisions(); renderApprovalPage(); } catch(_){}
-    return;
-  }
-  _closeNonPoApproveModal();
-  const ceo = a.ceoApproval === 'requested';
-  const title = String(a.title || '-').replace(/</g,'&lt;');
-  const ov = document.createElement('div');
-  ov.id = 'nonpo-approve-overlay';
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99985;display:flex;align-items:center;justify-content:center;padding:20px';
-  ov.onclick = function(ev){ if (ev.target === ov) _closeNonPoApproveModal(); };
-  const btnSty = 'width:100%;border-radius:9px;padding:11px 14px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:9px;margin-top:8px;box-sizing:border-box';
-  let opts;
-  // v2.3.396: 서명 워크플로우 — 본부장 전결(이주연 서명) / 대표이사 결재(이재호 서명)
-  const _sig = (window._apnSignatures) || {};
-  const _dirReg = _sig.director && _sig.director.img;
-  const _ceoReg = _sig.ceo && _sig.ceo.img;
-  const _dirName = (_sig.director && _sig.director.name) || '이주연';
-  const _ceoName = (_sig.ceo && _sig.ceo.name) || '이재호';
-  if (ceo) {
-    opts = '<div style="font-size:12px;color:#64748b;margin-bottom:2px">현재 <b style="color:#4338ca">대표이사 결재 대기</b> 상태입니다.</div>'
-      + '<button onclick="_nonPoCeoSign(' + a.id + ')" style="' + btnSty + ';background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe">✍️ 대표이사 결재 <span style="font-size:11px;color:#6366f1;font-weight:600">(' + _ceoName + ' 서명)</span></button>'
-      + (_ceoReg ? '' : '<div style="font-size:11px;color:#b45309;margin-top:6px;line-height:1.5">⚠️ ' + _ceoName + ' 대표 서명이 등록돼 있지 않습니다. <b>🖋️ 서명 등록</b>에서 먼저 등록하세요.</div>')
-      + '<button onclick="_nonPoClearCeo(' + a.id + ')" style="' + btnSty + ';background:#fef9c3;color:#854d0e;border:1px solid #fcd34d">↩ 본부장 전결로 되돌리기</button>';
-  } else {
-    opts = '<div style="font-size:12px;color:#64748b;margin-bottom:2px">이 건을 어떻게 처리할까요?</div>'
-      + '<button onclick="_nonPoDirectorSign(' + a.id + ')" style="' + btnSty + ';background:#dcfce7;color:#15803d;border:1px solid #86efac">🖋️ 본부장 전결 <span style="font-size:11px;color:#16a34a;font-weight:600">(' + _dirName + ' 서명)</span></button>'
-      + (_dirReg ? '' : '<div style="font-size:11px;color:#b45309;margin-top:6px;line-height:1.5">⚠️ ' + _dirName + ' 본부장 서명이 등록돼 있지 않습니다. <b>🖋️ 서명 등록</b>에서 먼저 등록하세요.</div>')
-      + '<button onclick="_nonPoSetCeo(' + a.id + ')" style="' + btnSty + ';background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe">👔 대표이사 결재 요청</button>';
-  }
-  ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:380px;max-width:94vw;box-shadow:0 18px 50px rgba(0,0,0,.32);overflow:hidden">'
-    + '<div style="padding:14px 18px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between">'
-    + '<span style="font-size:14px;font-weight:800;color:#0f172a">🖋️ 결재 처리</span>'
-    + '<button onclick="_closeNonPoApproveModal()" style="background:#f1f5f9;border:none;width:25px;height:25px;border-radius:7px;cursor:pointer;font-size:13px;color:#64748b">✕</button>'
-    + '</div>'
-    + '<div style="padding:15px 18px">'
-    + '<div style="font-size:12.5px;font-weight:700;color:#334155;margin-bottom:10px">' + title + '</div>'
-    + opts
-    + '<button onclick="_closeNonPoApproveModal()" style="' + btnSty + ';background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;justify-content:center">취소</button>'
-    + '</div></div>';
-  document.body.appendChild(ov);
-}
-function _closeNonPoApproveModal() {
-  const ov = document.getElementById('nonpo-approve-overlay');
-  if (ov) ov.remove();
-}
-// v2.3.396: 결재 서명 이미지 로드/캐시 (shared/approval_signatures)
+function approveNonPo(id) { openNonPoApprovalSheet(id); }  // v2.3.397: 발주서처럼 결재 문서에서 바로 사인
+
+// v2.3.396/397: 결재 서명 이미지 로드/캐시 (shared/approval_signatures) — role별 최신 서명 보관
 window._apnSignatures = window._apnSignatures || null;
 async function _loadApnSignatures() {
   try {
@@ -36565,142 +36518,129 @@ async function _loadApnSignatures() {
   } catch(_) { if (!window._apnSignatures) window._apnSignatures = {}; }
   return window._apnSignatures;
 }
-// v2.3.396: 서명 확정 공통 처리 — role: 'director'(본부장 전결) / 'ceo'(대표이사 결재)
-function _nonPoFinalizeSign(id, role) {
+
+// v2.3.397: 일반 결재 문서(모달) — 발주서 결재처럼 결재란에서 바로 사인 -> 완료 저장
+function openNonPoApprovalSheet(id) {
   const a = DB.approvals.find(x => x.id === id && x.type === 'non_po_approval');
-  if (!a) return;
-  const sig = (window._apnSignatures) || {};
-  const rec = sig[role];
-  const defName = role === 'ceo' ? '이재호' : '이주연';
-  if (!rec || !rec.img) {
-    const roleLabel = role === 'ceo' ? '대표이사(' + defName + ')' : '본부장(' + defName + ')';
-    alert('⚠️ ' + roleLabel + ' 서명이 등록돼 있지 않습니다.\n\n결재 화면 상단의 [🖋️ 서명 등록] 에서 서명을 먼저 등록한 뒤 다시 결재해주세요.');
+  if (!a) {
+    alert('⚠️ 결재 대상을 찾을 수 없습니다. 데이터 정합성 문제일 수 있습니다. 새로고침 후 다시 시도해주세요.');
+    try { _fixApprovalIdCollisions(); renderApprovalPage(); } catch(_){}
     return;
   }
+  if (a.status === 'approved') { openNonPoApprovalPage(a.id); return; }
+  const _canWr = window._currentUser && (window._currentUser.isAdmin === true || window._currentUser.permission === 'write');
+  if (!_canWr) { showNotif('결재 처리는 쓰기 권한자만 가능합니다', 'warning'); return; }
+  const signMode = (a.ceoApproval === 'requested') ? 'ceo' : 'director';
+  const roleLabel = signMode === 'ceo' ? '대표이사 결재' : '본부장 전결';
+  const built = _nonPoDocInner(a, signMode);
+  _closeNonPoSignSheet();
+  const ov = document.createElement('div');
+  ov.id = 'nonpo-sign-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:99985;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto';
+  ov.onclick = function(ev){ if (ev.target === ov) _closeNonPoSignSheet(); };
+  const btn = 'padding:8px 13px;border-radius:7px;cursor:pointer;font-size:12.5px;font-weight:700;border:1px solid';
+  let toolbarBtns = ''
+    + '<button onclick="_openSignaturePad(_nonPoApplySign)" style="' + btn + ' #93c5fd;background:#fff;color:#1e40af">🎨 직접 사인</button>'
+    + '<button onclick="_openSavedSignaturesPicker(_nonPoApplySign)" style="' + btn + ' #93c5fd;background:#fff;color:#1e40af">📚 저장된 사인</button>';
+  if (signMode === 'ceo') {
+    toolbarBtns += '<button onclick="_nonPoSaveSign(' + a.id + ',\'ceo\')" style="' + btn + ' #4338ca;background:#4f46e5;color:#fff">✅ 대표이사 결재 완료 저장</button>'
+      + '<button onclick="_nonPoSheetClearCeo(' + a.id + ')" style="' + btn + ' #fcd34d;background:#fef9c3;color:#854d0e">↩ 본부장 전결로 되돌리기</button>';
+  } else {
+    toolbarBtns += '<button onclick="_nonPoSaveSign(' + a.id + ',\'director\')" style="' + btn + ' #15803d;background:#16a34a;color:#fff">✅ 본부장 전결 완료 저장</button>'
+      + '<button onclick="_nonPoSheetSetCeo(' + a.id + ')" style="' + btn + ' #c7d2fe;background:#eef2ff;color:#4338ca">👔 대표이사 결재 요청</button>';
+  }
+  ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#f3f4f6;border-radius:14px;width:880px;max-width:96vw;box-shadow:0 18px 50px rgba(0,0,0,.35);overflow:hidden;margin:auto">'
+    + '<div style="padding:12px 18px;background:#0f172a;color:#fff;display:flex;align-items:center;justify-content:space-between">'
+    + '<span style="font-size:14px;font-weight:800">🖋️ ' + roleLabel + ' — 결재 문서에서 바로 사인</span>'
+    + '<button onclick="_closeNonPoSignSheet()" style="background:rgba(255,255,255,.15);border:none;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:13px;color:#fff">✕</button>'
+    + '</div>'
+    + '<div style="padding:11px 16px;background:#eff6ff;border-bottom:1px solid #bfdbfe;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    + toolbarBtns
+    + '<button onclick="_nonPoClearSignCell()" style="' + btn + ' #cbd5e1;background:#fff;color:#475569">✕ 사인 지우기</button>'
+    + '<span style="flex-basis:100%;font-size:11px;color:#1e40af;line-height:1.45">문서 하단 <b>결재란</b>에 사인이 표시됩니다 · 사인 추가 후 <b>✅ 완료 저장</b> 을 눌러야 결재가 완료됩니다 · 저장된 사인은 브라우저에 보관되어 재사용됩니다</span>'
+    + '</div>'
+    + '<div style="padding:20px 22px 28px;max-height:calc(92vh - 140px);overflow:auto">' + built.innerHtml + '</div>'
+    + '</div>';
+  document.body.appendChild(ov);
+  setTimeout(function(){
+    try {
+      const sig = (window._apnSignatures) || {};
+      const rec = sig[signMode];
+      if (rec && rec.img) _nonPoApplySign(rec.img);
+    } catch(_){}
+  }, 50);
+}
+function _closeNonPoSignSheet() {
+  const ov = document.getElementById('nonpo-sign-overlay');
+  if (ov) ov.remove();
+}
+function _nonPoApplySign(dataUrl) {
+  const cell = document.getElementById('nonpo-sign-cell');
+  if (!cell) { showNotif('결재란을 찾을 수 없습니다 — 다시 열어주세요', 'warning'); return; }
+  const ex = cell.querySelector('.nonpo-sign-img'); if (ex) ex.remove();
+  const ph = cell.querySelector('.nonpo-sign-ph'); if (ph) ph.style.display = 'none';
+  const img = document.createElement('img');
+  img.src = dataUrl; img.className = 'nonpo-sign-img';
+  img.style.cssText = 'max-width:150px;max-height:56px;object-fit:contain';
+  cell.appendChild(img);
+}
+function _nonPoClearSignCell() {
+  const cell = document.getElementById('nonpo-sign-cell');
+  if (!cell) return;
+  const ex = cell.querySelector('.nonpo-sign-img'); if (ex) ex.remove();
+  const ph = cell.querySelector('.nonpo-sign-ph'); if (ph) ph.style.display = '';
+}
+async function _nonPoSaveSign(id, role) {
+  const _canWr = window._currentUser && (window._currentUser.isAdmin === true || window._currentUser.permission === 'write');
+  if (!_canWr) { showNotif('결재 처리는 쓰기 권한자만 가능합니다', 'warning'); return; }
+  const a = DB.approvals.find(x => x.id === id && x.type === 'non_po_approval');
+  if (!a) return;
+  const cell = document.getElementById('nonpo-sign-cell');
+  const img = cell && cell.querySelector('.nonpo-sign-img');
+  if (!img || !img.src || img.src.indexOf('data:') !== 0) {
+    showNotif('먼저 🎨 직접 사인 또는 📚 저장된 사인으로 사인을 추가해주세요', 'warning');
+    return;
+  }
+  const dataUrl = img.src;
+  const defName = role === 'ceo' ? '이재호' : '이주연';
+  const sig = (window._apnSignatures && typeof window._apnSignatures === 'object') ? window._apnSignatures : {};
+  sig[role] = { name: (sig[role] && sig[role].name) || defName, img: dataUrl, ts: Date.now() };
+  window._apnSignatures = sig;
+  try { await saveSharedSetting('approval_signatures', sig); } catch(e) { console.warn('[서명] 레지스트리 저장 실패:', e); }
   a.status = 'approved';
   a.approvedAt = Date.now();
-  a.updatedAt = Date.now();  // v1.9.772: EDIT RECOVERY 보호
-  a.signRole = role;                       // 'director' | 'ceo'
-  a.signName = rec.name || defName;
+  a.updatedAt = Date.now();
+  a.signRole = role;
+  a.signName = sig[role].name;
   a.signedAt = Date.now();
-  // 이미지는 approvals 문서 비대화 방지를 위해 저장하지 않고, 렌더 시 shared 레지스트리에서 조회
   try { saveData(); } catch(_){}
   try { slackNotify('approval_done', a); } catch(_){}
-  _closeNonPoApproveModal();
+  _closeNonPoSignSheet();
   renderApprovalPage();
   updateApprovalBadges();
   showNotif(role === 'ceo' ? '👑 대표이사 결재 완료' : '✅ 본부장 전결 완료', 'success');
 }
-function _nonPoDirectorSign(id) { _nonPoFinalizeSign(id, 'director'); }
-function _nonPoCeoSign(id) { _nonPoFinalizeSign(id, 'ceo'); }
-// 하위호환: 기존 참조가 남아 있을 경우 본부장 전결로 처리
-function _nonPoApproveDone(id) { _nonPoFinalizeSign(id, 'director'); }
-
-// v2.3.396: 서명 등록 모달 — 본부장(이주연)/대표(이재호) 서명 이미지 업로드
-function openApnSignatureRegister() {
-  if (!(window._currentUser && window._currentUser.isAdmin === true)) { showNotif('서명 등록은 관리자만 가능합니다', 'warning'); return; }
-  const sig = (window._apnSignatures) || {};
-  const ov = document.createElement('div');
-  ov.id = 'apn-sign-reg-overlay';
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99990;display:flex;align-items:center;justify-content:center;padding:20px';
-  ov.onclick = function(ev){ if (ev.target === ov) ov.remove(); };
-  function box(role, defName, label) {
-    const rec = sig[role] || {};
-    const nm = rec.name || defName;
-    const img = rec.img || '';
-    return '<div style="border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-top:10px">'
-      + '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin-bottom:8px">' + label + '</div>'
-      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
-      + '<span style="font-size:11.5px;color:#64748b;width:38px">이름</span>'
-      + '<input id="apn-sign-name-' + role + '" value="' + String(nm).replace(/"/g,'&quot;') + '" style="flex:1;border:1px solid #cbd5e1;border-radius:7px;padding:6px 9px;font-size:12.5px">'
-      + '</div>'
-      + '<div style="display:flex;align-items:center;gap:10px">'
-      + '<div id="apn-sign-prev-' + role + '" style="width:140px;height:56px;border:1px dashed #cbd5e1;border-radius:7px;background:#f8fafc;display:flex;align-items:center;justify-content:center;overflow:hidden">'
-      + (img ? '<img src="' + img + '" style="max-width:100%;max-height:100%;object-fit:contain">' : '<span style="font-size:11px;color:#94a3b8">서명 이미지</span>')
-      + '</div>'
-      + '<div style="display:flex;flex-direction:column;gap:5px">'
-      + '<label style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:6px 11px;border-radius:7px;font-size:11.5px;font-weight:700;cursor:pointer;text-align:center">📁 이미지 선택<input type="file" accept="image/*" style="display:none" onchange="_apnSignPickFile(this,\'' + role + '\')"></label>'
-      + '<button onclick="_apnSignClear(\'' + role + '\')" style="background:#fef2f2;color:#b91c1c;border:1px solid #fca5a5;padding:5px 11px;border-radius:7px;font-size:11.5px;font-weight:700;cursor:pointer">🗑️ 지우기</button>'
-      + '</div></div>'
-      + '<div style="font-size:10.5px;color:#94a3b8;margin-top:6px">배경이 투명한 PNG 서명 이미지를 권장합니다 (가로가 긴 이미지가 잘 보입니다).</div>'
-      + '</div>';
-  }
-  ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:460px;max-width:94vw;max-height:90vh;overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.32)">'
-    + '<div style="padding:14px 18px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between">'
-    + '<span style="font-size:14px;font-weight:800;color:#0f172a">🖋️ 결재 서명 등록</span>'
-    + '<button onclick="document.getElementById(\'apn-sign-reg-overlay\').remove()" style="background:#f1f5f9;border:none;width:25px;height:25px;border-radius:7px;cursor:pointer;font-size:13px;color:#64748b">✕</button>'
-    + '</div>'
-    + '<div style="padding:15px 18px">'
-    + '<div style="font-size:11.5px;color:#64748b;line-height:1.6;margin-bottom:2px">여기서 등록한 서명이 <b>본부장 전결</b>·<b>대표이사 결재</b> 시 결재 문서에 삽입됩니다. (전 직원 문서에서 조회)</div>'
-    + box('director', '이주연', '👔 본부장 전결 서명')
-    + box('ceo', '이재호', '🏛️ 대표이사 결재 서명')
-    + '<button onclick="_apnSignSave()" style="width:100%;margin-top:14px;background:#0f172a;color:#fff;border:none;border-radius:9px;padding:11px;font-size:13px;font-weight:800;cursor:pointer">💾 서명 저장</button>'
-    + '</div></div>';
-  document.body.appendChild(ov);
-  // 파일 선택 임시 저장소
-  window._apnSignDraft = { director: (sig.director && sig.director.img) || '', ceo: (sig.ceo && sig.ceo.img) || '' };
-}
-function _apnSignPickFile(input, role) {
-  const f = input.files && input.files[0];
-  if (!f) return;
-  if (!/^image\//.test(f.type)) { showNotif('이미지 파일만 등록할 수 있습니다', 'warning'); return; }
-  const reader = new FileReader();
-  reader.onload = function(e){
-    const dataUrl = e.target.result;
-    if (!window._apnSignDraft) window._apnSignDraft = {};
-    window._apnSignDraft[role] = dataUrl;
-    const prev = document.getElementById('apn-sign-prev-' + role);
-    if (prev) prev.innerHTML = '<img src="' + dataUrl + '" style="max-width:100%;max-height:100%;object-fit:contain">';
-  };
-  reader.readAsDataURL(f);
-}
-function _apnSignClear(role) {
-  if (!window._apnSignDraft) window._apnSignDraft = {};
-  window._apnSignDraft[role] = '';
-  const prev = document.getElementById('apn-sign-prev-' + role);
-  if (prev) prev.innerHTML = '<span style="font-size:11px;color:#94a3b8">서명 이미지</span>';
-}
-async function _apnSignSave() {
-  if (!(window._currentUser && window._currentUser.isAdmin === true)) { showNotif('서명 등록은 관리자만 가능합니다', 'warning'); return; }
-  const draft = window._apnSignDraft || {};
-  const nameEl = function(r){ const el = document.getElementById('apn-sign-name-' + r); return el ? el.value.trim() : ''; };
-  const out = {};
-  const dImg = draft.director || '';
-  const cImg = draft.ceo || '';
-  if (dImg) out.director = { name: nameEl('director') || '이주연', img: dImg, ts: Date.now() };
-  if (cImg) out.ceo = { name: nameEl('ceo') || '이재호', img: cImg, ts: Date.now() };
-  try {
-    await saveSharedSetting('approval_signatures', out);
-    window._apnSignatures = out;
-    const ov = document.getElementById('apn-sign-reg-overlay'); if (ov) ov.remove();
-    showNotif('🖋️ 결재 서명이 저장되었습니다', 'success');
-    try { renderApprovalPage(); } catch(_){}
-  } catch(e) {
-    console.warn('[서명] 저장 실패:', e);
-    showNotif('서명 저장 실패 — 다시 시도해주세요', 'warning');
-  }
-}
-function _nonPoSetCeo(id) {
+function _nonPoSheetSetCeo(id) {
   const a = DB.approvals.find(x => x.id === id && x.type === 'non_po_approval');
   if (!a) return;
   a.ceoApproval = 'requested';
   a.updatedAt = Date.now();
   try { saveData(); } catch(_){}
-  _closeNonPoApproveModal();
   renderApprovalPage();
   updateApprovalBadges();
-  showNotif('👔 대표이사 결재 요청으로 변경했습니다', 'info');
+  showNotif('👔 대표이사 결재 요청으로 변경 — 이어서 대표이사 결재 서명을 진행하세요', 'info');
+  openNonPoApprovalSheet(id);
 }
-function _nonPoClearCeo(id) {
+function _nonPoSheetClearCeo(id) {
   const a = DB.approvals.find(x => x.id === id && x.type === 'non_po_approval');
   if (!a) return;
   a.ceoApproval = '';
   a.updatedAt = Date.now();
   try { saveData(); } catch(_){}
-  _closeNonPoApproveModal();
   renderApprovalPage();
   updateApprovalBadges();
   showNotif('↩ 본부장 전결로 되돌렸습니다', 'info');
+  openNonPoApprovalSheet(id);
 }
 
 async function deleteNonPo(id) {
@@ -41588,7 +41528,12 @@ function openNonPoApprovalPage(approvalId) {
     else { alert('결재 문서를 찾을 수 없습니다. 삭제되었을 수 있습니다.'); }
     return;
   }
+  const built = _nonPoDocInner(a, null);
+  _openApprovalDocInNewTab(built.docLabel, built.docNo, built.innerHtml, a.id);
+}
 
+// v2.3.397: 결재 문서 내용 빌더 — signMode: null(보기) | 'director' | 'ceo'(사인 모드: 결재란에 편집 셀 제공)
+function _nonPoDocInner(a, signMode) {
   const docTypeMap = {
     '기안서': '기 안 서', '품의서': '품 의 서', '보고서': '보 고 서',
     '공문': '공　　문', '계약서': '계 약 서', '기타': '결 재 문 서',
@@ -41619,30 +41564,7 @@ function openNonPoApprovalPage(approvalId) {
     ? `<div style="white-space:pre-wrap;line-height:1.85;font-size:13.5px;color:#1e293b;font-family:'Noto Sans KR','Nanum Gothic',sans-serif;min-height:60px">${_linkifyText(sanitizedNote)}</div>`
     : `<div style="color:#94a3b8;font-size:12.5px;font-style:italic;text-align:center;padding:30px 0">(본문 내용 없음)</div>`;
 
-  // v2.3.396: 결재란(서명) — 본부장 전결 / 대표이사 결재 완료 시 등록 서명 삽입
-  let signBlock = '';
-  if (a.status === 'approved' && a.signRole) {
-    const _sig = (window._apnSignatures) || {};
-    const _rec = _sig[a.signRole] || {};
-    const _roleLabel = a.signRole === 'ceo' ? '대표이사 결재' : '본부장 전결';
-    const _nm = a.signName || _rec.name || (a.signRole === 'ceo' ? '이재호' : '이주연');
-    const _sd = a.signedAt || a.approvedAt;
-    const _sdStr = _sd ? new Date(_sd).toLocaleDateString('ko-KR',{year:'numeric',month:'2-digit',day:'2-digit'}) : '';
-    const _imgHtml = _rec.img
-      ? `<img src="${_rec.img}" style="max-width:150px;max-height:58px;object-fit:contain">`
-      : `<span style="font-size:13px;color:#166534;font-weight:800">승인</span>`;
-    signBlock = `
-      <div style="display:flex;justify-content:flex-end;margin-top:24px">
-        <table style="border-collapse:collapse;font-family:'Noto Sans KR',sans-serif">
-          <tr>
-            <td rowspan="3" style="border:1.5px solid #334155;background:#f1f5f9;width:26px;padding:6px 4px;text-align:center;font-size:12px;font-weight:800;color:#334155;letter-spacing:2px;line-height:1.35">결<br>재</td>
-            <td style="border:1px solid #334155;background:#f8fafc;padding:6px 22px;text-align:center;font-size:12px;font-weight:800;color:#334155;min-width:180px">${_roleLabel}</td>
-          </tr>
-          <tr><td style="border:1px solid #334155;height:64px;text-align:center;vertical-align:middle;padding:4px 22px;background:#fff">${_imgHtml}</td></tr>
-          <tr><td style="border:1px solid #334155;padding:6px 22px;text-align:center;font-size:11.5px;color:#0f172a;font-weight:700;background:#fff">${_nm}${_sdStr?` · ${_sdStr}`:''}</td></tr>
-        </table>
-      </div>`;
-  }
+  const signBlock = _nonPoSignBoxHtml(a, signMode);
 
   const closingHtml = `
     <div style="margin-top:26px;padding-top:18px;border-top:1px dashed #cbd5e1;text-align:center">
@@ -41692,7 +41614,41 @@ function openNonPoApprovalPage(approvalId) {
       </div>
     </div>`;
 
-  _openApprovalDocInNewTab(docLabel, docNo, innerHtml, a.id);
+  return { docLabel, docNo, innerHtml };
+}
+
+// v2.3.397: 결재란(서명 박스) — signMode 있으면 편집셀(id=nonpo-sign-cell) 제공, 없으면 완료 서명 표시
+function _nonPoSignBoxHtml(a, signMode) {
+  const role = signMode || ((a.status === 'approved' && a.signRole) ? a.signRole : '');
+  if (!role) return '';
+  const editable = !!signMode;
+  const sig = (window._apnSignatures) || {};
+  const rec = sig[role] || {};
+  const roleLabel = role === 'ceo' ? '대표이사 결재' : '본부장 전결';
+  const nm = (editable ? (rec.name || '') : (a.signName || rec.name || '')) || (role === 'ceo' ? '이재호' : '이주연');
+  const sd = a.signedAt || a.approvedAt;
+  const sdStr = (!editable && sd) ? new Date(sd).toLocaleDateString('ko-KR',{year:'numeric',month:'2-digit',day:'2-digit'}) : '';
+  let cellInner;
+  if (editable) {
+    cellInner = `<span class="nonpo-sign-ph" style="font-size:11px;color:#94a3b8">여기에 사인이 표시됩니다</span>`;
+  } else {
+    cellInner = rec.img
+      ? `<img src="${rec.img}" style="max-width:150px;max-height:58px;object-fit:contain">`
+      : `<span style="font-size:13px;color:#166534;font-weight:800">승인</span>`;
+  }
+  const cellId = editable ? ' id="nonpo-sign-cell"' : '';
+  const cellExtra = editable ? 'position:relative;' : '';
+  return `
+    <div style="display:flex;justify-content:flex-end;margin-top:24px">
+      <table style="border-collapse:collapse;font-family:'Noto Sans KR',sans-serif">
+        <tr>
+          <td rowspan="3" style="border:1.5px solid #334155;background:#f1f5f9;width:26px;padding:6px 4px;text-align:center;font-size:12px;font-weight:800;color:#334155;letter-spacing:2px;line-height:1.35">결<br>재</td>
+          <td style="border:1px solid #334155;background:#f8fafc;padding:6px 22px;text-align:center;font-size:12px;font-weight:800;color:#334155;min-width:180px">${roleLabel}</td>
+        </tr>
+        <tr><td${cellId} style="border:1px solid #334155;height:64px;text-align:center;vertical-align:middle;padding:4px 22px;background:#fff;${cellExtra}">${cellInner}</td></tr>
+        <tr><td style="border:1px solid #334155;padding:6px 22px;text-align:center;font-size:11.5px;color:#0f172a;font-weight:700;background:#fff">${nm}${sdStr?` · ${sdStr}`:''}</td></tr>
+      </table>
+    </div>`;
 }
 
 // v1.9.317: 결재 ID 충돌 자동 복구 — v1.9.756: 후순위 제거로 변경 (zombie 부활 방지)
