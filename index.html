@@ -1257,6 +1257,11 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="page" id="page-calendar">
       <div class="card">
         <div class="card-body" style="padding:14px">
+          <!-- v2.3.398: 캘린더 탭 — 업무 일정 / 약국 영업 일정 분리 -->
+          <div style="display:flex;gap:8px;margin-bottom:12px;border-bottom:1px solid #e5e7eb;padding-bottom:10px">
+            <button id="cal-tab-work" onclick="calSetTab('work')" style="padding:8px 18px;border:1px solid #0f172a;background:#0f172a;color:#fff;border-radius:8px;font-size:13.5px;font-weight:700;cursor:pointer;line-height:1.2;transition:all .12s">📋 업무 일정</button>
+            <button id="cal-tab-pharmacy" onclick="calSetTab('pharmacy')" style="padding:8px 18px;border:1px solid #bfdbfe;background:#f1f5f9;color:#475569;border-radius:8px;font-size:13.5px;font-weight:600;cursor:pointer;line-height:1.2;transition:all .12s">💊 약국 영업 일정</button>
+          </div>
           <!-- 네비게이션 + 동기화 + 요약 (통합 한 줄) -->
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:10px">
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -1268,14 +1273,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             </div>
             <div id="cal-summary" style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--gray-600)"></div>
           </div>
-          <!-- 범례 (우측 정렬, 얇게) -->
-          <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-bottom:8px;flex-wrap:wrap">
-            <span style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:#5b21b6"><span style="width:10px;height:10px;border-radius:3px;background:#ddd6fe;display:inline-block"></span>🧪 신제품 개발</span>
-            <span style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:#166534"><span style="width:10px;height:10px;border-radius:3px;background:#bbf7d0;display:inline-block"></span>🏢 르니브 운영 본부</span>
-            <span style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:#1d4ed8"><span style="width:10px;height:10px;border-radius:3px;background:#bfdbfe;display:inline-block"></span>💊 약국 영업</span>
-            <span style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:#b91c1c"><span style="width:10px;height:10px;border-radius:3px;background:#fecaca;display:inline-block"></span>🏠 홈쇼핑 준비</span>
-            <span style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:#713f12"><span style="width:10px;height:10px;border-radius:3px;background:#fef08a;display:inline-block"></span>📦 발주 입고예정</span>
-          </div>
+          <!-- 범례 (탭별 동적 렌더 — v2.3.398) -->
+          <div id="cal-legend" style="display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-bottom:8px;flex-wrap:wrap"></div>
           <!-- 캘린더 그리드 -->
           <div id="cal-grid"></div>
           <!-- 향후 일정 리스트 (옵션) -->
@@ -5864,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.397';
+const ERP_VERSION = 'v2.3.398';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -44794,10 +44793,13 @@ function _ymd(d) {
   return `${y}-${m}-${da}`;
 }
 
-function _getAllTrelloEvents() {
+function _getAllTrelloEvents(tab) {
+  // v2.3.398: tab — 'all'(기본, 전체) | 'work'(업무: 약국 제외) | 'pharmacy'(약국만+직접입력)
+  //   업무 일정 탭에서는 약국 영업(보드4)을 제외하고, 약국 영업 탭에서는 약국 보드 + 직접입력 일정만 표시.
+  tab = tab || 'all';
   // 두 보드의 due/start가 있는 카드를 모아서 반환 (start+due 있는 카드는 기간 이벤트)
   const out = [];
-  const boards = [
+  let boards = [
     { cards: DB._trelloCards || [],  board: '신제품', boardIcon: '🧪', color: '#ddd6fe', textColor: '#5b21b6', hoverBg: '#c4b5fd', boardUrl: 'https://trello.com/b/chxG4fva' },
     { cards: DB._trelloCards2 || [], board: '운영',   boardIcon: '🏢', color: '#bbf7d0', textColor: '#166534', hoverBg: '#86efac', boardUrl: 'https://trello.com/b/SMzNZ6Hw' },
     // v2.3.276 — 보드4 (약국 영업, 파스텔 블루)
@@ -44805,6 +44807,8 @@ function _getAllTrelloEvents() {
     // v2.3.277 — 보드3 (홈쇼핑 준비, 파스텔 레드)
     { cards: DB._trelloCards3 || [], board: '홈쇼핑', boardIcon: '🏠', color: '#fecaca', textColor: '#b91c1c', hoverBg: '#fca5a5', boardUrl: 'https://trello.com/b/' + TRELLO_BOARD_ID_3 }
   ];
+  if (tab === 'pharmacy') boards = boards.filter(b => b.board === '약국');
+  else if (tab === 'work') boards = boards.filter(b => b.board !== '약국');
   boards.forEach(b => {
     b.cards.forEach(c => {
       const hasDue = !!c.due;
@@ -44862,7 +44866,7 @@ function _getAllTrelloEvents() {
   // v1.9.180 — 긴급도(지연/D-3/D-1)에 따라 색상 차등
   const _todayYmd = _ymd(new Date());
   const _todayDate = new Date(_todayYmd + 'T00:00:00');
-  (DB.orders || []).forEach(o => {
+  if (tab !== 'pharmacy') (DB.orders || []).forEach(o => {
     if (!o.inDate) return;
     const ymd = _ymd(o.inDate);
     if (!ymd) return;
@@ -44899,6 +44903,35 @@ function _getAllTrelloEvents() {
       isRange: false, isStart: true, isEnd: true, rangeDays: 1, rangeIdx: 0
     });
   });
+
+  // v2.3.398: 약국 영업 직접입력 일정(shared/pharmacy_cal_events) — 약국/전체 탭에서 표시
+  if (tab === 'pharmacy' || tab === 'all') {
+    const _custom = Array.isArray(window._pharmacyCalEvents) ? window._pharmacyCalEvents : [];
+    _custom.forEach(ce => {
+      if (!ce || !ce.date) return;
+      const startYmd = _ymd(ce.date);
+      if (!startYmd) return;
+      let endYmd = ce.endDate ? _ymd(ce.endDate) : startYmd;
+      if (!endYmd || endYmd < startYmd) endYmd = startYmd;
+      const sDate = new Date(startYmd + 'T00:00:00');
+      const eDate = new Date(endYmd + 'T00:00:00');
+      const totalDays = Math.max(1, Math.round((eDate - sDate) / 86400000) + 1);
+      const isRange = totalDays > 1;
+      let cur = new Date(sDate), idx = 0;
+      while (idx < totalDays && idx < 400) {
+        out.push({
+          type: 'custom', customId: ce.id,
+          date: _ymd(cur), name: ce.name || '(제목 없음)', memo: ce.memo || '',
+          due: endYmd, start: startYmd, dueComplete: false,
+          url: null, board: '약국', boardIcon: '💊',
+          color: '#bfdbfe', textColor: '#1d4ed8', hoverBg: '#93c5fd',
+          createdBy: ce.createdBy || '',
+          isRange: isRange, isStart: idx === 0, isEnd: idx === totalDays - 1, rangeDays: totalDays, rangeIdx: idx
+        });
+        cur.setDate(cur.getDate() + 1); idx++;
+      }
+    });
+  }
 
   // 날짜순 정렬 (같은 날짜면 시간순)
   out.sort((a,b) => (a.date||'').localeCompare(b.date||'') || (a.due||'').localeCompare(b.due||''));
@@ -45024,8 +45057,9 @@ async function calOpenOrderPdf(orderId) {
 
 // v1.9.180 — 날짜 셀 클릭 시 그 날 이벤트 목록 모달
 function calShowDayModal(ymd) {
-  const events = _getAllTrelloEvents().filter(e => e.date === ymd);
-  if (!events.length) return;
+  const _tab = window._calTab || 'work';
+  const events = _getAllTrelloEvents(_tab).filter(e => e.date === ymd);
+  if (!events.length && _tab !== 'pharmacy') return;
   const existing = document.getElementById('cal-day-modal');
   if (existing) existing.remove();
 
@@ -45050,19 +45084,32 @@ function calShowDayModal(ymd) {
     // v1.9.186 — 행 배경에 연한 색상 적용 (좌측 색상 사각형 제거)
     const rowBg = `${e.color}55`;     // 기본: 33% 알파
     const rowBgHover = `${e.color}99`; // 호버: 60% 알파
+    // v2.3.398: 직접입력(custom) 약국 일정은 수정/삭제 버튼 + 메모
+    const isCustom = e.type === 'custom';
+    const memoHtml = (isCustom && e.memo) ? `<div style="font-size:11px;color:#475569;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📝 ${(e.memo||'').replace(/</g,'&lt;')}</div>` : '';
+    const custBtns = isCustom ? `<span style="display:inline-flex;gap:4px;flex-shrink:0">
+        <button onclick="event.stopPropagation();calPharmacyEditEvent('${e.customId}')" title="수정" style="background:#fff;border:1px solid #bfdbfe;color:#1d4ed8;border-radius:5px;padding:2px 7px;font-size:11px;font-weight:700;cursor:pointer">✏️</button>
+        <button onclick="event.stopPropagation();calPharmacyDeleteEvent('${e.customId}')" title="삭제" style="background:#fff;border:1px solid #fca5a5;color:#b91c1c;border-radius:5px;padding:2px 7px;font-size:11px;font-weight:700;cursor:pointer">🗑️</button>
+      </span>` : '';
     return `<div data-idx="${i}" class="cal-day-row" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #f3f4f6;cursor:pointer;transition:background .12s;background:${rowBg}" onmouseenter="this.style.background='${rowBgHover}'" onmouseleave="this.style.background='${rowBg}'">
-      <span style="color:#6b7280;font-size:12px;min-width:72px">${e.boardIcon} ${e.board}</span>
-      <span style="flex:1;color:#1f2937;font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${strike}">${e.dueComplete?'✓ ':''}${safeName}</span>
-      ${badge}
+      <span style="color:#6b7280;font-size:12px;min-width:72px">${e.boardIcon} ${e.board}${isCustom?'<br><span style=\"font-size:9.5px;color:#93c5fd\">직접입력</span>':''}</span>
+      <span style="flex:1;min-width:0"><span style="color:#1f2937;font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;${strike}">${e.dueComplete?'✓ ':''}${safeName}</span>${memoHtml}</span>
+      ${badge}${custBtns}
     </div>`;
   }).join('');
+
+  const emptyHtml = (!events.length) ? `<div style="padding:26px 14px;text-align:center;color:#94a3b8;font-size:12.5px">이 날짜에 등록된 일정이 없습니다</div>` : '';
+  const addBtnHtml = (_tab === 'pharmacy') ? `<div style="padding:10px 14px;border-top:1px solid #e5e7eb;background:#f8fafc">
+      <button onclick="document.getElementById('cal-day-modal').remove();calPharmacyAddEvent('${ymd}')" style="width:100%;background:#1d4ed8;color:#fff;border:none;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer">➕ 이 날짜에 약국 영업 일정 추가</button>
+    </div>` : '';
 
   box.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:#fafafa;border-bottom:1px solid #e5e7eb">
       <div style="font-size:14px;font-weight:700;color:#1f2937">${headerText}</div>
       <button id="cal-day-close" style="background:#fff;border:1px solid #d1d5db;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;font-weight:600">✕</button>
     </div>
-    <div style="flex:1;overflow-y:auto">${rowsHtml}</div>`;
+    <div style="flex:1;overflow-y:auto">${rowsHtml}${emptyHtml}</div>
+    ${addBtnHtml}`;
 
   overlay.appendChild(box);
   document.body.appendChild(overlay);
@@ -45074,6 +45121,7 @@ function calShowDayModal(ymd) {
       const idx = parseInt(row.dataset.idx);
       const e = events[idx];
       if (!e) return;
+      if (e.type === 'custom') { overlay.remove(); calPharmacyEditEvent(e.customId); return; }
       overlay.remove();
       if (e.type === 'po') calOpenOrderPdf(e.orderId);
       else if (e.url) window.open(e.url, '_blank');
@@ -45087,7 +45135,11 @@ function renderTrelloCalendar() {
   const month = _calendarCursor.getMonth(); // 0-11
   const titleEl = $('cal-title'); if (titleEl) titleEl.textContent = `${year}년 ${month+1}월`;
 
-  const events = _getAllTrelloEvents();
+  // v2.3.398: 탭 상태 — 'work'(업무 일정, 기본) | 'pharmacy'(약국 영업 일정)
+  const _tab = window._calTab || 'work';
+  window._calTab = _tab;
+  _calSyncTabButtons(_tab);
+  const events = _getAllTrelloEvents(_tab);
   const todayYmd = _ymd(new Date());
 
   // 이번 달 범위
@@ -45109,15 +45161,35 @@ function renderTrelloCalendar() {
   const cntOverdueAll = events.filter(e => e.type === 'po' && e.urgency === 'overdue').length;
   const summary = $('cal-summary');
   if (summary) {
-    summary.innerHTML = `
-      <span>총 <b style="color:var(--gray-800)">${monthEvents.length}</b></span>
-      <span style="color:#5b21b6">🧪 ${cntBoard1}</span>
-      <span style="color:#166534">🏢 ${cntBoard2}</span>
-      <span style="color:#1d4ed8">💊 ${cntBoard4}</span>
-      <span style="color:#b91c1c">🏠 ${cntBoard3}</span>
-      <span style="color:#713f12">📦 ${cntPO}</span>
-      ${cntOverdueAll > 0 ? `<span style="color:#fff;background:#dc2626;padding:2px 8px;border-radius:99px;font-weight:700">🚨 지연 ${cntOverdueAll}</span>` : ''}
-      <span style="color:#16a34a">✓ ${cntDone}</span>`;
+    if (_tab === 'pharmacy') {
+      summary.innerHTML = `
+        <span>총 <b style="color:var(--gray-800)">${monthEvents.length}</b></span>
+        <span style="color:#1d4ed8">💊 약국 영업 ${cntBoard4}</span>
+        <span style="color:#16a34a">✓ ${cntDone}</span>`;
+    } else {
+      summary.innerHTML = `
+        <span>총 <b style="color:var(--gray-800)">${monthEvents.length}</b></span>
+        <span style="color:#5b21b6">🧪 ${cntBoard1}</span>
+        <span style="color:#166534">🏢 ${cntBoard2}</span>
+        <span style="color:#b91c1c">🏠 ${cntBoard3}</span>
+        <span style="color:#713f12">📦 ${cntPO}</span>
+        ${cntOverdueAll > 0 ? `<span style="color:#fff;background:#dc2626;padding:2px 8px;border-radius:99px;font-weight:700">🚨 지연 ${cntOverdueAll}</span>` : ''}
+        <span style="color:#16a34a">✓ ${cntDone}</span>`;
+    }
+  }
+  // v2.3.398: 범례 — 탭별 동적 렌더
+  const legend = $('cal-legend');
+  if (legend) {
+    const _lg = (bg, tc, label) => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:${tc}"><span style="width:10px;height:10px;border-radius:3px;background:${bg};display:inline-block"></span>${label}</span>`;
+    if (_tab === 'pharmacy') {
+      legend.innerHTML = _lg('#bfdbfe', '#1d4ed8', '💊 약국 영업 (Trello · 직접입력)')
+        + `<span style="font-size:11.5px;color:#94a3b8">· 빈 날짜를 클릭하면 일정을 직접 추가할 수 있습니다</span>`;
+    } else {
+      legend.innerHTML = _lg('#ddd6fe', '#5b21b6', '🧪 신제품 개발')
+        + _lg('#bbf7d0', '#166534', '🏢 르니브 운영 본부')
+        + _lg('#fecaca', '#b91c1c', '🏠 홈쇼핑 준비')
+        + _lg('#fef08a', '#713f12', '📦 발주 입고예정');
+    }
   }
 
   // 일정 맵핑 (ymd → [events])
@@ -45204,9 +45276,11 @@ function renderTrelloCalendar() {
     const moreHtml = moreCount > 0 ? `<div style="font-size:10px;color:var(--gray-500);text-align:center;padding:1px;cursor:pointer" onclick="event.stopPropagation();calShowDayModal('${cell.ymd}')">+${moreCount}개 더</div>` : '';
 
     // v1.9.180 — 이벤트가 있는 셀 자체 클릭 시 해당 날짜 모달 열기
+    // v2.3.398 — 약국 영업 탭은 빈 셀 클릭 시 직접입력 모달
     const hasEv = ev.length > 0;
-    const cellOnclick = hasEv ? ` onclick="calShowDayModal('${cell.ymd}')"` : '';
-    const cellCursor = hasEv ? 'cursor:pointer;' : '';
+    let cellOnclick = '', cellCursor = '';
+    if (hasEv) { cellOnclick = ` onclick="calShowDayModal('${cell.ymd}')"`; cellCursor = 'cursor:pointer;'; }
+    else if (_tab === 'pharmacy') { cellOnclick = ` onclick="calPharmacyAddEvent('${cell.ymd}')" title="클릭하여 약국 영업 일정 추가"`; cellCursor = 'cursor:pointer;'; }
     return `
       <div${cellOnclick} style="background:${bgColor};border:1px solid ${borderColor};border-radius:7px;padding:5px 6px;min-height:92px;display:flex;flex-direction:column;gap:2px;overflow:hidden;${cellCursor}">
         <div style="font-size:11.5px;font-weight:${dateWeight};color:${dateColor};text-align:right">${cell.date.getDate()}${isToday?' <span style=\"background:#facc15;color:#78350f;font-size:9px;padding:1px 5px;border-radius:99px;margin-left:2px\">오늘</span>':''}</div>
@@ -45298,6 +45372,112 @@ function calNavMonth(diff) {
 function calGoToday() {
   _calendarCursor = new Date();
   renderTrelloCalendar();
+}
+
+// ═══════════ v2.3.398: 캘린더 탭(업무/약국) + 약국 영업 직접입력 일정 ═══════════
+function _loadPharmacyCalEvents() {
+  return loadSharedSetting('pharmacy_cal_events').then(v => {
+    window._pharmacyCalEvents = Array.isArray(v) ? v : [];
+    try { if ((window._calTab||'work') === 'pharmacy') renderTrelloCalendar(); } catch(_){}
+    return window._pharmacyCalEvents;
+  }).catch(() => { if (!Array.isArray(window._pharmacyCalEvents)) window._pharmacyCalEvents = []; return window._pharmacyCalEvents; });
+}
+async function _savePharmacyCalEvents() {
+  try { await saveSharedSetting('pharmacy_cal_events', window._pharmacyCalEvents || []); }
+  catch(e) { console.warn('[약국캘린더] 저장 실패:', e); }
+}
+function calSetTab(tab) {
+  window._calTab = (tab === 'pharmacy') ? 'pharmacy' : 'work';
+  renderTrelloCalendar();
+}
+function _calSyncTabButtons(tab) {
+  const w = document.getElementById('cal-tab-work');
+  const p = document.getElementById('cal-tab-pharmacy');
+  if (w) { const on = tab !== 'pharmacy'; w.style.background = on?'#0f172a':'#f1f5f9'; w.style.color = on?'#fff':'#475569'; w.style.borderColor = on?'#0f172a':'#e2e8f0'; w.style.fontWeight = on?'700':'600'; }
+  if (p) { const on = tab === 'pharmacy'; p.style.background = on?'#1d4ed8':'#f1f5f9'; p.style.color = on?'#fff':'#475569'; p.style.borderColor = on?'#1d4ed8':'#bfdbfe'; p.style.fontWeight = on?'700':'600'; }
+}
+function calPharmacyAddEvent(ymd) {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  _calPharmacyOpenForm(null, ymd);
+}
+function calPharmacyEditEvent(id) {
+  const ev = (window._pharmacyCalEvents||[]).find(x => String(x.id) === String(id));
+  if (!ev) { showNotif('일정을 찾을 수 없습니다', 'warning'); return; }
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  _calPharmacyOpenForm(ev, ev.date);
+}
+function _calPharmacyOpenForm(existing, defaultYmd) {
+  const old = document.getElementById('cal-pharm-form'); if (old) old.remove();
+  const isEdit = !!existing;
+  const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  const nm = existing ? esc(existing.name) : '';
+  const sd = existing ? esc(existing.date) : esc(defaultYmd||'');
+  const ed = existing ? esc(existing.endDate) : '';
+  const memo = existing ? esc(existing.memo) : '';
+  const ov = document.createElement('div');
+  ov.id = 'cal-pharm-form';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99988;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick = function(e){ if (e.target === ov) ov.remove(); };
+  ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:400px;max-width:94vw;box-shadow:0 18px 50px rgba(0,0,0,.32);overflow:hidden">'
+    + '<div style="padding:14px 18px;background:#1d4ed8;color:#fff;display:flex;align-items:center;justify-content:space-between">'
+    + '<span style="font-size:14px;font-weight:800">💊 약국 영업 일정 ' + (isEdit?'수정':'추가') + '</span>'
+    + '<button onclick="document.getElementById(\'cal-pharm-form\').remove()" style="background:rgba(255,255,255,.2);border:none;width:25px;height:25px;border-radius:7px;cursor:pointer;font-size:13px;color:#fff">✕</button>'
+    + '</div>'
+    + '<div style="padding:16px 18px;display:flex;flex-direction:column;gap:11px">'
+    + '<div><div style="font-size:11.5px;font-weight:700;color:#475569;margin-bottom:4px">제목 *</div><input id="cpf-name" value="' + nm + '" placeholder="예: OO약국 방문 상담" style="width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:9px 11px;font-size:13px;box-sizing:border-box"></div>'
+    + '<div style="display:flex;gap:10px">'
+    +   '<div style="flex:1"><div style="font-size:11.5px;font-weight:700;color:#475569;margin-bottom:4px">시작일 *</div><input id="cpf-date" type="date" value="' + sd + '" style="width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;font-size:13px;box-sizing:border-box"></div>'
+    +   '<div style="flex:1"><div style="font-size:11.5px;font-weight:700;color:#475569;margin-bottom:4px">종료일 <span style="color:#94a3b8;font-weight:500">(선택)</span></div><input id="cpf-end" type="date" value="' + ed + '" style="width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;font-size:13px;box-sizing:border-box"></div>'
+    + '</div>'
+    + '<div><div style="font-size:11.5px;font-weight:700;color:#475569;margin-bottom:4px">메모 <span style="color:#94a3b8;font-weight:500">(선택)</span></div><textarea id="cpf-memo" rows="2" placeholder="상세 내용" style="width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:9px 11px;font-size:13px;box-sizing:border-box;resize:vertical">' + memo + '</textarea></div>'
+    + '<div style="display:flex;gap:8px;margin-top:4px">'
+    + (isEdit ? '<button onclick="calPharmacyDeleteEvent(\'' + existing.id + '\')" style="background:#fef2f2;color:#b91c1c;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;font-size:12.5px;font-weight:700;cursor:pointer">🗑️ 삭제</button>' : '')
+    + '<button onclick="_calPharmacySave(' + (isEdit ? '\'' + existing.id + '\'' : 'null') + ')" style="flex:1;background:#1d4ed8;color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:800;cursor:pointer">💾 저장</button>'
+    + '</div>'
+    + '</div></div>';
+  document.body.appendChild(ov);
+  setTimeout(function(){ const el = document.getElementById('cpf-name'); if (el) el.focus(); }, 40);
+}
+async function _calPharmacySave(id) {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  const nameEl = document.getElementById('cpf-name');
+  const dateEl = document.getElementById('cpf-date');
+  const endEl  = document.getElementById('cpf-end');
+  const memoEl = document.getElementById('cpf-memo');
+  const name = nameEl ? nameEl.value.trim() : '';
+  const date = dateEl ? dateEl.value : '';
+  let endDate = endEl ? endEl.value : '';
+  const memo = memoEl ? memoEl.value.trim() : '';
+  if (!name) { showNotif('제목을 입력해주세요', 'warning'); return; }
+  if (!date) { showNotif('시작일을 입력해주세요', 'warning'); return; }
+  if (endDate && endDate < date) endDate = '';
+  if (!Array.isArray(window._pharmacyCalEvents)) window._pharmacyCalEvents = [];
+  if (id) {
+    const ev = window._pharmacyCalEvents.find(x => String(x.id) === String(id));
+    if (ev) { ev.name = name; ev.date = date; ev.endDate = endDate; ev.memo = memo; ev.updatedAt = Date.now(); }
+  } else {
+    window._pharmacyCalEvents.push({
+      id: 'pce_' + Date.now() + '_' + Math.floor(Math.random()*100000),
+      name: name, date: date, endDate: endDate, memo: memo,
+      createdBy: (window._currentUser && window._currentUser.name) || '',
+      createdAt: Date.now()
+    });
+  }
+  const ov = document.getElementById('cal-pharm-form'); if (ov) ov.remove();
+  await _savePharmacyCalEvents();
+  renderTrelloCalendar();
+  showNotif(id ? '✅ 일정을 수정했습니다' : '✅ 약국 영업 일정을 추가했습니다', 'success');
+}
+function calPharmacyDeleteEvent(id) {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  if (!confirm('이 약국 영업 일정을 삭제할까요?')) return;
+  if (!Array.isArray(window._pharmacyCalEvents)) window._pharmacyCalEvents = [];
+  window._pharmacyCalEvents = window._pharmacyCalEvents.filter(x => String(x.id) !== String(id));
+  const f = document.getElementById('cal-pharm-form'); if (f) f.remove();
+  const d = document.getElementById('cal-day-modal'); if (d) d.remove();
+  _savePharmacyCalEvents();
+  renderTrelloCalendar();
+  showNotif('🗑️ 일정을 삭제했습니다', 'info');
 }
 
 function calShowDay(ymd) {
@@ -53344,7 +53524,7 @@ function _sharedSettingCollection(key) {
       || k === 'trello_config' || k === 'trello_automation' || k === 'trello_auto_cards'
       || k === 'gemini_api_key' || k === 'claude_api_key' || k === 'warehouse_list'
       || k === 'pluscl_stock' || k === 'pluscl_item_map' || k === 'ad_refunds'
-      || k === 'approval_signatures') return 'shared';
+      || k === 'approval_signatures' || k === 'pharmacy_cal_events') return 'shared';
   return 'settings';
 }
 async function saveSharedSetting(key, value) {
@@ -55349,6 +55529,8 @@ function initERPWhenReady() {
       } catch(_){}
       // v2.3.396: 결재 서명(본부장/대표) 이미지 로드 — 결재 문서·처리 모달에서 사용
       try { if (typeof _loadApnSignatures === 'function') _loadApnSignatures(); } catch(_){}
+      // v2.3.398: 약국 영업 캘린더 직접입력 일정 로드 — 전 직원 공유(shared)
+      try { if (typeof _loadPharmacyCalEvents === 'function') _loadPharmacyCalEvents(); } catch(_){}
       // v2.3.171: 지급완료 override 적용 (머지 후 마지막에 강제 — paid 되돌림 영구 차단)
       try {
         if (typeof loadSharedSetting === 'function') {
