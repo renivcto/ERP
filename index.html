@@ -5863,7 +5863,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.399';
+const ERP_VERSION = 'v2.3.400';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30302,11 +30302,14 @@ async function sendOrderEmail(orderId) {
     return btoa(unescape(encodeURIComponent(str)));
   }
   const encSubject = '=?UTF-8?B?' + utf8Base64(subject) + '?=';
+  // v2.3.400: 첨부 파일명 한글은 RFC2047 인코딩 — 헤더에 raw 비ASCII(한글)를 넣으면 Outlook 발송 시 오류
+  const encPdfName = '=?UTF-8?B?' + utf8Base64(pdfName) + '?=';
   const bodyBase64 = utf8Base64(body);
   const boundary = '----=_RenivERP_' + Date.now().toString(36);
 
+  // v2.3.400: 'From:' 헤더 제거 — 명시적 From 이 있으면 Outlook 이 '다른 사용자를 대신하여 보내기'
+  //   권한 검사를 걸어(본인 주소여도) 발송 시 오류가 남. 헤더 생략 시 Outlook 기본 계정으로 정상 발송됨.
   const eml =
-    'From: cto@reniv.co.kr\r\n' +
     'To: ' + vendorEmail + '\r\n' +
     'X-Unsent: 1\r\n' +
     'Subject: ' + encSubject + '\r\n' +
@@ -30319,9 +30322,9 @@ async function sendOrderEmail(orderId) {
     '\r\n' +
     bodyBase64.match(/.{1,76}/g).join('\r\n') + '\r\n' +
     '\r\n--' + boundary + '\r\n' +
-    'Content-Type: application/pdf; name="' + pdfName + '"\r\n' +
+    'Content-Type: application/pdf; name="' + encPdfName + '"\r\n' +
     'Content-Transfer-Encoding: base64\r\n' +
-    'Content-Disposition: attachment; filename="' + pdfName + '"\r\n' +
+    'Content-Disposition: attachment; filename="' + encPdfName + '"\r\n' +
     '\r\n' +
     pdfBase64.match(/.{1,76}/g).join('\r\n') + '\r\n' +
     '\r\n--' + boundary + '--\r\n';
