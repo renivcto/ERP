@@ -488,6 +488,64 @@ async function applyProductMappingsToOrders(firestoreDb, orders, shopId) {
   return { mapped };
 }
 
+// ─────────────────────────────────────────────────────────────
+// v2.22: shopOrders Firestore 1MB 문서 한도 대응 — 라이브(shopOrders) + 아카이브(shopOrders_arch1..N) 샤딩.
+//   라이브 문서 = {data:JSON(최신 청크), ts, arch:N}, 아카이브 = {data:JSON(청크), ts}.
+//   readAllShopOrders: 라이브+아카이브 전부 합쳐 전체 배열 반환(dedupe 정확).
+//   writeShopOrdersSharded: 최신순으로 라이브부터 채우고 넘치면 아카이브로 분리 저장 → 어떤 청크도 1MB 초과 안 함.
+//   앱(index.html)도 동일 규약으로 읽기/쓰기(v2.3.402+). 데이터 손실 없음.
+const SHOP_ORDERS_SHARD_MAX = 850000; // UTF-8 bytes (data 값 한도 ~1,048,487 아래 안전 여유)
+const SHOP_ORDERS_ARCH_CLEANUP = 8;   // 축소 시 이전 초과 아카이브 샤드 삭제 범위
+function _soByteLen(s) { return Buffer.byteLength(s, 'utf8'); }
+function _parseOrdersData(raw) {
+  if (typeof raw === 'string') { try { return JSON.parse(raw) || []; } catch (_) { return []; } }
+  if (Array.isArray(raw)) return raw;
+  return [];
+}
+async function readAllShopOrders(db) {
+  const liveSnap = await db.doc('erp_data/shopOrders').get();
+  let all = [];
+  let archN = 0;
+  if (liveSnap.exists) {
+    const d = liveSnap.data() || {};
+    archN = Number(d.arch) || 0;
+    all = _parseOrdersData(d.data);
+  }
+  for (let i = 1; i <= archN; i++) {
+    try {
+      const s = await db.doc('erp_data/shopOrders_arch' + i).get();
+      if (s.exists) all = all.concat(_parseOrdersData(s.data().data));
+    } catch (_) {}
+  }
+  return all;
+}
+function _shardShopOrders(allOrders) {
+  // v2.22: 배열 순서 보존(정렬 안 함) — 재조립 = 라이브.concat(아카이브)로 원본 순서 유지 → 앱 dedup 로직 안전.
+  const arr = Array.isArray(allOrders) ? allOrders : [];
+  const shards = [];
+  let cur = [], curLen = 2; // '[]'
+  for (const o of arr) {
+    const s = _soByteLen(JSON.stringify(o)) + 1;  // UTF-8 바이트(한글 대응)
+    if (cur.length > 0 && curLen + s > SHOP_ORDERS_SHARD_MAX) { shards.push(cur); cur = []; curLen = 2; }
+    cur.push(o); curLen += s;
+  }
+  if (cur.length || shards.length === 0) shards.push(cur);
+  return shards;
+}
+async function writeShopOrdersSharded(db, allOrders) {
+  const shards = _shardShopOrders(allOrders);
+  const archN = shards.length - 1;
+  await db.doc('erp_data/shopOrders').set({ data: JSON.stringify(shards[0] || []), ts: Date.now(), arch: archN });
+  for (let i = 1; i <= archN; i++) {
+    await db.doc('erp_data/shopOrders_arch' + i).set({ data: JSON.stringify(shards[i]), ts: Date.now() });
+  }
+  // 축소 시 이전에 더 많던 아카이브 샤드 제거(stale 방지)
+  for (let i = archN + 1; i <= archN + SHOP_ORDERS_ARCH_CLEANUP; i++) {
+    try { await db.doc('erp_data/shopOrders_arch' + i).delete(); } catch (_) {}
+  }
+  return { total: (allOrders || []).length, shards: shards.length, archN };
+}
+
 // v2.8/v2.15: 취소/반품된 orderNo들을 erp_data/shopOrders에서 제거 + 재고 자동 복구
 //   - 동일 shopId 내에서만 매칭 (다른 쇼핑몰의 같은 주문번호 보호)
 //   - stockDeducted된 주문이라면 stockDeductedQty 만큼 items 재고 복구 + stockHistory 기록
@@ -497,17 +555,7 @@ async function removeOrdersFromFirestore(firestoreDb, orderNos, shopId) {
   const set = (orderNos instanceof Set) ? orderNos : new Set(Array.from(orderNos).map(String));
   if (set.size === 0) return { removed: 0, samples: [], restoredCount: 0, restoredItems: [] };
 
-  const docRef = firestoreDb.doc('erp_data/shopOrders');
-  const snap = await docRef.get();
-  let existing = [];
-  if (snap.exists) {
-    const raw = snap.data().data;
-    if (typeof raw === 'string') {
-      try { existing = JSON.parse(raw) || []; } catch (_) {}
-    } else if (Array.isArray(raw)) {
-      existing = raw;
-    }
-  }
+  const existing = await readAllShopOrders(firestoreDb);  // v2.22: 라이브+아카이브 전체
 
   const samples = [];
   const toRestore = []; // v2.15: 재고 복구 대상 [{itemId, qty, orderNo, productName}]
@@ -582,24 +630,15 @@ async function removeOrdersFromFirestore(firestoreDb, orderNos, shopId) {
   }
 
   if (removed > 0) {
-    await docRef.set({ data: JSON.stringify(filtered), ts: Date.now() });
+    await writeShopOrdersSharded(firestoreDb, filtered);  // v2.22: 샤딩 저장
   }
   return { removed, samples, restoredCount, restoredItems };
 }
 
 // erp_data/shopOrders Firestore 문서에서 기존 주문 읽고 신규만 머지
 async function mergeOrdersIntoFirestore(firestoreDb, newOrders) {
-  const docRef = firestoreDb.doc('erp_data/shopOrders');
-  const snap = await docRef.get();
-  let existing = [];
-  if (snap.exists) {
-    const raw = snap.data().data;
-    if (typeof raw === 'string') {
-      try { existing = JSON.parse(raw) || []; } catch (_) { existing = []; }
-    } else if (Array.isArray(raw)) {
-      existing = raw;
-    }
-  }
+  // v2.22: 라이브+아카이브 전부 읽어 dedupe → 샤딩 저장
+  const existing = await readAllShopOrders(firestoreDb);
   const existingOrderNos = new Set(existing.map(o => String(o.orderNo)));
   const trulyNew = newOrders.filter(o => o.orderNo && !existingOrderNos.has(String(o.orderNo)));
 
@@ -608,10 +647,7 @@ async function mergeOrdersIntoFirestore(firestoreDb, newOrders) {
   }
 
   const merged = existing.concat(trulyNew);
-  await docRef.set({
-    data: JSON.stringify(merged),
-    ts: Date.now()
-  });
+  await writeShopOrdersSharded(firestoreDb, merged);
 
   return { added: trulyNew.length, total: merged.length, sampleNew: trulyNew.slice(0, 3) };
 }
@@ -1047,11 +1083,8 @@ async function saveCafe24RefreshToken(firestoreDb, refreshToken) {
 //   - 분리된 자식 행 (-1, -2 같은 접미사) 이 있는데 같은 originalOrderId 의 합쳐진 행 (접미사 없음) 도 있으면
 //   - 합쳐진 행을 자동 삭제 (v2.19 이전에 들어온 잘못된 데이터)
 async function cleanupMergedDuplicates(firestoreDb) {
-  const docRef = firestoreDb.doc('erp_data/shopOrders');
-  const snap = await docRef.get();
-  if (!snap.exists) return { removed: 0, total: 0 };
-  let orders = [];
-  try { orders = JSON.parse(snap.data().data) || []; } catch (_) { return { removed: 0, total: 0 }; }
+  const orders = await readAllShopOrders(firestoreDb);  // v2.22: 라이브+아카이브 전체
+  if (orders.length === 0) return { removed: 0, total: 0 };
   // 분리된 행이 존재하는 originalOrderId 수집
   const splitOriginalIds = new Set();
   for (const o of orders) {
@@ -1072,7 +1105,7 @@ async function cleanupMergedDuplicates(firestoreDb) {
   });
   const removed = orders.length - cleaned.length;
   if (removed > 0) {
-    await docRef.set({ data: JSON.stringify(cleaned), ts: Date.now() });
+    await writeShopOrdersSharded(firestoreDb, cleaned);  // v2.22: 샤딩 저장
     console.log('[CLEANUP] 합쳐진 중복', removed, '건 자동 삭제 완료');
   }
   return { removed, total: cleaned.length };
@@ -1765,19 +1798,13 @@ function mapPlusclToErpOrder(r, shopId, shopName) {
 
 // PlusCL 전용 머지 — plusclUid 로 dedupe(몰 orderNo 충돌 무관, 재폴링 중복 방지)
 async function mergePlusclOrders(firestoreDb, newOrders) {
-  const docRef = firestoreDb.doc('erp_data/shopOrders');
-  const snap = await docRef.get();
-  let existing = [];
-  if (snap.exists) {
-    const raw = snap.data().data;
-    if (typeof raw === 'string') { try { existing = JSON.parse(raw) || []; } catch (_) {} }
-    else if (Array.isArray(raw)) existing = raw;
-  }
+  // v2.22: 라이브+아카이브 전부 읽어 dedupe → 샤딩 저장(1MB 초과 방지)
+  const existing = await readAllShopOrders(firestoreDb);
   const seenUid = new Set(existing.filter(o => o && o.plusclUid).map(o => String(o.plusclUid)));
   const trulyNew = newOrders.filter(o => o.plusclUid && !seenUid.has(String(o.plusclUid)));
   if (trulyNew.length === 0) return { added: 0, total: existing.length, sampleNew: [], newOrders: [] };
   const merged = existing.concat(trulyNew);
-  await docRef.set({ data: JSON.stringify(merged), ts: Date.now() });
+  await writeShopOrdersSharded(firestoreDb, merged);
   return { added: trulyNew.length, total: merged.length, sampleNew: trulyNew.slice(0, 3), newOrders: trulyNew };
 }
 

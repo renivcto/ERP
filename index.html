@@ -11,7 +11,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-  import { getFirestore, doc, getDoc, getDocFromServer, getDocFromCache, setDoc, collection, getDocs, waitForPendingWrites } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { getFirestore, doc, getDoc, getDocFromServer, getDocFromCache, setDoc, collection, getDocs, waitForPendingWrites, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
   import { getStorage, ref as _storageRefFn, uploadString as _storageUploadString, getDownloadURL as _storageGetUrl, deleteObject as _storageDelete } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
   import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";  // v2.3.341: onCall(스마트스토어 수동수집)
 
@@ -48,6 +48,7 @@
   window._firestoreGetDocFromServer = getDocFromServer;
   window._firestoreGetDocFromCache = getDocFromCache;
   window._firestoreSetDoc = setDoc;
+  window._firestoreWriteBatch = writeBatch;  // v2.3.402: shopOrders 샤드 원자적 저장
   window._firestoreWaitForPendingWrites = () => waitForPendingWrites(db);
   window._firestoreCollection = collection;
   window._firestoreGetDocs = getDocs;
@@ -5863,7 +5864,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.401';
+const ERP_VERSION = 'v2.3.402';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6504,6 +6505,52 @@ function _backupOrdersNow(tag) {
   }
 }
 
+// ═══════════ v2.3.402: shopOrders Firestore 1MB 샤딩 (라이브 + 아카이브) ═══════════
+//   문서가 1MB 한도에 도달 → 라이브 erp_data/shopOrders {data:JSON(청크0), ts, arch:N}
+//   + 아카이브 erp_data/shopOrders_arch1..N {data:JSON(청크i), ts}. 각 청크 900KB 이하.
+//   읽기: 라이브+아카이브 concat(순서 보존) = 전체 배열. 쓰기: 순서 보존 청킹 후 batch 원자 저장.
+//   functions/index.js(크롤러)와 완전 동일 규약. 앱의 다른 로직은 전체배열 그대로 사용(변경 없음).
+const _SO_SHARD_MAX = 850000; // UTF-8 bytes (data 값 한도 ~1,048,487 아래 안전 여유)
+function _soParseData(raw){ if(typeof raw==='string'){try{return JSON.parse(raw)||[];}catch(_){return [];}} return Array.isArray(raw)?raw:[]; }
+function _soByteLen(s){ try { return new TextEncoder().encode(s).length; } catch(_) { try { return unescape(encodeURIComponent(s)).length; } catch(__){ return s.length; } } }
+function _soShardArr(arr){
+  arr = Array.isArray(arr) ? arr : [];
+  const shards = []; let cur = [], len = 2; // '[]'
+  for (const o of arr){ const s = _soByteLen(JSON.stringify(o)) + 1; if (cur.length>0 && len+s>_SO_SHARD_MAX){ shards.push(cur); cur=[]; len=2; } cur.push(o); len+=s; }
+  if (cur.length || shards.length===0) shards.push(cur);
+  return shards;
+}
+// getFn: (docRef)=>Promise<snap>. 라이브+아카이브 전체 배열 반환.
+async function _soReadSharded(getFn){
+  const db = window._firebaseDb, dref = window._firestoreDoc;
+  if (!db || !dref || !getFn) return { exists:false, orders:[], archN:0 };
+  const live = await getFn(dref(db,'erp_data','shopOrders'));
+  if (!(live && live.exists && live.exists())) return { exists:false, orders:[], archN:0 };
+  const d = live.data() || {}; const archN = Number(d.arch) || 0;
+  let all = _soParseData(d.data);
+  for (let i=1;i<=archN;i++){
+    try { const s = await getFn(dref(db,'erp_data','shopOrders_arch'+i)); if (s && s.exists && s.exists()) all = all.concat(_soParseData(s.data().data)); } catch(_){}
+  }
+  return { exists:true, orders:all, archN };
+}
+// 전체 배열을 라이브+아카이브 샤드로 나눠 원자적(batch) 저장.
+async function _soWriteSharded(arr){
+  const db = window._firebaseDb, dref = window._firestoreDoc, setD = window._firestoreSetDoc, mkBatch = window._firestoreWriteBatch;
+  const shards = _soShardArr(arr); const archN = shards.length - 1; const ts = Date.now();
+  if (mkBatch){
+    const b = mkBatch(db);
+    b.set(dref(db,'erp_data','shopOrders'), { data: JSON.stringify(shards[0]||[]), ts, arch: archN });
+    for (let i=1;i<=archN;i++) b.set(dref(db,'erp_data','shopOrders_arch'+i), { data: JSON.stringify(shards[i]), ts });
+    await b.commit();
+  } else {
+    // 폴백(비원자): 아카이브 먼저, 라이브(arch 메타) 마지막
+    for (let i=1;i<=archN;i++) await setD(dref(db,'erp_data','shopOrders_arch'+i), { data: JSON.stringify(shards[i]), ts });
+    await setD(dref(db,'erp_data','shopOrders'), { data: JSON.stringify(shards[0]||[]), ts, arch: archN });
+  }
+  console.log('💾 [shopOrders 샤딩] 저장:', (arr||[]).length, '건 →', shards.length, '샤드(아카이브', archN, ')');
+  return { archN, shards: shards.length };
+}
+
 // 즉시 저장 (디바운스 없이) — 주문 업로드 등 중요 작업용
 async function saveDataNow() {
   if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
@@ -6522,21 +6569,18 @@ async function saveDataNow() {
     let verifyOK = false;
     try {
       if (serverGet && window._firestoreDoc && window._firebaseDb) {
-        const verifySnap = await serverGet(window._firestoreDoc(window._firebaseDb, 'erp_data', 'shopOrders'));
-        if (verifySnap.exists()) {
-          const verifyData = JSON.parse(verifySnap.data().data);
-          console.log('🔍 [VERIFY] Firestore shopOrders 서버 검증:', verifyData.length, '건 (기대:', (DB.shopOrders||[]).length, '건)');
-          if (verifyData.length === (DB.shopOrders||[]).length) {
+        // v2.3.402: 라이브+아카이브 합산으로 검증, 재저장은 샤딩
+        const _vr = await _soReadSharded(serverGet);
+        if (_vr.exists) {
+          const verifyLen = _vr.orders.length;
+          console.log('🔍 [VERIFY] Firestore shopOrders 서버 검증:', verifyLen, '건 (기대:', (DB.shopOrders||[]).length, '건)');
+          if (verifyLen === (DB.shopOrders||[]).length) {
             verifyOK = true;
           } else {
-            console.error('❌ [VERIFY] 저장 불일치! Firestore:', verifyData.length, 'DB:', (DB.shopOrders||[]).length);
-            // 불일치 시 shopOrders만 재저장 시도
-            console.log('🔄 [VERIFY] shopOrders 강제 재저장 시도...');
+            console.error('❌ [VERIFY] 저장 불일치! Firestore:', verifyLen, 'DB:', (DB.shopOrders||[]).length);
+            console.log('🔄 [VERIFY] shopOrders 강제 재저장 시도(샤딩)...');
             try {
-              await window._firestoreSetDoc(
-                window._firestoreDoc(window._firebaseDb, 'erp_data', 'shopOrders'),
-                { data: JSON.stringify(DB.shopOrders || []), ts: Date.now() }
-              );
+              await _soWriteSharded(DB.shopOrders || []);
               console.log('✅ [VERIFY] shopOrders 강제 재저장 성공!');
               verifyOK = true;
             } catch(rewriteErr) {
@@ -6544,12 +6588,9 @@ async function saveDataNow() {
             }
           }
         } else {
-          console.error('❌ [VERIFY] shopOrders 문서가 서버에 없음! 강제 재저장 시도...');
+          console.error('❌ [VERIFY] shopOrders 문서가 서버에 없음! 강제 재저장 시도(샤딩)...');
           try {
-            await window._firestoreSetDoc(
-              window._firestoreDoc(window._firebaseDb, 'erp_data', 'shopOrders'),
-              { data: JSON.stringify(DB.shopOrders || []), ts: Date.now() }
-            );
+            await _soWriteSharded(DB.shopOrders || []);
             console.log('✅ [VERIFY] shopOrders 강제 생성 성공!');
             verifyOK = true;
           } catch(rewriteErr) {
@@ -7404,9 +7445,16 @@ async function _doSaveDataInner() {
     if (GUARD_KEYS.has(key)) {
       try {
         const serverGet3 = window._firestoreGetDocFromServer || window._firestoreGetDoc;
-        const srvSnap = await serverGet3(docRef(db, 'erp_data', key));
-        if (srvSnap.exists()) {
-          const srvArr = JSON.parse(srvSnap.data().data);
+        let _srvExists, srvArr;
+        if (key === 'shopOrders') {
+          const _sr = await _soReadSharded(serverGet3);   // v2.3.402: 라이브+아카이브 합본으로 가드 비교
+          _srvExists = _sr.exists; srvArr = _sr.orders;
+        } else {
+          const srvSnap = await serverGet3(docRef(db, 'erp_data', key));
+          _srvExists = srvSnap.exists();
+          srvArr = _srvExists ? JSON.parse(srvSnap.data().data) : null;
+        }
+        if (_srvExists) {
           const srvLen = Array.isArray(srvArr) ? srvArr.length : 0;
           const locLen = Array.isArray(val) ? val.length : 0;
           // v1.9.955: 로컬 컬렉션이 통째로 비었는데 서버엔 데이터가 있으면 = 비정상 상태 →
@@ -7588,8 +7636,8 @@ async function _doSaveDataInner() {
       }
     }
     try {
-      await setDoc(docRef(db, 'erp_data', key), payload);
-      if (key === 'shopOrders') _shopOrdersSaved = true;
+      if (key === 'shopOrders') { await _soWriteSharded(JSON.parse(payload.data)); _shopOrdersSaved = true; }  // v2.3.402: 라이브+아카이브 샤딩(1MB 초과 방지)
+      else { await setDoc(docRef(db, 'erp_data', key), payload); }
       if (key === 'accounts') console.log('✅ [FIRESTORE SAVE] accounts 저장 성공:', (val||[]).length, '건');
       // v1.9.150 — items 저장 성공 시 stale 플래그 해제
       if (key === 'items') {
@@ -7613,7 +7661,7 @@ async function _doSaveDataInner() {
           try {
             console.log(`🔄 shopOrders 저장 재시도 ${retry}/3...`);
             await new Promise(r => setTimeout(r, 500 * retry));
-            await setDoc(docRef(db, 'erp_data', key), payload);
+            await _soWriteSharded(JSON.parse(payload.data));  // v2.3.402: 샤딩 저장
             _shopOrdersSaved = true;
             console.log(`✅ shopOrders 저장 재시도 ${retry} 성공!`);
             break;
@@ -7804,6 +7852,20 @@ async function loadDataFromFirestore() {
         }
       }
     });
+    // v2.3.402: shopOrders 아카이브 샤드 병합 — 라이브 doc 의 arch 개수만큼 읽어 concat(순서 보존)
+    try {
+      const _soLive = snaps[soIdx];
+      const _archN = (_soLive && _soLive.exists()) ? (Number(_soLive.data().arch) || 0) : 0;
+      if (_archN > 0 && Array.isArray(result.shopOrders)) {
+        for (let i = 1; i <= _archN; i++) {
+          try {
+            const _as = await cacheGetDoc(docRef(db, 'erp_data', 'shopOrders_arch' + i));
+            if (_as && _as.exists()) result.shopOrders = result.shopOrders.concat(_soParseData(_as.data().data));
+          } catch(_){}
+        }
+        console.log('🔍 [FIRESTORE READ] shopOrders 아카이브', _archN, '샤드 병합 → 전체', result.shopOrders.length, '건');
+      }
+    } catch(_){}
     // meta
     const meta = JSON.parse(snaps[metaIdx].data().data);
     Object.assign(result, meta);
