@@ -5865,7 +5865,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.405';
+const ERP_VERSION = 'v2.3.406';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -16996,6 +16996,17 @@ function editShopOrder(id){
   const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
   const inp = 'width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;font-size:13px;box-sizing:border-box';
   const fld = (label, inner) => '<div style="margin-bottom:11px"><div style="font-size:11.5px;font-weight:700;color:#475569;margin-bottom:4px">'+label+'</div>'+inner+'</div>';
+  // v2.3.406: 쇼핑몰 드롭다운(활성 shops). 현재 쇼핑몰이 목록에 없으면 '현재값' 보존 옵션 추가.
+  const _shops = (DB.shops||[]).filter(s => s && s.active !== false);
+  const _curId = (o.shopId!=null && o.shopId!=='') ? String(o.shopId) : '';
+  const _curName = o.shopName || '';
+  const _inList = _shops.some(s => String(s.id)===_curId || (s.name||'')===_curName);
+  let _shopOpts = _shops.map(s => {
+    const sel = (String(s.id)===_curId || (s.name||'')===_curName) ? ' selected' : '';
+    return '<option value="'+esc(s.id)+'"'+sel+'>'+esc(s.name||'')+'</option>';
+  }).join('');
+  if (!_inList) _shopOpts = '<option value="__keep__" selected>'+esc(_curName||'(미지정)')+'</option>' + _shopOpts;
+  const _shopSelect = '<select id="soe-shop" style="'+inp+';cursor:pointer;background:#fff">'+_shopOpts+'</select>';
   const ov = document.createElement('div');
   ov.id = 'so-edit-overlay';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99987;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto';
@@ -17008,7 +17019,7 @@ function editShopOrder(id){
     + '<div style="padding:16px 18px">'
     + '<div style="display:flex;gap:10px">'
     +   '<div style="flex:1">' + fld('주문일', '<input id="soe-date" type="date" value="'+esc(o.orderDate)+'" style="'+inp+'">') + '</div>'
-    +   '<div style="flex:1">' + fld('쇼핑몰', '<input id="soe-shop" value="'+esc(o.shopName)+'" style="'+inp+'">') + '</div>'
+    +   '<div style="flex:1">' + fld('쇼핑몰', _shopSelect) + '</div>'
     + '</div>'
     + fld('주문번호', '<input id="soe-ono" value="'+esc(o.orderNo)+'" style="'+inp+'">')
     + '<div style="display:flex;gap:10px">'
@@ -17034,7 +17045,16 @@ async function _saveShopOrderEdit(id){
   const ono = V('soe-ono').trim();
   if (!ono) { showNotif('주문번호를 입력해주세요', 'warning'); return; }
   o.orderDate = V('soe-date').trim();
-  o.shopName = V('soe-shop').trim();
+  // v2.3.406: 쇼핑몰 드롭다운 — shopId+shopName 함께 반영(__keep__ 이면 현재 유지)
+  const _sel = document.getElementById('soe-shop');
+  if (_sel) {
+    const _v = _sel.value;
+    if (_v !== '__keep__') {
+      const _sh = (DB.shops||[]).find(s => s && String(s.id) === String(_v));
+      if (_sh) { o.shopId = _sh.id; o.shopName = _sh.name; }
+      else { const _op = _sel.options[_sel.selectedIndex]; if (_op) o.shopName = _op.textContent; }
+    }
+  }
   o.orderNo = ono;
   o.customerName = V('soe-cname').trim();
   o.customerPhone = V('soe-cphone').trim();
