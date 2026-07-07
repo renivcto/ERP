@@ -5866,7 +5866,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.409';
+const ERP_VERSION = 'v2.3.410';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -17110,6 +17110,24 @@ function _deductFromWarehouse(item, whId, qty, note){
   };
 }
 
+// v2.3.410: 수동주문 — 품목 선택 시 상품명·판매단가 자동, 단가×수량=주문금액 자동계산(수정가능)
+function _moItemChange(sel){
+  const opt = sel && sel.options[sel.selectedIndex];
+  const n = opt ? (opt.getAttribute('data-name')||'') : '';
+  const t = document.getElementById('mo-pname');
+  if (t && (!t.value.trim() || t.dataset.auto==='1')) { t.value = n; t.dataset.auto='1'; }
+  const it = (sel && sel.value) ? (DB.items||[]).find(x => x && String(x.id) === String(sel.value)) : null;
+  const p = document.getElementById('mo-price');
+  if (p && it) { p.value = Number(it.actualSalePrice) || Number(it.consumerPrice) || 0; }  // 실제판매가 → 소비자가 폴백
+  _moRecalc();
+}
+function _moRecalc(){
+  const p = Number((document.getElementById('mo-price')||{}).value) || 0;
+  const q = Number((document.getElementById('mo-qty')||{}).value) || 0;
+  const a = document.getElementById('mo-amt');
+  if (a) a.value = Math.round(p*q);
+}
+
 // v2.3.407: 수동 주문 입력 — 로켓그로스 등 주문상세 미제공 몰을 월말에 하나씩 입력
 async function openManualOrderModal(){
   if (typeof requireWrite==='function' && !requireWrite()) return;
@@ -17142,13 +17160,14 @@ async function openManualOrderModal(){
     +   '<div style="flex:1">' + fld('주문일', '<input id="mo-date" type="date" value="'+today+'" style="'+inp+'">', true) + '</div>'
     +   '<div style="flex:1">' + fld('쇼핑몰', '<select id="mo-shop" style="'+inp+';cursor:pointer;background:#fff">'+shopOpts+'</select>', true) + '</div>'
     + '</div>'
-    + fld('ERP 품목 연결 <span style="color:#94a3b8;font-weight:500">(마진분석·재고차감용)</span>', '<select id="mo-item" onchange="var t=document.getElementById(\'mo-pname\'); var n=this.options[this.selectedIndex].getAttribute(\'data-name\')||\'\'; if(t&&(!t.value.trim()||t.dataset.auto===\'1\')){t.value=n;t.dataset.auto=\'1\';}" style="'+inp+';cursor:pointer;background:#fff">'+itemOpts+'</select>')
+    + fld('ERP 품목 연결 <span style="color:#94a3b8;font-weight:500">(마진분석·재고차감·단가자동)</span>', '<select id="mo-item" onchange="_moItemChange(this)" style="'+inp+';cursor:pointer;background:#fff">'+itemOpts+'</select>')
     + fld('재고 차감 창고 <span style="color:#94a3b8;font-weight:500">(품목 연결 시 차감)</span>', '<select id="mo-wh" style="'+inp+';cursor:pointer;background:#fff">'+whOpts+'</select>')
     + fld('상품명', '<input id="mo-pname" style="'+inp+'" placeholder="예: 320 크림 60ml">', true)
     + '<div style="display:flex;gap:10px">'
-    +   '<div style="flex:1">' + fld('수량', '<input id="mo-qty" type="number" min="0" step="1" value="1" style="'+inp+'">', true) + '</div>'
-    +   '<div style="flex:1">' + fld('주문금액(원)', '<input id="mo-amt" type="number" min="0" step="1" value="0" style="'+inp+'">', true) + '</div>'
+    +   '<div style="flex:1">' + fld('판매 단가(원) <span style="color:#94a3b8;font-weight:500">(품목선택시 자동)</span>', '<input id="mo-price" type="number" min="0" step="1" value="0" oninput="_moRecalc()" style="'+inp+'">') + '</div>'
+    +   '<div style="flex:1">' + fld('수량', '<input id="mo-qty" type="number" min="0" step="1" value="1" oninput="_moRecalc()" style="'+inp+'">', true) + '</div>'
     + '</div>'
+    + fld('주문금액(원) <span style="color:#94a3b8;font-weight:500">(단가×수량 자동 · 수정가능)</span>', '<input id="mo-amt" type="number" min="0" step="1" value="0" style="'+inp+'">', true)
     + '<div style="display:flex;gap:10px">'
     +   '<div style="flex:1">' + fld('주문번호 <span style="color:#94a3b8;font-weight:500">(비우면 자동)</span>', '<input id="mo-ono" style="'+inp+'" placeholder="자동 생성">') + '</div>'
     +   '<div style="flex:1">' + fld('입금예정일 <span style="color:#94a3b8;font-weight:500">(선택)</span>', '<input id="mo-ddate" type="date" style="'+inp+'">') + '</div>'
@@ -17231,6 +17250,7 @@ async function _saveManualOrder(cont){
   if (cont) {
     ['mo-pname','mo-ono','mo-cname'].forEach(id=>{ const el=document.getElementById(id); if(el){ el.value=''; if(id==='mo-pname') el.dataset.auto=''; } });
     const q=document.getElementById('mo-qty'); if(q) q.value='1';
+    const pr=document.getElementById('mo-price'); if(pr) pr.value='0';
     const a=document.getElementById('mo-amt'); if(a) a.value='0';
     const it=document.getElementById('mo-item'); if(it) it.selectedIndex=0;
     btns.forEach(b=>{ if(b) b.disabled=false; }); if(sb) sb.innerHTML=prev||'💾 저장';
