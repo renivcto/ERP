@@ -5864,7 +5864,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.402';
+const ERP_VERSION = 'v2.3.403';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -32956,7 +32956,27 @@ async function saveFeedPost(){
   const prevBtnLabel = saveBtn ? saveBtn.textContent : '';
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ 저장 중...'; }
 
-  // 즉시 피드백 + 모달 닫기 (로컬에는 이미 저장됨)
+  // v2.3.403: Firestore 확정 저장(saveDataNow)을 '먼저' await → 성공 후에만 슬랙 알림·성공표시.
+  //   기존엔 알림·모달닫기가 즉시였고 Firestore 동기화는 백그라운드(비-await)라, 작성자가 저장 직후
+  //   곧바로 새로고침/이탈하면 글이 Firestore 에 안 써진 채 유실됐다(슬랙 알림만 나감 = "알림은
+  //   갔는데 데이터는 유실"). 권다빈 업무공유 글 유실 사례. [[savedata-debounce-vs-savenow]]
+  let _syncOk = false;
+  try {
+    if (typeof saveDataNow === 'function') { await saveDataNow(); _syncOk = true; }
+    else if (typeof saveData === 'function') { saveData(); _syncOk = true; }
+    else { _syncOk = true; }
+  } catch(e) {
+    console.error('피드 Firestore 동기화 실패(로컬에는 저장됨):', e);
+  }
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = prevBtnLabel || '저장'; }
+
+  if (!_syncOk) {
+    // 확정 저장 실패 — 오알림 방지 위해 슬랙 미발송, 모달 유지(재시도 유도). 글은 로컬엔 남아있음.
+    try { showNotif('☁️ 서버 저장 실패 — 글이 서버에 반영되지 않았습니다. 잠시 후 다시 저장해주세요 (알림 미발송)', 'error'); } catch(_){}
+    return;
+  }
+
+  // 확정 저장 성공 → 피드백 + 슬랙 알림 + 모달 닫기
   showNotif(isNew ? '📰 업무 공유가 등록되었습니다' : '✅ 글이 수정되었습니다', 'success');
   // v2.3.23: 새 글만 슬랙 알림 (수정은 알림 X)
   if (isNew) {
@@ -32981,21 +33001,6 @@ async function saveFeedPost(){
   try { renderFeed(); } catch(_){}
   // v2.3.210: 홈 대시보드의 운영 업무 공유 카드에서 작성했을 때 즉시 반영
   try { if (document.getElementById('dash-stats') && typeof renderDashStats === 'function') renderDashStats(); } catch(_){}
-  if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = prevBtnLabel || '저장'; }
-
-  // 클라우드 동기화는 백그라운드 — 실패해도 localStorage 는 안전
-  (async () => {
-    try {
-      if (typeof saveDataNow === 'function') {
-        await saveDataNow();
-      } else if (typeof saveData === 'function') {
-        saveData();
-      }
-    } catch(e) {
-      console.error('피드 Firestore 동기화 실패(로컬에는 저장됨):', e);
-      try { showNotif('☁️ 클라우드 동기화 실패 — 로컬에는 저장되었습니다', 'warning'); } catch(_){}
-    }
-  })();
 }
 
 function editFeedPost(id){
