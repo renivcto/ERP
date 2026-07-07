@@ -5902,7 +5902,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.418';
+const ERP_VERSION = 'v2.3.419';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -55190,7 +55190,7 @@ function initERPWhenReady() {
           //   → 수정 직후 Firestore 동기화 전에 페이지가 재로드되어도 사용자의 최신 수정이 유지됨
           try {
             const localById = new Map(localDB[k].filter(x => x && x.id != null).map(x => [x.id, x]));
-            let _editsRecovered = 0;
+            let _editsRecovered = 0, _idCollisionSkipped = 0;
             merged[k] = merged[k].map(remote => {
               if (!remote || remote.id == null) return remote;
               const local = localById.get(remote.id);
@@ -55198,11 +55198,22 @@ function initERPWhenReady() {
               const localTs = Number(local.updatedAt) || 0;
               const remoteTs = Number(remote.updatedAt) || 0;
               if (localTs > remoteTs) {
+                // v2.3.419: 동일성 가드 — 기기별 순차 카운터 id(expenses 등)는 재사용·재생성으로
+                //   같은 id 가 전혀 다른 레코드를 가리킬 수 있다. createdAt 이 다르면 다른 레코드로
+                //   판정해 서버본을 채택. (이전: 타 기기의 로컬 구본이 updatedAt 만 크면 서버 수정본을
+                //   영구히 덮어써 "내 화면만 옛날 데이터" 분기 발생 — 특허 지출건 v2.3.419)
+                //   createdAt 이 같을 때만 기존 updatedAt 비교 유지 → "방금 내 수정 보존" 기능은 그대로.
+                if (String(local.createdAt == null ? '' : local.createdAt) !== String(remote.createdAt == null ? '' : remote.createdAt)) {
+                  _idCollisionSkipped++;
+                  console.warn(`⚠️ [EDIT RECOVERY] ${k} id=${remote.id} createdAt 불일치 (local:${local.createdAt} ≠ server:${remote.createdAt}) — 다른 레코드로 판정, 서버본 채택`);
+                  return remote;
+                }
                 _editsRecovered++;
                 return local;
               }
               return remote;
             });
+            if (_idCollisionSkipped > 0) console.warn(`⚠️ [EDIT RECOVERY] ${k}: id 재사용 충돌 ${_idCollisionSkipped}건 — 서버본 우선 적용`);
             if (_editsRecovered > 0) {
               console.warn(`🛟 [EDIT RECOVERY] ${k}: localStorage 의 더 최신 수정본 ${_editsRecovered}건 보존 (updatedAt 비교)`);
               _needsResaveToFirestore = true;
