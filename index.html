@@ -5218,7 +5218,7 @@ EXP YYYYMMDD 까지</textarea></div>
 <!-- ═══════════════ v1.9.235 — 📰 업무 공유 피드: 글 작성/수정 모달 ═══════════════ -->
 <div class="overlay" id="overlay-feed-post">
   <div class="modal" style="width:720px;max-width:96vw">
-    <div class="modal-hdr"><span class="modal-ttl">✍️ 업무 공유 작성</span><button class="modal-x" onclick="closeModal('feed-post')">✕</button></div>
+    <div class="modal-hdr"><span class="modal-ttl">✍️ 업무 공유 작성</span><button class="modal-x" onclick="_closeGuard('feed-post',true)">✕</button></div>
     <div class="modal-body">
       <input type="hidden" id="feed-post-id" value="">
       <!-- 카테고리 칩 -->
@@ -5287,7 +5287,7 @@ EXP YYYYMMDD 까지</textarea></div>
       </div>
     </div>
     <div class="modal-ft" style="padding:16px 24px;gap:10px">
-      <button class="btn btn-outline" onclick="closeModal('feed-post')">취소</button>
+      <button class="btn btn-outline" onclick="_closeGuard('feed-post',true)">취소</button>
       <button class="btn btn-primary" onclick="saveFeedPost()">저장</button>
     </div>
   </div>
@@ -5866,7 +5866,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.412';
+const ERP_VERSION = 'v2.3.413';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -17015,7 +17015,7 @@ function editShopOrder(id){
   ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:440px;max-width:94vw;max-height:92vh;overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.32)">'
     + '<div style="padding:14px 18px;background:#0f172a;color:#fff;display:flex;align-items:center;justify-content:space-between">'
     + '<span style="font-size:14px;font-weight:800">✏️ 주문 수정</span>'
-    + '<button onclick="document.getElementById(\'so-edit-overlay\').remove()" style="background:rgba(255,255,255,.15);border:none;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:13px;color:#fff">✕</button>'
+    + '<button onclick="_closeGuard(\'so-edit-overlay\',false)" style="background:rgba(255,255,255,.15);border:none;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:13px;color:#fff">✕</button>'
     + '</div>'
     + '<div style="padding:16px 18px">'
     + '<div style="display:flex;gap:10px">'
@@ -17031,7 +17031,7 @@ function editShopOrder(id){
     + fld('주문금액(원)', '<input id="soe-amt" type="number" step="1" value="'+(Number(o.paymentAmount)||0)+'" style="'+inp+'">')
     + '<div style="font-size:11px;color:#94a3b8;line-height:1.5;margin:2px 0 12px">※ 수량·입금예정액·입금예정일은 표에서 해당 <b>셀을 클릭</b>해 수정하세요(재고·정산 자동연동).</div>'
     + '<div style="display:flex;gap:8px">'
-    + '<button onclick="document.getElementById(\'so-edit-overlay\').remove()" style="flex:0 0 auto;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer">취소</button>'
+    + '<button onclick="_closeGuard(\'so-edit-overlay\',false)" style="flex:0 0 auto;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer">취소</button>'
     + '<button id="soe-save" onclick="_saveShopOrderEdit(\''+_idStr.replace(/'/g,'&#39;')+'\')" style="flex:1;background:#0f172a;color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:800;cursor:pointer">💾 저장</button>'
     + '</div></div></div>';
   document.body.appendChild(ov);
@@ -17128,6 +17128,28 @@ function _moRecalc(){
   if (a) a.value = Math.round(p*q);
 }
 
+// v2.3.413: 저장 중 닫기 가드 — 저장(_criticalSaving) 진행 중 모달 X/취소 클릭 시 경고 창.
+//   isStatic=true 면 closeModal(id)(정적 모달), false 면 오버레이 .remove()(동적 모달).
+function _closeNow(id, isStatic){
+  if (isStatic) { if (typeof closeModal==='function') closeModal(id); }
+  else { const ov=document.getElementById(id); if(ov) ov.remove(); }
+}
+function _closeGuard(id, isStatic){
+  if (!window._criticalSaving) { _closeNow(id, isStatic); return; }   // 저장 중 아니면 그냥 닫기
+  const old=document.getElementById('saving-warn'); if(old) old.remove();
+  const w=document.createElement('div'); w.id='saving-warn';
+  w.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:100002;display:flex;align-items:center;justify-content:center;padding:20px';
+  w.innerHTML='<div style="background:#fff;border-radius:14px;width:360px;max-width:92vw;box-shadow:0 18px 50px rgba(0,0,0,.35);overflow:hidden;text-align:center">'
+    +'<div style="padding:20px 20px 8px"><div style="font-size:30px">⏳</div>'
+    +'<div style="font-size:15px;font-weight:800;color:#0f172a;margin-top:6px">저장 중입니다</div>'
+    +'<div style="font-size:12.5px;color:#64748b;line-height:1.6;margin-top:6px">잠시만 기다려 주세요. 저장이 끝나면 자동으로 닫힙니다.<br>완료 전엔 새로고침이나 페이지 이동을 하지 마세요.</div></div>'
+    +'<div style="display:flex;gap:8px;padding:14px 18px 16px">'
+    +'<button onclick="var e=document.getElementById(\'saving-warn\');if(e)e.remove()" style="flex:1;background:#0f766e;color:#fff;border:none;border-radius:9px;padding:11px;font-size:13px;font-weight:800;cursor:pointer">계속 기다리기</button>'
+    +'<button onclick="var e=document.getElementById(\'saving-warn\');if(e)e.remove();_closeNow(\''+id+'\','+(isStatic?'true':'false')+')" style="flex:0 0 auto;background:#f8fafc;color:#94a3b8;border:1px solid #e2e8f0;border-radius:9px;padding:11px 14px;font-size:12px;font-weight:600;cursor:pointer">그래도 닫기</button>'
+    +'</div></div>';
+  document.body.appendChild(w);
+}
+
 // v2.3.407: 수동 주문 입력 — 로켓그로스 등 주문상세 미제공 몰을 월말에 하나씩 입력
 async function openManualOrderModal(){
   if (typeof requireWrite==='function' && !requireWrite()) return;
@@ -17152,7 +17174,7 @@ async function openManualOrderModal(){
   ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:460px;max-width:94vw;box-shadow:0 18px 50px rgba(0,0,0,.32);overflow:hidden;margin:auto">'
     + '<div style="padding:14px 18px;background:#0f766e;color:#fff;display:flex;align-items:center;justify-content:space-between">'
     + '<span style="font-size:14px;font-weight:800">✏️ 수동 주문 입력</span>'
-    + '<button onclick="document.getElementById(\'mo-overlay\').remove()" style="background:rgba(255,255,255,.18);border:none;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:13px;color:#fff">✕</button>'
+    + '<button onclick="_closeGuard(\'mo-overlay\',false)" style="background:rgba(255,255,255,.18);border:none;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:13px;color:#fff">✕</button>'
     + '</div>'
     + '<div style="padding:16px 18px;max-height:80vh;overflow:auto">'
     + '<div style="font-size:11.5px;color:#64748b;line-height:1.5;margin-bottom:10px">주문 상세가 없는 몰(로켓그로스 등)을 월말에 하나씩 입력하세요. 여러 건이면 <b>저장 후 계속</b>으로 이어서 입력할 수 있습니다.</div>'
@@ -17174,7 +17196,7 @@ async function openManualOrderModal(){
     + '</div>'
     + fld('고객명 <span style="color:#94a3b8;font-weight:500">(선택)</span>', '<input id="mo-cname" style="'+inp+'" placeholder="모르면 비워두세요">')
     + '<div style="display:flex;gap:8px;margin-top:4px">'
-    + '<button onclick="document.getElementById(\'mo-overlay\').remove()" style="flex:0 0 auto;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;font-size:12.5px;font-weight:700;cursor:pointer">닫기</button>'
+    + '<button onclick="_closeGuard(\'mo-overlay\',false)" style="flex:0 0 auto;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;font-size:12.5px;font-weight:700;cursor:pointer">닫기</button>'
     + '<button id="mo-save-cont" onclick="_saveManualOrder(true)" style="flex:1;background:#fff;color:#0f766e;border:1px solid #0f766e;border-radius:8px;padding:10px;font-size:12.5px;font-weight:800;cursor:pointer">💾 저장 후 계속</button>'
     + '<button id="mo-save" onclick="_saveManualOrder(false)" style="flex:1;background:#0f766e;color:#fff;border:none;border-radius:8px;padding:10px;font-size:12.5px;font-weight:800;cursor:pointer">💾 저장</button>'
     + '</div>'
