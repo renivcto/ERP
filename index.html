@@ -5866,7 +5866,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.411';
+const ERP_VERSION = 'v2.3.412';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28072,7 +28072,11 @@ function openItemStockHistory(itemId){
   const hist = (DB.stockHistory||[]).filter(h => h && String(h.itemId) === String(itemId)).slice().reverse();
   const totIn  = hist.filter(h=>h.type==='in').reduce((s,h)=>s+(Number(h.qty)||0),0);
   const totOut = hist.filter(h=>h.type==='out').reduce((s,h)=>s+(Number(h.qty)||0),0);
-  const rows = hist.map(h => {
+  // v2.3.412: 잔여 재고(각 행 처리 직후 총 재고) — 현재 재고에서 최신→과거로 역산(입고 -qty, 출고 +qty, 이동 불변)
+  let _run = Number(it.stock)||0;
+  const bal = [];
+  for (let _k=0; _k<hist.length; _k++){ bal[_k]=_run; const _h=hist[_k]; _run -= (_h.type==='in'?(Number(_h.qty)||0):(_h.type==='out'?-(Number(_h.qty)||0):0)); }
+  const rows = hist.map((h, i) => {
     const isMove = h.type==='move';
     const badge = isMove ? '<span style="background:#f3e8ff;color:#7c3aed;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:700">🔁 이동</span>'
       : h.type==='in' ? '<span style="background:#dcfce7;color:#166534;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:700">📥 입고</span>'
@@ -28084,10 +28088,11 @@ function openItemStockHistory(itemId){
       + '<td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;white-space:nowrap;font-size:12px">'+(h.date||'-')+'</td>'
       + '<td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;text-align:center">'+badge+'</td>'
       + '<td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;text-align:center;font-weight:700;color:'+qtyColor+'">'+qtyStr+'</td>'
+      + '<td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;text-align:center;font-weight:800;color:'+((Number(bal[i])||0)<0?'#dc2626':'#0f172a')+'">'+fmt(bal[i])+'</td>'
       + '<td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;text-align:center;font-size:11.5px;color:#64748b;white-space:nowrap">'+(whStr||'-')+'</td>'
       + '<td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#475569">'+esc(h.note||'-')+'</td>'
       + '</tr>';
-  }).join('') || '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:26px">입출고 내역이 없습니다</td></tr>';
+  }).join('') || '<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:26px">입출고 내역이 없습니다</td></tr>';
   const ov = document.createElement('div');
   ov.id = 'ish-overlay';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99987;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto';
@@ -28108,7 +28113,8 @@ function openItemStockHistory(itemId){
     +   '<thead><tr style="background:#f1f5f9;position:sticky;top:0">'
     +     '<th style="padding:8px;text-align:left;font-size:11.5px;color:#475569">날짜</th>'
     +     '<th style="padding:8px;text-align:center;font-size:11.5px;color:#475569">구분</th>'
-    +     '<th style="padding:8px;text-align:center;font-size:11.5px;color:#475569">수량</th>'
+    +     '<th style="padding:8px;text-align:center;font-size:11.5px;color:#475569">입출고</th>'
+    +     '<th style="padding:8px;text-align:center;font-size:11.5px;color:#475569">잔여 재고</th>'
     +     '<th style="padding:8px;text-align:center;font-size:11.5px;color:#475569">창고</th>'
     +     '<th style="padding:8px;text-align:left;font-size:11.5px;color:#475569">비고</th>'
     +   '</tr></thead><tbody>'+rows+'</tbody></table>'
