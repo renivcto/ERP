@@ -5914,7 +5914,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.433';
+const ERP_VERSION = 'v2.3.434';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -39561,6 +39561,7 @@ async function saveSlackDriveSettings() {
   if (!DB.appSettings) DB.appSettings = {};
   DB.appSettings.slackDriveWebhookUrl = url;
   DB.appSettings.slackDriveEnabled = enabled;
+  DB.appSettings.slackCfgTs = Date.now();  // v2.3.434
   try { localStorage.setItem('reniv_slack_drive_webhook_backup', url); } catch(_){}
   try { saveData(); } catch(_){}
   if (typeof showNotif === 'function') showNotif('✅ 드라이브 슬랙 설정 저장 완료', 'success');
@@ -39653,6 +39654,7 @@ function saveSlackSettings() {
   }
   DB.appSettings.slackWebhookUrl = url;
   DB.appSettings.slackEnabled = enabled;
+  DB.appSettings.slackCfgTs = Date.now();  // v2.3.434: recency 스탬프(병합 클로버 방지)
   // v1.9.247 — 독립 localStorage 백업 (DB/Firestore가 모두 날아가도 URL만은 살아남도록)
   try {
     if (url) localStorage.setItem('reniv_slack_webhook_backup', url);
@@ -40200,6 +40202,7 @@ function saveSlackApprovalSettings() {
   DB.appSettings.slackApprovalRelayUrl = (document.getElementById('slack-approval-relay-url')?.value || '').trim();
   DB.appSettings.slackApprovalRelaySecret = (document.getElementById('slack-approval-relay-secret')?.value || '').trim();
   DB.appSettings.slackApprovalEnabled = !!document.getElementById('slack-approval-enabled')?.checked;
+  DB.appSettings.slackCfgTs = Date.now();  // v2.3.434
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
   try { _updateSlackApprovalStatusBadge(); } catch(_){}
   showNotif('✅ 결재 슬랙 양방향 설정 저장됨', 'success');
@@ -40319,6 +40322,7 @@ function saveSlackBoardSettings() {
   if (!DB.appSettings) DB.appSettings = {};
   DB.appSettings.slackBoardWebhookUrl = url;
   DB.appSettings.slackBoardEnabled = enabled;
+  DB.appSettings.slackCfgTs = Date.now();  // v2.3.434
   // v2.3.173: 릴레이 URL/Secret 저장
   DB.appSettings.slackBoardRelayUrl = (document.getElementById('slack-board-relay-url')?.value || '').trim();
   DB.appSettings.slackBoardRelaySecret = (document.getElementById('slack-board-relay-secret')?.value || '').trim();
@@ -40862,6 +40866,7 @@ function saveSlackOpsSettings() {
   if (!DB.appSettings) DB.appSettings = {};
   DB.appSettings.slackOpsWebhookUrl = url;
   DB.appSettings.slackOpsEnabled = enabled;
+  DB.appSettings.slackCfgTs = Date.now();  // v2.3.434
   try { localStorage.setItem('reniv_slack_ops_webhook_backup', url); } catch(_){}
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
   _updateSlackOpsStatusBadge();
@@ -41022,6 +41027,7 @@ function saveSlackDigestSettings() {
   DB.appSettings.slackDigestWebhookUrl = url;
   DB.appSettings.slackDigestTime = /^\d{2}:\d{2}$/.test(time) ? time : '07:00';
   DB.appSettings.slackDigestEnabled = enabled;
+  DB.appSettings.slackCfgTs = Date.now();  // v2.3.434
   try { localStorage.setItem('reniv_slack_digest_webhook_backup', url); } catch(_){}
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
   _updateSlackDigestStatusBadge();
@@ -55397,6 +55403,17 @@ function initERPWhenReady() {
         console.warn('⚠️ appSettings 병합 실패:', e.message);
         // v2.3.18: fallback object 에도 drive 필드 / v2.3.23: board 필드
         merged.appSettings = localDB.appSettings || firestoreDB.appSettings || { slackWebhookUrl:'', slackEnabled:false, slackDriveWebhookUrl:'', slackDriveEnabled:false, slackBoardWebhookUrl:'', slackBoardEnabled:false, slackDigestWebhookUrl:'', slackDigestEnabled:false, slackDigestTime:'07:00', slackOpsWebhookUrl:'', slackOpsEnabled:false, lastWebhookTestAt:0, geminiApiKey:'' };
+        // v2.3.434: 슬랙/알림 설정 recency 보정 — appSettings 가 '로컬 우선' 통째 병합이라,
+        //   슬랙이 꺼진(기본값) 다른 기기가 서버의 켜진 설정을 조용히 덮어써 알림이 전면 중단되던 사고 방지.
+        //   서버 slackCfgTs 가 로컬보다 최신이면 슬랙 관련 필드만 서버값으로 채택(마지막 저장 우선).
+        try {
+          const _lApp = (localDB && localDB.appSettings) || {}, _fApp = (firestoreDB && firestoreDB.appSettings) || {};
+          const _lts = Number(_lApp.slackCfgTs) || 0, _fts = Number(_fApp.slackCfgTs) || 0;
+          if (_fts > _lts) {
+            ['slackWebhookUrl','slackEnabled','slackDriveWebhookUrl','slackDriveEnabled','slackBoardWebhookUrl','slackBoardEnabled','slackDigestWebhookUrl','slackDigestEnabled','slackDigestTime','slackOpsWebhookUrl','slackOpsEnabled','slackBoardRelayUrl','slackBoardRelaySecret','slackApprovalRelayUrl','slackApprovalRelaySecret','slackApprovalEnabled','slackCfgTs'].forEach(k => { if (k in _fApp) merged.appSettings[k] = _fApp[k]; });
+            console.warn('🔔 [SLACK CFG] 서버 설정이 더 최신(slackCfgTs) — 슬랙 알림 설정을 서버값으로 채택');
+          }
+        } catch(_){}
       }
       // v1.9.228 — 삭제 Tombstone 은 UNION(합집합). 기기간 삭제 의도가 모두 보존되도록.
       try {
