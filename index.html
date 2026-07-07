@@ -2974,6 +2974,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             <button class="btn btn-outline btn-sm pg-topbar-btn" style="color:var(--red-500);border-color:var(--red-200)" onclick="bulkDeleteOrders()">🗑 선택 삭제</button>
             <button id="btn-pluscl-fetch" class="btn btn-outline btn-sm pg-topbar-btn" style="color:#7c3aed;border-color:#ddd6fe" onclick="_testPlusclFetch()" title="물류(PlusCL) 배송정보를 지금 수집합니다 (관리자 · 최근 3일). 쿠팡·자사몰·스마트스토어 주문을 물류사에서 한번에 가져옵니다">🚚 물류 배송정보 수집</button>
             <button class="btn btn-outline btn-sm pg-topbar-btn" onclick="downloadOrderTemplate()">📥 엑셀 양식</button>
+            <button class="btn btn-outline btn-sm pg-topbar-btn" style="color:#0f766e;border-color:#99f6e4" onclick="openManualOrderModal()" title="로켓그로스 등 주문 상세가 없는 몰을 월말에 하나씩 수동 입력">✏️ 수동 입력</button>
             <button class="btn btn-primary btn-sm pg-topbar-btn" onclick="openOrderUploadModal()">📤 주문 업로드</button>
           </div>
         </div>
@@ -5865,7 +5866,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.406';
+const ERP_VERSION = 'v2.3.407';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -17073,6 +17074,117 @@ async function _saveShopOrderEdit(id){
   try { const ov=document.getElementById('so-edit-overlay'); if(ov) ov.remove(); } catch(_){}
   try { renderShopOrderTable(); } catch(_){}
   showNotif('✅ 주문이 수정되었습니다', 'success');
+}
+
+// v2.3.407: 수동 주문 입력 — 로켓그로스 등 주문상세 미제공 몰을 월말에 하나씩 입력
+function openManualOrderModal(){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const old = document.getElementById('mo-overlay'); if (old) old.remove();
+  const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  const inp = 'width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;font-size:13px;box-sizing:border-box';
+  const fld = (label, inner, req) => '<div style="margin-bottom:11px"><div style="font-size:11.5px;font-weight:700;color:#475569;margin-bottom:4px">'+label+(req?' <span style="color:#dc2626">*</span>':'')+'</div>'+inner+'</div>';
+  const today = new Date().toISOString().slice(0,10);
+  const shops = (DB.shops||[]).filter(s => s && s.active !== false);
+  const shopOpts = shops.map(s => '<option value="'+esc(s.id)+'"'+(/로켓/.test(String(s.name||''))?' selected':'')+'>'+esc(s.name||'')+'</option>').join('');
+  const items = (DB.items||[]).filter(it => it && it.active !== false);
+  const itemOpts = '<option value="">— 연결 안 함 (직접 입력) —</option>' + items.map(it => '<option value="'+esc(it.id)+'" data-name="'+esc(it.name||'')+'">'+(it.code?('('+esc(it.code)+') '):'')+esc(it.name||'')+'</option>').join('');
+  const ov = document.createElement('div');
+  ov.id = 'mo-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99987;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:460px;max-width:94vw;box-shadow:0 18px 50px rgba(0,0,0,.32);overflow:hidden;margin:auto">'
+    + '<div style="padding:14px 18px;background:#0f766e;color:#fff;display:flex;align-items:center;justify-content:space-between">'
+    + '<span style="font-size:14px;font-weight:800">✏️ 수동 주문 입력</span>'
+    + '<button onclick="document.getElementById(\'mo-overlay\').remove()" style="background:rgba(255,255,255,.18);border:none;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:13px;color:#fff">✕</button>'
+    + '</div>'
+    + '<div style="padding:16px 18px;max-height:80vh;overflow:auto">'
+    + '<div style="font-size:11.5px;color:#64748b;line-height:1.5;margin-bottom:10px">주문 상세가 없는 몰(로켓그로스 등)을 월말에 하나씩 입력하세요. 여러 건이면 <b>저장 후 계속</b>으로 이어서 입력할 수 있습니다.</div>'
+    + '<div style="display:flex;gap:10px">'
+    +   '<div style="flex:1">' + fld('주문일', '<input id="mo-date" type="date" value="'+today+'" style="'+inp+'">', true) + '</div>'
+    +   '<div style="flex:1">' + fld('쇼핑몰', '<select id="mo-shop" style="'+inp+';cursor:pointer;background:#fff">'+shopOpts+'</select>', true) + '</div>'
+    + '</div>'
+    + fld('ERP 품목 연결 <span style="color:#94a3b8;font-weight:500">(선택 · 마진분석용)</span>', '<select id="mo-item" onchange="var t=document.getElementById(\'mo-pname\'); var n=this.options[this.selectedIndex].getAttribute(\'data-name\')||\'\'; if(t&&(!t.value.trim()||t.dataset.auto===\'1\')){t.value=n;t.dataset.auto=\'1\';}" style="'+inp+';cursor:pointer;background:#fff">'+itemOpts+'</select>')
+    + fld('상품명', '<input id="mo-pname" style="'+inp+'" placeholder="예: 320 크림 60ml">', true)
+    + '<div style="display:flex;gap:10px">'
+    +   '<div style="flex:1">' + fld('수량', '<input id="mo-qty" type="number" min="0" step="1" value="1" style="'+inp+'">', true) + '</div>'
+    +   '<div style="flex:1">' + fld('주문금액(원)', '<input id="mo-amt" type="number" min="0" step="1" value="0" style="'+inp+'">', true) + '</div>'
+    + '</div>'
+    + '<div style="display:flex;gap:10px">'
+    +   '<div style="flex:1">' + fld('주문번호 <span style="color:#94a3b8;font-weight:500">(비우면 자동)</span>', '<input id="mo-ono" style="'+inp+'" placeholder="자동 생성">') + '</div>'
+    +   '<div style="flex:1">' + fld('입금예정일 <span style="color:#94a3b8;font-weight:500">(선택)</span>', '<input id="mo-ddate" type="date" style="'+inp+'">') + '</div>'
+    + '</div>'
+    + fld('고객명 <span style="color:#94a3b8;font-weight:500">(선택)</span>', '<input id="mo-cname" style="'+inp+'" placeholder="모르면 비워두세요">')
+    + '<div style="display:flex;gap:8px;margin-top:4px">'
+    + '<button onclick="document.getElementById(\'mo-overlay\').remove()" style="flex:0 0 auto;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;font-size:12.5px;font-weight:700;cursor:pointer">닫기</button>'
+    + '<button id="mo-save-cont" onclick="_saveManualOrder(true)" style="flex:1;background:#fff;color:#0f766e;border:1px solid #0f766e;border-radius:8px;padding:10px;font-size:12.5px;font-weight:800;cursor:pointer">💾 저장 후 계속</button>'
+    + '<button id="mo-save" onclick="_saveManualOrder(false)" style="flex:1;background:#0f766e;color:#fff;border:none;border-radius:8px;padding:10px;font-size:12.5px;font-weight:800;cursor:pointer">💾 저장</button>'
+    + '</div>'
+    + '<div style="font-size:11px;color:#94a3b8;line-height:1.5;margin-top:10px">※ 재고는 자동 차감되지 않습니다(집계 입력). 입금예정일·금액을 비우면 쇼핑몰 정산주기로 자동 계산됩니다.</div>'
+    + '</div></div>';
+  document.body.appendChild(ov);
+  setTimeout(()=>{ const el=document.getElementById('mo-pname'); if(el) el.focus(); }, 40);
+}
+async function _saveManualOrder(cont){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const V = k => { const el = document.getElementById(k); return el ? el.value : ''; };
+  const date = V('mo-date').trim();
+  const pname = V('mo-pname').trim();
+  const qty = Math.round(Number(V('mo-qty'))||0);
+  const amt = Math.round(Number(V('mo-amt'))||0);
+  if (!date) { showNotif('주문일을 입력해주세요', 'warning'); return; }
+  if (!pname) { showNotif('상품명을 입력해주세요', 'warning'); return; }
+  if (qty <= 0) { showNotif('수량을 1 이상 입력해주세요', 'warning'); return; }
+  const shopSel = document.getElementById('mo-shop');
+  let shopId='', shopName='';
+  if (shopSel && shopSel.value) {
+    const sh=(DB.shops||[]).find(s=>s&&String(s.id)===String(shopSel.value));
+    if (sh){ shopId=sh.id; shopName=sh.name; } else if (shopSel.selectedIndex>=0) { shopName=shopSel.options[shopSel.selectedIndex].textContent; }
+  }
+  const itemSel = document.getElementById('mo-item');
+  const itemId = (itemSel && itemSel.value) ? itemSel.value : '';
+  let ono = V('mo-ono').trim();
+  if (!ono) ono = '수동-' + date.replace(/-/g,'') + '-' + Math.floor(Math.random()*9000+1000);
+  let newId = Date.now()*1000 + Math.floor(Math.random()*1000);
+  const used = new Set((DB.shopOrders||[]).map(o=>o&&String(o.id)));
+  let guard=0; while(used.has(String(newId)) && guard<1000){ newId = Date.now()*1000 + Math.floor(Math.random()*1000); guard++; }
+  const now = new Date().toISOString();
+  const order = {
+    id: newId, orderNo: ono, orderDate: date,
+    shopId: shopId, shopName: shopName,
+    productName: pname, qty: qty, paymentAmount: amt,
+    customerName: V('mo-cname').trim(), customerPhone: '',
+    status: '배송완료', source: 'manual',
+    createdAt: now, updatedAt: now, fetchedAt: Date.now(),
+  };
+  if (itemId) order.itemId = itemId;
+  const ddate = V('mo-ddate').trim(); if (ddate) order.expectedDepositDate = ddate;
+  if (!Array.isArray(DB.shopOrders)) DB.shopOrders = [];
+  DB.shopOrders.push(order);
+  const btns = ['mo-save','mo-save-cont'].map(id=>document.getElementById(id));
+  btns.forEach(b=>{ if(b) b.disabled=true; });
+  const sb=document.getElementById('mo-save'); const prev=sb?sb.innerHTML:''; if(sb) sb.innerHTML='저장 중…';
+  window._criticalSaving = true;
+  let ok=false;
+  try { if (typeof saveDataNow==='function'){ await saveDataNow(); ok=true; } else { saveData(); ok=true; } }
+  catch(e){ console.error('수동 주문 저장 실패:', e); }
+  window._criticalSaving = false;
+  if (!ok) {
+    DB.shopOrders = (DB.shopOrders||[]).filter(o=>o && String(o.id)!==String(newId));  // 서버 미반영 → 롤백
+    btns.forEach(b=>{ if(b) b.disabled=false; }); if(sb) sb.innerHTML=prev||'💾 저장';
+    showNotif('☁️ 저장 실패 — 네트워크 확인 후 다시 시도해주세요 (미반영)', 'error'); return;
+  }
+  try { renderShopOrderTable(); } catch(_){}
+  showNotif('✅ 수동 주문이 추가되었습니다', 'success');
+  if (cont) {
+    ['mo-pname','mo-ono','mo-cname'].forEach(id=>{ const el=document.getElementById(id); if(el){ el.value=''; if(id==='mo-pname') el.dataset.auto=''; } });
+    const q=document.getElementById('mo-qty'); if(q) q.value='1';
+    const a=document.getElementById('mo-amt'); if(a) a.value='0';
+    const it=document.getElementById('mo-item'); if(it) it.selectedIndex=0;
+    btns.forEach(b=>{ if(b) b.disabled=false; }); if(sb) sb.innerHTML=prev||'💾 저장';
+    const pn=document.getElementById('mo-pname'); if(pn) pn.focus();
+  } else {
+    try { const ov=document.getElementById('mo-overlay'); if(ov) ov.remove(); } catch(_){}
+  }
 }
 
 async function deleteShopOrder(id) {
