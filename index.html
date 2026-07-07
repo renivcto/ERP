@@ -5866,7 +5866,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.408';
+const ERP_VERSION = 'v2.3.409';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -16808,7 +16808,7 @@ function renderShopOrderTable() {
       productCell = `<td style="${productCellStyle};background:#fef3c7;cursor:pointer" onclick="event.stopPropagation();openMappingForOrder(${o.id})" title="🔗 클릭해서 ERP 품목과 매핑하기 (같은 상품명 일괄 적용)"><span style="color:#92400e;font-weight:600">⚠️</span> ${o.productName||'-'} <span style="font-size:10.5px;color:#92400e;font-weight:600">[매핑 필요]</span></td>`;
     } else {
       // 매핑된 ERP 품목 정보 찾기
-      const mappedItem = (DB.items||[]).find(it => it && it.id === o.itemId);
+      const mappedItem = (DB.items||[]).find(it => it && String(it.id) === String(o.itemId));  // v2.3.409: 타입 무관 비교(수동입력 문자열 id 호환)
       let mappedLabel = '';
       if (mappedItem) {
         const code = mappedItem.code ? `(${mappedItem.code}) ` : '';
@@ -17076,9 +17076,44 @@ async function _saveShopOrderEdit(id){
   showNotif('✅ 주문이 수정되었습니다', 'success');
 }
 
+// v2.3.409: 특정 창고에서 재고 출고 차감 — item.stock 전체 + 선택 창고 whStock 반영(음수 방지), 롤백함수 반환.
+function _deductFromWarehouse(item, whId, qty, note){
+  qty = Number(qty)||0;
+  const beforeStock = Number(item.stock)||0;
+  const beforeWh = JSON.stringify(item.whStock||{});
+  const beforeUpd = item.updatedAt;
+  const eff = (typeof _itemWhEffective==='function') ? _itemWhEffective(item) : {};
+  const isImplicit = (!whId || whId==='__un__');
+  const avail = isImplicit ? beforeStock : (Number(eff[whId])||0);
+  const take = Math.max(0, Math.min(qty, avail));   // 창고에서 가용분까지만(초과분은 잔여/미지정에서)
+  item.stock = beforeStock - qty;
+  if (whId && whId!=='__un__') {
+    eff[whId] = (Number(eff[whId])||0) - take;
+    const dw = (item.defaultWh && typeof _whById==='function' && _whById(item.defaultWh)) ? String(item.defaultWh) : null;
+    const newWh = {};
+    Object.keys(eff).forEach(k => { if(k==='__un__') return; if(dw && k===dw) return; const q=Number(eff[k])||0; if(q!==0) newWh[k]=q; });
+    item.whStock = newWh;
+  }
+  item.updatedAt = Date.now();
+  DB.stockHistory = DB.stockHistory || [];
+  const hid = (typeof nextId==='function') ? nextId('stock') : (Date.now()+Math.floor(Math.random()*100000));
+  DB.stockHistory.push({ id: hid, itemId: item.id, type:'out', qty: qty, price: item.price||0, fromWh: whId||'', date: new Date().toISOString().slice(0,10), lot: item.lot||'', note: note||'수동 주문 재고 차감' });
+  return {
+    short: qty > avail,
+    avail: avail,
+    rollback: () => {
+      item.stock = beforeStock;
+      try { item.whStock = JSON.parse(beforeWh); } catch(_){ item.whStock = {}; }
+      item.updatedAt = beforeUpd;
+      DB.stockHistory = (DB.stockHistory||[]).filter(h => h && h.id !== hid);
+    }
+  };
+}
+
 // v2.3.407: 수동 주문 입력 — 로켓그로스 등 주문상세 미제공 몰을 월말에 하나씩 입력
-function openManualOrderModal(){
+async function openManualOrderModal(){
   if (typeof requireWrite==='function' && !requireWrite()) return;
+  try { if (typeof _whEnsureLoaded === 'function') await _whEnsureLoaded(); } catch(_){}  // v2.3.409: 창고 목록 로드
   const old = document.getElementById('mo-overlay'); if (old) old.remove();
   const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
   const inp = 'width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;font-size:13px;box-sizing:border-box';
@@ -17088,6 +17123,10 @@ function openManualOrderModal(){
   const shopOpts = shops.map(s => '<option value="'+esc(s.id)+'"'+(/로켓/.test(String(s.name||''))?' selected':'')+'>'+esc(s.name||'')+'</option>').join('');
   const items = (DB.items||[]).filter(it => it && it.active !== false && it.type === '완제품');  // v2.3.408: 완제품만
   const itemOpts = '<option value="">— 연결 안 함 (직접 입력) —</option>' + items.map(it => '<option value="'+esc(it.id)+'" data-name="'+esc(it.name||'')+'">'+(it.code?('('+esc(it.code)+') '):'')+esc(it.name||'')+'</option>').join('');
+  // v2.3.409: 재고 차감 창고 — 로켓그로스는 '쿠팡 창고' 기본
+  const _whs = (window._WH && Array.isArray(window._WH.list)) ? window._WH.list : [];
+  const _defWh = _whs.find(w => /쿠팡/.test(String(w.name||'')));
+  const whOpts = '<option value="">— 재고 차감 안 함 —</option>' + _whs.map(w => '<option value="'+esc(w.id)+'"'+((_defWh && String(w.id)===String(_defWh.id))?' selected':'')+'>'+esc(w.name||'')+'</option>').join('');
   const ov = document.createElement('div');
   ov.id = 'mo-overlay';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99987;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto';
@@ -17103,7 +17142,8 @@ function openManualOrderModal(){
     +   '<div style="flex:1">' + fld('주문일', '<input id="mo-date" type="date" value="'+today+'" style="'+inp+'">', true) + '</div>'
     +   '<div style="flex:1">' + fld('쇼핑몰', '<select id="mo-shop" style="'+inp+';cursor:pointer;background:#fff">'+shopOpts+'</select>', true) + '</div>'
     + '</div>'
-    + fld('ERP 품목 연결 <span style="color:#94a3b8;font-weight:500">(선택 · 마진분석용)</span>', '<select id="mo-item" onchange="var t=document.getElementById(\'mo-pname\'); var n=this.options[this.selectedIndex].getAttribute(\'data-name\')||\'\'; if(t&&(!t.value.trim()||t.dataset.auto===\'1\')){t.value=n;t.dataset.auto=\'1\';}" style="'+inp+';cursor:pointer;background:#fff">'+itemOpts+'</select>')
+    + fld('ERP 품목 연결 <span style="color:#94a3b8;font-weight:500">(마진분석·재고차감용)</span>', '<select id="mo-item" onchange="var t=document.getElementById(\'mo-pname\'); var n=this.options[this.selectedIndex].getAttribute(\'data-name\')||\'\'; if(t&&(!t.value.trim()||t.dataset.auto===\'1\')){t.value=n;t.dataset.auto=\'1\';}" style="'+inp+';cursor:pointer;background:#fff">'+itemOpts+'</select>')
+    + fld('재고 차감 창고 <span style="color:#94a3b8;font-weight:500">(품목 연결 시 차감)</span>', '<select id="mo-wh" style="'+inp+';cursor:pointer;background:#fff">'+whOpts+'</select>')
     + fld('상품명', '<input id="mo-pname" style="'+inp+'" placeholder="예: 320 크림 60ml">', true)
     + '<div style="display:flex;gap:10px">'
     +   '<div style="flex:1">' + fld('수량', '<input id="mo-qty" type="number" min="0" step="1" value="1" style="'+inp+'">', true) + '</div>'
@@ -17119,7 +17159,7 @@ function openManualOrderModal(){
     + '<button id="mo-save-cont" onclick="_saveManualOrder(true)" style="flex:1;background:#fff;color:#0f766e;border:1px solid #0f766e;border-radius:8px;padding:10px;font-size:12.5px;font-weight:800;cursor:pointer">💾 저장 후 계속</button>'
     + '<button id="mo-save" onclick="_saveManualOrder(false)" style="flex:1;background:#0f766e;color:#fff;border:none;border-radius:8px;padding:10px;font-size:12.5px;font-weight:800;cursor:pointer">💾 저장</button>'
     + '</div>'
-    + '<div style="font-size:11px;color:#94a3b8;line-height:1.5;margin-top:10px">※ 재고는 자동 차감되지 않습니다(집계 입력). 입금예정일·금액을 비우면 쇼핑몰 정산주기로 자동 계산됩니다.</div>'
+    + '<div style="font-size:11px;color:#94a3b8;line-height:1.5;margin-top:10px">※ ERP 품목을 연결하면 선택한 <b>재고 차감 창고</b>에서 수량만큼 재고가 차감됩니다(연결 안 하면 차감 없음). 입금예정일·금액을 비우면 정산주기로 자동 계산.</div>'
     + '</div></div>';
   document.body.appendChild(ov);
   setTimeout(()=>{ const el=document.getElementById('mo-pname'); if(el) el.focus(); }, 40);
@@ -17141,7 +17181,8 @@ async function _saveManualOrder(cont){
     if (sh){ shopId=sh.id; shopName=sh.name; } else if (shopSel.selectedIndex>=0) { shopName=shopSel.options[shopSel.selectedIndex].textContent; }
   }
   const itemSel = document.getElementById('mo-item');
-  const itemId = (itemSel && itemSel.value) ? itemSel.value : '';
+  const _selItem = (itemSel && itemSel.value) ? (DB.items||[]).find(x => x && String(x.id) === String(itemSel.value)) : null;
+  const itemId = _selItem ? _selItem.id : '';  // v2.3.409: 실제 품목 id(숫자) 저장 — 렌더/마진 매핑 정확
   let ono = V('mo-ono').trim();
   if (!ono) ono = '수동-' + date.replace(/-/g,'') + '-' + Math.floor(Math.random()*9000+1000);
   let newId = Date.now()*1000 + Math.floor(Math.random()*1000);
@@ -17160,6 +17201,16 @@ async function _saveManualOrder(cont){
   const ddate = V('mo-ddate').trim(); if (ddate) order.expectedDepositDate = ddate;
   if (!Array.isArray(DB.shopOrders)) DB.shopOrders = [];
   DB.shopOrders.push(order);
+  // v2.3.409: 선택 창고에서 재고 차감(품목 연결 시). 저장 실패 시 함께 롤백.
+  const whSel = document.getElementById('mo-wh');
+  const whId = whSel ? whSel.value : '';
+  let _ded = null, _dedMsg = '';
+  if (whId && _selItem) {
+    _ded = _deductFromWarehouse(_selItem, whId, qty, ('주문판매 [' + ono + '] ' + (shopName||'')).trim());
+    _dedMsg = ' · 재고 -' + qty + '(' + (_whName(whId)||'창고') + ')' + (_ded.short ? ' ⚠️창고재고 부족' : '');
+  } else if (whId && !_selItem) {
+    _dedMsg = ' · (품목 미연결로 재고 미차감)';
+  }
   const btns = ['mo-save','mo-save-cont'].map(id=>document.getElementById(id));
   btns.forEach(b=>{ if(b) b.disabled=true; });
   const sb=document.getElementById('mo-save'); const prev=sb?sb.innerHTML:''; if(sb) sb.innerHTML='저장 중…';
@@ -17170,11 +17221,13 @@ async function _saveManualOrder(cont){
   window._criticalSaving = false;
   if (!ok) {
     DB.shopOrders = (DB.shopOrders||[]).filter(o=>o && String(o.id)!==String(newId));  // 서버 미반영 → 롤백
+    if (_ded && _ded.rollback) { try { _ded.rollback(); } catch(_){} }               // 재고 차감도 롤백
     btns.forEach(b=>{ if(b) b.disabled=false; }); if(sb) sb.innerHTML=prev||'💾 저장';
     showNotif('☁️ 저장 실패 — 네트워크 확인 후 다시 시도해주세요 (미반영)', 'error'); return;
   }
   try { renderShopOrderTable(); } catch(_){}
-  showNotif('✅ 수동 주문이 추가되었습니다', 'success');
+  try { if (typeof renderStock === 'function' && document.getElementById('page-stock')) renderStock(); } catch(_){}
+  showNotif('✅ 수동 주문이 추가되었습니다' + _dedMsg, 'success');
   if (cont) {
     ['mo-pname','mo-ono','mo-cname'].forEach(id=>{ const el=document.getElementById(id); if(el){ el.value=''; if(id==='mo-pname') el.dataset.auto=''; } });
     const q=document.getElementById('mo-qty'); if(q) q.value='1';
