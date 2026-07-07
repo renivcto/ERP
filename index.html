@@ -862,6 +862,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 @keyframes bubbleFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 @keyframes dotPulse{0%,80%,100%{transform:scale(.55);opacity:.4}40%{transform:scale(1.15);opacity:1}}
 @keyframes tilt{0%,100%{transform:rotate(-6deg)}50%{transform:rotate(6deg)}}
+@keyframes _spin{to{transform:rotate(360deg)}}
 
 /* v1.9.538 — 시장 메모 contenteditable placeholder */
 #np-note:empty:before { content: attr(data-placeholder); color: var(--gray-400); pointer-events: none; }
@@ -5864,7 +5865,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.403';
+const ERP_VERSION = 'v2.3.404';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -5897,6 +5898,12 @@ console.log('🏭 RENIV ERP ' + ERP_VERSION + ' 로드됨');
 // 페이지 이탈 시 미저장 변경 감지
 let _hasUnsavedChanges = false;
 window.addEventListener('beforeunload', (e) => {
+  // v2.3.404: 저장 진행 중(글 작성 등)엔 이탈 시 강하게 경고 — 저장 완료 전 새로고침/닫기로 유실 방지
+  if (window._criticalSaving) {
+    e.preventDefault();
+    e.returnValue = '아직 저장 중입니다. 지금 나가면 작성한 내용이 저장되지 않습니다.';
+    return e.returnValue;
+  }
   if (_hasUnsavedChanges) {
     e.preventDefault();
     e.returnValue = '저장되지 않은 변경사항이 있습니다. 페이지를 떠나시겠습니까?';
@@ -32953,8 +32960,13 @@ async function saveFeedPost(){
   //   기존에는 saveDataNow() 를 await 하면서 여러 컬렉션을 순차 검증·쓰기하느라 수십 초 동안
   //   버튼이 "⏳ 저장 중..." 에 잠겨 "저장 안 됨"처럼 보이는 문제가 있었음.
   const saveBtn = document.querySelector('#overlay-feed-post .btn-primary') || document.querySelector('[onclick*="saveFeedPost"]');
-  const prevBtnLabel = saveBtn ? saveBtn.textContent : '';
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ 저장 중...'; }
+  const prevBtnHtml = saveBtn ? saveBtn.innerHTML : '';
+  // v2.3.404: 예쁜 스피너 로딩 버튼 + 저장 중 페이지 이탈 방지 플래그(beforeunload)
+  if (saveBtn) {
+    saveBtn.disabled = true; saveBtn.style.cursor = 'wait'; saveBtn.style.opacity = '.96';
+    saveBtn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:8px"><span style="width:14px;height:14px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;display:inline-block;animation:_spin .7s linear infinite"></span>저장 중…</span>';
+  }
+  window._criticalSaving = true;
 
   // v2.3.403: Firestore 확정 저장(saveDataNow)을 '먼저' await → 성공 후에만 슬랙 알림·성공표시.
   //   기존엔 알림·모달닫기가 즉시였고 Firestore 동기화는 백그라운드(비-await)라, 작성자가 저장 직후
@@ -32968,14 +32980,21 @@ async function saveFeedPost(){
   } catch(e) {
     console.error('피드 Firestore 동기화 실패(로컬에는 저장됨):', e);
   }
-  if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = prevBtnLabel || '저장'; }
+  window._criticalSaving = false;
 
   if (!_syncOk) {
     // 확정 저장 실패 — 오알림 방지 위해 슬랙 미발송, 모달 유지(재시도 유도). 글은 로컬엔 남아있음.
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.style.cursor = ''; saveBtn.style.opacity = ''; saveBtn.innerHTML = prevBtnHtml || '저장'; }
     try { showNotif('☁️ 서버 저장 실패 — 글이 서버에 반영되지 않았습니다. 잠시 후 다시 저장해주세요 (알림 미발송)', 'error'); } catch(_){}
     return;
   }
 
+  // v2.3.404: 저장 완료 → 버튼을 '저장이 완료되었습니다'(초록)로 바꿔 명확히 표시
+  if (saveBtn) {
+    saveBtn.style.background = '#16a34a'; saveBtn.style.borderColor = '#15803d'; saveBtn.style.color = '#fff';
+    saveBtn.style.cursor = 'default'; saveBtn.style.opacity = '';
+    saveBtn.innerHTML = '✅ 저장이 완료되었습니다';
+  }
   // 확정 저장 성공 → 피드백 + 슬랙 알림 + 모달 닫기
   showNotif(isNew ? '📰 업무 공유가 등록되었습니다' : '✅ 글이 수정되었습니다', 'success');
   // v2.3.23: 새 글만 슬랙 알림 (수정은 알림 X)
@@ -32996,11 +33015,20 @@ async function saveFeedPost(){
       else slackBoardNotify('board_post', { text: _msg });
     } catch(e) { console.warn('[v2.3.23] board_post 알림 실패:', e); }
   }
-  try { closeModal('feed-post'); } catch(_){}
   try { document.removeEventListener('paste', _feedPasteHandler); } catch(_){}
   try { renderFeed(); } catch(_){}
   // v2.3.210: 홈 대시보드의 운영 업무 공유 카드에서 작성했을 때 즉시 반영
   try { if (document.getElementById('dash-stats') && typeof renderDashStats === 'function') renderDashStats(); } catch(_){}
+  // v2.3.404: '저장이 완료되었습니다' 를 잠깐(0.9초) 보여준 뒤 모달 닫고 버튼 원복
+  setTimeout(() => {
+    try { closeModal('feed-post'); } catch(_){}
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.style.background = ''; saveBtn.style.borderColor = ''; saveBtn.style.color = '';
+      saveBtn.style.cursor = ''; saveBtn.style.opacity = '';
+      saveBtn.innerHTML = prevBtnHtml || '저장';
+    }
+  }, 900);
 }
 
 function editFeedPost(id){
