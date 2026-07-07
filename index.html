@@ -5865,7 +5865,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.404';
+const ERP_VERSION = 'v2.3.405';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -16829,7 +16829,10 @@ function renderShopOrderTable() {
       <td style="font-variant-numeric:tabular-nums;font-size:13px">${amt.toLocaleString()}원</td>
       <td style="white-space:nowrap;font-size:12.5px;font-variant-numeric:tabular-nums;cursor:pointer;color:#0f766e;font-weight:600" onclick="event.stopPropagation();_editOrderDepositAmount('${String(o.id).replace(/'/g,'&#39;')}')" title="클릭해서 입금예정금액 수정 (비우면 결제금액−수수료 자동)">${_orderDepositAmount(o).toLocaleString()}원</td>
       <td style="white-space:nowrap;font-size:12px;cursor:pointer" onclick="event.stopPropagation();_editOrderDepositDate('${String(o.id).replace(/'/g,'&#39;')}')" title="클릭해서 입금예정일 수정 (비우면 정산주기 자동)">${_orderDepositDate(o)||'<span style="color:#cbd5e1">미설정</span>'}</td>
-      <td style="white-space:nowrap;text-align:center"><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 10px;color:var(--red-500);white-space:nowrap;word-break:keep-all;display:inline-block;min-width:36px" onclick="deleteShopOrder('${String(o.id).replace(/'/g, '&#39;')}')">삭제</button></td>
+      <td style="white-space:nowrap;text-align:center"><div style="display:inline-flex;flex-direction:column;gap:3px;align-items:stretch">
+        <button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 10px;color:#1d4ed8;border-color:#bfdbfe;white-space:nowrap;word-break:keep-all;min-width:36px" onclick="editShopOrder('${String(o.id).replace(/'/g, '&#39;')}')">수정</button>
+        <button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 10px;color:var(--red-500);white-space:nowrap;word-break:keep-all;min-width:36px" onclick="deleteShopOrder('${String(o.id).replace(/'/g, '&#39;')}')">삭제</button>
+      </div></td>
     </tr>`;
   }).join('');
 }
@@ -16980,6 +16983,76 @@ async function editOrderQty(orderId) {
     else if (typeof saveData === 'function') saveData();
   } catch(_){}
   showNotif(`✅ 수량 수정 완료: ${oldQty} → ${newQty}` + stockMsg, 'success');
+}
+
+// v2.3.405: 판매주문 수정 모달 — 주문일/쇼핑몰/주문번호/고객명/전화/상품명/주문금액 편집.
+//   (수량·입금예정액·입금예정일은 표 셀 클릭의 전용 편집기 사용 — 재고·정산 자동연동 유지)
+function editShopOrder(id){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const _idStr = String(id);
+  const o = (DB.shopOrders||[]).find(x => x && String(x.id) === _idStr);
+  if (!o) { showNotif('주문을 찾을 수 없습니다 (새로고침 후 다시 시도)', 'warning'); return; }
+  const old = document.getElementById('so-edit-overlay'); if (old) old.remove();
+  const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  const inp = 'width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;font-size:13px;box-sizing:border-box';
+  const fld = (label, inner) => '<div style="margin-bottom:11px"><div style="font-size:11.5px;font-weight:700;color:#475569;margin-bottom:4px">'+label+'</div>'+inner+'</div>';
+  const ov = document.createElement('div');
+  ov.id = 'so-edit-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99987;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:440px;max-width:94vw;max-height:92vh;overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.32)">'
+    + '<div style="padding:14px 18px;background:#0f172a;color:#fff;display:flex;align-items:center;justify-content:space-between">'
+    + '<span style="font-size:14px;font-weight:800">✏️ 주문 수정</span>'
+    + '<button onclick="document.getElementById(\'so-edit-overlay\').remove()" style="background:rgba(255,255,255,.15);border:none;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:13px;color:#fff">✕</button>'
+    + '</div>'
+    + '<div style="padding:16px 18px">'
+    + '<div style="display:flex;gap:10px">'
+    +   '<div style="flex:1">' + fld('주문일', '<input id="soe-date" type="date" value="'+esc(o.orderDate)+'" style="'+inp+'">') + '</div>'
+    +   '<div style="flex:1">' + fld('쇼핑몰', '<input id="soe-shop" value="'+esc(o.shopName)+'" style="'+inp+'">') + '</div>'
+    + '</div>'
+    + fld('주문번호', '<input id="soe-ono" value="'+esc(o.orderNo)+'" style="'+inp+'">')
+    + '<div style="display:flex;gap:10px">'
+    +   '<div style="flex:1">' + fld('고객명', '<input id="soe-cname" value="'+esc(o.customerName)+'" style="'+inp+'">') + '</div>'
+    +   '<div style="flex:1">' + fld('고객 전화', '<input id="soe-cphone" value="'+esc(o.customerPhone)+'" style="'+inp+'">') + '</div>'
+    + '</div>'
+    + fld('상품명', '<textarea id="soe-pname" rows="2" style="'+inp+';resize:vertical">'+esc(o.productName)+'</textarea>')
+    + fld('주문금액(원)', '<input id="soe-amt" type="number" step="1" value="'+(Number(o.paymentAmount)||0)+'" style="'+inp+'">')
+    + '<div style="font-size:11px;color:#94a3b8;line-height:1.5;margin:2px 0 12px">※ 수량·입금예정액·입금예정일은 표에서 해당 <b>셀을 클릭</b>해 수정하세요(재고·정산 자동연동).</div>'
+    + '<div style="display:flex;gap:8px">'
+    + '<button onclick="document.getElementById(\'so-edit-overlay\').remove()" style="flex:0 0 auto;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer">취소</button>'
+    + '<button id="soe-save" onclick="_saveShopOrderEdit(\''+_idStr.replace(/'/g,'&#39;')+'\')" style="flex:1;background:#0f172a;color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:800;cursor:pointer">💾 저장</button>'
+    + '</div></div></div>';
+  document.body.appendChild(ov);
+  setTimeout(()=>{ const el=document.getElementById('soe-cname'); if(el) el.focus(); }, 40);
+}
+async function _saveShopOrderEdit(id){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const _idStr = String(id);
+  const o = (DB.shopOrders||[]).find(x => x && String(x.id) === _idStr);
+  if (!o) { showNotif('주문을 찾을 수 없습니다', 'warning'); return; }
+  const V = k => { const el = document.getElementById(k); return el ? el.value : ''; };
+  const ono = V('soe-ono').trim();
+  if (!ono) { showNotif('주문번호를 입력해주세요', 'warning'); return; }
+  o.orderDate = V('soe-date').trim();
+  o.shopName = V('soe-shop').trim();
+  o.orderNo = ono;
+  o.customerName = V('soe-cname').trim();
+  o.customerPhone = V('soe-cphone').trim();
+  o.productName = V('soe-pname').trim();
+  o.paymentAmount = Math.round(Number(V('soe-amt')) || 0);
+  o.updatedAt = new Date().toISOString();  // 로컬우선 머지 보호
+  const btn = document.getElementById('soe-save');
+  const prev = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '저장 중…'; }
+  window._criticalSaving = true;  // v2.3.404: 저장 중 이탈 방지
+  let ok = false;
+  try { if (typeof saveDataNow === 'function') { await saveDataNow(); ok = true; } else { saveData(); ok = true; } }
+  catch(e) { console.error('주문 수정 저장 실패:', e); }
+  window._criticalSaving = false;
+  if (!ok) { if (btn){ btn.disabled=false; btn.innerHTML = prev||'💾 저장'; } showNotif('☁️ 저장 실패 — 네트워크 확인 후 다시 시도해주세요 (서버 미반영)', 'error'); return; }
+  try { const ov=document.getElementById('so-edit-overlay'); if(ov) ov.remove(); } catch(_){}
+  try { renderShopOrderTable(); } catch(_){}
+  showNotif('✅ 주문이 수정되었습니다', 'success');
 }
 
 async function deleteShopOrder(id) {
