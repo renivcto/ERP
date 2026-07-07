@@ -405,6 +405,8 @@ body{font-family:var(--font);background:var(--gray-50);color:var(--gray-800);hei
 .feed-lrow{display:flex;flex-direction:column;gap:3px;padding:9px 11px;background:#fff;border:1px solid #eef2f6;border-radius:10px;cursor:pointer;transition:all .15s;position:relative}
 .feed-lrow:hover{border-color:#cbd5e1;transform:translateY(-1px);box-shadow:0 2px 6px rgba(15,23,42,.04)}
 .feed-lrow.pinned{background:#fffbeb;border-color:#fde68a}
+.feed-lrow.cur{background:#e8f4fd;border-color:#a9d5f5}  /* v2.3.420: 본문에 표시 중인 글 — 연한 하늘색 강조 */
+.feed-lrow.cur:hover{border-color:#7fc0ef}
 .feed-lrow-meta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;line-height:1}
 .feed-lrow-title{font-size:13px;font-weight:700;color:#0a0a0a;letter-spacing:-.2px;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-all}
 .feed-lrow-author{font-size:11px;color:#64748b;font-weight:600}
@@ -5902,7 +5904,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.419';
+const ERP_VERSION = 'v2.3.420';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -32590,8 +32592,9 @@ function renderFeedList(){
   const mainPost = posts[mainIdx];
   const others = posts.filter((_, i) => i !== mainIdx);
 
-  const thumbsHtml = others.length
-    ? others.map(renderFeedThumbHtml).join('')
+  // v2.3.420: 본문에 표시 중인 글도 리스트에 포함(제목/작성자 누락 방지) + 현재 글은 하늘색 강조
+  const thumbsHtml = posts.length
+    ? posts.map(p => renderFeedThumbHtml(p, mainPost && p.id === mainPost.id)).join('')
     : '<div style="color:#94a3b8;font-size:12px;padding:20px 12px;text-align:center;line-height:1.5">이전 글이 없어요<br><span style="font-size:11px;color:#cbd5e1">새 글을 작성해 보세요</span></div>';
 
   // v2.3.414: RECENT POSTS = 리스트만(캘린더 분리) / 캘린더는 하단으로 이동·확대
@@ -32601,7 +32604,7 @@ function renderFeedList(){
       <aside class="feed-thumb-strip" aria-label="지난 포스트">
         <div class="feed-thumb-head">
           <div class="feed-eyebrow" style="color:#64748b">RECENT POSTS</div>
-          <div style="font-size:10.5px;color:#94a3b8;font-weight:500">${others.length}개</div>
+          <div style="font-size:10.5px;color:#94a3b8;font-weight:500">${posts.length}개</div>
         </div>
         <div class="feed-thumb-scroll">${thumbsHtml}</div>
       </aside>
@@ -32612,13 +32615,13 @@ function renderFeedList(){
 
 // v1.9.244 — 오른쪽 썸네일 카드 (클릭 시 왼쪽 메인 슬롯으로 올림)
 // v2.3.414: RECENT POSTS 심플 리스트 행 — 제목 + '작성자 : 이름'. 클릭 시 메인 슬롯으로 올림.
-function renderFeedThumbHtml(p){
+function renderFeedThumbHtml(p, isCur){
   const cat = feedCatInfo(p.category);
   const isNew = p.createdAt && (Date.now() - new Date(p.createdAt).getTime()) < 48*60*60*1000;
   const pinned = !!p.pinned;
   const author = esc(p.authorName || '익명');
   return `
-    <div class="feed-lrow${pinned?' pinned':''}" onclick="_feedMainPostId=${p.id};renderFeed();" title="${esc(p.title||'')}">
+    <div class="feed-lrow${pinned?' pinned':''}${isCur?' cur':''}" onclick="_feedMainPostId=${p.id};renderFeed();" title="${esc(p.title||'')}">
       <div class="feed-lrow-meta">
         ${pinned ? '<span class="feed-thumb-pin" style="position:static">📌</span>' : ''}
         <span class="feed-thumb-cat" style="background:${cat.bg};color:${cat.fg}">${cat.label}</span>
