@@ -5928,7 +5928,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.440';
+const ERP_VERSION = 'v2.3.441';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12134,6 +12134,39 @@ function renderDashStats() {
       <div style="display:flex;flex-direction:column">${ystShopRows}</div>
     </div>`;
 
+  // ── v2.3.441: 이번 달 지급 예정 / 미결제 (매출 열 중간 카드) ──
+  const _payNow = new Date();
+  const _payYm = _payNow.getFullYear() + '-' + String(_payNow.getMonth()+1).padStart(2,'0');
+  const _payTodayYmd = (typeof _todayKstYmd === 'function')
+    ? _todayKstYmd()
+    : (_payNow.getFullYear() + '-' + String(_payNow.getMonth()+1).padStart(2,'0') + '-' + String(_payNow.getDate()).padStart(2,'0'));
+  const _payUnpaid = (DB.expenses||[]).filter(e => e && e.paidStatus !== 'paid');
+  const _payKrw = e => (typeof _expenseTodayKrw === 'function') ? (Number(_expenseTodayKrw(e))||0) : (Number(e.amount)||0);
+  const _payDueThisMonth = _payUnpaid
+    .filter(e => String(e.dueDate||'').slice(0,7) === _payYm)
+    .reduce((s,e) => s + _payKrw(e), 0);
+  const _payUnpaidCount = _payUnpaid.length;
+  const _payUrgent = _payUnpaid.filter(e => {
+    if (e.urgent) return true;
+    const due = String(e.dueDate||'').slice(0,10);
+    return due && due < _payTodayYmd;
+  }).length;
+  const payDueHtml = `
+    <div class="stat c-red" style="cursor:pointer;flex-shrink:0" onclick="go('approval')" title="결재 관리(지출 결의)로 이동">
+      <div class="stat-lbl" style="display:flex;align-items:center;gap:8px">
+        <span>💳 이번 달 지급 예정</span>
+      </div>
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-top:2px">
+        <div style="font-size:21px;font-weight:800;color:#be185d;line-height:1.1;letter-spacing:-.5px;font-variant-numeric:tabular-nums">${_payDueThisMonth > 0 ? '₩' + Math.round(_payDueThisMonth).toLocaleString() : '₩0'}</div>
+        <div style="text-align:right;line-height:1.35;white-space:nowrap">
+          <span style="font-size:11px;color:var(--gray-500);font-weight:600">미결제 </span>
+          <span style="font-size:15px;font-weight:800;color:#f59e0b;font-variant-numeric:tabular-nums">${_payUnpaidCount}</span>
+          <span style="font-size:11px;color:var(--gray-500);font-weight:600">건</span>
+          ${_payUrgent > 0 ? `<span style="margin-left:6px;font-size:10.5px;font-weight:700;color:#dc2626;background:#fee2e2;border:1px solid #fecaca;padding:1px 7px;border-radius:999px">🚨 ${_payUrgent}</span>` : ''}
+        </div>
+      </div>
+    </div>`;
+
   // ── 카드 2: 완제품 재고 현황 ──
   const finishedItems = (DB.items||[]).filter(i => i.type === '완제품');
   const stockRows = finishedItems.slice(0,4).map(item => {
@@ -12299,6 +12332,7 @@ function renderDashStats() {
         </div>
         ${salesHtml}
       </div>
+      ${payDueHtml}
       <div class="stat c-amber" style="cursor:pointer" onclick="go('sales');setTimeout(()=>switchSalesTab('orders'),10)" title="주문 관리 페이지로 이동">
         <div class="stat-lbl" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
           <span>🌆 어제의 매출 <span style="color:var(--gray-400);font-weight:500;font-size:11px">· ${yst.dateLabel}</span></span>
