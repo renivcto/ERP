@@ -5928,7 +5928,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.442';
+const ERP_VERSION = 'v2.3.443';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -11942,6 +11942,11 @@ function _revokeDashBlobUrls() {
   window._dashBlobUrls = [];
 }
 
+// v2.3.443: HOME 업무공유 카드 — 리스트 선택 글을 위 본문에 표시 + 목록 스크롤
+window._dashNotePostId = window._dashNotePostId || null;
+window._dashSelectNote = function(id){ window._dashNotePostId = id; try { renderDashStats(); } catch(_){} };
+window._dashNoteScroll = function(dir){ const el = document.getElementById('dash-note-list'); if (el) el.scrollBy({ top: dir * 130, behavior: 'smooth' }); };
+
 function renderDashStats() {
   // v1.9.761: revoke 를 즉시 하지 않고, 5초 setTimeout 으로 미룸 (이미지 로드 완료 보장)
   //   원인: renderDashStats 재호출 시 이전 URL 즉시 revoke → 이미지 로드 전이면 ERR_FILE_NOT_FOUND
@@ -12225,8 +12230,8 @@ function renderDashStats() {
     // 카테고리 emoji 색 그라데이션으로 32x32 fallback 썸네일 (이미지 없을 때)
     const _emojiThumb = (cat) => `<span style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:8px;background:${cat.bg};color:${cat.fg};font-size:18px;flex-shrink:0;border:1px solid ${cat.fg}20">${cat.icon||'📌'}</span>`;
 
-    // ── 최근글 1개 (메인) ──
-    const top = notePosts[0];
+    // ── 최근글 1개 (메인) — v2.3.443: 리스트에서 선택한 글을 위에 표시(없으면 최신) ──
+    const top = notePosts.find(p => p && p.id === window._dashNotePostId) || notePosts[0];
     const topCat = (typeof feedCatInfo === 'function') ? feedCatInfo(top.category) : {label:top.category||'자유', icon:'📌', bg:'#f8fafc', fg:'#475569'};
     const topWhen = (typeof feedTimeAgo === 'function') ? feedTimeAgo(top.createdAt) : '';
     const topAuthor = top.authorName || '익명';
@@ -12274,8 +12279,8 @@ function renderDashStats() {
         </div>
       </div>`;
 
-    // ── 지난 업무공유 (최근 글 제외) ── v2.3.436: 4개로 늘려 좌측 카드 높이 채움
-    const pastPosts = notePosts.slice(1, 3);
+    // ── 지난 업무공유 (선택글 제외 전체) ── v2.3.443: 전체 목록 스크롤·클릭 시 위 본문 교체
+    const pastPosts = notePosts.filter(p => p && p.id !== top.id);
     const pastListHtml = pastPosts.length === 0
       ? `<div style="padding:14px 8px;text-align:center;color:var(--gray-400);font-size:11.5px">지난 글이 없습니다</div>`
       : pastPosts.map(p => {
@@ -12287,7 +12292,7 @@ function renderDashStats() {
           const title = (p.title||'').trim() || _extractBody(p.content, 50) || '(제목 없음)';
           const dateStr = p.createdAt ? new Date(p.createdAt).toISOString().slice(0,10).replace(/-/g,'.') : '';
           return `
-            <div onclick="event.stopPropagation();_notesOpenPostDetail(${p.id})" style="display:flex;align-items:center;gap:10px;padding:8px 6px;border-radius:8px;cursor:pointer;transition:background .12s" onmouseenter="this.style.background='#f8fafc'" onmouseleave="this.style.background=''">
+            <div onclick="event.stopPropagation();_dashSelectNote(${p.id})" style="display:flex;align-items:center;gap:10px;padding:8px 6px;border-radius:8px;cursor:pointer;transition:background .12s" onmouseenter="this.style.background='#f8fafc'" onmouseleave="this.style.background=''">
               ${thumb}
               <div style="flex:1;min-width:0">
                 <div style="font-size:12.5px;font-weight:700;color:var(--gray-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.3;letter-spacing:-.1px">${escFnX(title)}</div>
@@ -12305,11 +12310,15 @@ function renderDashStats() {
         ${topMainHtml}
         <!-- 지난 업무공유 헤더 + 더 보기 -->
         <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--gray-100);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
-          <span style="font-size:11.5px;font-weight:700;color:var(--gray-500);letter-spacing:.2px;display:flex;align-items:center;gap:5px"><span>🕒</span><span>지난 업무공유</span></span>
-          <button type="button" onclick="event.stopPropagation();go('feedshare')" title="전체 보기" style="background:#0a0a0a;color:#fff;border:0;border-radius:999px;padding:5px 13px;font-size:11.5px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px;letter-spacing:-.1px;white-space:nowrap;transition:transform .15s" onmouseenter="this.style.transform='translateY(-1px)'" onmouseleave="this.style.transform=''">전체보기 →</button>
+          <span style="font-size:11.5px;font-weight:700;color:var(--gray-500);letter-spacing:.2px;display:flex;align-items:center;gap:5px"><span>🕒</span><span>지난 업무공유${pastPosts.length ? ' (' + pastPosts.length + ')' : ''}</span></span>
+          <div style="display:flex;align-items:center;gap:6px">
+            <button type="button" onclick="event.stopPropagation();_dashNoteScroll(-1)" title="위로" style="width:24px;height:24px;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:7px;cursor:pointer;font-size:10px;line-height:1;display:inline-flex;align-items:center;justify-content:center;transition:all .12s" onmouseenter="this.style.background='#eef2f6'" onmouseleave="this.style.background='#f8fafc'">▲</button>
+            <button type="button" onclick="event.stopPropagation();_dashNoteScroll(1)" title="아래로" style="width:24px;height:24px;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:7px;cursor:pointer;font-size:10px;line-height:1;display:inline-flex;align-items:center;justify-content:center;transition:all .12s" onmouseenter="this.style.background='#eef2f6'" onmouseleave="this.style.background='#f8fafc'">▼</button>
+            <button type="button" onclick="event.stopPropagation();go('feedshare')" title="전체 보기" style="background:#0a0a0a;color:#fff;border:0;border-radius:999px;padding:5px 13px;font-size:11.5px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px;letter-spacing:-.1px;white-space:nowrap;transition:transform .15s" onmouseenter="this.style.transform='translateY(-1px)'" onmouseleave="this.style.transform=''">전체보기 →</button>
+          </div>
         </div>
-        <!-- 지난 글 리스트 — v2.3.438: 2개 고정(최근글이 위 공간 채움) -->
-        <div style="margin-top:4px;flex-shrink:0">${pastListHtml}</div>
+        <!-- 지난 글 리스트 — v2.3.443: 전체 목록 스크롤(▲▼), 클릭 시 위 본문 교체 -->
+        <div id="dash-note-list" class="home-scroll-box" style="margin-top:4px;flex-shrink:0;height:158px;overflow-y:auto">${pastListHtml}</div>
       </div>`;
   }
 
