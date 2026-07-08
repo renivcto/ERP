@@ -5928,7 +5928,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.443';
+const ERP_VERSION = 'v2.3.444';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -41070,7 +41070,7 @@ function _buildDailyDigestText() {
   let hasIssue = false;
 
   // 1) 완제품 재고 (type === '완제품') — 재고 적은 순, 최소재고 미달이면 🚨 표시
-  const finished = (DB.items||[]).filter(it => it && it.type === '완제품')
+  const finished = (DB.items||[]).filter(it => it && it.type === '완제품' && (Number(it.stock)||0) > 0)
     .sort((a,b) => (Number(a.stock)||0) - (Number(b.stock)||0));
   if (finished.length) {
     hasIssue = true;
@@ -41080,7 +41080,7 @@ function _buildDailyDigestText() {
       const stk = Number(it.stock)||0;
       const min = Number(it.minStock)||0;
       const low = min > 0 && stk < min;
-      L.push('• ' + (low ? '🚨 ' : '') + (it.name||'-') + (it.spec ? ' [' + it.spec + ']' : '') + ' — 재고 ' + stk.toLocaleString() + (min > 0 ? ' / 최소 ' + min.toLocaleString() : ''));
+      L.push('• ' + (low ? '🚨 ' : '') + (it.name||'-') + ' — 재고 ' + stk.toLocaleString());
     });
     if (finished.length > 12) L.push('  … 외 ' + (finished.length - 12) + '종');
   }
@@ -41093,7 +41093,7 @@ function _buildDailyDigestText() {
     L.push('');
     L.push('📦 *7일 내 입고 예정 ' + soon.length + '건*');
     soon.slice(0, 6).forEach(o => {
-      L.push('• ' + (o.inDate === today ? '*오늘* ' : o.inDate + ' ') + vName(o.vendorId) + ' — ' + ordTitle(o));
+      L.push('• ' + (o.inDate === today ? '*오늘* ' : String(o.inDate).slice(5) + ' ') + vName(o.vendorId) + ' — ' + ordTitle(o));
     });
     if (soon.length > 6) L.push('  … 외 ' + (soon.length - 6) + '건');
   }
@@ -41111,14 +41111,14 @@ function _buildDailyDigestText() {
   }
 
   // 4) 생산 진행 현황
-  const prods = (DB.productions||[]).filter(p => p && p.status === '생산중');
+  const prods = (DB.productions||[]).filter(p => p && p.status === '생산중' && p.productId && (DB.items||[]).some(it => it && it.id === p.productId));
   if (prods.length) {
     hasIssue = true;
     L.push('');
     L.push('🏭 *생산중 ' + prods.length + '건*');
     prods.slice().sort((a,b) => String(a.inDate||'9999').localeCompare(String(b.inDate||'9999')))
       .slice(0, 6).forEach(p => {
-        L.push('• ' + (p.productName||'-') + ' ' + (Number(p.qty)||0).toLocaleString() + '개 — ' + (Number(p.progress)||0) + '%' + (p.inDate ? ' (입고예정 ' + p.inDate + ')' : ''));
+        L.push('• ' + ((typeof getItemName === 'function' ? getItemName(p.productId) : '') || p.productName || '-') + ' ' + (Number(p.qty)||0).toLocaleString() + '개' + (p.inDate ? ' (입고예정 ' + String(p.inDate).slice(5) + ')' : ''));
       });
     if (prods.length > 6) L.push('  … 외 ' + (prods.length - 6) + '건');
   }
@@ -41131,7 +41131,7 @@ function _buildDailyDigestText() {
     L.push('');
     L.push('💳 *지급예정일 경과 ' + overdue.length + '건 — 합계 ' + fmtWon(total) + '*');
     overdue.slice(0, 5).forEach(e => {
-      L.push('• ' + (e.title||'-') + (e.vendor ? ' / ' + e.vendor : '') + ' — ' + fmtWon(Number(e.amount)||0) + ' (예정 ' + e.dueDate + ')');
+      L.push('• ' + (e.title||'-') + (e.vendor ? ' / ' + e.vendor : '') + ' — ' + fmtWon(Number(e.amount)||0) + ' (예정 ' + String(e.dueDate).slice(5) + ')');
     });
     if (overdue.length > 5) L.push('  … 외 ' + (overdue.length - 5) + '건');
   }
