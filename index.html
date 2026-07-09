@@ -5933,7 +5933,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.453';
+const ERP_VERSION = 'v2.3.454';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -17297,6 +17297,19 @@ function _closeGuard(id, isStatic){
     +'</div></div>';
   document.body.appendChild(w);
 }
+
+// v2.3.454: 저장 중 프로액티브 안내 오버레이(이탈 방지) — _closeGuard 와 동일 디자인. 저장 시작 시 표시, 완료 시 자동 제거.
+function _showSavingOverlay(){
+  const old=document.getElementById('saving-overlay'); if(old) old.remove();
+  const w=document.createElement('div'); w.id='saving-overlay';
+  w.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:100003;display:flex;align-items:center;justify-content:center;padding:20px';
+  w.innerHTML='<div style="background:#fff;border-radius:14px;width:360px;max-width:92vw;box-shadow:0 18px 50px rgba(0,0,0,.35);overflow:hidden;text-align:center;padding:26px 22px 24px">'
+    +'<div style="width:40px;height:40px;border:3px solid #e2e8f0;border-top-color:#0f766e;border-radius:50%;margin:0 auto;animation:_spin .8s linear infinite"></div>'
+    +'<div style="font-size:16px;font-weight:800;color:#0f172a;margin-top:16px">저장 중입니다</div>'
+    +'<div style="font-size:12.5px;color:#64748b;line-height:1.65;margin-top:7px">잠시만 기다려 주세요. 저장이 끝나면 자동으로 닫힙니다.<br>완료 전엔 새로고침이나 페이지 이동을 하지 마세요.</div></div>';
+  document.body.appendChild(w);
+}
+function _hideSavingOverlay(){ const e=document.getElementById('saving-overlay'); if(e) e.remove(); }
 
 // v2.3.407: 수동 주문 입력 — 로켓그로스 등 주문상세 미제공 몰을 월말에 하나씩 입력
 async function openManualOrderModal(){
@@ -33604,6 +33617,7 @@ async function saveFeedPost(){
     saveBtn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:8px"><span style="width:14px;height:14px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;display:inline-block;animation:_spin .7s linear infinite"></span>저장 중…</span>';
   }
   window._criticalSaving = true;
+  try { _showSavingOverlay(); } catch(_){}  // v2.3.454: 저장 중 이탈 방지 안내 팝업
 
   // v2.3.403: Firestore 확정 저장(saveDataNow)을 '먼저' await → 성공 후에만 슬랙 알림·성공표시.
   //   기존엔 알림·모달닫기가 즉시였고 Firestore 동기화는 백그라운드(비-await)라, 작성자가 저장 직후
@@ -33618,6 +33632,7 @@ async function saveFeedPost(){
     console.error('피드 Firestore 동기화 실패(로컬에는 저장됨):', e);
   }
   window._criticalSaving = false;
+  try { _hideSavingOverlay(); } catch(_){}  // v2.3.454: 저장 종료 → 안내 팝업 제거
 
   if (!_syncOk) {
     // 확정 저장 실패 — 오알림 방지 위해 슬랙 미발송, 모달 유지(재시도 유도). 글은 로컬엔 남아있음.
