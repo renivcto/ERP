@@ -5933,7 +5933,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.461';
+const ERP_VERSION = 'v2.3.462';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6117,6 +6117,17 @@ window._migrateAttachmentsCore = async function() {
     await _one('vendor_bankbook_' + v.id, v.bankbook, null, u => { v.bankbook = u; });
     if (Array.isArray(v.quotes)) for (let qi = 0; qi < v.quotes.length; qi++) { const q0 = v.quotes[qi]; if (q0) await _one('vendor_quote_' + v.id + '_' + qi, q0.data, null, u => { q0.data = u; }); }
     if (Array.isArray(v.attachments)) for (let ai = 0; ai < v.attachments.length; ai++) { const a0 = v.attachments[ai]; if (a0) await _one('vendor_attach_' + v.id + '_' + ai, a0.data, null, u => { a0.data = u; }); }
+  }
+  // v2.3.462: 협력사/판매처(cooperators/sellers) 첨부도 Storage 오프로드 — 명함/사업자등록증/통장/계약서/견적 (partner_<coll>_<id>_* 키)
+  for (const coll of ['cooperators', 'sellers']) {
+    for (const p of (DB[coll] || [])) {
+      if (!p || p.id == null) continue;
+      for (const field of ['bizDoc', 'bankbook', 'businessCard', 'contractDoc']) {
+        await _one('partner_' + coll + '_' + p.id + '_' + field, p[field], null, u => { p[field] = u; });
+      }
+      if (Array.isArray(p.businessCards)) for (let ci = 0; ci < p.businessCards.length; ci++) { const c0 = p.businessCards[ci]; if (c0) await _one('partner_' + coll + '_' + p.id + '_card_' + ci, c0.data, null, u => { c0.data = u; }); }
+      if (Array.isArray(p.quotes)) for (let qi = 0; qi < p.quotes.length; qi++) { const q0 = p.quotes[qi]; if (q0) await _one('partner_' + coll + '_' + p.id + '_quote_' + qi, q0.data, null, u => { q0.data = u; }); }
+    }
   }
   console.log('📦 [MIGRATE] 완료:', JSON.stringify(stat));
   return stat;
@@ -7128,7 +7139,7 @@ async function _doSaveDataInner() {
       // 단일 필드
       ['bizDoc', 'bankbook', 'businessCard', 'contractDoc'].forEach(field => {
         const v = p[field];
-        if (typeof v === 'string' && v.length > 100 && v !== '__idb__') {
+        if (typeof v === 'string' && v.length > 100 && v !== '__idb__' && v.indexOf('http') !== 0) {
           try { idbSet('partner_' + coll + '_' + p.id + '_' + field, v); } catch(_){}
           dbToSave[coll][i][field] = '__idb__';
         }
@@ -7137,7 +7148,7 @@ async function _doSaveDataInner() {
       if (Array.isArray(p.businessCards)) {
         p.businessCards.forEach((card, ci) => {
           if (!card || typeof card.data !== 'string') return;
-          if (card.data.length > 100 && card.data !== '__idb__') {
+          if (card.data.length > 100 && card.data !== '__idb__' && card.data.indexOf('http') !== 0) {
             try { idbSet('partner_' + coll + '_' + p.id + '_card_' + ci, card.data); } catch(_){}
             dbToSave[coll][i].businessCards[ci] = { ...card, data: '__idb__' };
           }
@@ -7147,7 +7158,7 @@ async function _doSaveDataInner() {
       if (Array.isArray(p.quotes)) {
         p.quotes.forEach((q, qi) => {
           if (!q || typeof q.data !== 'string') return;
-          if (q.data.length > 100 && q.data !== '__idb__') {
+          if (q.data.length > 100 && q.data !== '__idb__' && q.data.indexOf('http') !== 0) {
             try { idbSet('partner_' + coll + '_' + p.id + '_quote_' + qi, q.data); } catch(_){}
             dbToSave[coll][i].quotes[qi] = { ...q, data: '__idb__' };
           }
