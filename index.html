@@ -5933,7 +5933,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.458';
+const ERP_VERSION = 'v2.3.459';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -23688,7 +23688,8 @@ async function saveVendor() {
     if (idx>=0) DB.vendors[idx] = {...DB.vendors[idx], ...data};
     showNotif('업체 정보가 수정되었습니다','success');
   } else {
-    DB.vendors.push({id:nextId('vendor'), ...data});
+    // v2.3.459: createdAt 부여 — 기기별 카운터 id 가 충돌해도 로드 머지 가드(v2.3.419)가 '다른 레코드'로 판별해 필드 혼합 방지
+    DB.vendors.push({id:nextId('vendor'), createdAt: Date.now(), ...data});
     showNotif('업체가 등록되었습니다','success');
   }
   closeModal('add-vendor'); renderVendorTable();
@@ -23737,6 +23738,9 @@ function editVendor(id) {
   window._vendorBankbook = (v.bankbook) ? { data: v.bankbook, name: v.bankbookName || '통장사본' } : null;
   _vendorQuotes = v.quotes ? JSON.parse(JSON.stringify(v.quotes)) : [];
   window._vendorAttachments = v.attachments ? JSON.parse(JSON.stringify(v.attachments)) : [];
+  // v2.3.459: 편집 창 열 때 네이티브 파일 입력(통장/견적/첨부) 초기화 — 다른 업체에서 고른 파일이 남아 보이던 누수 방지(오저장 위험 차단)
+  ['v-bankbook-inp','v-quote-file-inp','v-attach-file-inp'].forEach(function(_id){ var _el = document.getElementById(_id); if (_el) _el.value = ''; });
+  ['v-quote-file-clear','v-attach-file-clear'].forEach(function(_id){ var _el = document.getElementById(_id); if (_el) _el.style.display = 'none'; });
   const delBtn = $('vendor-delete-btn');
   if (delBtn) delBtn.style.display = '';
   openModal('add-vendor');
