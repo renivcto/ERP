@@ -5933,7 +5933,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.454';
+const ERP_VERSION = 'v2.3.455';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -11954,6 +11954,44 @@ window._dashNotePostId = window._dashNotePostId || null;
 window._dashSelectNote = function(id){ window._dashNotePostId = id; try { renderDashStats(); } catch(_){} };
 window._dashNoteScroll = function(dir){ const el = document.getElementById('dash-note-list'); if (el) el.scrollBy({ top: dir * 130, behavior: 'smooth' }); };
 
+// v2.3.455: HOME 업무공유 카드 인라인 반응·댓글(전용 id·renderDashStats 갱신 — 상세팝업/피드와 id 충돌 회피)
+window._dashPostReact = function(postId, emoji){
+  try { var r = toggleFeedReaction(postId, emoji); if (r && r.catch) r.catch(function(){}); } catch(_){}
+  try { renderDashStats(); } catch(_){}
+};
+window._dashAddComment = async function(postId){
+  var inp = document.getElementById('dash-cmt-input-' + postId);
+  if (!inp) return;
+  var text = (inp.value||'').trim();
+  if (!text) return;
+  var p = (DB.feedPosts||[]).find(function(x){ return x && x.id === postId; });
+  if (!p) return;
+  if (!Array.isArray(p.comments)) p.comments = [];
+  var u = (typeof feedCurrentUser==='function') ? feedCurrentUser() : (window._currentUser||{});
+  var cid = Date.now()*1000 + Math.floor(Math.random()*1000);
+  p.comments.push({ id: cid, text: text, parentId: null, reactions: {}, authorName: u.name, authorEmail: u.email, createdAt: new Date().toISOString() });
+  inp.value = '';
+  try { renderDashStats(); } catch(_){}
+  var _saved = false;
+  try { if (typeof saveDataNow==='function'){ await saveDataNow(); _saved = true; } else if (typeof saveData==='function'){ saveData(); _saved = true; } } catch(e){ console.warn('[dash] 댓글 저장 실패', e); }
+  if (_saved) { try { var _t = (typeof _kstShortTimeMin==='function')?_kstShortTimeMin():''; var _msg = '💬 *댓글* · ' + (u.name||'익명') + (_t?('  _( ' + _t + ' )_'):'') + '\n' + (text.length>500?(text.slice(0,500)+' …'):text); if (typeof _boardDispatch==='function') _boardDispatch(p.id, 'comment', _msg); } catch(_){} }
+};
+window._dashEditComment = function(postId, cid){
+  var p = (DB.feedPosts||[]).find(function(x){ return x && x.id === postId; }); if (!p) return;
+  var c = (p.comments||[]).find(function(x){ return x && String(x.id) === String(cid); }); if (!c) return;
+  var nt = prompt('댓글 수정', c.text||''); if (nt === null) return; nt = String(nt).trim(); if (!nt) return;
+  c.text = nt; c.updatedAt = new Date().toISOString();
+  try { renderDashStats(); } catch(_){}
+  try { if (typeof saveDataNow==='function') saveDataNow(); else if (typeof saveData==='function') saveData(); } catch(_){}
+};
+window._dashDeleteComment = function(postId, cid){
+  if (!confirm('이 댓글을 삭제할까요?')) return;
+  var p = (DB.feedPosts||[]).find(function(x){ return x && x.id === postId; }); if (!p) return;
+  p.comments = (p.comments||[]).filter(function(x){ return x && String(x.id) !== String(cid); });
+  try { renderDashStats(); } catch(_){}
+  try { if (typeof saveDataNow==='function') saveDataNow(); else if (typeof saveData==='function') saveData(); } catch(_){}
+};
+
 function renderDashStats() {
   // v1.9.761: revoke 를 즉시 하지 않고, 5초 setTimeout 으로 미룸 (이미지 로드 완료 보장)
   //   원인: renderDashStats 재호출 시 이전 URL 즉시 revoke → 이미지 로드 전이면 ERR_FILE_NOT_FOUND
@@ -12262,6 +12300,44 @@ function renderDashStats() {
          </div>`
       : '';
     const topTitle = (top.title||'').trim();
+    // v2.3.455: 파란 영역 — 이미지 갤러리(전체 나열, 클릭 시 라이트박스)
+    const topPostIdx = notePosts.findIndex(p => p && p.id === top.id);
+    const galleryHtml = topImages.length
+      ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">'
+        + topImages.map((im, i) => '<img src="' + _base64ToBlobUrl(im) + '" loading="lazy" decoding="async" onclick="event.stopPropagation();_notesOpenLightbox(' + topPostIdx + ',' + i + ')" style="width:84px;height:84px;object-fit:cover;background:#fff;border:1px solid #e2e8f0;border-radius:10px;cursor:zoom-in" title="클릭해서 크게 보기"/>').join('')
+        + '</div>'
+      : '';
+    // v2.3.455: 초록 영역 — 반응 + 댓글 + 작성/수정/삭제 (전용 id)
+    const _dMyEmail = (typeof feedCurrentUser === 'function') ? (feedCurrentUser().email || '') : ((window._currentUser||{}).email || '');
+    const _dIsAdmin = !!(window._currentUser && window._currentUser.isAdmin === true);
+    const _dReactions = top.reactions || {};
+    const _dREACT = (typeof FEED_REACTIONS !== 'undefined') ? FEED_REACTIONS : ['👍','❤️','🎉','👏','🔥','🤔','🙌','💡'];
+    const _dReactRow = _dREACT.map(em => {
+      const r = _dReactions[em]; const cnt = (r && r.count) || 0; const mine = r && r.users && _dMyEmail && r.users.includes(_dMyEmail);
+      return '<button type="button" onclick="event.stopPropagation();_dashPostReact(' + top.id + ',\'' + em + '\')" style="background:' + (mine?'#fef3c7':'#f8fafc') + ';border:1px solid ' + (mine?'#fcd34d':'#e2e8f0') + ';border-radius:999px;padding:3px 9px;font-size:12.5px;font-weight:700;cursor:pointer;color:#475569;line-height:1.3">' + em + (cnt?(' ' + cnt):'') + '</button>';
+    }).join('');
+    const _dCmts = Array.isArray(top.comments) ? top.comments.slice().sort((a,b)=>String(a.createdAt||'').localeCompare(String(b.createdAt||''))) : [];
+    const _dCmtRows = _dCmts.length === 0
+      ? '<div style="font-size:11.5px;color:#94a3b8;padding:6px 2px">아직 댓글이 없습니다. 첫 댓글을 남겨보세요!</div>'
+      : _dCmts.map(c => {
+          const mine = (c.authorEmail && c.authorEmail === _dMyEmail) || _dIsAdmin;
+          const t = c.createdAt ? new Date(c.createdAt).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+          const indent = c.parentId ? 'margin-left:18px;border-left:2px solid #e2e8f0;padding-left:8px;' : '';
+          return '<div style="padding:6px 2px;' + indent + '">'
+            + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:11.5px;font-weight:700;color:#334155">' + escFnX(c.authorName||'익명') + '</span><span style="font-size:10px;color:#94a3b8">' + t + '</span>'
+            + (mine ? ('<button type="button" onclick="event.stopPropagation();_dashEditComment(' + top.id + ',\'' + c.id + '\')" style="margin-left:4px;background:none;border:0;color:#4338ca;font-size:10.5px;font-weight:700;cursor:pointer">수정</button><button type="button" onclick="event.stopPropagation();_dashDeleteComment(' + top.id + ',\'' + c.id + '\')" style="background:none;border:0;color:#b91c1c;font-size:10.5px;font-weight:700;cursor:pointer">삭제</button>') : '')
+            + '</div>'
+            + '<div style="font-size:12px;color:#475569;line-height:1.5;white-space:pre-wrap;word-break:break-word;margin-top:2px">' + escFnX(c.text||'') + '</div>'
+            + '</div>';
+        }).join('');
+    const dashInteractiveHtml = '<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eef2f6" onclick="event.stopPropagation()">'
+      + '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">' + _dReactRow + '</div>'
+      + '<div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:6px">💬 댓글 ' + _dCmts.length + '</div>'
+      + '<div>' + _dCmtRows + '</div>'
+      + '<div style="display:flex;gap:6px;align-items:flex-end;margin-top:8px">'
+      + '<textarea id="dash-cmt-input-' + top.id + '" placeholder="댓글을 남겨보세요... (Enter 전송)" rows="1" onclick="event.stopPropagation()" onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();_dashAddComment(' + top.id + ')}" oninput="this.style.height=\'auto\';this.style.height=Math.min(this.scrollHeight,90)+\'px\'" style="flex:1;resize:none;min-height:34px;max-height:90px;line-height:1.5;padding:7px 10px;font-family:inherit;font-size:12.5px;border:1px solid #cbd5e1;border-radius:8px;outline:none;box-sizing:border-box"></textarea>'
+      + '<button type="button" onclick="event.stopPropagation();_dashAddComment(' + top.id + ')" style="background:#0f172a;color:#fff;border:0;border-radius:8px;padding:0 14px;height:34px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0">전송</button>'
+      + '</div></div>';
     const topMainHtml = `
       <div style="cursor:pointer;border-radius:8px;padding:8px 6px;margin:0 -6px;transition:background .12s;flex:1 1 auto;min-height:0;display:flex;flex-direction:column"
            onclick="event.stopPropagation();_notesOpenPostDetail(${top.id})"
@@ -12280,9 +12356,9 @@ function renderDashStats() {
         ${topTitle ? `<div style="font-size:14.5px;font-weight:800;color:var(--gray-800);line-height:1.35;margin-bottom:8px;letter-spacing:-.2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;flex-shrink:0">${escFnX(topTitle)}</div>` : ''}
         ${topSummaryBlock}
         <div class="home-scroll-box" style="overflow-y:auto;overflow-x:hidden;flex:1 1 0;min-height:0;padding-right:8px">
-          ${topImageHtml}
           <div style="font-size:12.5px;color:#475569;line-height:1.7;word-break:break-word;letter-spacing:-.1px">${topBodyHtml}</div>
-          <div style="clear:both"></div>
+          ${galleryHtml}
+          ${dashInteractiveHtml}
         </div>
       </div>`;
 
