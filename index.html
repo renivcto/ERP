@@ -5933,7 +5933,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.460';
+const ERP_VERSION = 'v2.3.461';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6109,6 +6109,14 @@ window._migrateAttachmentsCore = async function() {
     if (!ex) continue;
     if (Array.isArray(ex.attachments)) for (let ai = 0; ai < ex.attachments.length; ai++) { const a0 = ex.attachments[ai]; if (a0) await _one('expense_attach_' + ex.id + '_' + ai, a0.data, () => (typeof _loadSharedExpenseFile === 'function' ? _loadSharedExpenseFile(ex.id, 'attach', ai) : null), u => { a0.data = u; }); }
     if (Array.isArray(ex.quotes)) for (let qi = 0; qi < ex.quotes.length; qi++) { const q0 = ex.quotes[qi]; if (q0) await _one('expense_quote_' + ex.id + '_' + qi, q0.data, () => (typeof _loadSharedExpenseFile === 'function' ? _loadSharedExpenseFile(ex.id, 'quote', qi) : null), u => { q0.data = u; }); }
+  }
+  // v2.3.461: 거래처(vendor) 첨부도 Storage 오프로드 — 통장/사업자등록증/견적/첨부 (기기 IDB → 서버 URL, 유실·기기간 혼선 방지)
+  for (const v of (DB.vendors || [])) {
+    if (!v) continue;
+    await _one('vendor_bizDoc_' + v.id, v.bizDoc, null, u => { v.bizDoc = u; });
+    await _one('vendor_bankbook_' + v.id, v.bankbook, null, u => { v.bankbook = u; });
+    if (Array.isArray(v.quotes)) for (let qi = 0; qi < v.quotes.length; qi++) { const q0 = v.quotes[qi]; if (q0) await _one('vendor_quote_' + v.id + '_' + qi, q0.data, null, u => { q0.data = u; }); }
+    if (Array.isArray(v.attachments)) for (let ai = 0; ai < v.attachments.length; ai++) { const a0 = v.attachments[ai]; if (a0) await _one('vendor_attach_' + v.id + '_' + ai, a0.data, null, u => { a0.data = u; }); }
   }
   console.log('📦 [MIGRATE] 완료:', JSON.stringify(stat));
   return stat;
@@ -7014,7 +7022,7 @@ async function _doSaveDataInner() {
   (dbToSave.vendors||[]).forEach((v, vi) => {
     if (v.quotes && v.quotes.length) {
       v.quotes.forEach((q, qi) => {
-        if (q.data && q.data.length > 100) {
+        if (q.data && q.data.length > 100 && q.data.indexOf('http') !== 0) {
           idbSet('vendor_quote_' + v.id + '_' + qi, q.data);
           // v1.9.713: Firestore 에도 백업 (IDB 손실 시 복구용) — v2.3.357: dedup 경로로 flood 차단
           try { _fsUpTryUpload('vq_' + v.id + '_' + qi, q.data, (d) => _saveSharedVendorQuote(v.id, qi, d, q.fileName || q.name)); } catch(_){}
@@ -7024,7 +7032,7 @@ async function _doSaveDataInner() {
     }
     if (v.attachments && v.attachments.length) {
       v.attachments.forEach((a, ai) => {
-        if (a.data && a.data.length > 100) {
+        if (a.data && a.data.length > 100 && a.data.indexOf('http') !== 0) {
           idbSet('vendor_attach_' + v.id + '_' + ai, a.data);
           // v1.9.713: Firestore 에도 백업 — v2.3.357: dedup 경로로 flood 차단
           try { _fsUpTryUpload('va_' + v.id + '_' + ai, a.data, (d) => _saveSharedVendorAttach(v.id, ai, d, a.fileName || a.name)); } catch(_){}
@@ -7099,12 +7107,12 @@ async function _doSaveDataInner() {
     if (!v) return;
     // v1.9.632: 통장사본 IDB 오프로드 — 이전엔 인라인 저장 -> 다른 vendor 들과 합쳐 1MB 초과 시
     //   silent fail 로 사업자번호 등 텍스트까지 같이 사라지던 문제 해결
-    if (typeof v.bankbook === 'string' && v.bankbook.length > 100 && v.bankbook !== '__idb__') {
+    if (typeof v.bankbook === 'string' && v.bankbook.length > 100 && v.bankbook !== '__idb__' && v.bankbook.indexOf('http') !== 0) {
       try { idbSet('vendor_bankbook_' + v.id, v.bankbook); } catch(_){}
       dbToSave.vendors[vi].bankbook = '__idb__';
     }
     // v1.9.644: 사업자등록증 IDB 오프로드
-    if (typeof v.bizDoc === 'string' && v.bizDoc.length > 100 && v.bizDoc !== '__idb__') {
+    if (typeof v.bizDoc === 'string' && v.bizDoc.length > 100 && v.bizDoc !== '__idb__' && v.bizDoc.indexOf('http') !== 0) {
       try { idbSet('vendor_bizDoc_' + v.id, v.bizDoc); } catch(_){}
       dbToSave.vendors[vi].bizDoc = '__idb__';
     }
