@@ -6009,7 +6009,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.464';
+const ERP_VERSION = 'v2.3.465';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6584,25 +6584,27 @@ function _backupOrdersNow(tag) {
     //   QuotaExceededError 로 백업 실패 + localStorage 고갈.
     const _liteOrders = orders.map(function(o){
       const c = Object.assign({}, o);
-      if (typeof c.pdfData === 'string' && c.pdfData.length > 10 && c.pdfData !== '__idb__') c.pdfData = '__idb__';
-      if (typeof c.stampData === 'string' && c.stampData.length > 10 && c.stampData !== '__idb__') c.stampData = '__idb__';
+      // v2.3.465: Storage 이전된 첨부는 URL(약 250자) 이라 아래 length 게이트에 걸려 '__idb__' 로
+      //   마커화됐다 → 백업 복구 시 하이드레이션 키가 없어 파일 유실(URL 파괴 클래스). http 는 그대로 보존.
+      if (typeof c.pdfData === 'string' && c.pdfData.length > 10 && c.pdfData !== '__idb__' && !_stoIsHttp(c.pdfData)) c.pdfData = '__idb__';
+      if (typeof c.stampData === 'string' && c.stampData.length > 10 && c.stampData !== '__idb__' && !_stoIsHttp(c.stampData)) c.stampData = '__idb__';
       // v2.3.195: 누락됐던 대용량 base64 필드도 제거 — 결재 도장 이미지/해외PO 첨부.
       //   (이것들이 안 빠져 reniv_orders_backup·스냅샷이 ~717KB 로 비대 → localStorage 고갈)
       //   원본은 메모리 DB·Firestore 에 그대로. 백업은 메타데이터 복구용이므로 마커만 남겨도 안전.
-      if (typeof c.approvalStampImage === 'string' && c.approvalStampImage.length > 100 && c.approvalStampImage !== '__idb__') c.approvalStampImage = '__stripped__';
-      if (typeof c.stampImage === 'string' && c.stampImage.length > 100 && c.stampImage !== '__idb__') c.stampImage = '__stripped__';
-      if (c.invoiceFile && typeof c.invoiceFile.data === 'string' && c.invoiceFile.data.length > 100 && c.invoiceFile.data !== '__idb__') {
+      if (typeof c.approvalStampImage === 'string' && c.approvalStampImage.length > 100 && c.approvalStampImage !== '__idb__' && !_stoIsHttp(c.approvalStampImage)) c.approvalStampImage = '__stripped__';
+      if (typeof c.stampImage === 'string' && c.stampImage.length > 100 && c.stampImage !== '__idb__' && !_stoIsHttp(c.stampImage)) c.stampImage = '__stripped__';
+      if (c.invoiceFile && typeof c.invoiceFile.data === 'string' && c.invoiceFile.data.length > 100 && c.invoiceFile.data !== '__idb__' && !_stoIsHttp(c.invoiceFile.data)) {
         c.invoiceFile = Object.assign({}, c.invoiceFile, { data: '__idb__' });
       }
       if (Array.isArray(c.otherFiles)) {
         c.otherFiles = c.otherFiles.map(function(f){
-          if (f && typeof f.data === 'string' && f.data.length > 100 && f.data !== '__idb__') return Object.assign({}, f, { data: '__idb__' });
+          if (f && typeof f.data === 'string' && f.data.length > 100 && f.data !== '__idb__' && !_stoIsHttp(f.data)) return Object.assign({}, f, { data: '__idb__' });
           return f;
         });
       }
       if (Array.isArray(c.closingDocs)) {
         c.closingDocs = c.closingDocs.map(function(d){
-          if (d && typeof d.data === 'string' && d.data.length > 100 && d.data !== '__idb__') {
+          if (d && typeof d.data === 'string' && d.data.length > 100 && d.data !== '__idb__' && !_stoIsHttp(d.data)) {
             return Object.assign({}, d, { data: '__idb__' });
           }
           return d;
@@ -31833,6 +31835,7 @@ function toggleClosingNone() {
   const ord = (DB.orders||[]).find(o => o && String(o.id) === String(_closingModalOrderId));
   if (!ord) return;
   ord.closingNone = !!(chk && chk.checked);
+  ord.updatedAt = Date.now();  // v2.3.465: EDIT RECOVERY 보호 (31953 날인본 패턴)
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
   _closingModalRender();
   try { renderApprovalExpenseTable(); } catch(_){}
@@ -31845,7 +31848,19 @@ function saveClosingNoneNote() {
   const v = ta.value || '';
   if ((ord.closingNoneNote || '') === v) return;
   ord.closingNoneNote = v;
+  ord.updatedAt = Date.now();  // v2.3.465: EDIT RECOVERY 보호
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+}
+// v2.3.465: 마감서 모달이 order.closingDocs 를 바꿨을 때, 같은 발주서가 발주서 폼에도 열려 있으면
+//   폼 전역(_orderClosingDocs)도 함께 갱신한다. 안 하면 폼 저장(saveOrder:32452)이 stale 배열로
+//   closingDocs 를 통째 덮어써 방금 올린 마감서가 사라진다.
+function _syncOrderClosingDocsGlobal(ord) {
+  try {
+    if (!ord || window._currentEditOrderId == null) return;
+    if (String(window._currentEditOrderId) !== String(ord.id)) return;
+    _orderClosingDocs = Array.isArray(ord.closingDocs) ? ord.closingDocs.slice() : [];
+    try { renderOrderClosingDocsList(); } catch(_){}
+  } catch(_){}
 }
 function handleClosingModalUpload(input) {
   const files = input.files;
@@ -31861,6 +31876,8 @@ function handleClosingModalUpload(input) {
     reader.onload = function(ev){
       ord.closingDocs.push({ name: f.name, data: ev.target.result, type: f.type, size: f.size, addedAt: Date.now() });
       ord.closingNone = false;
+      ord.updatedAt = Date.now();  // v2.3.465: EDIT RECOVERY 보호 — 없으면 머지가 구본 채택 후 서버에 되쓰기
+      _syncOrderClosingDocsGlobal(ord);
       added++; pending--;
       if (pending <= 0) _closingModalCommit(added);
     };
@@ -31869,8 +31886,9 @@ function handleClosingModalUpload(input) {
   });
   input.value = '';
 }
-function _closingModalCommit(addedCount) {
-  try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+async function _closingModalCommit(addedCount) {
+  // v2.3.465: await 로 저장 완료를 기다린 뒤 알림 (CLAUDE.md 규칙#3 — 알림만 나가고 데이터 유실 방지)
+  try { if (typeof saveDataNow === 'function') await saveDataNow(); else saveData(); } catch(_){}
   _closingModalRender();
   try { renderApprovalExpenseTable(); } catch(_){}
   try { renderOrderClosingDocsList(); } catch(_){}
@@ -31882,6 +31900,8 @@ function removeClosingModalDoc(idx) {
   if (idx < 0 || idx >= ord.closingDocs.length) return;
   if (!confirm('이 마감서 파일을 삭제하시겠습니까?')) return;
   ord.closingDocs.splice(idx, 1);
+  ord.updatedAt = Date.now();  // v2.3.465: EDIT RECOVERY 보호 (삭제도 머지에서 되살아나지 않게)
+  _syncOrderClosingDocsGlobal(ord);
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
   _closingModalRender();
   try { renderApprovalExpenseTable(); } catch(_){}
@@ -31903,6 +31923,9 @@ async function viewClosingModalDoc(idx) {
       else { showNotif('⚠️ 파일 데이터 없음 (IDB/Firestore 미발견)', 'warning'); return; }
     } catch(e) { showNotif('파일 로드 실패', 'warning'); return; }
   }
+  // v2.3.465: Storage 이전된 첨부(https URL)는 직접 열기 — v2.3.365 때 발주서 폼 뷰어(31712)에만
+  //   적용되고 이 모달엔 누락돼, URL 로 이전된 마감서가 atob() 로 들어가 '보기'가 깨졌다.
+  if (typeof _stoIsHttp === 'function' && _stoIsHttp(data)) { window.open(data, '_blank'); return; }
   try {
     const parts = String(data).split(',');
     const meta = parts[0] || '', b64 = parts[1] || '';
@@ -36439,6 +36462,7 @@ function toggleOrderTaxInvoice(orderId) {
   const o = DB.orders.find(x => x.id === orderId);
   if (!o) return;
   o.taxInvoice = (o.taxInvoice === '수령완료') ? '미수령' : '수령완료';
+  o.updatedAt = Date.now();  // v2.3.465: EDIT RECOVERY 보호 — 미기록 시 타 기기 구본이 증빙 상태를 되돌림
   try { saveData(); } catch(_){}
   renderApprovalPage();
 }
