@@ -6009,7 +6009,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.465';
+const ERP_VERSION = 'v2.3.466';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6574,6 +6574,33 @@ window._freeLS = function() {
   try { if (typeof showNotif === 'function') showNotif('🧹 저장공간 ' + freedKB + 'KB 확보', 'success'); } catch(_){}
   return { freedKB: freedKB };
 };
+
+// v2.3.466: 샘플 tombstone 판정 — id 만 비교하면 안 된다.
+//   sample id 는 기기별 카운터(nextId = max+1)라, 삭제된 id 가 새 샘플에 그대로 재발급된다.
+//   그러면 옛 묘비가 신규 품의서를 태어나자마자 죽이는 자기영속 루프가 된다
+//   (2026-07 사고: 05-09 에 찍힌 id=4 묘비가 07-09 재등록건을 매 로드마다 삭제 → 서버에서 영구 소멸).
+//   expenses 의 v2.3.330 가드 · _isOrderTombstoned · _isApprovalTombstoned 와 동형.
+//   ⚠️ createdAt 이 없는 구 레코드(0)는 반드시 tombstoned 로 유지 — 아니면 의도적 삭제분이 부활한다.
+function _sampleTombTsMap(list) {
+  const m = new Map();
+  (Array.isArray(list) ? list : []).forEach(x => {
+    if (!x) return;
+    const id = (typeof x === 'object') ? x.id : x;
+    if (id == null) return;
+    const k = String(id);
+    const ts = (typeof x === 'object') ? (Number(x.ts) || 0) : 0;
+    if (!m.has(k) || ts > m.get(k)) m.set(k, ts);
+  });
+  return m;
+}
+function _isSampleTombstoned(s, tombTsMap) {
+  if (!s || s.id == null) return false;
+  if (!tombTsMap || !tombTsMap.has(String(s.id))) return false;
+  const ts = Number(tombTsMap.get(String(s.id))) || 0;
+  const created = Number(s.createdAt) || 0;
+  if (ts > 0 && created > 0 && created > ts) return false;  // 묘비 이후 생성 = 신규 레코드 → 보존
+  return true;
+}
 
 function _backupOrdersNow(tag) {
   try {
@@ -7748,10 +7775,11 @@ async function _doSaveDataInner() {
                       //   조용히 지우던 버그(작성자만 보이고 타인엔 안 보임) 차단. sig tombstone 의 createdAt 가드와 동형.
                       const _tsById = new Map();
                       DB[_tombArrName].forEach(x => { const xid = String(x && typeof x === 'object' ? x.id : x); const xts = (x && typeof x === 'object') ? (Number(x.ts) || 0) : 0; if (!_tsById.has(xid) || xts > _tsById.get(xid)) _tsById.set(xid, xts); });
-                      const _srvByIdT = (key === 'expenses') ? new Map(srvArr.map(o => [o && o.id, o])) : null;
+                      // v2.3.466: samples 도 동일 가드 적용 — sample id 도 기기별 카운터라 삭제 id 가 재발급된다.
+                      const _srvByIdT = (key === 'expenses' || key === 'samples') ? new Map(srvArr.map(o => [o && o.id, o])) : null;
                       _keepIds = _keepIds.filter(id => {
                         if (!_tsById.has(String(id))) return true;          // tombstone 아님 → 보존
-                        if (key === 'expenses' && _srvByIdT) { const o = _srvByIdT.get(id); if (o && (Number(o.createdAt) || 0) > _tsById.get(String(id))) return true; }  // 삭제 이후 생성 = 새 입력 → 보존
+                        if (_srvByIdT) { const o = _srvByIdT.get(id); if (o && (Number(o.createdAt) || 0) > _tsById.get(String(id))) return true; }  // 삭제 이후 생성 = 새 입력 → 보존
                         return false;                                       // tombstone → 제외
                       });
                     }
@@ -39816,7 +39844,10 @@ async function saveSample() {
   // 신규 등록
   const _payMethod = $('aps-paymethod').value || '';
   const s = {
-    id: nextId('sample'),
+    // v2.3.466: 전역고유 id — nextId('sample') 은 기기별 카운터(max+1)라 삭제된 id 를 그대로 재발급했고,
+    //   그 결과 옛 tombstone 이 신규 품의서를 매 로드마다 삭제했다(2026-07 '320 크림 용기 샘플' 사고).
+    //   기존 1~3 은 그대로 두고 신규만 전역고유화 → id 재사용 충돌 자체를 제거.
+    id: (function(){ let _sid; do { _sid = Date.now()*1000 + Math.floor(Math.random()*1000); } while ((DB.samples||[]).some(x => x && x.id === _sid)); return _sid; })(),
     purpose,
     buyDate: $('aps-buydate').value || '',
     vendor: $('aps-vendor').value || '',
@@ -44414,8 +44445,13 @@ async function openExpenseApprovalForm(expenseId) {
     }];
   }
 
-  const today = new Date();
-  const _ymd = today.toISOString().slice(0,10);
+  // v2.3.466: 기안일 = '지출결의서를 작성한 날짜'(createdAt). 이전엔 new Date() 를 그대로 써서
+  //   문서를 여는 날마다 기안일이 오늘로 바뀌었다(기안일이 저장된 적이 없음 — 8일에 만든 문서를
+  //   16일에 열면 16일로 표시). createdAt 이 없는 구 레코드만 오늘로 폴백.
+  //   (_ymd 지역상수는 이 함수에서 쓰이지 않는 죽은 코드 + 잘못된 createdAt 에서 toISOString() 이
+  //    RangeError 를 던져 문서가 아예 안 열릴 수 있어 제거. 이상값이면 오늘로 폴백.)
+  const _draftD = e.createdAt ? new Date(e.createdAt) : null;
+  const today = (_draftD && !isNaN(_draftD.getTime())) ? _draftD : new Date();
   const ymdKor = `${today.getFullYear()}년 ${String(today.getMonth()+1).padStart(2,'0')}월 ${String(today.getDate()).padStart(2,'0')}일`;
   const dueKor = e.dueDate ? `${e.dueDate.slice(0,4)}년 ${e.dueDate.slice(5,7)}월 ${e.dueDate.slice(8,10)}일` : '-';
   const amt = Number(e.amount) || 0;
@@ -55693,16 +55729,15 @@ function initERPWhenReady() {
           }
         }
         // 같은 패턴으로 sample 도 사전 차단
-        let _sampleTombs = [];
         const _fsST = Array.isArray(firestoreDB._deletedSampleIds) ? firestoreDB._deletedSampleIds : [];
         const _lcST = Array.isArray(localDB._deletedSampleIds) ? localDB._deletedSampleIds : [];
         let _lsST = [];
         try { _lsST = JSON.parse(localStorage.getItem('reniv_deleted_sample_ids')||'[]') || []; } catch(_){}
-        [..._fsST, ..._lcST, ..._lsST].forEach(x => { if (x && x.id != null) _sampleTombs.push(String(x.id)); });
-        const _smTombSetEarly = new Set(_sampleTombs);
-        if (_smTombSetEarly.size > 0) {
-          if (Array.isArray(firestoreDB.samples)) firestoreDB.samples = firestoreDB.samples.filter(s => s && !_smTombSetEarly.has(String(s.id)));
-          if (Array.isArray(localDB.samples)) localDB.samples = localDB.samples.filter(s => s && !_smTombSetEarly.has(String(s.id)));
+        // v2.3.466: 이전엔 id 만 모아 Set 으로 비교 → ts 가 버려져, 재발급된 id 의 신규 샘플이 옛 묘비에 즉사했다.
+        const _smTombTsEarly = _sampleTombTsMap([..._fsST, ..._lcST, ..._lsST]);
+        if (_smTombTsEarly.size > 0) {
+          if (Array.isArray(firestoreDB.samples)) firestoreDB.samples = firestoreDB.samples.filter(s => s && !_isSampleTombstoned(s, _smTombTsEarly));
+          if (Array.isArray(localDB.samples)) localDB.samples = localDB.samples.filter(s => s && !_isSampleTombstoned(s, _smTombTsEarly));
         }
         // v2.2.45: shopOrders tombstone 사전 차단 — 같은 패턴
         //   COUNT-GUARD 는 저장 시점에만 동작 → 로드 시점에 별도 필터 없으면 부활
@@ -56254,10 +56289,11 @@ function initERPWhenReady() {
           if (!prev || (x.ts || 0) > (prev.ts || 0)) smTByKey.set(k, x);
         });
         merged._deletedSampleIds = Array.from(smTByKey.values()).sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
-        const smTombSet = new Set(merged._deletedSampleIds.map(x => String(x.id)));
-        if (Array.isArray(merged.samples) && smTombSet.size > 0) {
+        // v2.3.466: ts 보존 비교 — 묘비 이후 생성된 동일 id 신규 샘플은 보존(id 재발급 대비)
+        const smTombTs = _sampleTombTsMap(merged._deletedSampleIds);
+        if (Array.isArray(merged.samples) && smTombTs.size > 0) {
           const before = merged.samples.length;
-          merged.samples = merged.samples.filter(s => s && !smTombSet.has(String(s.id)));
+          merged.samples = merged.samples.filter(s => s && !_isSampleTombstoned(s, smTombTs));
           const removed = before - merged.samples.length;
           if (removed > 0) console.warn('🪦 [v1.9.682] sample tombstone 으로 ' + removed + '건 부활 차단');
         }
