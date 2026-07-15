@@ -1040,6 +1040,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="nav-sub" id="customer-sub">
       <div class="nav-item" onclick="go('cs')"><span class="ico">💬</span>CS 관리</div>
       <div class="nav-item" onclick="go('customers')"><span class="ico">📋</span>고객 정보</div>
+      <div class="nav-item" onclick="go('claims')"><span class="ico">⚠️</span>클레임 관리</div>
     </div>
   </div>
 
@@ -2883,6 +2884,51 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             </div>
           </div>
           <div class="modal-ft"><button class="btn btn-outline" onclick="closeModal('cs-form-modal')">취소</button><button class="btn btn-primary" onclick="saveCsEntry()">저장</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ ⚠️ 클레임 관리 ══════════════ -->
+    <div class="page" id="page-claims">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+        <button class="btn" style="background:#0f172a;color:#fff;border:1px solid #0f172a;font-weight:700;font-size:13px;padding:8px 18px;border-radius:8px" onclick="openClaimForm()">＋ 클레임 추가</button>
+        <div class="pg-topbar-search-wrap" style="margin-left:auto">
+          <input class="fi pg-topbar-search" id="claim-search" placeholder="제품·내용 검색" style="width:200px" oninput="renderClaims()">
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-hdr"><span class="card-title">⚠️ 클레임 목록</span><span id="claim-count" style="margin-left:8px;font-size:12px;color:var(--gray-400)"></span></div>
+        <div class="card-body" style="overflow-x:auto">
+          <table class="tbl" style="text-align:center"><thead><tr><th style="width:110px">접수일</th><th>제품</th><th style="width:120px">클레임 종류</th><th>상세 내용</th><th style="width:100px">관리</th></tr></thead><tbody id="claim-table"></tbody></table>
+        </div>
+      </div>
+
+      <!-- 클레임 입력/수정 모달 -->
+      <div class="overlay" id="overlay-claim-form-modal">
+        <div class="modal" style="width:600px">
+          <div class="modal-hdr" style="background:linear-gradient(135deg,#f97316 0%,#ef4444 100%);border-bottom:none"><span class="modal-ttl" id="claim-form-title" style="color:#fff;font-weight:700;font-size:16.5px">⚠️ 클레임 추가</span><button class="modal-x" onclick="closeModal('claim-form-modal')" style="color:#fff;background:rgba(255,255,255,.15);border-radius:6px">✕</button></div>
+          <div class="modal-body" style="max-height:68vh;overflow-y:auto">
+            <input type="hidden" id="claim-edit-id">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:2px">
+              <div class="fg"><label>접수일</label><input class="fi" type="date" id="claim-date"></div>
+              <div class="fg"><label>클레임 종류<span class="req">*</span></label><select class="fs" id="claim-category"></select></div>
+            </div>
+            <div class="fg"><label>제품<span class="req">*</span></label><select class="fs" id="claim-product"></select></div>
+            <div class="fg"><label>상세 내용<span class="req">*</span></label><textarea class="fi" id="claim-detail" rows="3" style="resize:vertical" placeholder="어떤 클레임이 접수되었는지"></textarea></div>
+            <div class="fg"><label>해결 방안</label><textarea class="fi" id="claim-solution" rows="2" style="resize:vertical" placeholder="어떻게 해결했는지"></textarea></div>
+            <div class="fg"><label>재발 방지 방안</label><textarea class="fi" id="claim-prevention" rows="2" style="resize:vertical" placeholder="재발 방지 대책"></textarea></div>
+            <div class="fg"><label>비고</label><input class="fi" id="claim-note" placeholder="비고 (선택)"></div>
+          </div>
+          <div class="modal-ft"><button class="btn btn-outline" onclick="closeModal('claim-form-modal')">취소</button><button class="btn btn-primary" onclick="saveClaim()">저장</button></div>
+        </div>
+      </div>
+
+      <!-- 클레임 상세 팝업 -->
+      <div class="overlay" id="overlay-claim-detail-modal">
+        <div class="modal" style="width:560px">
+          <div class="modal-hdr" style="background:linear-gradient(135deg,#f97316 0%,#ef4444 100%);border-bottom:none"><span class="modal-ttl" style="color:#fff;font-weight:700;font-size:16.5px">⚠️ 클레임 상세</span><button class="modal-x" onclick="closeModal('claim-detail-modal')" style="color:#fff;background:rgba(255,255,255,.15);border-radius:6px">✕</button></div>
+          <div class="modal-body" id="claim-detail-body" style="max-height:70vh;overflow-y:auto"></div>
+          <div class="modal-ft"><button class="btn btn-outline" onclick="closeModal('claim-detail-modal')">닫기</button><button class="btn btn-primary" id="claim-detail-edit-btn">수정</button></div>
         </div>
       </div>
     </div>
@@ -5933,7 +5979,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.462';
+const ERP_VERSION = 'v2.3.463';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -11367,7 +11413,7 @@ const PAGE_TITLES = {
   archive:'📥 아카이브',
   bom:'BOM 관리',production:'생산 현황',stock:'재고 관리',quote:'견적서',
   order:'발주서',sites:'사이트 / 계정',insight:'🌱 신제품 개발',accounts:'🔑 외부 계정',users:'사용자 관리',qc:'품질 관리',cost:'원가 분석',settings:'설정 프로필',
-  cs:'CS 관리',customers:'👥 고객 정보',sales:'판매 관리',approval:'🖋️ 결재 관리',ads:'📢 광고비 관리',
+  cs:'CS 관리',customers:'👥 고객 정보',claims:'⚠️ 클레임 관리',sales:'판매 관리',approval:'🖋️ 결재 관리',ads:'📢 광고비 관리',
   costest:'💰 생산 예상 비용',
   recurring:'🔁 정기 결제',
   finance:'💰 재무 관리'
@@ -11378,6 +11424,8 @@ function go(page) {
   if (page === 'customers') setTimeout(() => { try { renderCustomersList(); } catch(_){} }, 0);
   // v1.9.773 — 광고비 관리 페이지 진입 시 자동 렌더
   if (page === 'ads') setTimeout(() => { try { renderAdsPage(); } catch(_){} }, 0);
+  // v2.3.463 — 클레임 관리 페이지 진입 시 자동 렌더
+  if (page === 'claims') setTimeout(() => { try { renderClaims(); } catch(_){} }, 0);
 
   // v1.9.152 — '업무 현황'은 부모 전용(자체 페이지 없음) → 기본 워크플로우로 리다이렉트
   if (page === 'work') page = 'workflow';
@@ -47878,6 +47926,162 @@ function escapeHtml(s) {
 }
 
 // ═══════════════════════════════════════════════════════
+// ⚠️ 클레임 관리 (Customer Claims) — v2.3.463
+//   전 직원 공유: shared/claims (saveSharedSetting/loadSharedSetting 라우팅)
+// ═══════════════════════════════════════════════════════
+const CLAIM_CATEGORIES = ['내용물 용량','용기 불량','포장재 훼손','피부 트러블','사용감 불만족','기타'];
+window._claims = window._claims || null;
+
+async function _loadClaims() {
+  try {
+    const v = await loadSharedSetting('claims');
+    window._claims = Array.isArray(v) ? v : [];
+  } catch(_) { window._claims = window._claims || []; }
+  return window._claims;
+}
+async function _saveClaims() {
+  try { await saveSharedSetting('claims', window._claims || []); }
+  catch(e) { console.warn('클레임 저장 실패', e); }
+}
+function _claimFinishedItems() {
+  return (DB.items || []).filter(i => i && i.type === '완제품');
+}
+function _claimProductLabel(c) {
+  const it = (DB.items || []).find(i => i && String(i.id) === String(c && c.productId));
+  if (it) return it.name + (it.spec ? ' (' + it.spec + ')' : '');
+  if (c && c.productName) return c.productName;
+  return (c && c.productId) ? '(삭제된 품목)' : '-';
+}
+
+async function renderClaims() {
+  const tb = document.getElementById('claim-table');
+  if (!tb) return;
+  if (window._claims == null) {
+    tb.innerHTML = '<tr><td colspan="5" style="padding:24px;color:var(--gray-400)">불러오는 중…</td></tr>';
+    await _loadClaims();
+  }
+  const q = ((document.getElementById('claim-search') || {}).value || '').trim().toLowerCase();
+  let list = (window._claims || []).slice();
+  list.sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')) || (b.createdAt||0) - (a.createdAt||0));
+  if (q) {
+    list = list.filter(c => [_claimProductLabel(c), c.category, c.detail, c.solution, c.prevention, c.note].join(' ').toLowerCase().indexOf(q) >= 0);
+  }
+  const cnt = document.getElementById('claim-count'); if (cnt) cnt.textContent = '총 ' + list.length + '건';
+  if (!list.length) {
+    tb.innerHTML = '<tr><td colspan="5" style="padding:28px;color:var(--gray-400)">' + (q ? '검색 결과가 없습니다.' : '등록된 클레임이 없습니다. 상단 “＋ 클레임 추가” 로 등록하세요.') + '</td></tr>';
+    return;
+  }
+  tb.innerHTML = list.map(c => {
+    const detail = (c.detail || '').replace(/\n/g,' ');
+    const short = detail.length > 40 ? escapeHtml(detail.slice(0,40)) + '…' : (escapeHtml(detail) || '-');
+    return '<tr style="cursor:pointer" onclick="openClaimDetail(\'' + c.id + '\')">' +
+      '<td>' + escapeHtml(c.date || '-') + '</td>' +
+      '<td style="text-align:left;font-weight:600">' + escapeHtml(_claimProductLabel(c)) + '</td>' +
+      '<td><span style="display:inline-block;padding:2px 9px;border-radius:999px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;font-size:11.5px;font-weight:600">' + escapeHtml(c.category || '-') + '</span></td>' +
+      '<td style="text-align:left;color:var(--gray-600)">' + short + '</td>' +
+      '<td onclick="event.stopPropagation()">' +
+        '<button class="btn btn-outline btn-sm" style="padding:3px 8px" onclick="openClaimForm(\'' + c.id + '\')" title="수정">✏️</button> ' +
+        '<button class="btn btn-outline btn-sm" style="padding:3px 8px;color:#dc2626;border-color:#fca5a5" onclick="deleteClaim(\'' + c.id + '\')" title="삭제">🗑️</button>' +
+      '</td></tr>';
+  }).join('');
+}
+
+function _fillClaimSelects(selCat, selProd) {
+  const cat = document.getElementById('claim-category');
+  if (cat) cat.innerHTML = CLAIM_CATEGORIES.map(k => '<option value="' + escapeHtml(k) + '"' + (k === selCat ? ' selected' : '') + '>' + escapeHtml(k) + '</option>').join('');
+  const prod = document.getElementById('claim-product');
+  if (prod) {
+    prod.innerHTML = '<option value="">— 제품 선택 —</option>' + _claimFinishedItems().map(i => {
+      const label = i.name + (i.spec ? ' (' + i.spec + ')' : '');
+      return '<option value="' + i.id + '"' + (String(i.id) === String(selProd) ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+    }).join('');
+  }
+}
+
+async function openClaimForm(id) {
+  if (window._claims == null) await _loadClaims();
+  const c = id ? (window._claims || []).find(x => String(x.id) === String(id)) : null;
+  document.getElementById('claim-edit-id').value = c ? c.id : '';
+  document.getElementById('claim-form-title').textContent = c ? '⚠️ 클레임 수정' : '⚠️ 클레임 추가';
+  _fillClaimSelects(c ? c.category : CLAIM_CATEGORIES[0], c ? c.productId : '');
+  document.getElementById('claim-date').value = c ? (c.date || today()) : today();
+  document.getElementById('claim-detail').value = c ? (c.detail || '') : '';
+  document.getElementById('claim-solution').value = c ? (c.solution || '') : '';
+  document.getElementById('claim-prevention').value = c ? (c.prevention || '') : '';
+  document.getElementById('claim-note').value = c ? (c.note || '') : '';
+  openModal('claim-form-modal');
+}
+
+async function saveClaim() {
+  const id = document.getElementById('claim-edit-id').value;
+  const productId = document.getElementById('claim-product').value;
+  const detail = document.getElementById('claim-detail').value.trim();
+  if (!productId) { alert('제품을 선택하세요.'); return; }
+  if (!detail) { alert('상세 내용을 입력하세요.'); return; }
+  const it = (DB.items || []).find(i => String(i.id) === String(productId));
+  const rec = {
+    date: document.getElementById('claim-date').value || today(),
+    productId: productId,
+    productName: it ? (it.name + (it.spec ? ' (' + it.spec + ')' : '')) : '',
+    category: document.getElementById('claim-category').value,
+    detail: detail,
+    solution: document.getElementById('claim-solution').value.trim(),
+    prevention: document.getElementById('claim-prevention').value.trim(),
+    note: document.getElementById('claim-note').value.trim()
+  };
+  if (window._claims == null) await _loadClaims();
+  if (id) {
+    const idx = (window._claims || []).findIndex(x => String(x.id) === String(id));
+    if (idx >= 0) window._claims[idx] = Object.assign({}, window._claims[idx], rec);
+  } else {
+    let uid; do { uid = Date.now() * 1000 + Math.floor(Math.random() * 1000); } while ((window._claims || []).some(x => x && x.id === uid));
+    rec.id = uid;
+    rec.createdAt = Date.now();
+    rec.createdBy = (window._currentUser && (window._currentUser.name || window._currentUser.email)) || '';
+    window._claims.push(rec);
+  }
+  await _saveClaims();
+  closeModal('claim-form-modal');
+  renderClaims();
+}
+
+async function deleteClaim(id) {
+  if (!confirm('이 클레임을 삭제하시겠습니까?')) return;
+  if (window._claims == null) await _loadClaims();
+  window._claims = (window._claims || []).filter(x => String(x.id) !== String(id));
+  await _saveClaims();
+  closeModal('claim-detail-modal');
+  renderClaims();
+}
+
+async function openClaimDetail(id) {
+  if (window._claims == null) await _loadClaims();
+  const c = (window._claims || []).find(x => String(x.id) === String(id));
+  if (!c) return;
+  const row = (label, val) => {
+    const has = val && String(val).trim();
+    return '<div style="margin-bottom:14px">' +
+      '<div style="font-size:11.5px;font-weight:700;color:var(--gray-500);margin-bottom:4px">' + label + '</div>' +
+      '<div style="font-size:13.5px;color:' + (has ? 'var(--gray-800)' : 'var(--gray-400)') + ';line-height:1.6;white-space:pre-wrap">' + (has ? escapeHtml(val) : '—') + '</div>' +
+    '</div>';
+  };
+  document.getElementById('claim-detail-body').innerHTML =
+    '<div style="display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap">' +
+      '<span style="display:inline-block;padding:3px 11px;border-radius:999px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;font-size:12px;font-weight:700">' + escapeHtml(c.category || '-') + '</span>' +
+      '<span style="font-size:12px;color:var(--gray-400)">접수일 ' + escapeHtml(c.date || '-') + '</span>' +
+      (c.createdBy ? '<span style="font-size:12px;color:var(--gray-400)">· 등록 ' + escapeHtml(c.createdBy) + '</span>' : '') +
+    '</div>' +
+    row('제품', _claimProductLabel(c)) +
+    row('상세 내용', c.detail) +
+    row('해결 방안', c.solution) +
+    row('재발 방지 방안', c.prevention) +
+    row('비고', c.note);
+  const eb = document.getElementById('claim-detail-edit-btn');
+  if (eb) eb.setAttribute('onclick', "closeModal('claim-detail-modal');openClaimForm('" + c.id + "')");
+  openModal('claim-detail-modal');
+}
+
+// ═══════════════════════════════════════════════════════
 // 🌱 신제품 아이디어 (New Product Ideas)
 // ═══════════════════════════════════════════════════════
 let _npEditId = null;
@@ -54388,7 +54592,7 @@ function _sharedSettingCollection(key) {
       || k === 'trello_config' || k === 'trello_automation' || k === 'trello_auto_cards'
       || k === 'gemini_api_key' || k === 'claude_api_key' || k === 'warehouse_list'
       || k === 'pluscl_stock' || k === 'pluscl_item_map' || k === 'ad_refunds'
-      || k === 'approval_signatures' || k === 'pharmacy_cal_events') return 'shared';
+      || k === 'approval_signatures' || k === 'pharmacy_cal_events' || k === 'claims') return 'shared';
   return 'settings';
 }
 async function saveSharedSetting(key, value) {
@@ -55196,7 +55400,7 @@ function initERPWhenReady() {
     try { updateBadges(); } catch(e) { console.warn('updateBadges 실패:', e); }
     // v1.9.316 — 새로고침 시 마지막 머물렀던 페이지 복원 (기본: dashboard)
     try {
-      const KNOWN_PAGES = ['dashboard','feedshare','workflow','calendar','gdrive','vendor','item','archive','bom','production','stock','quote','order','approval','sites','accounts','insight','users','qc','cost','cs','sales','settings','recurring'];
+      const KNOWN_PAGES = ['dashboard','feedshare','workflow','calendar','gdrive','vendor','item','archive','bom','production','stock','quote','order','approval','sites','accounts','insight','users','qc','cost','cs','claims','sales','settings','recurring'];
       // v1.9.976: 같은 탭 새로고침이면 마지막 페이지 복원, 처음 접속/새 탭/브라우저 재시작이면 dashboard
       //   sessionStorage 는 같은 탭이 살아있는 동안만 유지(새로고침=유지, 탭닫기/재시작=초기화)
       if (typeof window._v976_freshSession === 'undefined') {
