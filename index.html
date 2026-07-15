@@ -583,6 +583,10 @@ body{font-family:var(--font);background:var(--gray-50);color:var(--gray-800);hei
 .dcal-ev-i{font-size:10px;flex-shrink:0;line-height:1}
 .dcal-ev-t{font-size:10.5px;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.2px}
 .dcal-more{font-size:9.5px;color:#94a3b8;font-weight:700;padding-left:3px}
+/* v2.3.468 — 일정이 있는 날짜 칸은 클릭하면 전체 일정 팝업 */
+.dcal-cell.has-ev{cursor:pointer}
+.dcal-cell.has-ev:hover{border-color:#93c5fd;background:#f7fbff}
+.dcal-cell.has-ev:hover .dcal-more{color:#3b82f6}
 @media(max-width:1100px){.dcal-cell{min-height:58px}.dcal-ev-t{font-size:9.5px}}
 .stat{background:#fff;border-radius:var(--r);border:1px solid var(--gray-200);padding:20px 22px;box-shadow:0 1px 2px rgba(15,23,42,0.04);position:relative;overflow:hidden;cursor:default;transition:all .18s ease}
 .stat:hover{border-color:var(--gray-300);box-shadow:0 4px 12px rgba(15,23,42,0.06);transform:translateY(-1px)}
@@ -6009,7 +6013,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.467';
+const ERP_VERSION = 'v2.3.468';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -23160,8 +23164,14 @@ function renderDashCalendar(){
       return '<button class="dcal-ev" style="border-left-color:' + (e.textColor||'#94a3b8') + ';background:' + (e.color||'#f1f5f9') + (done ? ';opacity:.5' : '') + '" onclick="event.stopPropagation();' + act + '" title="' + nm + ' [' + escFn(e.board||'') + ']">'
         + '<span class="dcal-ev-i">' + (e.boardIcon||'') + '</span><span class="dcal-ev-t">' + nm + '</span></button>';
     }).join('');
-    const more = list.length > 3 ? '<div class="dcal-more">+' + (list.length - 3) + '개</div>' : '';
-    cells += '<div class="' + cls.join(' ') + '"><div class="' + dnCls.join(' ') + '">' + d + '</div><div class="dcal-evs">' + chips + more + '</div></div>';
+    const more = list.length > 3 ? '<div class="dcal-more">+' + (list.length - 3) + '개 더</div>' : '';
+    // v2.3.468: 일정이 있는 날짜 칸 클릭 → 그날 전체 일정 팝업(캘린더 페이지와 동일한 calShowDayModal).
+    //   칸에는 3건까지만 보이고 나머지는 '+N개 더'로 숨겨져 전체를 볼 수단이 없었다.
+    //   이 캘린더는 'all'(전체 종합)이므로 팝업에도 'all' 을 넘겨 셀과 내용을 일치시킨다.
+    //   (이벤트 칩은 자체 onclick 에 event.stopPropagation() 이 있어 칩 클릭은 종전대로 카드 열기)
+    let cellClick = '';
+    if (list.length) { cls.push('has-ev'); cellClick = ' onclick="calShowDayModal(\'' + key + '\',\'all\')" title="클릭하면 이 날짜의 전체 일정(' + list.length + '건) 보기"'; }
+    cells += '<div class="' + cls.join(' ') + '"' + cellClick + '><div class="' + dnCls.join(' ') + '">' + d + '</div><div class="dcal-evs">' + chips + more + '</div></div>';
   }
   const dowHead = DOWH.map((w,i) => '<div class="dcal-dow ' + (i===0?'sun':(i===6?'sat':'')) + '">' + w + '</div>').join('');
   const monthLabel = y + '. ' + String(m+1).padStart(2,'0');
@@ -46071,8 +46081,11 @@ async function calOpenOrderPdf(orderId) {
 }
 
 // v1.9.180 — 날짜 셀 클릭 시 그 날 이벤트 목록 모달
-function calShowDayModal(ymd) {
-  const _tab = window._calTab || 'work';
+// v2.3.468: tabOverride — HOME '르니브 업무 일정' 캘린더는 전체 종합(_getAllTrelloEvents('all'))이라
+//   캘린더 페이지의 현재 탭(window._calTab)을 쓰면 셀에 보이는 일정과 팝업 내용이 어긋난다.
+//   → 호출부가 탭을 지정할 수 있게 한다(대시보드는 'all', 캘린더 페이지는 기존대로 생략).
+function calShowDayModal(ymd, tabOverride) {
+  const _tab = tabOverride || window._calTab || 'work';
   const events = _getAllTrelloEvents(_tab).filter(e => e.date === ymd);
   if (!events.length && _tab !== 'pharmacy') return;
   const existing = document.getElementById('cal-day-modal');
