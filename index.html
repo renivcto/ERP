@@ -6018,7 +6018,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.470';
+const ERP_VERSION = 'v2.3.471';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28969,6 +28969,7 @@ function _editOrderDirect(o, dbIdx) {
   // v1.9.199: 결제일(payDate) 필드 삭제 — 잔금예정일(balanceDueDate) 우선, 구버전 payDate fallback
   if ($('o-pay-date')) $('o-pay-date').value = o.payDate||'';
   $('o-stock-status').value = o.stockStatus||'입고전';
+  window._orderFormLoadedStockStatus = o.stockStatus||'입고전';  // v2.3.471: stale 폼 보존 가드용
   if ($('o-prepay-pct')) $('o-prepay-pct').value = (o.prepayPercent ?? 0);
   if ($('o-balance-due')) $('o-balance-due').value = o.balanceDueDate || o.payDate || '';
   if ($('o-urgent')) $('o-urgent').checked = !!o.urgent;
@@ -31394,6 +31395,10 @@ function confirmStockInQty(orderId) {
   o.stockStatus = '입고완료';
   o.status = '완료';
   o.updatedAt = Date.now();  // v1.9.405 머지 보호
+  // v2.3.471: 입고상태 전용 시각 — updatedAt 은 레코드에 1개뿐이라, 마감서/증빙만 만진 stale 기기가
+  //   updatedAt 을 갱신하면(v2.3.465) 그 기기의 옛 '입고전'까지 통째 정본이 되어 입고완료가 반복 원복됐다.
+  //   로드 머지가 stockStatusAt recency 로 입고상태를 필드 단위 채택해 이를 차단한다(발주 50 사건).
+  o.stockStatusAt = Date.now();
   DB.orders[idx] = o;
   try { processOrderStockIn(receivedRows, o.inDate || today(), o.serial || '', o.vendorId, o.id); } catch(e) { console.error('입고 재고반영 실패:', e); }
   // v2.3.83: receivedRows 전달 (qty 가 실제 입고수량으로 덮어씌워짐) → production.qty 동기화
@@ -32489,12 +32494,22 @@ function saveOrder() {
   const existing = (isEdit && DB.orders[dbIdx]) ? DB.orders[dbIdx] : {};
   const newStockStatus = $('o-stock-status').value;
   const prevStockStatus = existing.stockStatus || '입고전';
+  // v2.3.471: stale 폼 보존 가드 — 폼을 연 뒤 사용자가 입고상태 select 를 건드리지 않았다면
+  //   (폼값 == 폼 로드시점 값) 레코드의 현재값을 그대로 유지한다. 폼이 열린 사이 다른 경로
+  //   (입고완료 버튼 등)로 바뀐 상태를 폼 저장이 옛값으로 덮어쓰는 것을 차단.
+  let effStockStatus = newStockStatus;
+  if (isEdit && window._orderFormLoadedStockStatus != null
+      && newStockStatus === window._orderFormLoadedStockStatus
+      && prevStockStatus !== newStockStatus) {
+    effStockStatus = prevStockStatus;
+    console.warn('[v2.3.471] 입고상태 stale 폼 보존: 폼값(' + newStockStatus + ') 무시, 현재값(' + effStockStatus + ') 유지');
+  }
   // v1.9.199: 결제일(payDate) 필드 삭제 → 잔금예정일(balanceDueDate)이 대체
   // 하위 호환을 위해 payDate에도 balanceDueDate 값 복사 (기존 로직·외부 내보내기 유지)
   const _balanceDueVal = ($('o-balance-due') ? $('o-balance-due').value : '') || existing.balanceDueDate || existing.payDate || '';
   const data = {
     vendorId, orderDate:$('o-date').value, inDate:$('o-in-date').value,
-    payDate:_balanceDueVal, stockStatus:newStockStatus,
+    payDate:_balanceDueVal, stockStatus:effStockStatus,
     receiver:$('o-receiver').value, addr:$('o-addr').value, serial:$('o-serial').value,
     contact:$('o-contact').value, phone:$('o-phone').value,
     email:($('o-email')?$('o-email').value:''),  // v2.2.72: 발주서 별 이메일
@@ -32521,6 +32536,9 @@ function saveOrder() {
     // v1.9.787: 머지 보호 (v1.9.405 머지 로직이 updatedAt 큰 쪽을 선택)
     updatedAt: Date.now(),
   };
+  // v2.3.471: 입고상태가 실제로 바뀔 때만 전용 시각 스탬프 — 안 바뀌면 data 에 없음 → {...existing,...data}
+  //   가 기존 stockStatusAt 을 보존해, 다른 필드 수정이 입고상태 최신성을 가로채지 않는다.
+  if (!isEdit || prevStockStatus !== effStockStatus) data.stockStatusAt = Date.now();
   let _savedOrderId = null;
   if (isEdit && dbIdx >= 0) {
     DB.orders[dbIdx] = {...existing, ...data};
@@ -32550,7 +32568,8 @@ function saveOrder() {
     } catch(e) { console.warn('생산관리 동기화 실패:', e); }
   } else {
     const _newOrderId = nextId('order');
-    DB.orders.push({id:_newOrderId, ...data});
+    // v2.3.471: createdAt 부여 — 없으면 EDIT RECOVERY 의 v2.3.419 동일성 가드('' === '')가 orders 에서 무력
+    DB.orders.push({id:_newOrderId, createdAt: Date.now(), ...data});
     _savedOrderId = _newOrderId;
   }
   // v1.9.226 — 사용자가 같은 서명의 발주서를 새로 작성했다면 tombstone 에서 제거(재활성)
@@ -32573,7 +32592,7 @@ function saveOrder() {
   try { _backupOrdersNow('saveOrder_pre'); } catch(_){}
 
   // ── 입고완료로 변경 시 재고 자동 반영 + 생산완료 처리 ─────
-  if (newStockStatus === '입고완료' && prevStockStatus !== '입고완료') {
+  if (effStockStatus === '입고완료' && prevStockStatus !== '입고완료') {
     processOrderStockIn(rows, $('o-inDate') ? $('o-in-date').value : today(), data.serial || '', data.vendorId, _savedOrderId);
     completeRelatedProductions(rows, data.serial || '', _savedOrderId);
     // v2.3.126: 입고 완료 슬랙 알림 (발주서 수정 화면에서 상태 변경 시)
@@ -32588,7 +32607,7 @@ function saveOrder() {
     try { if (typeof _trelloAutoCompleteOrder === 'function') _trelloAutoCompleteOrder(_savedOrderId, data.serial); } catch(_){}
   }
   // ── 입고완료 → 다른 상태로 되돌릴 시 재고 차감 ──────────
-  if (prevStockStatus === '입고완료' && newStockStatus !== '입고완료') {
+  if (prevStockStatus === '입고완료' && effStockStatus !== '입고완료') {
     processOrderStockOut(rows, today(), data.serial || '', data.vendorId);
     // v1.9.109 — _processedOrders에서 제거: 다시 입고완료로 변경 시 재반영 가능하도록
     if (_savedOrderId != null && DB._processedOrders) {
@@ -56001,6 +56020,8 @@ function initERPWhenReady() {
               if (!local) return remote;
               const localTs = Number(local.updatedAt) || 0;
               const remoteTs = Number(remote.updatedAt) || 0;
+              let _winner = remote;
+              let _idCollided = false;
               if (localTs > remoteTs) {
                 // v2.3.419: 동일성 가드 — 기기별 순차 카운터 id(expenses 등)는 재사용·재생성으로
                 //   같은 id 가 전혀 다른 레코드를 가리킬 수 있다. createdAt 이 다르면 다른 레코드로
@@ -56009,13 +56030,47 @@ function initERPWhenReady() {
                 //   createdAt 이 같을 때만 기존 updatedAt 비교 유지 → "방금 내 수정 보존" 기능은 그대로.
                 if (String(local.createdAt == null ? '' : local.createdAt) !== String(remote.createdAt == null ? '' : remote.createdAt)) {
                   _idCollisionSkipped++;
+                  _idCollided = true;
                   console.warn(`⚠️ [EDIT RECOVERY] ${k} id=${remote.id} createdAt 불일치 (local:${local.createdAt} ≠ server:${remote.createdAt}) — 다른 레코드로 판정, 서버본 채택`);
-                  return remote;
+                } else {
+                  _editsRecovered++;
+                  _winner = local;
                 }
-                _editsRecovered++;
-                return local;
               }
-              return remote;
+              // v2.3.471: orders 입고상태 필드 단위 recency 병합 — updatedAt 은 레코드에 1개뿐이라,
+              //   마감서/증빙만 만진 stale 레코드가 최신 도장(v2.3.465)을 받으면 옛 stockStatus('입고전')
+              //   까지 통째 정본이 되어 입고완료가 반복 원복됐다(발주 50). 전용 시각 stockStatusAt 이
+              //   더 최신인 쪽의 입고상태·발주상태·실입고수량을 필드 단위로 채택해 레코드 채택과 분리.
+              //   (id 충돌(createdAt 불일치) 레코드 간에는 필드 이식 금지 — 다른 레코드끼리 섞임 방지)
+              if (k === 'orders' && !_idCollided
+                  && String(local.createdAt == null ? '' : local.createdAt) === String(remote.createdAt == null ? '' : remote.createdAt)) {
+                try {
+                  const lSt = Number(local.stockStatusAt) || 0, rSt = Number(remote.stockStatusAt) || 0;
+                  if (lSt !== rSt) {
+                    const src = lSt > rSt ? local : remote;
+                    if (src !== _winner) {
+                      const patch = { stockStatusAt: Math.max(lSt, rSt) };
+                      const changed = src.stockStatus && src.stockStatus !== _winner.stockStatus;
+                      if (changed) {
+                        patch.stockStatus = src.stockStatus;
+                        if (src.status && src.status !== _winner.status) patch.status = src.status;
+                      }
+                      _winner = Object.assign({}, _winner, patch);
+                      if (changed && Array.isArray(src.rows) && Array.isArray(_winner.rows)
+                          && src.rows.length === _winner.rows.length
+                          && src.rows.some(r => r && r.receivedQty != null)) {
+                        _winner.rows = _winner.rows.map((r, ri) => (r && src.rows[ri] && src.rows[ri].receivedQty != null)
+                          ? Object.assign({}, r, { receivedQty: src.rows[ri].receivedQty }) : r);
+                      }
+                      if (changed) {
+                        console.warn('🛟 [STOCK MERGE v2.3.471] orders id=' + remote.id + ' 입고상태 필드 보존: ' + String(_winner.stockStatus) + ' (stockStatusAt recency)');
+                        _needsResaveToFirestore = true;
+                      }
+                    }
+                  }
+                } catch(_){}
+              }
+              return _winner;
             });
             if (_idCollisionSkipped > 0) console.warn(`⚠️ [EDIT RECOVERY] ${k}: id 재사용 충돌 ${_idCollisionSkipped}건 — 서버본 우선 적용`);
             if (_editsRecovered > 0) {
