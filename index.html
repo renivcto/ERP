@@ -6018,7 +6018,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.469';
+const ERP_VERSION = 'v2.3.470';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9173,6 +9173,8 @@ if (DB == null) {
       if (typeof DB.appSettings.slackDigestTime !== 'string') DB.appSettings.slackDigestTime = '07:00';
       // v2.3.164: 데일리 브리핑 시각을 오전 7시로 1회 강제 리셋 (사용자 요청)
       if (!DB.appSettings.__digest7amV164) { DB.appSettings.slackDigestTime = '07:00'; DB.appSettings.__digest7amV164 = true; }
+      // v2.3.470: 오전 8시로 1회 강제 리셋 (사용자 요청 — 하루 1회 08:00). slackCfgTs 스탬프로 recency 우선.
+      if (!DB.appSettings.__digest8amV470) { DB.appSettings.slackDigestTime = '08:00'; DB.appSettings.__digest8amV470 = true; DB.appSettings.slackCfgTs = Date.now(); }
       // v2.3.126: 운영 알림 기본값
       if (typeof DB.appSettings.slackOpsWebhookUrl !== 'string') DB.appSettings.slackOpsWebhookUrl = '';
       if (typeof DB.appSettings.slackOpsEnabled !== 'boolean') DB.appSettings.slackOpsEnabled = false;
@@ -41518,6 +41520,10 @@ async function _maybeSendDailyDigest() {
     if (!s.slackDigestEnabled) return;
     const url = _cleanWebhookUrl(s.slackDigestWebhookUrl || '');
     if (!url) return;
+    // v2.3.470: 쓰기권한(관리자/쓰기) 세션만 발송·선점한다. 선점 기록은 shared/slack_digest_state 에
+    //   write 하는데 이는 canWrite 만 가능 → 읽기전용 세션이 보내면 선점 write 가 조용히 실패해 가드가
+    //   안 남고, 다음 기기가 또 보내 중복(하루 4번)이 된다. 읽기전용은 아예 발송하지 않는다.
+    if (!(window._currentUser && (window._currentUser.isAdmin === true || window._currentUser.permission === 'write'))) return;
     if (typeof _dbFromDefault !== 'undefined' && _dbFromDefault) return;  // 빈 기본데이터 상태 — 발송 금지
     // v2.3.163: Firestore 로드 완료 전엔 발송 금지 (기기간 중복발송 방지 — 공유 상태 가드가 신뢰성 있어야 함)
     if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) return;
@@ -54872,7 +54878,10 @@ function _sharedSettingCollection(key) {
       || k === 'trello_config' || k === 'trello_automation' || k === 'trello_auto_cards'
       || k === 'gemini_api_key' || k === 'claude_api_key' || k === 'warehouse_list'
       || k === 'pluscl_stock' || k === 'pluscl_item_map' || k === 'ad_refunds'
-      || k === 'approval_signatures' || k === 'pharmacy_cal_events' || k === 'claims') return 'shared';
+      || k === 'approval_signatures' || k === 'pharmacy_cal_events' || k === 'claims'
+      // v2.3.470: 데일리 브리핑 '오늘 보냄' 가드 — 비밀 없음({lastSentDate,sentBy,ts}). settings/ 로 가면
+      //   비관리자가 못 읽어(관리자 전용 read) 각 기기가 중복 발송한다(하루 4번 사고). 전 직원 read 필요 → shared/.
+      || k === 'slack_digest_state') return 'shared';
   return 'settings';
 }
 async function saveSharedSetting(key, value) {
