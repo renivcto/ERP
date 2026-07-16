@@ -6018,7 +6018,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.471';
+const ERP_VERSION = 'v2.3.472';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -31381,6 +31381,14 @@ function confirmStockInQty(orderId) {
   const o = DB.orders[idx];
   const _m = document.getElementById('stockin-qty-modal');
   if (o.stockStatus === '입고완료') { showNotif('이미 입고완료 처리된 발주서입니다', 'info'); if (_m) _m.remove(); return; }
+  // v2.3.472: 이미 재고 반영된 발주 재확인 — 상태만 '입고전'으로 원복된 발주를 다시 입고완료하면
+  //   재고가 중복 가산된다(processOrderStockIn 은 사후 기록만, 사전 가드 부재). 의도적 재반영
+  //   (입고 취소 후 재입고 — processOrderStockOut 이 _processedOrders 에서 제거)은 confirm 으로 허용.
+  try {
+    if (Array.isArray(DB._processedOrders) && DB._processedOrders.indexOf(orderId) >= 0) {
+      if (!confirm('이 발주서는 이미 재고에 반영된 기록이 있습니다.\n다시 입고완료 처리하면 재고가 중복 가산될 수 있습니다.\n\n계속할까요?')) { if (_m) _m.remove(); return; }
+    }
+  } catch(_){}
   const rows = Array.isArray(o.rows) ? o.rows : [];
   const inputs = _m ? _m.querySelectorAll('.siq-input') : [];
   const receivedRows = [];
@@ -43573,7 +43581,9 @@ function processOrderStockIn(rows, date, serial, orderVendorId, orderId) {
         return;  // 이 row 만 skip (rows.forEach 안에서)
       }
       const newItem = {
-        id: nextId('item'),
+        // v2.3.472: id 충돌 회피 — 발주 자동등록 경로에는 saveItem 의 v2.3.179 가드가 없어,
+        //   카운터가 어긋난 기기(예: _nextId.item=80 인데 id 80 존재)에서 기존 품목 id 를 재발급할 수 있었다.
+        id: (function(){ let _nid = nextId('item'); try { const _tomb = Array.isArray(DB._deletedItemIds) ? DB._deletedItemIds.map(t => Number(t && t.id)).filter(n => !isNaN(n)) : []; const _exist = (DB.items||[]).map(i => Number(i && i.id)).filter(n => !isNaN(n)); const _max = Math.max(0, ..._tomb, ..._exist); if (_nid <= _max) { console.warn('🪦 [v2.3.472] 자동등록 item ID 충돌 회피 — ' + _nid + ' → ' + (_max + 1)); _nid = _max + 1; DB._nextId.item = _nid + 1; } } catch(_){} return _nid; })(),
         type: '부자재',
         code: row.code || '',
         name: row.name,
@@ -56890,9 +56900,17 @@ function initERPWhenReady() {
             if (!local) return it;
             // 재고 수량만 localStorage 값으로 복원 (이름·가격 등 다른 필드는 Firestore 유지)
             if (local.stock !== undefined && local.stock !== it.stock) {
+              // v2.3.472: recency 가드 — 서버 레코드가 더 최신이면 이식 금지. 이 복원은 updatedAt 을
+              //   안 봐서, 저장실패 플래그가 남은 기기의 '옛' 로컬 stock 이 타 기기의 최신 수동 수정을
+              //   원복시키고 stock<whStock 자기모순을 만들었다(M-3X-17 재고수정 원복 사건).
+              //   원래 목적(내 저장실패 직후 복구)은 로컬 updatedAt ≥ 서버라 그대로 동작.
+              if ((Number(local.updatedAt) || 0) < (Number(it.updatedAt) || 0)) return it;
               console.warn(`  🛟 재고 복원 [${it.name}]: Firestore ${it.stock} → localStorage ${local.stock}`);
               restoredCount++;
-              return Object.assign({}, it, { stock: local.stock });
+              const _r = Object.assign({}, it, { stock: local.stock });
+              // v2.3.472: 이식 후 whStock 합계 > stock 모순 방지 (비례축소, 멱등)
+              try { if (typeof _reconcileWhToStock === 'function') _reconcileWhToStock(_r, _r.stock); } catch(_){}
+              return _r;
             }
             return it;
           });
