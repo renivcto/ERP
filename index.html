@@ -6024,7 +6024,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.475';
+const ERP_VERSION = 'v2.3.476';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -25512,14 +25512,29 @@ function showItemDetail(id) {
         </div>
       </div>
       ${(function(){
+        // v2.3.476: 22종 전체를 목록으로 — 있는 건 파일 링크, 없는 건 '-' 로 한눈에.
+        //   원자재는 항상 표시(누락 파악용), 그 외 분류는 첨부가 하나라도 있을 때만.
         const rd = (i.rawDocs && typeof i.rawDocs === 'object') ? i.rawDocs : {};
-        const ks = Object.keys(rd).filter(k => rd[k] && rd[k].url).sort((a,b) => Number(a) - Number(b));
-        if (!ks.length) return '';
-        const chips = ks.map(k => {
-          const lbl = (typeof RAW_DOC_TYPES !== 'undefined' && RAW_DOC_TYPES[Number(k)]) ? RAW_DOC_TYPES[Number(k)] : ('서류 ' + (Number(k)+1));
-          return '<a href="' + String(rd[k].url).replace(/"/g,'&quot;') + '" target="_blank" rel="noopener noreferrer" title="' + String(rd[k].name||'').replace(/"/g,'&quot;') + '" style="font-size:11px;color:var(--sky-700);background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:3px 9px;text-decoration:none;white-space:nowrap">📎 ' + lbl.replace(/</g,'&lt;') + '</a>';
+        const total = (typeof RAW_DOC_TYPES !== 'undefined') ? RAW_DOC_TYPES.length : 22;
+        const cnt = Object.keys(rd).filter(k => rd[k] && rd[k].url).length;
+        if (i.type !== '원자재' && cnt === 0) return '';
+        const q = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+        const rows = RAW_DOC_TYPES.map((lbl, k) => {
+          const d = rd[String(k)];
+          const has = d && d.url;
+          const right = has
+            ? '<a href="' + q(d.url) + '" target="_blank" rel="noopener noreferrer" title="' + q(d.name) + '" style="font-size:11.5px;font-weight:600;color:var(--sky-700);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;flex-shrink:0">📎 보기</a>'
+            : '<span style="font-size:12px;color:var(--gray-300);flex-shrink:0">-</span>';
+          return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 12px;background:' + (has ? '#f7fdfb' : '#fff') + ';border-bottom:1px solid #f1f5f9">'
+            + '<span style="display:inline-flex;align-items:center;min-width:0">'
+            + '<span style="display:inline-block;width:18px;text-align:right;margin-right:8px;font-size:10px;color:var(--gray-300);flex-shrink:0">' + (k + 1) + '</span>'
+            + '<span style="font-size:11.5px;color:' + (has ? 'var(--gray-700)' : 'var(--gray-400)') + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + q(lbl) + '</span></span>'
+            + right + '</div>';
         }).join('');
-        return '<div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:4px">🧾 원료 서류 (' + ks.length + '/' + (typeof RAW_DOC_TYPES !== 'undefined' ? RAW_DOC_TYPES.length : 22) + '종)</div><div style="display:flex;flex-wrap:wrap;gap:6px">' + chips + '</div></div>';
+        return '<div class="full" style="margin-top:4px">'
+          + '<div style="font-size:10.5px;color:var(--gray-500);margin-bottom:5px">🧾 원료 서류 <span style="color:var(--sky-700);font-weight:700">' + cnt + '</span>/' + total + '종</div>'
+          + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:0 14px;border:1px solid var(--gray-200);border-radius:8px;overflow:hidden;background:#fff">' + rows + '</div>'
+          + '</div>';
       })()}
       ${i.material?`<div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">재질</div><span style="font-size:13px;font-weight:400">${i.material}</span></div>`:''}
       ${i.quoteFileName?`<div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">견적서</div><button onclick="openItemQuoteFile(${i.id})" title="${(i.quoteFileName||'').replace(/\"/g,'&quot;')}" style="display:inline-flex;align-items:center;gap:5px;background:#fdf2f8;color:#c4708a;border:1px solid #f0c0d4;padding:5px 12px;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#d97b9a\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z\"/><polyline points=\"14 2 14 8 20 8\"/></svg>${i.quoteFileName||'견적서'}</button></div>`:''}
