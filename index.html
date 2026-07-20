@@ -6024,7 +6024,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.480';
+const ERP_VERSION = 'v2.3.481';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7779,6 +7779,7 @@ async function _doSaveDataInner() {
                 const _tombArrName = ({
                   items:'_deletedItemIds', samples:'_deletedSampleIds', approvals:'_deletedApprovalIds',
                   vendors:'_deletedVendorIds',  // v2.3.479
+                  cooperators:'_deletedCooperatorIds', sellers:'_deletedSellerIds',  // v2.3.481 (유형 이동)
 
                   expenses:'_deletedExpenseIds', approvalComments:'_deletedCommentIds', feedPosts:'_deletedFeedPostIds',
                   newProducts:'_deletedNewProductIds'  // v2.3.193
@@ -7793,7 +7794,7 @@ async function _doSaveDataInner() {
                       const _tsById = new Map();
                       DB[_tombArrName].forEach(x => { const xid = String(x && typeof x === 'object' ? x.id : x); const xts = (x && typeof x === 'object') ? (Number(x.ts) || 0) : 0; if (!_tsById.has(xid) || xts > _tsById.get(xid)) _tsById.set(xid, xts); });
                       // v2.3.466: samples 도 동일 가드 적용 — sample id 도 기기별 카운터라 삭제 id 가 재발급된다.
-                      const _srvByIdT = (key === 'expenses' || key === 'samples' || key === 'vendors') ? new Map(srvArr.map(o => [o && o.id, o])) : null;
+                      const _srvByIdT = (key === 'expenses' || key === 'samples' || key === 'vendors' || key === 'cooperators' || key === 'sellers') ? new Map(srvArr.map(o => [o && o.id, o])) : null;
                       _keepIds = _keepIds.filter(id => {
                         if (!_tsById.has(String(id))) return true;          // tombstone 아님 → 보존
                         if (_srvByIdT) { const o = _srvByIdT.get(id); if (o && (Number(o.createdAt) || 0) > _tsById.get(String(id))) return true; }  // 삭제 이후 생성 = 새 입력 → 보존
@@ -7943,6 +7944,8 @@ async function _doSaveDataInner() {
       _deletedCommentSigs: Array.isArray(dbToSave._deletedCommentSigs) ? dbToSave._deletedCommentSigs : [],  // v2.3.288
       _deletedSampleIds: Array.isArray(dbToSave._deletedSampleIds) ? dbToSave._deletedSampleIds : [],  // v1.9.682
       _deletedVendorIds: Array.isArray(dbToSave._deletedVendorIds) ? dbToSave._deletedVendorIds : [],  // v2.3.479
+      _deletedCooperatorIds: Array.isArray(dbToSave._deletedCooperatorIds) ? dbToSave._deletedCooperatorIds : [],  // v2.3.481
+      _deletedSellerIds: Array.isArray(dbToSave._deletedSellerIds) ? dbToSave._deletedSellerIds : [],  // v2.3.481
       _deletedItemIds: Array.isArray(dbToSave._deletedItemIds) ? dbToSave._deletedItemIds : [],  // v1.9.892
       _deletedShopIds: Array.isArray(dbToSave._deletedShopIds) ? dbToSave._deletedShopIds : [],  // v1.9.691
       _deletedNewProductIds: Array.isArray(dbToSave._deletedNewProductIds) ? dbToSave._deletedNewProductIds : [],  // v2.3.193
@@ -9118,6 +9121,8 @@ const DEFAULT_DB = {
   _deletedCommentSigs: [],  // v2.3.288: 의견 콘텐츠 sig tombstone (작은-정수 id 충돌 방어)
   _deletedSampleIds: [],  // v1.9.682
   _deletedVendorIds: [],  // v2.3.479
+  _deletedCooperatorIds: [],  // v2.3.481
+  _deletedSellerIds: [],  // v2.3.481
   _deletedItemIds: [],  // v1.9.892 — 품목 삭제 tombstone
   _deletedShopIds: [],  // v1.9.691
   _deletedNewProductIds: [],  // v2.3.193
@@ -9159,6 +9164,8 @@ if (DB == null) {
     if (!Array.isArray(DB._deletedCommentIds)) DB._deletedCommentIds = [];
     if (!Array.isArray(DB._deletedSampleIds)) DB._deletedSampleIds = [];  // v1.9.682
     if (!Array.isArray(DB._deletedVendorIds)) DB._deletedVendorIds = [];  // v2.3.479
+    if (!Array.isArray(DB._deletedCooperatorIds)) DB._deletedCooperatorIds = [];  // v2.3.481
+    if (!Array.isArray(DB._deletedSellerIds)) DB._deletedSellerIds = [];  // v2.3.481
     if (!Array.isArray(DB._deletedItemIds)) DB._deletedItemIds = [];  // v1.9.892
     if (!Array.isArray(DB._deletedShopIds)) DB._deletedShopIds = [];  // v1.9.691
     if (!Array.isArray(DB._deletedNewProductIds)) DB._deletedNewProductIds = [];  // v2.3.193
@@ -19610,6 +19617,7 @@ function shopShowDetail(idx) {
     + '</div>'
     + '</div>'
     + '<div style="padding:12px 22px;border-top:1px solid #f1f5f9;display:flex;gap:8px;justify-content:flex-end;background:#fafbfc">'
+    + _partnerTypeSelectHtml('shop', s.id)
     + '<button onclick="document.getElementById(\'overlay-shop-detail-view\')?.remove()" style="background:#fff;border:1px solid #e2e8f0;color:#475569;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600">닫기</button>'
     + '<button onclick="document.getElementById(\'overlay-shop-detail-view\')?.remove();shopEditMode(' + idx + ')" style="background:#0f172a;color:#fff;border:0;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">✏️ 수정</button>'
     + '</div>'
@@ -35701,6 +35709,7 @@ function showPartnerCard(prefix, id) {
     + (noteHtml ? '<div class="pcr"><div class="pcl">비고</div><div class="pcv" style="line-height:1.7">' + noteHtml + '</div></div>' : '')
     + '</div>'
     + '<div style="padding:12px 22px;border-top:1px solid #f1f5f9;display:flex;gap:8px;justify-content:flex-end;background:#fafbfc">'
+    + _partnerTypeSelectHtml(prefix === 'coop' ? 'coop' : 'seller', id)
     + '<button onclick="document.getElementById(\'partner-card-overlay\')?.remove()" style="background:#fff;border:1px solid #e2e8f0;color:#475569;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600">닫기</button>'
     + '<button onclick="document.getElementById(\'partner-card-overlay\')?.remove();' + (prefix === 'coop' ? "openCooperatorEditModal(" + id + ")" : "openSellerEditModal(" + id + ")") + '" style="background:#0f172a;color:#fff;border:0;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">✏️ 수정</button>'
     + '</div>'
@@ -35894,6 +35903,7 @@ function saveCooperator() {
 function deleteCooperator() {
   if (!window._editingCooperatorId) return;
   if (!confirm('이 협력사를 삭제하시겠습니까?')) return;
+  _partnerPushTomb('_deletedCooperatorIds', window._editingCooperatorId);  // v2.3.481
   DB.cooperators = (DB.cooperators||[]).filter(x => x.id !== window._editingCooperatorId);
   closeModal('cooperator-edit');
   renderCooperatorsTable();
@@ -36095,9 +36105,144 @@ function saveSeller() {
   try { showNotif('✅ 판매업체 저장 완료', 'success'); } catch(_){}
 }
 
+// v2.3.481: 거래처 유형 이동 (협력사 ↔ 판매업체 ↔ 쇼핑몰) — 컬렉션 간 레코드 이동.
+//   원본은 묘비 처리(타 기기 부활 차단) 후 제거, 대상 컬렉션에 공통 필드 매핑 + 전역고유 신규 id.
+//   생산업체(vendors)는 발주·품목이 vendorId 로 참조하므로 이동 대상에서 제외(사용자 결정).
+const _PARTNER_TYPE = {
+  coop:   { coll:'cooperators', tomb:'_deletedCooperatorIds', label:'🤝 협력사',   tab:'coop'   },
+  seller: { coll:'sellers',     tomb:'_deletedSellerIds',     label:'🛒 판매업체', tab:'seller' },
+  shop:   { coll:'shops',       tomb:'_deletedShopIds',       label:'🏪 쇼핑몰',   tab:'shop'   }
+};
+function _partnerStripHtml(s) {
+  if (!s) return '';
+  try { const d = document.createElement('div'); d.innerHTML = String(s); return (d.textContent || '').trim(); } catch(_) { return String(s); }
+}
+function _partnerPushTomb(arrName, id) {
+  if (!Array.isArray(DB[arrName])) DB[arrName] = [];
+  DB[arrName].push({ id: (arrName === '_deletedShopIds') ? String(id) : id, ts: Date.now() });
+  if (DB[arrName].length > 300) DB[arrName] = DB[arrName].sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0,300);
+}
+function _partnerExtractCommon(src) {
+  const contacts = (Array.isArray(src.contacts) && src.contacts.length)
+    ? src.contacts.map(c => ({ name: c.name||'', phone: c.phone||'', email: c.email||'' }))
+    : (src.manager ? [{ name: String(src.manager).split(/\s+/)[0] || src.manager, phone: (String(src.manager).match(/01[0-9][- 0-9]{7,}/)||[''])[0], email: '' }] : []);
+  return {
+    company: src.company || src.name || '',
+    bizno: src.bizno || '', ceo: src.ceo || '',
+    contacts: contacts,
+    address: src.address || '',
+    bankName: src.bankName||'', bankAccount: src.bankAccount||'', bankHolder: src.bankHolder||'',
+    businessCards: src.businessCards||[], businessCard: src.businessCard||'', businessCardName: src.businessCardName||'',
+    bizDoc: src.bizDoc||'', bizDocName: src.bizDocName||'',
+    bankbook: src.bankbook||'', bankbookName: src.bankbookName||'',
+    contractDoc: src.contractDoc||'', contractDocName: src.contractDocName||'',
+    quotes: src.quotes||[],
+    note: src.note || src.memo || '',
+    createdAt: src.createdAt
+  };
+}
+function _partnerUniqNumId() { let n; do { n = Date.now()*1000 + Math.floor(Math.random()*1000); } while ((DB.cooperators||[]).some(x=>x&&x.id===n) || (DB.sellers||[]).some(x=>x&&x.id===n)); return n; }
+function _partnerBuildRecord(dstType, c) {
+  const now = Date.now();
+  const contact = c.contacts.map(x=>x.name).filter(Boolean).join('\n');
+  const phone = c.contacts.map(x=>x.phone).filter(Boolean).join('\n');
+  const email = c.contacts.map(x=>x.email).filter(Boolean).join('\n');
+  const base = {
+    company: c.company, bizno: c.bizno, ceo: c.ceo, contacts: c.contacts, contact, phone, email,
+    address: c.address, bankName: c.bankName, bankAccount: c.bankAccount, bankHolder: c.bankHolder,
+    businessCards: c.businessCards, businessCard: c.businessCard, businessCardName: c.businessCardName,
+    bizDoc: c.bizDoc, bizDocName: c.bizDocName, bankbook: c.bankbook, bankbookName: c.bankbookName,
+    contractDoc: c.contractDoc, contractDocName: c.contractDocName, quotes: c.quotes,
+    note: c.note, createdAt: (typeof c.createdAt === 'number' && c.createdAt) ? c.createdAt : now, updatedAt: now
+  };
+  if (dstType === 'coop') return Object.assign({ id: _partnerUniqNumId() }, base);
+  if (dstType === 'seller') return Object.assign({ id: _partnerUniqNumId() }, base, { supplyRate:'', supplyRateVat:'exclude', rateKind:'supply', channel:'' });
+  // shop — 구조가 다름: 공통 정보만 매핑, 채널/수수료 등은 기본값
+  const c0 = c.contacts[0];
+  return {
+    id: 'shop_' + (Date.now()*1000 + Math.floor(Math.random()*1000)),
+    name: c.company, active: true, apiLinked: false, channelType: '',
+    commissionBase: 0, shippingPolicy: 'seller', shippingCost: 0, freeShippingThreshold: 0,
+    couponBorneRate: 0, settlementCycle: '',
+    manager: c0 ? (c0.name + (c0.phone ? ' ' + c0.phone : '')) : '',
+    memo: _partnerStripHtml(c.note), feeMemo: '', adsCosts: [],
+    createdAt: new Date().toISOString(), updatedAt: now
+  };
+}
+// v2.3.481: 이동 직전 __idb__ 마커 첨부를 실데이터로 해결(clone 대상). id 가 바뀌면 IDB 키가
+//   달라져 마커 복원이 불가하므로, 이 기기 IDB 에서 미리 읽어 실데이터로 옮긴다. 이 기기에 없는
+//   첨부(타 기기 IDB 전용·미이전)는 missing 으로 보고 → 사용자에게 유실 경고.
+async function _partnerHydrateForMove(srcType, work) {
+  const missing = [];
+  if (srcType === 'shop') return missing;  // 쇼핑몰엔 partner 첨부 없음
+  const coll = _PARTNER_TYPE[srcType].coll, id = work.id;
+  const resolve = async (val, key, label) => {
+    if (val !== '__idb__') return val;
+    let v = null; try { v = await idbGet(key); } catch(_){}
+    if (v && v !== '__idb__') return v;
+    missing.push(label); return '__idb__';
+  };
+  for (const field of ['businessCard','bizDoc','bankbook','contractDoc']) {
+    if (work[field] === '__idb__') work[field] = await resolve(work[field], 'partner_'+coll+'_'+id+'_'+field, field);
+  }
+  if (Array.isArray(work.businessCards)) for (let ci=0; ci<work.businessCards.length; ci++) {
+    const c0 = work.businessCards[ci];
+    if (c0 && c0.data === '__idb__') c0.data = await resolve(c0.data, 'partner_'+coll+'_'+id+'_card_'+ci, '명함'+(ci+1));
+  }
+  if (Array.isArray(work.quotes)) for (let qi=0; qi<work.quotes.length; qi++) {
+    const q0 = work.quotes[qi];
+    if (q0 && q0.data === '__idb__') q0.data = await resolve(q0.data, 'partner_'+coll+'_'+id+'_quote_'+qi, '견적서'+(qi+1));
+  }
+  return missing;
+}
+async function _partnerChangeType(srcType, id, dstType) {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  const S = _PARTNER_TYPE[srcType], D = _PARTNER_TYPE[dstType];
+  if (!S || !D || srcType === dstType) return;
+  const src = (DB[S.coll]||[]).find(x => x && String(x.id) === String(id));
+  if (!src) { showNotif('원본을 찾을 수 없습니다', 'warning'); return; }
+  const name = src.company || src.name || '거래처';
+  // v2.3.481: 원본 clone 후 첨부 하이드레이트(원본 미변경 유지)
+  const work = JSON.parse(JSON.stringify(src));
+  const _missing = await _partnerHydrateForMove(srcType, work);
+  // 경고: 쇼핑몰 관련 이동은 전용 데이터 손실 안내
+  let warn = '';
+  if (_missing.length) warn += '\n\n⚠️ 이 기기에 없는 첨부 ' + _missing.length + '개(' + _missing.slice(0,4).join(', ') + (_missing.length>4?' 외':'') + ')는 이동 시 유실됩니다. 해당 첨부를 올린 기기에서 이동하는 것이 안전합니다.';
+  if (srcType === 'shop') {
+    const nOrders = (DB.shopOrders||[]).filter(o => o && String(o.shopId) === String(id)).length;
+    warn = '\n\n⚠️ 쇼핑몰 전용 정보(수수료·배송정책·광고비' + (nOrders ? ' · 연결된 판매주문 ' + nOrders + '건' : '') + ')는 함께 옮겨지지 않습니다.';
+  } else if (dstType === 'shop') {
+    warn = '\n\n⚠️ 판매채널 전용 항목(수수료·배송정책 등)은 기본값으로 생성되니 이후 쇼핑몰에서 입력하세요.';
+  }
+  if (!confirm('"' + name + '" 을(를)\n' + S.label + ' → ' + D.label + ' (으)로 이동할까요?' + warn + '\n\n· 원본은 ' + S.label + '에서 제거됩니다.\n· 이름·담당자·연락처·주소·계좌·첨부는 함께 이동합니다.')) return;
+  const rec = _partnerBuildRecord(dstType, _partnerExtractCommon(work));
+  _partnerPushTomb(S.tomb, src.id);                                  // 원본 묘비
+  DB[S.coll] = (DB[S.coll]||[]).filter(x => x && String(x.id) !== String(id));  // 원본 제거
+  if (!Array.isArray(DB[D.coll])) DB[D.coll] = [];
+  DB[D.coll].push(rec);                                             // 대상 추가
+  // 팝업 닫기
+  try { document.getElementById('partner-card-overlay')?.remove(); } catch(_){}
+  try { document.getElementById('overlay-shop-detail-view')?.remove(); } catch(_){}
+  try { await saveDataNow(); } catch(e) { console.warn('유형 이동 저장 실패', e); }
+  try { renderCooperatorsTable(); } catch(_){}
+  try { renderSellersTable(); } catch(_){}
+  try { renderShopList(); } catch(_){}
+  try { if (typeof switchPartnersTab === 'function') switchPartnersTab(D.tab); } catch(_){}
+  showNotif('✅ "' + name + '" → ' + D.label + ' (으)로 이동했습니다', 'success');
+}
+// 상세 팝업용 유형 변경 드롭다운 HTML
+function _partnerTypeSelectHtml(srcType, id) {
+  const opts = [['coop','🤝 협력사'],['seller','🛒 판매업체'],['shop','🏪 쇼핑몰']];
+  return '<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#475569;margin-right:auto">유형 변경'
+    + '<select onchange="_partnerChangeType(\'' + srcType + '\',' + JSON.stringify(id) + ',this.value);this.value=\'' + srcType + '\'" style="padding:5px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;cursor:pointer">'
+    + opts.map(o => '<option value="' + o[0] + '"' + (o[0]===srcType?' selected':'') + '>' + o[1] + '</option>').join('')
+    + '</select></label>';
+}
+
 function deleteSeller() {
   if (!window._editingSellerId) return;
   if (!confirm('이 판매업체를 삭제하시겠습니까?')) return;
+  _partnerPushTomb('_deletedSellerIds', window._editingSellerId);  // v2.3.481
   DB.sellers = (DB.sellers||[]).filter(x => x.id !== window._editingSellerId);
   closeModal('seller-edit');
   renderSellersTable();
@@ -54907,7 +55052,8 @@ const _RECONCILE_TOMB = {
   expenses:'_deletedExpenseIds', approvals:'_deletedApprovalIds', items:'_deletedItemIds',
   samples:'_deletedSampleIds', approvalComments:'_deletedCommentIds', feedPosts:'_deletedFeedPostIds',
   newProducts:'_deletedNewProductIds',
-  vendors:'_deletedVendorIds'  // v2.3.479
+  vendors:'_deletedVendorIds',  // v2.3.479
+  cooperators:'_deletedCooperatorIds', sellers:'_deletedSellerIds'  // v2.3.481
 };
 async function _reconcileToServer() {
   if (!(window._currentUser && window._currentUser.isAdmin === true)) { showNotif('관리자만 사용할 수 있습니다','warning'); return; }
@@ -56059,6 +56205,17 @@ function initERPWhenReady() {
           if (Array.isArray(firestoreDB.vendors)) firestoreDB.vendors = firestoreDB.vendors.filter(v => v && !_isSampleTombstoned(v, _vdTombTsEarly));
           if (Array.isArray(localDB.vendors)) localDB.vendors = localDB.vendors.filter(v => v && !_isSampleTombstoned(v, _vdTombTsEarly));
         }
+        // v2.3.481: cooperators/sellers 도 동형 사전차단 (유형 이동으로 컬렉션 간 이동 시 원본 부활 방지)
+        [['cooperators','_deletedCooperatorIds'],['sellers','_deletedSellerIds']].forEach(function(pair){
+          var coll = pair[0], tk = pair[1];
+          var fsT = Array.isArray(firestoreDB[tk]) ? firestoreDB[tk] : [];
+          var lcT = Array.isArray(localDB[tk]) ? localDB[tk] : [];
+          var ts = _sampleTombTsMap([].concat(fsT, lcT));
+          if (ts.size > 0) {
+            if (Array.isArray(firestoreDB[coll])) firestoreDB[coll] = firestoreDB[coll].filter(x => x && !_isSampleTombstoned(x, ts));
+            if (Array.isArray(localDB[coll])) localDB[coll] = localDB[coll].filter(x => x && !_isSampleTombstoned(x, ts));
+          }
+        });
         // v2.2.45: shopOrders tombstone 사전 차단 — 같은 패턴
         //   COUNT-GUARD 는 저장 시점에만 동작 → 로드 시점에 별도 필터 없으면 부활
         let _shopOrderTombSigSet = new Set();
@@ -56673,6 +56830,22 @@ function initERPWhenReady() {
             if (removedV > 0) console.warn('🪦 [v2.3.479] vendor tombstone 으로 ' + removedV + '건 부활 차단');
           }
         }
+        // v2.3.481: cooperators/sellers tombstone 머지 + 필터 (vendor 패턴 동형)
+        [['cooperators','_deletedCooperatorIds'],['sellers','_deletedSellerIds']].forEach(function(pair){
+          var coll = pair[0], tk = pair[1];
+          var fsT = Array.isArray(firestoreDB[tk]) ? firestoreDB[tk] : [];
+          var lcT = Array.isArray(localDB[tk]) ? localDB[tk] : [];
+          var byKey = new Map();
+          [].concat(fsT, lcT).forEach(function(x){ if(!x||x.id==null) return; var k=String(x.id); var p=byKey.get(k); if(!p||(x.ts||0)>(p.ts||0)) byKey.set(k,x); });
+          merged[tk] = Array.from(byKey.values()).sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0,200);
+          var ts = _sampleTombTsMap(merged[tk]);
+          if (Array.isArray(merged[coll]) && ts.size > 0) {
+            var before = merged[coll].length;
+            merged[coll] = merged[coll].filter(x => x && !_isSampleTombstoned(x, ts));
+            var removed = before - merged[coll].length;
+            if (removed > 0) console.warn('🪦 [v2.3.481] ' + coll + ' tombstone 으로 ' + removed + '건 부활 차단');
+          }
+        });
         // v2.2.68: items 백업 보호 — Firestore items 가 백업보다 크게 줄었으면 빠진 것 복구
         try {
           let _backup = [];
