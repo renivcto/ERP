@@ -6018,7 +6018,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.472';
+const ERP_VERSION = 'v2.3.473';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -41372,13 +41372,38 @@ function _kstNowHM() {
   return d.toISOString().slice(11, 16);
 }
 
+// v2.3.473: 발송 직전 서버 최신 스냅샷 로드 — 며칠째 새로고침 없이 열려있던 세션이 발송을 선점하면
+//   메모리의 옛 데이터로 브리핑이 나감(이미 생산완료된 건이 '생산중'으로 나온 07-20 사건).
+//   실패한 컬렉션은 메모리(DB) 값으로 폴백. DB 자체는 건드리지 않는다(머지 우회 클로버 방지).
+async function _digestFreshSrc() {
+  const src = {};
+  const COLLS = ['items','orders','productions','expenses','vendors'];
+  COLLS.forEach(c => { src[c] = DB[c]; });
+  try {
+    const _get = window._firestoreGetDocFromServer || window._firestoreGetDoc;
+    if (!_get || !window._firestoreDoc || !window._firebaseDb) return src;
+    for (const c of COLLS) {
+      try {
+        const snap = await _get(window._firestoreDoc(window._firebaseDb, 'erp_data', c));
+        if (snap && snap.exists()) {
+          const arr = JSON.parse(snap.data().data || '[]');
+          if (Array.isArray(arr) && arr.length) src[c] = arr;
+        }
+      } catch(_){}
+    }
+  } catch(_){}
+  return src;
+}
+
 // 브리핑 본문 생성 — 재고부족 / 입고 지연·예정 / 어제 발주 / 생산중 / 지급경과
-function _buildDailyDigestText() {
+//   src(선택): _digestFreshSrc() 의 서버 스냅샷. 없으면 메모리 DB.
+function _buildDailyDigestText(src) {
+  const S = src || DB;
   const today = _kstDateStr(0);
   const yesterday = _kstDateStr(-1);
   const weekLater = _kstDateStr(7);
   const dow = ['일','월','화','수','목','금','토'][new Date(Date.now() + 9*60*60*1000).getUTCDay()];  // KST 요일 (로컬 TZ 무관)
-  const vName = id => { const v = (DB.vendors||[]).find(x => x && x.id === id); return v ? v.company : '-'; };
+  const vName = id => { const v = (S.vendors||[]).find(x => x && x.id === id); return v ? v.company : '-'; };
   const ordTitle = o => {
     const rows = Array.isArray(o.rows) ? o.rows : [];
     if (!rows.length) return '-';
@@ -41390,7 +41415,7 @@ function _buildDailyDigestText() {
   let hasIssue = false;
 
   // 1) 완제품 재고 (type === '완제품') — 재고 적은 순, 최소재고 미달이면 🚨 표시
-  const finished = (DB.items||[]).filter(it => it && it.type === '완제품' && (Number(it.stock)||0) > 0)
+  const finished = (S.items||[]).filter(it => it && it.type === '완제품' && (Number(it.stock)||0) > 0)
     .sort((a,b) => (Number(a.stock)||0) - (Number(b.stock)||0));
   if (finished.length) {
     hasIssue = true;
@@ -41406,7 +41431,7 @@ function _buildDailyDigestText() {
   }
 
   // 2) 입고 예정 (입고전 발주 기준) — v2.3.165: 입고 지연은 '발주·생산 알림' 채널로 이동(중복 방지)
-  const pending = (DB.orders||[]).filter(o => o && o.stockStatus === '입고전' && o.inDate);
+  const pending = (S.orders||[]).filter(o => o && o.stockStatus === '입고전' && o.inDate);
   const soon = pending.filter(o => o.inDate >= today && o.inDate <= weekLater);
   if (soon.length) {
     hasIssue = true;
@@ -41419,7 +41444,7 @@ function _buildDailyDigestText() {
   }
 
   // 3) 어제 발주
-  const yOrders = (DB.orders||[]).filter(o => o && o.orderDate === yesterday);
+  const yOrders = (S.orders||[]).filter(o => o && o.orderDate === yesterday);
   if (yOrders.length) {
     hasIssue = true;
     L.push('');
@@ -41431,20 +41456,21 @@ function _buildDailyDigestText() {
   }
 
   // 4) 생산 진행 현황
-  const prods = (DB.productions||[]).filter(p => p && p.status === '생산중' && p.productId && (DB.items||[]).some(it => it && it.id === p.productId));
+  const prods = (S.productions||[]).filter(p => p && p.status === '생산중' && p.productId && (S.items||[]).some(it => it && it.id === p.productId));
   if (prods.length) {
     hasIssue = true;
     L.push('');
     L.push('🏭 *생산중 ' + prods.length + '건*');
     prods.slice().sort((a,b) => String(a.inDate||'9999').localeCompare(String(b.inDate||'9999')))
       .slice(0, 6).forEach(p => {
-        L.push('• ' + ((typeof getItemName === 'function' ? getItemName(p.productId) : '') || p.productName || '-') + ' ' + (Number(p.qty)||0).toLocaleString() + '개' + (p.inDate ? ' (입고예정 ' + String(p.inDate).slice(5) + ')' : ''));
+        const _pItem = (S.items||[]).find(it => it && it.id === p.productId);
+        L.push('• ' + ((_pItem && _pItem.name) || p.productName || '-') + ' ' + (Number(p.qty)||0).toLocaleString() + '개' + (p.inDate ? ' (입고예정 ' + String(p.inDate).slice(5) + ')' : ''));
       });
     if (prods.length > 6) L.push('  … 외 ' + (prods.length - 6) + '건');
   }
 
   // 5) 지급예정일 경과 (미지급)
-  const overdue = (DB.expenses||[]).filter(e => e && e.paidStatus !== 'paid' && e.dueDate && e.dueDate < today);
+  const overdue = (S.expenses||[]).filter(e => e && e.paidStatus !== 'paid' && e.dueDate && e.dueDate < today);
   if (overdue.length) {
     hasIssue = true;
     const total = overdue.reduce((s2, e) => s2 + (Number(e.amount)||0), 0);
@@ -41523,7 +41549,9 @@ async function sendDailyDigestNow() {
   const url = _cleanWebhookUrl(s.slackDigestWebhookUrl || (document.getElementById('slack-digest-url')?.value || ''));
   if (!url) { showNotif('Webhook URL 을 먼저 입력·저장하세요', 'warning'); return; }
   try {
-    const text = _buildDailyDigestText();
+    // v2.3.473: 수동 발송도 서버 최신 스냅샷 기준
+    const _src = await _digestFreshSrc();
+    const text = _buildDailyDigestText(_src);
     const kind = _detectWebhookKind(url);
     await _postWebhook(url, kind, _buildWebhookPayload(kind, 'daily_digest', { text }));
     const today = _kstDateStr(0);
@@ -41570,7 +41598,9 @@ async function _maybeSendDailyDigest() {
     const me = (window._currentUser && (window._currentUser.displayName || window._currentUser.name || window._currentUser.email)) || 'auto';
     try { if (typeof saveSharedSetting === 'function') await saveSharedSetting('slack_digest_state', { lastSentDate: today, sentBy: me, ts: Date.now() }); } catch(_){}
     try { localStorage.setItem('reniv_digest_last_sent', today); } catch(_){}
-    const text = _buildDailyDigestText();
+    // v2.3.473: 세션 메모리가 아니라 서버 최신 스냅샷으로 본문 생성 (오래 열린 세션의 옛 데이터 발송 차단)
+    const _src = await _digestFreshSrc();
+    const text = _buildDailyDigestText(_src);
     const kind = _detectWebhookKind(url);
     await _postWebhook(url, kind, _buildWebhookPayload(kind, 'daily_digest', { text }));
     console.log('☀️ [DIGEST] 데일리 브리핑 자동 발송 완료 (' + today + ', by ' + me + ')');
