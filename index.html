@@ -4350,7 +4350,12 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="fg2">
         <div class="fg"><label>분류<span class="req">*</span></label><select class="fs" id="i-type" onchange="populateItemVendorSelect();updateBomCostBtnState();updateItemPriceFieldsState()"><option value="">— 선택하세요 —</option><option>원자재</option><option>부자재</option><option>OEM</option><option>완제품</option><option>반제품</option><option>외주가공</option></select></div>
         <div class="fg"><label>품목코드</label><input class="fi" id="i-code" style="font-family:monospace"></div>
-        <div class="fg full"><label>품목명<span class="req">*</span></label><input class="fi" id="i-name"></div>
+        <div class="fg full"><label>품목명<span class="req">*</span> <span style="font-size:10px;color:var(--gray-400);font-weight:400">(ERP 노출명)</span></label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="fi" id="i-name" style="flex:1">
+            <select class="fs" id="i-name-pick" style="width:180px;flex-shrink:0" onchange="if(this.value){document.getElementById('i-name').value=this.value;}this.selectedIndex=0"><option value="">↩ 다른 이름에서 선택</option></select>
+          </div>
+        </div>
         <div class="fg full" id="i-name-en-wrap"><label>영문 품목명</label><input class="fi" id="i-name-en"></div>
         <div class="fg full"><label>업체</label><select class="fs" id="i-vendor"></select></div>
         <div class="fg full"><label>보관 창고 <span style="font-size:10px;color:var(--gray-400);font-weight:400">(기본 입고 위치 · 재고 이동/수량은 재고관리에서)</span></label><select class="fs" id="i-default-wh"></select><div id="i-wh-dist" style="margin-top:7px"></div></div>
@@ -4420,7 +4425,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         </div>
         <!-- v2.3.491: 판매업체 공급가(위탁 출고 거래명세서 단가) — 업체별 공급가 + 부가세 -->
         <div class="fg full">
-          <label>🏷️ 판매업체 공급가 <span style="font-size:10px;color:var(--gray-400);font-weight:400">(위탁 출고 거래명세서 단가 · 업체별로 등록)</span></label>
+          <label>🏷️ 판매업체 공급가 · 거래처 품목명 <span style="font-size:10px;color:var(--gray-400);font-weight:400">(위탁 출고 거래명세서에 자동 반영 · 업체별로 등록)</span></label>
           <div id="i-supply-list" style="border:1px solid var(--gray-200);border-radius:8px;background:#fff;padding:4px"></div>
           <button type="button" class="btn btn-outline btn-sm" style="margin-top:6px" onclick="_itemSupplyAddRow()">+ 업체 공급가 추가</button>
         </div>
@@ -6049,7 +6054,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.491';
+const ERP_VERSION = 'v2.3.492';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -25347,27 +25352,38 @@ function _rawDocRemove(idx) {
 // ── v2.3.491: 판매업체 공급가 (item.supplyPrices = [{sellerId, price, vat}]) ──
 window._itemSupplyPrices = window._itemSupplyPrices || [];
 function _itemSupplySellers(){ return (DB.sellers||[]).slice().sort((a,b)=>String(a.company||'').localeCompare(String(b.company||''))); }
+function _itemSupplyRefreshNamePick(){
+  const sel=document.getElementById('i-name-pick'); if(!sel) return;
+  const names=[]; const en=(document.getElementById('i-name-en')||{}).value; if(en) names.push(en);
+  (window._itemSupplyPrices||[]).forEach(r=>{ if(r&&r.itemName&&names.indexOf(r.itemName)<0) names.push(r.itemName); });
+  sel.innerHTML='<option value="">↩ 다른 이름에서 선택</option>'+names.map(n=>'<option value="'+escapeHtml(n)+'">'+escapeHtml(n)+'</option>').join('');
+}
 function _renderItemSupplyList(){
   const box=document.getElementById('i-supply-list'); if(!box) return;
   const rows=window._itemSupplyPrices||[]; const sellers=_itemSupplySellers();
-  if(!rows.length){ box.innerHTML='<div style="color:var(--gray-400);font-size:11.5px;padding:8px 6px">등록된 업체 공급가가 없습니다. 아래 버튼으로 추가하세요.</div>'; return; }
+  if(!rows.length){ box.innerHTML='<div style="color:var(--gray-400);font-size:11.5px;padding:8px 6px">등록된 업체 공급가가 없습니다. 아래 버튼으로 추가하세요.</div>'; _itemSupplyRefreshNamePick(); return; }
   box.innerHTML=rows.map((r,i)=>{
     const opts='<option value="">— 업체 —</option>'+sellers.map(s=>'<option value="'+s.id+'"'+(String(s.id)===String(r.sellerId)?' selected':'')+'>'+escapeHtml(s.company||'')+'</option>').join('');
-    return '<div style="display:grid;grid-template-columns:1fr 120px 130px 30px;gap:6px;align-items:center;padding:5px 4px;border-bottom:1px solid var(--gray-100)">'
-      +'<select class="fs" style="height:32px;font-size:12px" onchange="_itemSupplySet('+i+',\'sellerId\',this.value)">'+opts+'</select>'
-      +'<input class="fi" type="number" min="0" style="height:32px;font-size:12px;text-align:right" placeholder="공급가" value="'+(r.price!=null?r.price:'')+'" oninput="_itemSupplySet('+i+',\'price\',this.value)">'
-      +'<select class="fs" style="height:32px;font-size:12px" onchange="_itemSupplySet('+i+',\'vat\',this.value)"><option value="exclude"'+(r.vat!=='include'?' selected':'')+'>부가세 별도</option><option value="include"'+(r.vat==='include'?' selected':'')+'>부가세 포함</option></select>'
-      +'<button type="button" onclick="_itemSupplyRemove('+i+')" style="background:none;border:none;color:#dc2626;cursor:pointer">✕</button></div>';
+    return '<div style="border:1px solid var(--gray-100);border-radius:7px;padding:7px;margin-bottom:6px;background:#fafcff">'
+      +'<div style="display:grid;grid-template-columns:1fr 26px;gap:6px;align-items:center;margin-bottom:5px">'
+      +  '<select class="fs" style="height:32px;font-size:12px" onchange="_itemSupplySet('+i+',\'sellerId\',this.value)">'+opts+'</select>'
+      +  '<button type="button" onclick="_itemSupplyRemove('+i+')" title="삭제" style="background:none;border:none;color:#dc2626;cursor:pointer">✕</button></div>'
+      +'<div style="display:grid;grid-template-columns:1fr 110px 118px;gap:6px;align-items:center">'
+      +  '<input class="fi" style="height:32px;font-size:12px" placeholder="거래처 품목명 (명세서 표기)" value="'+escapeHtml(r.itemName||'')+'" oninput="_itemSupplySet('+i+',\'itemName\',this.value)" onblur="_itemSupplyRefreshNamePick()">'
+      +  '<input class="fi" type="number" min="0" style="height:32px;font-size:12px;text-align:right" placeholder="공급가" value="'+(r.price!=null?r.price:'')+'" oninput="_itemSupplySet('+i+',\'price\',this.value)">'
+      +  '<select class="fs" style="height:32px;font-size:11.5px" onchange="_itemSupplySet('+i+',\'vat\',this.value)"><option value="exclude"'+(r.vat!=='include'?' selected':'')+'>부가세 별도</option><option value="include"'+(r.vat==='include'?' selected':'')+'>부가세 포함</option></select>'
+      +'</div></div>';
   }).join('');
+  _itemSupplyRefreshNamePick();
 }
 function _itemSupplyAddRow(){ (window._itemSupplyPrices=window._itemSupplyPrices||[]).push({sellerId:'',price:'',vat:'exclude'}); _renderItemSupplyList(); }
 function _itemSupplySet(i,k,v){ if(window._itemSupplyPrices&&window._itemSupplyPrices[i]){ window._itemSupplyPrices[i][k]=(k==='price')?(v===''?'':Number(v)):v; } }
 function _itemSupplyRemove(i){ if(window._itemSupplyPrices){ window._itemSupplyPrices.splice(i,1); _renderItemSupplyList(); } }
-function _itemSupplyForSave(){ return (window._itemSupplyPrices||[]).filter(r=>r&&r.sellerId&&r.price!==''&&r.price!=null).map(r=>({sellerId:r.sellerId, price:Number(r.price)||0, vat:r.vat==='include'?'include':'exclude'})); }
+function _itemSupplyForSave(){ return (window._itemSupplyPrices||[]).filter(r=>r&&r.sellerId&&((r.price!==''&&r.price!=null)||(r.itemName&&r.itemName.trim()))).map(r=>({sellerId:r.sellerId, itemName:(r.itemName||'').trim(), price:(r.price===''||r.price==null)?'':(Number(r.price)||0), vat:r.vat==='include'?'include':'exclude'})); }
 function _itemSupplyPrice(item, sellerId){
   if(!item||!Array.isArray(item.supplyPrices)) return null;
   const row=item.supplyPrices.find(r=>r&&String(r.sellerId)===String(sellerId));
-  return row?{price:Number(row.price)||0, vat:row.vat==='include'?'include':'exclude'}:null;
+  return row?{price:(row.price===''||row.price==null)?'':(Number(row.price)||0), vat:row.vat==='include'?'include':'exclude', itemName:(row.itemName||'').trim()}:null;
 }
 
 function editItem(id) {
@@ -28341,7 +28357,7 @@ function _consignLineItemChanged(sel){
   row.querySelector('.cs-spec').textContent = it ? (it.spec||'-') : '-';
   const sellerId=(document.getElementById('cs-seller')||{}).value;
   const pEl=row.querySelector('.cs-price');
-  if (it && sellerId) { const sp=_itemSupplyPrice(it, sellerId); if (sp && !pEl.value) { pEl.value = sp.price; _consignApplyVatFrom(sp); } }
+  if (it && sellerId) { const sp=_itemSupplyPrice(it, sellerId); if (sp) { if(sp.price!=='' && !pEl.value) pEl.value = sp.price; _consignApplyVatFrom(sp); if(sp.itemName){ const sc=row.querySelector('.cs-spec'); if(sc) sc.title='명세서 표기: '+sp.itemName; } } }
   _consignRecalc();
 }
 function _consignRefillPrices(){
@@ -28350,7 +28366,7 @@ function _consignRefillPrices(){
   document.querySelectorAll('#cs-lines .cs-line').forEach(row=>{
     const sel=row.querySelector('.cs-item'); const it=(DB.items||[]).find(i=>String(i.id)===String(sel.value));
     const pEl=row.querySelector('.cs-price');
-    if (it && sellerId) { const sp=_itemSupplyPrice(it, sellerId); if (sp) { pEl.value = sp.price; if(!firstSp) firstSp=sp; } }
+    if (it && sellerId) { const sp=_itemSupplyPrice(it, sellerId); if (sp) { if(sp.price!=='') pEl.value = sp.price; if(!firstSp) firstSp=sp; } }
   });
   if (firstSp) _consignApplyVatFrom(firstSp);
   _consignRecalc();
@@ -28384,7 +28400,9 @@ async function _consignSubmit(){
     const price=Number(row.querySelector('.cs-price').value)||0;
     if(!it) return;
     if(qty<=0){ bad = it.name+' 수량'; return; }
-    lines.push({ itemId:it.id, code:it.code||'', name:it.name||'', spec:it.spec||'', barcode:it.barcode||'', qty:qty, price:price });
+    const _sp=_itemSupplyPrice(it, sellerId);
+    const _dispName=(_sp && _sp.itemName) ? _sp.itemName : (it.name||'');  // v2.3.492: 거래처 품목명 우선
+    lines.push({ itemId:it.id, code:it.code||'', name:_dispName, erpName:it.name||'', spec:it.spec||'', barcode:it.barcode||'', qty:qty, price:price });
   });
   if(!lines.length){ alert('품목을 1개 이상 추가하고 수량을 입력하세요'); return; }
   if(bad){ alert(bad+'을(를) 입력하세요'); return; }
