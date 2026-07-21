@@ -6049,7 +6049,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.494';
+const ERP_VERSION = 'v2.3.495';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28324,11 +28324,19 @@ function _consignFillWhInfo(){
   if (p && !p.value) p.value = w.phone||'';
 }
 function _consignFinishedItems(){ return (DB.items||[]).filter(i=>i && i.type==='완제품'); }
+// v2.3.495: 품목 라벨 — 선택된 판매업체에 거래처 품목명이 등록돼 있으면 그 이름, 없으면 ERP 대표명
+function _consignItemLabel(it, sellerId){
+  const sp = sellerId ? _itemSupplyPrice(it, sellerId) : null;
+  const nm = (sp && sp.itemName) ? sp.itemName : (it.name||'');
+  return nm + (it.spec?' ('+it.spec+')':'');
+}
+function _consignItemOptions(sellerId, selectedId){
+  return '<option value="">— 품목 —</option>' + _consignFinishedItems().map(i=>'<option value="'+i.id+'"'+(String(i.id)===String(selectedId)?' selected':'')+'>'+escapeHtml(_consignItemLabel(i, sellerId))+'</option>').join('');
+}
 function _consignAddLine(){
   const box=document.getElementById('cs-lines'); if(!box) return;
   const idx = box.children.length;
-  const items = _consignFinishedItems();
-  const opts = '<option value="">— 품목 —</option>' + items.map(i=>'<option value="'+i.id+'">'+escapeHtml(i.name + (i.spec?' ('+i.spec+')':''))+'</option>').join('');
+  const opts = _consignItemOptions((document.getElementById('cs-seller')||{}).value, '');
   const row=document.createElement('div');
   row.className='cs-line';
   row.style.cssText='display:grid;grid-template-columns:1fr 96px 84px 110px 120px 34px;gap:0;align-items:center;padding:6px 10px;border-top:1px solid #f1f5f9';
@@ -28359,7 +28367,9 @@ function _consignRefillPrices(){
   const sellerId=(document.getElementById('cs-seller')||{}).value;
   let firstSp=null;
   document.querySelectorAll('#cs-lines .cs-line').forEach(row=>{
-    const sel=row.querySelector('.cs-item'); const it=(DB.items||[]).find(i=>String(i.id)===String(sel.value));
+    const sel=row.querySelector('.cs-item');
+    sel.innerHTML = _consignItemOptions(sellerId, sel.value);  // v2.3.495: 거래처 품목명으로 라벨 갱신(선택 유지)
+    const it=(DB.items||[]).find(i=>String(i.id)===String(sel.value));
     const pEl=row.querySelector('.cs-price');
     if (it && sellerId) { const sp=_itemSupplyPrice(it, sellerId); if (sp) { if(sp.price!=='') pEl.value = sp.price; if(!firstSp) firstSp=sp; } }
   });
