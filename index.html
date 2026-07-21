@@ -6042,7 +6042,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.485';
+const ERP_VERSION = 'v2.3.486';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -43538,6 +43538,10 @@ async function addApprovalComment() {
   // v1.9.671: nextId('comment') 가 이미 삭제된 ID 와 collision 가능 → tombstone 에 같은 ID 가 있으면
   //   _nextId.comment 를 max(existing) + max(tombstone) + 1 로 점프시켜 충돌 회피
   const _now = Date.now();
+  // v2.3.486: 파일 첨부 시 업로드+저장이 수 초 걸림 — 그 사이 창을 닫으면 저장이 안 되는데 사용자는
+  //   오류로 오인. 저장 중 오버레이(v2.3.454 피드 패턴) + beforeunload 강한 경고(_criticalSaving).
+  const _hasFiles = attaches.length > 0;
+  if (_hasFiles) { window._criticalSaving = true; try { _showSavingOverlay(); } catch(_){} }
   // v2.3.201: 댓글 id 를 timestamp+random(전역 고유)으로 — 카운터(작은 id)가 다른 사용자가 과거에
   //   삭제한 댓글의 tombstone id 와 충돌해, 로드 머지의 댓글 tombstone 필터(부활 차단)가 그 댓글을
   //   지워서 '다른 쓰기권한자에게 댓글이 안 보이던' 버그. feedComment(v2.2.10)·발주(v1.9.918) 동일 패턴.
@@ -43608,10 +43612,18 @@ async function addApprovalComment() {
     localStorage.setItem('reniv_approvalComments_backup_ts', String(Date.now()));
   } catch(e) { console.warn('approvalComments 백업 실패:', e); }
   // 2차: Firestore 즉시 저장 (디바운스 우회)
+  // v2.3.486: 파일 첨부 시엔 저장 완료를 await — 완료 후 오버레이를 닫아 "언제 닫아도 되는지"를 명확히
   if (typeof saveDataNow === 'function') {
-    saveDataNow().then(() => console.log('✅ [SAVE] approvalComments OK')).catch(e => { console.error('❌ [SAVE] approvalComments 실패:', e); try { showNotif('⚠️ 의견 저장 실패: ' + (e.message || e), 'error'); } catch(_){} });
+    if (_hasFiles) {
+      try { await saveDataNow(); console.log('✅ [SAVE] approvalComments OK (첨부 ' + attaches.length + ')'); }
+      catch(e) { console.error('❌ [SAVE] approvalComments 실패:', e); try { showNotif('⚠️ 의견 저장 실패: ' + (e.message || e), 'error'); } catch(_){} }
+      finally { window._criticalSaving = false; try { _hideSavingOverlay(); } catch(_){} }
+    } else {
+      saveDataNow().then(() => console.log('✅ [SAVE] approvalComments OK')).catch(e => { console.error('❌ [SAVE] approvalComments 실패:', e); try { showNotif('⚠️ 의견 저장 실패: ' + (e.message || e), 'error'); } catch(_){} });
+    }
   } else {
     try { saveData(); } catch(_){}
+    if (_hasFiles) { window._criticalSaving = false; try { _hideSavingOverlay(); } catch(_){} }
   }
   renderApprovalComments(ref);
   // v2.3.205: 결재 의견 → 슬랙(전용 채널) 스레드 전송 (양방향). slack-origin 댓글은 이 경로를 안 거침 → 루프 없음.
