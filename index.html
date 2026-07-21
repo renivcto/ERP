@@ -1899,6 +1899,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <button class="btn btn-sm pg-topbar-btn" style="background:#0f172a;color:#fff;border:1px solid #0f172a;margin-right:6px;font-weight:700" onclick="if(requireWrite())openModal('stock-in-modal')">📥 입고 처리</button>
           <button class="btn btn-sm pg-topbar-btn" style="background:#0f172a;color:#fff;border:1px solid #0f172a;font-weight:700;margin-right:6px" onclick="if(requireWrite())openModal('stock-out-modal')">🚚 출고 처리</button>
           <button class="btn btn-sm pg-topbar-btn" style="background:#4338ca;color:#fff;border:1px solid #4338ca;font-weight:700;margin-right:6px" onclick="openStockMove()">🔁 재고 이동</button>
+          <button class="btn btn-sm pg-topbar-btn" style="background:#0f766e;color:#fff;border:1px solid #0f766e;font-weight:700;margin-right:6px" onclick="openConsignShip()" title="바로팜 등 위탁 판매업체로 재고이동 + 거래명세서 발행">🧾 위탁 출고</button>
           <button class="btn btn-outline btn-sm pg-topbar-btn" onclick="openWarehouseManager()">🏭 창고 관리</button>
           <div class="pg-topbar-search-wrap" style="margin-left:12px">
             <input class="fi pg-topbar-search" id="stock-search" placeholder="품목명·코드 검색" oninput="renderStockTable()">
@@ -6042,7 +6043,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.489';
+const ERP_VERSION = 'v2.3.490';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28170,6 +28171,312 @@ async function saveStockMove(){
   showNotif('재고 이동 중…','info');
   try{ if(typeof saveDataNow==='function') await saveDataNow(); else await _doSaveData(); showNotif(`재고 이동 완료: ${it.name} ${r.fromName}→${r.toName} ${fmt(qty)}개`,'success'); }
   catch(e){ showNotif('⚠️ 재고 이동 저장 실패: '+(e&&e.message||e),'error'); }
+}
+
+// ═══════════ v2.3.490: 위탁판매 Phase 1 — 제품별 공급가 + 재고이동 거래명세서 ═══════════
+//   바로팜 등 위탁 판매업체: 르니브 창고 → 바로팜 창고 재고이동 시 표준 거래명세서 자동생성·인쇄·이메일.
+//   제품별 공급가는 (sellerId,itemId) 로 기억(consignment_prices) → 다음 출고 시 자동 채움.
+//   출고 기록(consignment_shipments)은 Phase 2(월말 정산)의 원천 데이터.
+window._consign = window._consign || { prices:{}, shipments:[], loaded:false };
+async function _consignLoad(force){
+  if (window._consign.loaded && !force) return;
+  try { const p = await loadSharedSetting('consignment_prices'); window._consign.prices = (p && typeof p==='object' && !Array.isArray(p)) ? p : {}; } catch(_){ window._consign.prices = window._consign.prices||{}; }
+  try { const s = await loadSharedSetting('consignment_shipments'); window._consign.shipments = Array.isArray(s) ? s : []; } catch(_){ window._consign.shipments = window._consign.shipments||[]; }
+  window._consign.loaded = true;
+}
+async function _consignSavePrices(){ try { await saveSharedSetting('consignment_prices', window._consign.prices||{}); } catch(e){ console.warn('위탁단가 저장 실패', e); } }
+async function _consignSaveShipments(){ try { await saveSharedSetting('consignment_shipments', window._consign.shipments||[]); } catch(e){ console.warn('위탁 명세서 저장 실패', e); } }
+function _consignPriceKey(sellerId, itemId){ return String(sellerId) + '|' + String(itemId); }
+function _consignGetPrice(sellerId, itemId){ const v = (window._consign.prices||{})[_consignPriceKey(sellerId,itemId)]; return (v==null||v==='') ? '' : Number(v); }
+
+async function openConsignShip(){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  await _consignLoad(true);
+  try { if (typeof _whEnsureLoaded==='function') await _whEnsureLoaded(); } catch(_){}
+  document.getElementById('consign-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'consign-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:100000;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto';
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  const sellers = (DB.sellers||[]).slice().sort((a,b)=>String(a.company||'').localeCompare(String(b.company||'')));
+  const whs = (window._WH && Array.isArray(window._WH.list)) ? window._WH.list : [];
+  const sellerOpts = '<option value="">— 판매업체 선택 —</option>' + sellers.map(s=>'<option value="'+s.id+'">'+escapeHtml(s.company||'')+'</option>').join('');
+  const whOptsFrom = '<option value="__un__">미지정(전체)</option>' + whs.map(w=>'<option value="'+w.id+'">'+escapeHtml(w.name||'')+'</option>').join('');
+  const whOptsTo = '<option value="">— 입고 창고 선택 —</option>' + whs.map(w=>'<option value="'+w.id+'">'+escapeHtml(w.name||'')+'</option>').join('');
+  ov.innerHTML =
+    '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:min(920px,96vw);box-shadow:0 24px 60px rgba(15,23,42,.35);overflow:hidden;margin:auto">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 22px;background:linear-gradient(135deg,#5eead4 0%,#a5b4fc 100%)"><span style="font-size:16.5px;font-weight:800;color:#0f172a">🧾 위탁 출고 · 거래명세서</span><button onclick="document.getElementById(\'consign-overlay\').remove()" style="background:#fff;border:1px solid #e2e8f0;border-radius:50%;width:30px;height:30px;cursor:pointer;font-size:15px;color:#64748b">✕</button></div>'
+    + '<div style="padding:18px 22px;max-height:calc(100vh - 160px);overflow-y:auto">'
+    // ── 헤더 정보 ──
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">'
+    +   '<div class="fg" style="margin:0"><label>판매업체(수신처)<span class="req">*</span></label><select class="fs" id="cs-seller" onchange="_consignRefillPrices()">'+sellerOpts+'</select></div>'
+    +   '<div class="fg" style="margin:0"><label>출고일<span class="req">*</span></label><input class="fi" type="date" id="cs-date"></div>'
+    +   '<div class="fg" style="margin:0"><label>부가세</label><select class="fs" id="cs-vat" onchange="_consignRecalc()"><option value="exclude">별도(공급가+세액)</option><option value="include">포함(단가에 VAT 포함)</option></select></div>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+    +   '<div class="fg" style="margin:0"><label>출고 창고(르니브)</label><select class="fs" id="cs-wh-from">'+whOptsFrom+'</select></div>'
+    +   '<div class="fg" style="margin:0"><label>입고 창고(바로팜)<span class="req">*</span></label><select class="fs" id="cs-wh-to" onchange="_consignFillWhInfo()">'+whOptsTo+'</select></div>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin-bottom:14px">'
+    +   '<div class="fg" style="margin:0"><label>입고지(주소)</label><input class="fi" id="cs-recv-addr" placeholder="입고 창고 주소"></div>'
+    +   '<div class="fg" style="margin:0"><label>입고 담당자</label><input class="fi" id="cs-recv-mgr" placeholder="담당자명"></div>'
+    +   '<div class="fg" style="margin:0"><label>담당자 연락처</label><input class="fi" id="cs-recv-phone" placeholder="010-…"></div>'
+    + '</div>'
+    // ── 품목 라인 ──
+    + '<div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:8px">'
+    +   '<div style="display:grid;grid-template-columns:1fr 96px 84px 110px 120px 34px;gap:0;background:#f1f5f9;font-size:11px;font-weight:800;color:#475569;padding:8px 10px"><div>품목(완제품)</div><div style="text-align:center">규격</div><div style="text-align:center">수량</div><div style="text-align:right">공급단가</div><div style="text-align:right">공급가액</div><div></div></div>'
+    +   '<div id="cs-lines"></div>'
+    + '</div>'
+    + '<button class="btn btn-outline btn-sm" onclick="_consignAddLine()" style="margin-bottom:12px">+ 품목 추가</button>'
+    + '<div id="cs-total" style="text-align:right;font-size:14px;font-weight:800;color:#0f172a;margin-bottom:14px"></div>'
+    + '<div style="display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #f1f5f9;padding-top:14px">'
+    +   '<button class="btn btn-outline" onclick="document.getElementById(\'consign-overlay\').remove()">닫기</button>'
+    +   '<button class="btn btn-primary" style="background:#0f766e;border-color:#0f766e" onclick="_consignSubmit()">📦 재고이동 + 거래명세서 발행</button>'
+    + '</div>'
+    // ── 최근 명세서 목록 ──
+    + '<div style="margin-top:22px;border-top:2px solid #f1f5f9;padding-top:14px"><div style="font-size:13px;font-weight:800;color:#334155;margin-bottom:8px">📋 최근 위탁 거래명세서</div><div id="cs-ship-list"></div></div>'
+    + '</div></div>';
+  document.body.appendChild(ov);
+  document.getElementById('cs-date').value = today();
+  // 바로팜 자동선택 시도
+  const _baro = sellers.find(s=>/바로팜/.test(String(s.company||'')));
+  if (_baro) { document.getElementById('cs-seller').value = _baro.id; }
+  _consignAddLine();
+  _consignRenderList();
+}
+function _consignFillWhInfo(){
+  const w = _whById((document.getElementById('cs-wh-to')||{}).value);
+  if (!w) return;
+  const a=document.getElementById('cs-recv-addr'), m=document.getElementById('cs-recv-mgr'), p=document.getElementById('cs-recv-phone');
+  if (a && !a.value) a.value = w.address||'';
+  if (m && !m.value) m.value = w.manager||'';
+  if (p && !p.value) p.value = w.phone||'';
+}
+function _consignFinishedItems(){ return (DB.items||[]).filter(i=>i && i.type==='완제품'); }
+function _consignAddLine(){
+  const box=document.getElementById('cs-lines'); if(!box) return;
+  const idx = box.children.length;
+  const items = _consignFinishedItems();
+  const opts = '<option value="">— 품목 —</option>' + items.map(i=>'<option value="'+i.id+'">'+escapeHtml(i.name + (i.spec?' ('+i.spec+')':''))+'</option>').join('');
+  const row=document.createElement('div');
+  row.className='cs-line';
+  row.style.cssText='display:grid;grid-template-columns:1fr 96px 84px 110px 120px 34px;gap:0;align-items:center;padding:6px 10px;border-top:1px solid #f1f5f9';
+  row.innerHTML =
+      '<select class="fs cs-item" onchange="_consignLineItemChanged(this)" style="height:32px;font-size:12px">'+opts+'</select>'
+    + '<div class="cs-spec" style="text-align:center;font-size:11px;color:#64748b">-</div>'
+    + '<input class="fi cs-qty" type="number" min="0" value="" oninput="_consignRecalc()" style="height:32px;text-align:center;font-size:12px">'
+    + '<input class="fi cs-price" type="number" min="0" value="" oninput="_consignRecalc()" style="height:32px;text-align:right;font-size:12px">'
+    + '<div class="cs-amt" style="text-align:right;font-size:12px;font-weight:700;color:#0f172a">₩0</div>'
+    + '<button onclick="this.closest(\'.cs-line\').remove();_consignRecalc()" title="삭제" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:13px">✕</button>';
+  box.appendChild(row);
+}
+function _consignLineItemChanged(sel){
+  const row=sel.closest('.cs-line'); if(!row) return;
+  const it=(DB.items||[]).find(i=>String(i.id)===String(sel.value));
+  row.querySelector('.cs-spec').textContent = it ? (it.spec||'-') : '-';
+  const sellerId=(document.getElementById('cs-seller')||{}).value;
+  const pEl=row.querySelector('.cs-price');
+  if (it && sellerId) { const p=_consignGetPrice(sellerId, it.id); if (p!=='' && !pEl.value) pEl.value = p; }
+  _consignRecalc();
+}
+function _consignRefillPrices(){
+  const sellerId=(document.getElementById('cs-seller')||{}).value;
+  document.querySelectorAll('#cs-lines .cs-line').forEach(row=>{
+    const sel=row.querySelector('.cs-item'); const it=(DB.items||[]).find(i=>String(i.id)===String(sel.value));
+    const pEl=row.querySelector('.cs-price');
+    if (it && sellerId) { const p=_consignGetPrice(sellerId, it.id); if (p!=='') pEl.value = p; }
+  });
+  _consignRecalc();
+}
+function _consignRecalc(){
+  let sum=0;
+  document.querySelectorAll('#cs-lines .cs-line').forEach(row=>{
+    const q=Number(row.querySelector('.cs-qty').value)||0;
+    const pr=Number(row.querySelector('.cs-price').value)||0;
+    const amt=q*pr; sum+=amt;
+    row.querySelector('.cs-amt').textContent = '₩'+amt.toLocaleString();
+  });
+  const t=document.getElementById('cs-total');
+  if (t) t.innerHTML = '합계(공급단가 기준): <span style="color:#0f766e">₩'+sum.toLocaleString()+'</span>';
+}
+async function _consignSubmit(){
+  const sellerId=(document.getElementById('cs-seller')||{}).value;
+  const seller=(DB.sellers||[]).find(s=>String(s.id)===String(sellerId));
+  if(!seller){ alert('판매업체(수신처)를 선택하세요'); return; }
+  const whToId=(document.getElementById('cs-wh-to')||{}).value;
+  if(!whToId){ alert('입고 창고를 선택하세요'); return; }
+  const whFromId=(document.getElementById('cs-wh-from')||{}).value || '__un__';
+  if(whFromId===whToId){ alert('출고 창고와 입고 창고가 같습니다'); return; }
+  const date=(document.getElementById('cs-date')||{}).value || today();
+  const vatMode=(document.getElementById('cs-vat')||{}).value || 'exclude';
+  const lines=[];
+  let bad='';
+  document.querySelectorAll('#cs-lines .cs-line').forEach(row=>{
+    const it=(DB.items||[]).find(i=>String(i.id)===String(row.querySelector('.cs-item').value));
+    const qty=Number(row.querySelector('.cs-qty').value)||0;
+    const price=Number(row.querySelector('.cs-price').value)||0;
+    if(!it) return;
+    if(qty<=0){ bad = it.name+' 수량'; return; }
+    lines.push({ itemId:it.id, code:it.code||'', name:it.name||'', spec:it.spec||'', barcode:it.barcode||'', qty:qty, price:price });
+  });
+  if(!lines.length){ alert('품목을 1개 이상 추가하고 수량을 입력하세요'); return; }
+  if(bad){ alert(bad+'을(를) 입력하세요'); return; }
+  // 1) 재고이동 (르니브 창고 → 바로팜 창고)
+  const moveErrs=[];
+  for(const ln of lines){
+    const it=(DB.items||[]).find(i=>String(i.id)===String(ln.itemId));
+    const r=_applyStockMove(it, whFromId, whToId, ln.qty);
+    if(!r.ok) moveErrs.push(ln.name+': '+r.err);
+  }
+  if(moveErrs.length){
+    if(!confirm('일부 품목 재고이동 실패:\n'+moveErrs.join('\n')+'\n\n실패분을 제외하고 나머지로 명세서를 발행할까요?')){ return; }
+  }
+  const movedLines = lines.filter(ln=>!moveErrs.some(e=>e.indexOf(ln.name+':')===0));
+  if(!movedLines.length){ alert('이동된 품목이 없습니다'); return; }
+  // 2) 위탁 단가 기억
+  movedLines.forEach(ln=>{ window._consign.prices[_consignPriceKey(sellerId, ln.itemId)] = ln.price; });
+  // 3) 명세서 저장
+  let sid; do { sid = Date.now()*1000 + Math.floor(Math.random()*1000); } while ((window._consign.shipments||[]).some(x=>x&&x.id===sid));
+  const sh = {
+    id: sid, sellerId: seller.id, sellerName: seller.company||'',
+    date: date, vatMode: vatMode,
+    whFromId: whFromId, whFromName: whFromId==='__un__'?'미지정':_whName(whFromId),
+    whToId: whToId, whToName: _whName(whToId),
+    recvAddr:(document.getElementById('cs-recv-addr')||{}).value||'',
+    recvManager:(document.getElementById('cs-recv-mgr')||{}).value||'',
+    recvPhone:(document.getElementById('cs-recv-phone')||{}).value||'',
+    lines: movedLines,
+    createdAt: Date.now(), createdBy:(window._currentUser&&(window._currentUser.name||window._currentUser.email))||''
+  };
+  window._consign.shipments.push(sh);
+  await _consignSavePrices();
+  await _consignSaveShipments();
+  try { if(typeof renderStock==='function') renderStock(); } catch(_){}
+  try { await saveDataNow(); } catch(_){}   // 재고이동분 저장
+  showNotif('✅ 위탁 출고 완료 — 거래명세서 발행됨', 'success');
+  _consignRenderList();
+  // 폼 리셋(품목만)
+  document.getElementById('cs-lines').innerHTML=''; _consignAddLine(); _consignRecalc();
+  // 바로 인쇄 뷰 열기
+  _consignPrint(sid);
+}
+// 부가세 계산: exclude=단가가 공급가액 / include=단가에 VAT 포함(공급가액=단가/1.1)
+function _consignAmounts(sh){
+  const inc = sh.vatMode==='include';
+  let supply=0;
+  const rows = (sh.lines||[]).map(ln=>{
+    const line=(Number(ln.qty)||0)*(Number(ln.price)||0);
+    const s = inc ? Math.round(line/1.1) : line;   // 공급가액
+    const tax = inc ? (line - s) : Math.round(line*0.1);
+    supply += s;
+    return { ln, supply:s, tax };
+  });
+  const supplySum=rows.reduce((a,r)=>a+r.supply,0);
+  const taxSum=rows.reduce((a,r)=>a+r.tax,0);
+  return { rows, supplySum, taxSum, total: supplySum+taxSum };
+}
+// 표준 거래명세서 HTML
+function _consignStatementHtml(sh){
+  const ci = DB._companyInfo || {};
+  const A = _consignAmounts(sh);
+  const esc = s => escapeHtml(s==null?'':String(s));
+  const won = n => '₩'+(Number(n)||0).toLocaleString();
+  const supplierContact = (Array.isArray(ci.contacts)&&ci.contacts[0]) ? (ci.contacts[0].name+' / '+(ci.contacts[0].phone||'')) : '';
+  const rowsHtml = A.rows.map((r,i)=>
+    '<tr><td class="c">'+(i+1)+'</td><td>'+esc(r.ln.name)+'</td><td class="c">'+esc(r.ln.spec||'')+'</td>'
+    +'<td class="c">'+(Number(r.ln.qty)||0).toLocaleString()+'</td><td class="r">'+won(r.ln.price)+'</td>'
+    +'<td class="r">'+won(r.supply)+'</td><td class="r">'+won(r.tax)+'</td><td class="c" style="font-size:10px;color:#555">'+esc(r.ln.barcode||'')+'</td></tr>'
+  ).join('');
+  const emptyRows = Array.from({length: Math.max(0, 6 - A.rows.length)}).map(()=>'<tr><td class="c">&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('');
+  return ''
+  + '<div class="stmt">'
+  + '<h1>거 래 명 세 서</h1>'
+  + '<table class="hdr"><tr>'
+  +   '<td class="party"><div class="pt">공급받는 곳</div>'
+  +     '<table class="pinfo"><tr><th>수신처</th><td>'+esc(sh.sellerName)+'</td></tr>'
+  +     '<tr><th>담당자</th><td>'+esc(sh.recvManager||'-')+'</td></tr>'
+  +     '<tr><th>연락처</th><td>'+esc(sh.recvPhone||'-')+'</td></tr>'
+  +     '<tr><th>입고지</th><td>'+esc(sh.recvAddr||'-')+'</td></tr>'
+  +     '<tr><th>출고일</th><td>'+esc(sh.date||'-')+'</td></tr></table>'
+  +   '</td>'
+  +   '<td class="party"><div class="pt">공급자</div>'
+  +     '<table class="pinfo"><tr><th>등록번호</th><td>'+esc(ci.bizNo||'')+'</td></tr>'
+  +     '<tr><th>상호</th><td>'+esc(ci.company||'')+' (대표 '+esc(ci.ceo||'')+')</td></tr>'
+  +     '<tr><th>주소</th><td>'+esc(ci.addr||'')+'</td></tr>'
+  +     '<tr><th>업태 / 종목</th><td>'+esc(ci.bizType||'도소매')+' / '+esc(ci.bizItem||'화장품')+'</td></tr>'
+  +     '<tr><th>담당자</th><td>'+esc(supplierContact)+'</td></tr></table>'
+  +   '</td>'
+  + '</tr></table>'
+  + '<table class="items"><thead><tr><th style="width:34px">No.</th><th>품목명</th><th style="width:120px">규격</th><th style="width:60px">수량</th><th style="width:90px">공급단가</th><th style="width:100px">공급가액</th><th style="width:90px">세액</th><th style="width:100px">바코드</th></tr></thead>'
+  + '<tbody>'+rowsHtml+emptyRows+'</tbody>'
+  + '<tfoot><tr><td colspan="5" class="r" style="font-weight:800">합계</td><td class="r" style="font-weight:800">'+won(A.supplySum)+'</td><td class="r" style="font-weight:800">'+won(A.taxSum)+'</td><td></td></tr>'
+  + '<tr><td colspan="5" class="r" style="font-weight:900;background:#fffbe6">합계금액 (공급가액 + 세액)</td><td colspan="3" class="r" style="font-weight:900;background:#fffbe6;font-size:14px">'+won(A.total)+'</td></tr></tfoot></table>'
+  + '<div class="foot"><div>인수자 (입고 창고): _______________________ (서명/인)</div><div style="text-align:right">'+esc(sh.whToName||'')+' · '+esc(sh.recvManager||'')+'</div></div>'
+  + '</div>';
+}
+const _CONSIGN_PRINT_CSS = '@page{size:A4;margin:14mm}*{box-sizing:border-box;font-family:"Malgun Gothic",sans-serif}.stmt{color:#0f172a}h1{text-align:center;font-size:24px;letter-spacing:8px;margin:0 0 16px}table{border-collapse:collapse;width:100%}.hdr{margin-bottom:10px}.hdr>tbody>tr>td.party{width:50%;border:1px solid #333;padding:0;vertical-align:top}.pt{background:#f1f5f9;font-weight:800;text-align:center;padding:5px;border-bottom:1px solid #333;font-size:12px}.pinfo{width:100%}.pinfo th{background:#f8fafc;border:1px solid #e2e8f0;padding:5px 7px;font-size:11px;color:#475569;width:74px;text-align:left;font-weight:700}.pinfo td{border:1px solid #e2e8f0;padding:5px 8px;font-size:11.5px}.items th{background:#e2e8f0;border:1px solid #333;padding:6px 4px;font-size:11.5px}.items td{border:1px solid #333;padding:5px 6px;font-size:11.5px}.items .c{text-align:center}.items .r{text-align:right}.items tfoot td{border:1px solid #333;padding:6px}.foot{margin-top:22px;display:flex;justify-content:space-between;font-size:12px;color:#334155}';
+function _consignPrint(shId){
+  const sh=(window._consign.shipments||[]).find(x=>x&&String(x.id)===String(shId));
+  if(!sh){ showNotif('명세서를 찾을 수 없습니다','warning'); return; }
+  const w=window.open('','_blank');
+  if(!w){ alert('팝업이 차단되었습니다. 팝업을 허용해 주세요.'); return; }
+  w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>거래명세서 '+escapeHtml(sh.sellerName)+' '+escapeHtml(sh.date)+'</title><style>'+_CONSIGN_PRINT_CSS
+    +'.bar{position:fixed;top:0;left:0;right:0;background:#0f172a;color:#fff;padding:8px;text-align:center;z-index:9}@media print{.bar{display:none}}</style></head><body>'
+    +'<div class="bar"><button onclick="window.print()" style="padding:6px 16px;font-weight:700;cursor:pointer">🖨 인쇄 / PDF 저장</button></div><div style="height:44px"></div>'
+    + _consignStatementHtml(sh)
+    +'<script>setTimeout(function(){try{window.focus();window.print();}catch(e){}},400);<\/script></body></html>');
+  w.document.close();
+}
+// 거래명세서 이메일 — HTML 본문 .eml (첨부 없이 Outlook 새 메일에 표 그대로)
+function _consignEmail(shId){
+  const sh=(window._consign.shipments||[]).find(x=>x&&String(x.id)===String(shId));
+  if(!sh){ showNotif('명세서를 찾을 수 없습니다','warning'); return; }
+  const seller=(DB.sellers||[]).find(s=>String(s.id)===String(sh.sellerId));
+  let to='';
+  try { const cs=(typeof _partnerNormalizeContacts==='function')?_partnerNormalizeContacts(seller||{}):[]; to=(cs.find(c=>c.email)||{}).email||''; } catch(_){}
+  const A=_consignAmounts(sh);
+  const subject='[르니브] 거래명세서 — '+(sh.sellerName||'')+' ('+(sh.date||'')+')';
+  const utf8Base64 = s => btoa(unescape(encodeURIComponent(s)));
+  const bodyHtml = '<div style="font-family:Malgun Gothic,sans-serif;color:#0f172a">'
+    + '<p>'+escapeHtml(sh.recvManager||'담당자')+'님, 르니브 거래명세서 송부드립니다.</p>'
+    + '<p>· 출고일: '+escapeHtml(sh.date||'')+'<br>· 입고 창고: '+escapeHtml(sh.whToName||'')+'<br>· 합계금액(VAT포함): <b>₩'+A.total.toLocaleString()+'</b></p>'
+    + _consignStatementHtml(sh).replace('<style>','')
+    + '<p>확인 부탁드립니다. 감사합니다.<br>㈜르니브</p></div>';
+  const fullHtml='<html><head><meta charset="utf-8"><style>'+_CONSIGN_PRINT_CSS+'</style></head><body>'+bodyHtml+'</body></html>';
+  const boundary='----=_RenivStmt_'+Date.now().toString(36);
+  const eml = (to?('To: '+to+'\r\n'):'')
+    + 'X-Unsent: 1\r\nSubject: =?UTF-8?B?'+utf8Base64(subject)+'?=\r\nMIME-Version: 1.0\r\n'
+    + 'Content-Type: multipart/alternative; boundary="'+boundary+'"\r\n\r\n'
+    + '--'+boundary+'\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n'
+    + utf8Base64(fullHtml).match(/.{1,76}/g).join('\r\n')+'\r\n\r\n--'+boundary+'--\r\n';
+  const blob=new Blob([eml],{type:'message/rfc822'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='거래명세서_'+(sh.sellerName||'')+'_'+(sh.date||'')+'.eml';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),200);
+  showNotif('✉️ 거래명세서 메일(.eml) 다운로드 — Outlook 새 메일 창이 열립니다'+(to?'':' (받는사람 미설정 — 직접 입력)'),'info');
+}
+async function _consignDelete(shId){
+  if(!confirm('이 거래명세서 기록을 삭제하시겠습니까?\n(이미 반영된 재고이동은 되돌아가지 않습니다)')) return;
+  window._consign.shipments=(window._consign.shipments||[]).filter(x=>x&&String(x.id)!==String(shId));
+  await _consignSaveShipments();
+  _consignRenderList();
+}
+function _consignRenderList(){
+  const box=document.getElementById('cs-ship-list'); if(!box) return;
+  const list=(window._consign.shipments||[]).slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,20);
+  if(!list.length){ box.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:10px">아직 발행한 거래명세서가 없습니다.</div>'; return; }
+  box.innerHTML=list.map(sh=>{
+    const A=_consignAmounts(sh);
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:6px;background:#fff">'
+      +'<div style="min-width:0"><div style="font-size:12.5px;font-weight:700;color:#0f172a">'+escapeHtml(sh.sellerName||'')+' · '+escapeHtml(sh.whToName||'')+'</div>'
+      +'<div style="font-size:11px;color:#64748b">'+escapeHtml(sh.date||'')+' · 품목 '+(sh.lines||[]).length+'종 · 합계 ₩'+A.total.toLocaleString()+'</div></div>'
+      +'<div style="display:flex;gap:5px;flex-shrink:0">'
+      +'<button class="btn btn-outline btn-sm" style="padding:3px 9px" onclick="_consignPrint(\''+sh.id+'\')">🖨 발행</button>'
+      +'<button class="btn btn-outline btn-sm" style="padding:3px 9px" onclick="_consignEmail(\''+sh.id+'\')">✉ 이메일</button>'
+      +'<button class="btn btn-outline btn-sm" style="padding:3px 9px;color:#dc2626;border-color:#fca5a5" onclick="_consignDelete(\''+sh.id+'\')">🗑</button>'
+      +'</div></div>';
+  }).join('');
 }
 
 // ── v2.3.371: 품목 창고 패널 — 재고현황 '창고' 셀 클릭 시 열림.
@@ -55320,6 +55627,7 @@ function _sharedSettingCollection(key) {
       || k === 'gemini_api_key' || k === 'claude_api_key' || k === 'warehouse_list'
       || k === 'pluscl_stock' || k === 'pluscl_item_map' || k === 'ad_refunds'
       || k === 'approval_signatures' || k === 'pharmacy_cal_events' || k === 'claims'
+      || /^consignment_/.test(k)  // v2.3.490: 위탁판매(제품별 공급가·출고 명세서) — 전 직원 공유
       // v2.3.470: 데일리 브리핑 '오늘 보냄' 가드 — 비밀 없음({lastSentDate,sentBy,ts}). settings/ 로 가면
       //   비관리자가 못 읽어(관리자 전용 read) 각 기기가 중복 발송한다(하루 4번 사고). 전 직원 read 필요 → shared/.
       || k === 'slack_digest_state') return 'shared';
