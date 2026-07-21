@@ -6042,7 +6042,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.484';
+const ERP_VERSION = 'v2.3.485';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -43729,7 +43729,17 @@ function _apCommentSig(c){
   //   중복본(ghost)으로 흩어져도 tombstone 으로 일괄 차단(부활 방지). 공백 정규화로 사소한 차이 흡수.
   //   (v2.3.292 의 author|text|createdAt 는 ghost 의 createdAt/author 가 달라 부활을 못 막았음)
   const t = String(c.text==null?'':c.text).replace(/\s+/g,' ').trim();
-  if(t.length < 4) return '';  // 너무 짧은 본문은 서로 다른 결재의 동일 단어 동반삭제 위험 → sig 무효
+  if(t.length < 4) {
+    // v2.3.485: 파일-only 댓글(텍스트 없음/짧음)은 sig 가 없어 방어선이 id tombstone 하나뿐이었고,
+    //   meta 통째 덮어쓰기(stale 탭)로 tombstone 이 소거되면 부활을 못 막았다(PDF 첨부 의견 반복 부활 사건).
+    //   → 첨부 name+size 조합으로 결정적 sig 생성('F' prefix — 텍스트 sig 'H' 와 구분, 충돌 방지).
+    const ats = Array.isArray(c.attachments) ? c.attachments : (Array.isArray(c.files) ? c.files : []);
+    const key = ats.map(a => a ? (String(a.name||'') + ':' + String(a.size||0)) : '').filter(Boolean).join('|');
+    if (!key) return '';
+    let h2 = 5381;
+    for (let i = 0; i < key.length; i++) { h2 = (((h2 << 5) + h2) + key.charCodeAt(i)) | 0; }
+    return 'F' + (h2 >>> 0).toString(36) + '_' + key.length;
+  }
   // v2.3.300: 본문 전체 대신 짧은 해시(djb2)+길이 — full-text sig 가 meta 문서를 1MB 초과시켜
   //   저장 실패→삭제 부활하던 문제 해결(진단 sig톰=0/idLom=7 로 확인). 같은 본문이면 같은 해시(결정적)라
   //   id/작성자/시각이 다른 ghost 도 동일 식별. 길이 동봉으로 충돌 위험 최소화.
@@ -43764,6 +43774,14 @@ function deleteComment(commentId) {
   if (DB._deletedCommentIds.length > 1000) {
     DB._deletedCommentIds = DB._deletedCommentIds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 1000);
   }
+  // v2.3.485: 별도 localStorage 금고(stash) — 같은 브라우저의 stale 탭이 STORE_KEY 통째 저장으로
+  //   로컬 tombstone 까지 소거하던 부활 루프 차단(samples reniv_deleted_sample_ids 동형).
+  //   로드 머지 union 이 이 금고도 합산해, meta 가 클로버돼도 이 기기에선 항상 차단 + 재전파.
+  try {
+    const _st = JSON.parse(localStorage.getItem('reniv_deleted_comment_ids')||'[]') || [];
+    idsToRemove.forEach(id => _st.push({ id: String(id), ts: _now }));
+    localStorage.setItem('reniv_deleted_comment_ids', JSON.stringify(_st.slice(-500)));
+  } catch(_){}
   // tombstone 등록 (sig) — v2.3.288
   if (!Array.isArray(DB._deletedCommentSigs)) DB._deletedCommentSigs = [];
   _removedSigs.forEach(s => DB._deletedCommentSigs.push({ sig: s, ts: _now }));
@@ -56813,8 +56831,11 @@ function initERPWhenReady() {
         // v1.9.661: 결재 의견 tombstone 머지
         const fsCmT = Array.isArray(firestoreDB._deletedCommentIds) ? firestoreDB._deletedCommentIds : [];
         const lcCmT = Array.isArray(localDB._deletedCommentIds) ? localDB._deletedCommentIds : [];
+        // v2.3.485: 별도 금고(stash)도 합산 — 메인 tombstone 이 meta 클로버/STORE_KEY 덮어쓰기로 소거돼도 살아남음
+        let lsCmT = [];
+        try { lsCmT = JSON.parse(localStorage.getItem('reniv_deleted_comment_ids')||'[]') || []; } catch(_){}
         const cmTByKey = new Map();
-        [...fsCmT, ...lcCmT].forEach(x => {
+        [...fsCmT, ...lcCmT, ...lsCmT].forEach(x => {
           if (!x || x.id == null) return;
           const k = String(x.id);
           const prev = cmTByKey.get(k);
