@@ -1041,7 +1041,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     <div class="nav-item" onclick="clickNavItem('sales','sales-sub')" id="nav-sales"><span class="ico">📊</span>판매 관리</div>
     <div class="nav-sub" id="sales-sub">
       <div class="nav-item" onclick="go('sales');switchSalesTab('orders')"><span class="ico">📦</span>주문 관리</div>
-      <div class="nav-item" onclick="openConsignShip()" title="바로팜 등 위탁 판매처 창고로 재고이동 + 거래명세서 발행 (재고관리의 위탁 재고이동과 동일)"><span class="ico">🧾</span>위탁 재고이동</div>
+      <div class="nav-item" onclick="go('consign')" title="바로팜 등 위탁 판매처 창고로 재고이동 + 거래명세서 발행"><span class="ico">🧾</span>위탁 재고이동</div>
       <div class="nav-item" onclick="go('sales');switchSalesTab('margin')"><span class="ico">💰</span>마진 분석</div>
       <!-- v2.2.8: 쇼핑몰 메뉴는 거래처 정보 > 쇼핑몰 탭에서만 노출 (판매 관리에서 제거) -->
       <div class="nav-item" onclick="go('ads')"><span class="ico">📢</span>광고비 관리</div>
@@ -1897,7 +1897,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <button class="btn btn-sm pg-topbar-btn" style="background:#0f172a;color:#fff;border:1px solid #0f172a;margin-right:6px;font-weight:700" onclick="if(requireWrite())openModal('stock-in-modal')">📥 입고 처리</button>
           <button class="btn btn-sm pg-topbar-btn" style="background:#0f172a;color:#fff;border:1px solid #0f172a;font-weight:700;margin-right:6px" onclick="if(requireWrite())openModal('stock-out-modal')">🚚 출고 처리</button>
           <button class="btn btn-sm pg-topbar-btn" style="background:#4338ca;color:#fff;border:1px solid #4338ca;font-weight:700;margin-right:6px" onclick="openStockMove()">🔁 재고 이동</button>
-          <button class="btn btn-sm pg-topbar-btn" style="background:#0f766e;color:#fff;border:1px solid #0f766e;font-weight:700;margin-right:6px" onclick="openConsignShip()" title="바로팜 등 위탁 판매처 창고로 재고이동 + 거래명세서 발행">🧾 위탁 재고이동</button>
+          <button class="btn btn-sm pg-topbar-btn" style="background:#0f766e;color:#fff;border:1px solid #0f766e;font-weight:700;margin-right:6px" onclick="go('consign')" title="바로팜 등 위탁 판매처 창고로 재고이동 + 거래명세서 발행 페이지로 이동">🧾 위탁 재고이동</button>
           <button class="btn btn-outline btn-sm pg-topbar-btn" onclick="openWarehouseManager()">🏭 창고 관리</button>
           <div class="pg-topbar-search-wrap" style="margin-left:12px">
             <input class="fi pg-topbar-search" id="stock-search" placeholder="품목명·코드 검색" oninput="renderStockTable()">
@@ -2967,6 +2967,20 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div class="modal-hdr" style="background:linear-gradient(135deg,#f97316 0%,#ef4444 100%);border-bottom:none"><span class="modal-ttl" style="color:#fff;font-weight:700;font-size:16.5px">⚠️ 클레임 상세</span><button class="modal-x" onclick="closeModal('claim-detail-modal')" style="color:#fff;background:rgba(255,255,255,.15);border-radius:6px">✕</button></div>
           <div class="modal-body" id="claim-detail-body" style="max-height:70vh;overflow-y:auto"></div>
           <div class="modal-ft"><button class="btn btn-outline" onclick="closeModal('claim-detail-modal')">닫기</button><button class="btn btn-primary" id="claim-detail-edit-btn">수정</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ 🧾 위탁 재고이동 ══════════════ v2.3.500 -->
+    <div class="page" id="page-consign">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+        <button class="btn" style="background:#0f766e;color:#fff;border:1px solid #0f766e;font-weight:700;font-size:13px;padding:8px 18px;border-radius:8px" onclick="openConsignShip()">＋ 위탁 재고이동 추가</button>
+        <span style="font-size:12px;color:var(--gray-400)">르니브 창고 → 위탁 판매처 창고 재고이동 + 거래명세서 발행</span>
+      </div>
+      <div class="card">
+        <div class="card-hdr"><span class="card-title">🧾 위탁 재고이동 목록</span><span id="consign-count" style="margin-left:8px;font-size:12px;color:var(--gray-400)"></span></div>
+        <div class="card-body" style="overflow-x:auto">
+          <table class="tbl" style="text-align:center"><thead><tr><th style="width:100px">출고일</th><th>판매업체</th><th>입고 창고</th><th>품목</th><th style="width:120px">합계금액</th><th style="width:230px">관리</th></tr></thead><tbody id="consign-table"></tbody></table>
         </div>
       </div>
     </div>
@@ -6047,7 +6061,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.499';
+const ERP_VERSION = 'v2.3.500';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -11525,7 +11539,7 @@ const PAGE_TITLES = {
   archive:'📥 아카이브',
   bom:'BOM 관리',production:'생산 현황',stock:'재고 관리',quote:'견적서',
   order:'발주서',sites:'사이트 / 계정',insight:'🌱 신제품 개발',accounts:'🔑 외부 계정',users:'사용자 관리',qc:'품질 관리',cost:'원가 분석',settings:'설정 프로필',
-  cs:'CS 관리',customers:'👥 고객 정보',claims:'⚠️ 클레임 관리',sales:'판매 관리',approval:'🖋️ 결재 관리',ads:'📢 광고비 관리',
+  cs:'CS 관리',customers:'👥 고객 정보',claims:'⚠️ 클레임 관리',consign:'🧾 위탁 재고이동',sales:'판매 관리',approval:'🖋️ 결재 관리',ads:'📢 광고비 관리',
   costest:'💰 생산 예상 비용',
   recurring:'🔁 정기 결제',
   finance:'💰 재무 관리'
@@ -11538,6 +11552,8 @@ function go(page) {
   if (page === 'ads') setTimeout(() => { try { renderAdsPage(); } catch(_){} }, 0);
   // v2.3.463 — 클레임 관리 페이지 진입 시 자동 렌더
   if (page === 'claims') setTimeout(() => { try { renderClaims(); } catch(_){} }, 0);
+  // v2.3.500 — 위탁 재고이동 페이지 진입 시 자동 렌더
+  if (page === 'consign') setTimeout(() => { try { renderConsignPage(); } catch(_){} }, 0);
 
   // v1.9.152 — '업무 현황'은 부모 전용(자체 페이지 없음) → 기본 워크플로우로 리다이렉트
   if (page === 'work') page = 'workflow';
@@ -28278,9 +28294,7 @@ async function openConsignShip(editId){
     +   '<button class="btn btn-outline" onclick="document.getElementById(\'consign-overlay\').remove()">닫기</button>'
     +   '<button class="btn btn-primary" id="cs-submit-btn" style="background:#0f766e;border-color:#0f766e" onclick="_consignSubmit()">💾 저장 (재고이동 완료)</button>'
     + '</div>'
-    + '<div style="text-align:right;font-size:11px;color:#94a3b8;margin-top:5px">저장하면 재고이동이 완료됩니다. 거래명세서 인쇄·이메일은 아래 목록의 버튼으로.</div>'
-    // ── 최근 명세서 목록 ──
-    + '<div style="margin-top:22px;border-top:2px solid #f1f5f9;padding-top:14px"><div style="font-size:13px;font-weight:800;color:#334155;margin-bottom:8px">📋 최근 위탁 거래명세서</div><div id="cs-ship-list"></div></div>'
+    + '<div style="text-align:right;font-size:11px;color:#94a3b8;margin-top:5px">저장하면 재고이동이 완료되고 목록에 추가됩니다. 거래명세서 발행·이메일은 목록의 버튼으로.</div>'
     + '</div></div>';
   document.body.appendChild(ov);
   document.getElementById('cs-date').value = today();
@@ -28451,11 +28465,10 @@ async function _consignSubmit(){
   try { if(typeof renderStock==='function') renderStock(); } catch(_){}
   try { await saveDataNow(); } catch(_){}
   window._consignEditId=null;
-  showNotif(orig?'✅ 위탁 명세서 수정 저장 — 재고 차이 반영됨':'✅ 위탁 재고이동 완료 — 거래명세서 저장됨','success');
-  _consignRenderList();
-  document.getElementById('cs-lines').innerHTML='';
-  const _b=document.getElementById('cs-submit-btn'); if(_b) _b.textContent='💾 저장 (재고이동 완료)';
-  _consignAddLine(); _consignRecalc();
+  showNotif(orig?'✅ 위탁 명세서 수정 저장 — 재고 차이 반영됨':'✅ 위탁 재고이동 완료 — 목록에 추가됨','success');
+  // v2.3.500: 저장 후 폼 닫고 페이지 목록 갱신
+  try { document.getElementById('consign-overlay')?.remove(); } catch(_){}
+  try { renderConsignPage(); } catch(_){}
 }
 // 부가세 계산: exclude=단가가 공급가액 / include=단가에 VAT 포함(공급가액=단가/1.1)
 function _consignAmounts(sh){
@@ -28559,21 +28572,31 @@ async function _consignDelete(shId){
   await _consignSaveShipments();
   _consignRenderList();
 }
-function _consignRenderList(){
-  const box=document.getElementById('cs-ship-list'); if(!box) return;
-  const list=(window._consign.shipments||[]).slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,20);
-  if(!list.length){ box.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:10px">아직 발행한 거래명세서가 없습니다.</div>'; return; }
-  box.innerHTML=list.map(sh=>{
+// v2.3.500: 목록은 전용 페이지(page-consign)에서 관리 — 기존 호출부 호환용 별칭
+function _consignRenderList(){ try { renderConsignPage(); } catch(_){} }
+async function renderConsignPage(){
+  const tb=document.getElementById('consign-table'); if(!tb) return;
+  if(!window._consign.loaded){ tb.innerHTML='<tr><td colspan="6" style="padding:24px;color:var(--gray-400)">불러오는 중…</td></tr>'; await _consignLoad(true); }
+  const list=(window._consign.shipments||[]).slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||( (b.createdAt||0)-(a.createdAt||0) ));
+  const cnt=document.getElementById('consign-count'); if(cnt) cnt.textContent='총 '+list.length+'건';
+  if(!list.length){ tb.innerHTML='<tr><td colspan="6" style="padding:28px;color:var(--gray-400)">아직 위탁 재고이동 기록이 없습니다. 상단 “＋ 위탁 재고이동 추가” 로 등록하세요.</td></tr>'; return; }
+  tb.innerHTML=list.map(sh=>{
     const A=_consignAmounts(sh);
-    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:6px;background:#fff">'
-      +'<div style="min-width:0"><div style="font-size:12.5px;font-weight:700;color:#0f172a">'+escapeHtml(sh.sellerName||'')+' · '+escapeHtml(sh.whToName||'')+'</div>'
-      +'<div style="font-size:11px;color:#64748b">'+escapeHtml(sh.date||'')+' · 품목 '+(sh.lines||[]).length+'종 · 합계 ₩'+A.total.toLocaleString()+'</div></div>'
-      +'<div style="display:flex;gap:5px;flex-shrink:0">'
-      +'<button class="btn btn-outline btn-sm" style="padding:3px 9px" onclick="_consignPrint(\''+sh.id+'\')">🖨 발행</button>'
-      +'<button class="btn btn-outline btn-sm" style="padding:3px 9px" onclick="_consignEmail(\''+sh.id+'\')">✉ 이메일</button>'
-      +'<button class="btn btn-outline btn-sm" style="padding:3px 9px" onclick="openConsignShip(\''+sh.id+'\')">✏ 수정</button>'
-      +'<button class="btn btn-outline btn-sm" style="padding:3px 9px;color:#dc2626;border-color:#fca5a5" onclick="_consignDelete(\''+sh.id+'\')">🗑</button>'
-      +'</div></div>';
+    const lines=sh.lines||[];
+    const qtySum=lines.reduce((s,l)=>s+(Number(l.qty)||0),0);
+    const itemsTxt=lines.length ? (escapeHtml(lines[0].name||'')+(lines.length>1?' 외 '+(lines.length-1)+'종':'')) : '-';
+    return '<tr>'
+      +'<td>'+escapeHtml(sh.date||'-')+'</td>'
+      +'<td style="font-weight:600">'+escapeHtml(sh.sellerName||'-')+'</td>'
+      +'<td>'+escapeHtml(sh.whToName||'-')+'</td>'
+      +'<td style="text-align:left">'+itemsTxt+' <span style="color:var(--gray-400);font-size:11px">('+qtySum.toLocaleString()+'개)</span></td>'
+      +'<td style="text-align:right;font-weight:700;color:#0f766e">₩'+A.total.toLocaleString()+'</td>'
+      +'<td><div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">'
+      +'<button class="btn btn-outline btn-sm" style="padding:3px 9px;font-size:11.5px" onclick="_consignPrint(\''+sh.id+'\')">🖨 명세서 발행</button>'
+      +'<button class="btn btn-outline btn-sm" style="padding:3px 9px;font-size:11.5px" onclick="_consignEmail(\''+sh.id+'\')">✉ 이메일</button>'
+      +'<button class="btn btn-outline btn-sm" style="padding:3px 9px;font-size:11.5px" onclick="openConsignShip(\''+sh.id+'\')">✏ 수정</button>'
+      +'<button class="btn btn-outline btn-sm" style="padding:3px 9px;font-size:11.5px;color:#dc2626;border-color:#fca5a5" onclick="_consignDelete(\''+sh.id+'\')">🗑</button>'
+      +'</div></td></tr>';
   }).join('');
 }
 
@@ -56536,7 +56559,7 @@ function initERPWhenReady() {
     try { updateBadges(); } catch(e) { console.warn('updateBadges 실패:', e); }
     // v1.9.316 — 새로고침 시 마지막 머물렀던 페이지 복원 (기본: dashboard)
     try {
-      const KNOWN_PAGES = ['dashboard','feedshare','workflow','calendar','gdrive','vendor','item','archive','bom','production','stock','quote','order','approval','sites','accounts','insight','users','qc','cost','cs','claims','sales','settings','recurring'];
+      const KNOWN_PAGES = ['dashboard','feedshare','workflow','calendar','gdrive','vendor','item','archive','bom','production','stock','quote','order','approval','sites','accounts','insight','users','qc','cost','cs','claims','consign','sales','settings','recurring'];
       // v1.9.976: 같은 탭 새로고침이면 마지막 페이지 복원, 처음 접속/새 탭/브라우저 재시작이면 dashboard
       //   sessionStorage 는 같은 탭이 살아있는 동안만 유지(새로고침=유지, 탭닫기/재시작=초기화)
       if (typeof window._v976_freshSession === 'undefined') {
