@@ -6061,7 +6061,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.502';
+const ERP_VERSION = 'v2.3.503';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -25377,10 +25377,11 @@ function _renderItemSupplyList(){
       +'<div style="display:grid;grid-template-columns:1fr 26px;gap:6px;align-items:center;margin-bottom:5px">'
       +  '<select class="fs" style="height:32px;font-size:12px" onchange="_itemSupplySet('+i+',\'sellerId\',this.value)">'+opts+'</select>'
       +  '<button type="button" onclick="_itemSupplyRemove('+i+')" title="삭제" style="background:none;border:none;color:#dc2626;cursor:pointer">✕</button></div>'
-      +'<div style="display:grid;grid-template-columns:1fr 110px 118px;gap:6px;align-items:center">'
+      +'<div style="display:grid;grid-template-columns:1fr 92px 102px 102px;gap:6px;align-items:center">'
       +  '<input class="fi" style="height:32px;font-size:12px" placeholder="거래처 품목명 (명세서 표기)" value="'+escapeHtml(r.itemName||'')+'" oninput="_itemSupplySet('+i+',\'itemName\',this.value)" onblur="_itemSupplyRefreshNamePick()">'
       +  '<input class="fi" type="number" min="0" style="height:32px;font-size:12px;text-align:right" placeholder="공급가" value="'+(r.price!=null?r.price:'')+'" oninput="_itemSupplySet('+i+',\'price\',this.value)">'
       +  '<select class="fs" style="height:32px;font-size:11.5px" onchange="_itemSupplySet('+i+',\'vat\',this.value)"><option value="exclude"'+(r.vat!=='include'?' selected':'')+'>부가세 별도</option><option value="include"'+(r.vat==='include'?' selected':'')+'>부가세 포함</option></select>'
+      +  '<input class="fi" style="height:32px;font-size:12px" placeholder="재고ID (예: reniv1)" value="'+escapeHtml(r.stockId||'')+'" oninput="_itemSupplySet('+i+',\'stockId\',this.value)" title="위탁처 시스템의 재고 ID — 거래명세서 재고ID 열에 표기">'
       +'</div></div>';
   }).join('');
   _itemSupplyRefreshNamePick();
@@ -25388,11 +25389,11 @@ function _renderItemSupplyList(){
 function _itemSupplyAddRow(){ (window._itemSupplyPrices=window._itemSupplyPrices||[]).push({sellerId:'',price:'',vat:'exclude'}); _renderItemSupplyList(); }
 function _itemSupplySet(i,k,v){ if(window._itemSupplyPrices&&window._itemSupplyPrices[i]){ window._itemSupplyPrices[i][k]=(k==='price')?(v===''?'':Number(v)):v; } }
 function _itemSupplyRemove(i){ if(window._itemSupplyPrices){ window._itemSupplyPrices.splice(i,1); _renderItemSupplyList(); } }
-function _itemSupplyForSave(){ return (window._itemSupplyPrices||[]).filter(r=>r&&r.sellerId&&((r.price!==''&&r.price!=null)||(r.itemName&&r.itemName.trim()))).map(r=>({sellerId:r.sellerId, itemName:(r.itemName||'').trim(), price:(r.price===''||r.price==null)?'':(Number(r.price)||0), vat:r.vat==='include'?'include':'exclude'})); }
+function _itemSupplyForSave(){ return (window._itemSupplyPrices||[]).filter(r=>r&&r.sellerId&&((r.price!==''&&r.price!=null)||(r.itemName&&r.itemName.trim())||(r.stockId&&r.stockId.trim()))).map(r=>({sellerId:r.sellerId, itemName:(r.itemName||'').trim(), price:(r.price===''||r.price==null)?'':(Number(r.price)||0), vat:r.vat==='include'?'include':'exclude', stockId:(r.stockId||'').trim()})); }
 function _itemSupplyPrice(item, sellerId){
   if(!item||!Array.isArray(item.supplyPrices)) return null;
   const row=item.supplyPrices.find(r=>r&&String(r.sellerId)===String(sellerId));
-  return row?{price:(row.price===''||row.price==null)?'':(Number(row.price)||0), vat:row.vat==='include'?'include':'exclude', itemName:(row.itemName||'').trim()}:null;
+  return row?{price:(row.price===''||row.price==null)?'':(Number(row.price)||0), vat:row.vat==='include'?'include':'exclude', itemName:(row.itemName||'').trim(), stockId:(row.stockId||'').trim()}:null;
 }
 
 function editItem(id) {
@@ -28369,10 +28370,19 @@ function _consignApplyVatFrom(sp){
 function _consignLineItemChanged(sel){
   const row=sel.closest('.cs-line'); if(!row) return;
   const it=(DB.items||[]).find(i=>String(i.id)===String(sel.value));
-  row.querySelector('.cs-spec').textContent = it ? (it.spec||'-') : '-';
+  const sc=row.querySelector('.cs-spec');
+  sc.textContent = it ? (it.spec||'-') : '-';
   const sellerId=(document.getElementById('cs-seller')||{}).value;
   const pEl=row.querySelector('.cs-price');
-  if (it && sellerId) { const sp=_itemSupplyPrice(it, sellerId); if (sp) { if(sp.price!=='' && !pEl.value) pEl.value = sp.price; _consignApplyVatFrom(sp); if(sp.itemName){ const sc=row.querySelector('.cs-spec'); if(sc) sc.title='명세서 표기: '+sp.itemName; } } }
+  if (it && sellerId) {
+    const sp=_itemSupplyPrice(it, sellerId);
+    if (sp) { if(sp.price!=='' && !pEl.value) pEl.value = sp.price; _consignApplyVatFrom(sp); if(sp.itemName) sc.title='명세서 표기: '+sp.itemName; }
+    // v2.3.503: 재고ID(위탁처) 미입력 시 품목정보 바로가기 — 명세서 재고ID 열이 비게 되므로 안내
+    if (!sp || !sp.stockId) {
+      sc.innerHTML = escapeHtml(it.spec||'-')
+        + '<div><a href="javascript:void(0)" onclick="if(confirm(\'재고ID 는 품목정보의 거래처 카드에서 입력합니다.\\n지금 이동할까요? (작성 중인 내용은 닫힙니다)\')){document.getElementById(\'consign-overlay\')?.remove();editItem('+it.id+');}" style="font-size:10px;color:#dc2626;text-decoration:underline">재고ID 미입력 →입력</a></div>';
+    }
+  }
   _consignRecalc();
 }
 function _consignRefillPrices(){
@@ -28419,7 +28429,7 @@ async function _consignSubmit(){
     if(qty<=0){ bad = it.name+' 수량'; return; }
     const _sp=_itemSupplyPrice(it, sellerId);
     const _dispName=(_sp && _sp.itemName) ? _sp.itemName : (it.name||'');  // v2.3.492: 거래처 품목명 우선
-    lines.push({ itemId:it.id, code:it.code||'', name:_dispName, erpName:it.name||'', spec:it.spec||'', barcode:it.barcode||'', qty:qty, price:price });
+    lines.push({ itemId:it.id, code:it.code||'', name:_dispName, erpName:it.name||'', spec:it.spec||'', barcode:it.barcode||'', stockId:(_sp&&_sp.stockId)?_sp.stockId:'', qty:qty, price:price });
   });
   if(!lines.length){ alert('품목을 1개 이상 추가하고 수량을 입력하세요'); return; }
   if(bad){ alert(bad+'을(를) 입력하세요'); return; }
@@ -28492,12 +28502,23 @@ function _consignStatementHtml(sh){
   const esc = s => escapeHtml(s==null?'':String(s));
   const won = n => '₩'+(Number(n)||0).toLocaleString();
   const supplierContact = (Array.isArray(ci.contacts)&&ci.contacts[0]) ? (ci.contacts[0].name+' / '+(ci.contacts[0].phone||'')) : '';
-  const rowsHtml = A.rows.map((r,i)=>
-    '<tr><td class="c">'+(i+1)+'</td><td>'+esc(r.ln.name)+'</td><td class="c">'+esc(r.ln.spec||'')+'</td>'
-    +'<td class="c">'+(Number(r.ln.qty)||0).toLocaleString()+'</td><td class="r">'+won(r.ln.price)+'</td>'
-    +'<td class="r">'+won(r.supply)+'</td><td class="r">'+won(r.tax)+'</td><td class="c" style="font-size:10px;color:#555">'+esc(r.ln.barcode||'')+'</td></tr>'
-  ).join('');
-  const emptyRows = Array.from({length: Math.max(0, 6 - A.rows.length)}).map(()=>'<tr><td class="c">&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('');
+  // v2.3.503: VAT 포함 기준으로 단순화(공급단가·총액 모두 VAT포함, 세액 열 제거) + 재고ID(위탁처) 열.
+  //   재고ID 는 품목정보 거래처 카드(supplyPrices[].stockId)에서 자동 — 구버전 저장분은 라이브 조회 폴백.
+  const _stockIdOf = (ln) => {
+    if (ln.stockId) return ln.stockId;
+    try { const it=(DB.items||[]).find(i=>i&&String(i.id)===String(ln.itemId)); const sp=it?_itemSupplyPrice(it, sh.sellerId):null; return (sp&&sp.stockId)?sp.stockId:''; } catch(_){ return ''; }
+  };
+  const rowsHtml = A.rows.map((r,i)=>{
+    const lineIncl = r.supply + r.tax;                                   // 총액(VAT포함)
+    const unitIncl = (sh.vatMode==='include') ? (Number(r.ln.price)||0) : Math.round((Number(r.ln.price)||0)*1.1);
+    return '<tr><td class="c">'+(i+1)+'</td><td>'+esc(r.ln.name)+'</td>'
+    +'<td class="c" style="font-size:10.5px;color:#555">'+esc(r.ln.barcode||'')+'</td>'
+    +'<td class="c">'+(Number(r.ln.qty)||0).toLocaleString()+'</td>'
+    +'<td class="r">'+won(unitIncl)+'</td>'
+    +'<td class="r">'+won(lineIncl)+'</td>'
+    +'<td class="c" style="font-size:10.5px;color:#334155">'+esc(_stockIdOf(r.ln))+'</td></tr>';
+  }).join('');
+  const emptyRows = Array.from({length: Math.max(0, 6 - A.rows.length)}).map(()=>'<tr><td class="c">&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('');
   return ''
   + '<div class="stmt">'
   + '<h1>거 래 명 세 서</h1>'
@@ -28517,10 +28538,10 @@ function _consignStatementHtml(sh){
   +     '<tr><th>담당자</th><td>'+esc(supplierContact)+'</td></tr></table>'
   +   '</td>'
   + '</tr></table>'
-  + '<table class="items"><thead><tr><th style="width:34px">No.</th><th>품목명</th><th style="width:120px">규격</th><th style="width:60px">수량</th><th style="width:90px">공급단가</th><th style="width:100px">공급가액</th><th style="width:90px">세액</th><th style="width:100px">바코드</th></tr></thead>'
+  + '<table class="items"><thead><tr><th style="width:34px">No.</th><th>품목명</th><th style="width:110px">바코드</th><th style="width:64px">수량(ea)</th><th style="width:95px">공급단가<br>(VAT포함)</th><th style="width:110px">총액<br>(VAT포함)</th><th style="width:95px">재고ID<br>('+esc(sh.sellerName||'위탁처')+')</th></tr></thead>'
   + '<tbody>'+rowsHtml+emptyRows+'</tbody>'
-  + '<tfoot><tr><td colspan="5" class="r" style="font-weight:800">합계</td><td class="r" style="font-weight:800">'+won(A.supplySum)+'</td><td class="r" style="font-weight:800">'+won(A.taxSum)+'</td><td></td></tr>'
-  + '<tr><td colspan="5" class="r" style="font-weight:900;background:#fffbe6">합계금액 (공급가액 + 세액)</td><td colspan="3" class="r" style="font-weight:900;background:#fffbe6;font-size:14px">'+won(A.total)+'</td></tr></tfoot></table>'
+  + '<tfoot><tr><td colspan="5" class="r" style="font-weight:800">합계</td><td class="r" style="font-weight:800">'+won(A.total)+'</td><td></td></tr>'
+  + '<tr><td colspan="5" class="r" style="font-weight:900;background:#fffbe6">합계금액 (VAT 포함)</td><td colspan="2" class="r" style="font-weight:900;background:#fffbe6;font-size:14px">'+won(A.total)+'</td></tr></tfoot></table>'
   + '<div class="foot"><div>인수자 (입고 창고): _______________________ (서명/인)</div><div style="text-align:right">'+esc(sh.whToName||'')+' · '+esc(sh.recvManager||'')+'</div></div>'
   + '</div>';
 }
