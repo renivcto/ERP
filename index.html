@@ -6061,7 +6061,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.506';
+const ERP_VERSION = 'v2.3.507';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28473,6 +28473,10 @@ async function _consignSubmit(){
   const _gv=id=>(document.getElementById(id)||{}).value||'';
   const editId = window._consignEditId;
   const orig = editId ? (window._consign.shipments||[]).find(x=>x&&String(x.id)===String(editId)) : null;
+  // v2.3.507: 저장 중 오버레이(댓글 저장 v2.3.486 패턴) + 이중클릭 방지 + 에러 무음 금지
+  const _btn=document.getElementById('cs-submit-btn'); if(_btn){ if(_btn.disabled) return; _btn.disabled=true; }
+  window._criticalSaving = true; try { _showSavingOverlay(); } catch(_){}
+  try {
   const moveErrs=[];
   if (orig){
     // ── 수정: 원본 창고 기준 수량 델타만 이동(재고 정합 유지) ──
@@ -28518,6 +28522,14 @@ async function _consignSubmit(){
   // v2.3.500: 저장 후 폼 닫고 페이지 목록 갱신
   try { document.getElementById('consign-overlay')?.remove(); } catch(_){}
   try { renderConsignPage(); } catch(_){}
+  } catch(e) {
+    // v2.3.507: 어떤 오류도 무음으로 삼키지 않는다 — '저장 눌러도 무반응' 방지
+    console.error('[CONSIGN] 저장 오류', e);
+    alert('저장 중 오류가 발생했습니다:\n'+((e&&e.message)||e));
+  } finally {
+    window._criticalSaving=false; try { _hideSavingOverlay(); } catch(_){}
+    const b2=document.getElementById('cs-submit-btn'); if(b2) b2.disabled=false;
+  }
 }
 // 부가세 계산: exclude=단가가 공급가액 / include=단가에 VAT 포함(공급가액=단가/1.1)
 function _consignAmounts(sh){
