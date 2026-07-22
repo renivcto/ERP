@@ -6061,7 +6061,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.504';
+const ERP_VERSION = 'v2.3.505';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28284,10 +28284,10 @@ async function openConsignShip(editId){
     +   '<div class="fg" style="margin:0"><label>입고 담당자</label><input class="fi" id="cs-recv-mgr" placeholder="담당자명"></div>'
     +   '<div class="fg" style="margin:0"><label>담당자 연락처</label><input class="fi" id="cs-recv-phone" placeholder="010-…"></div>'
     + '</div>'
-    // v2.3.504: 르니브(공급자) 출고 담당자 — 거래명세서 공급자 담당자 란에 표기 (비우면 회사정보 담당자)
+    // v2.3.505: 르니브(공급자) 출고 담당자 — 회사정보 담당자 드롭다운(선택 시 연락처 자동)
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">'
-    +   '<div class="fg" style="margin:0"><label>출고 담당자(르니브)</label><input class="fi" id="cs-sup-mgr" placeholder="르니브 담당자명"></div>'
-    +   '<div class="fg" style="margin:0"><label>출고 담당자 연락처</label><input class="fi" id="cs-sup-phone" placeholder="010-…"></div>'
+    +   '<div class="fg" style="margin:0"><label>출고 담당자(르니브)</label><select class="fs" id="cs-sup-mgr" onchange="_consignSupMgrChanged()">'+_consignSupMgrOptions()+'</select></div>'
+    +   '<div class="fg" style="margin:0"><label>출고 담당자 연락처</label><input class="fi" id="cs-sup-phone" placeholder="담당자 선택 시 자동"></div>'
     + '</div>'
     // ── 품목 라인 ──
     + '<div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:8px">'
@@ -28314,7 +28314,11 @@ async function openConsignShip(editId){
       g('cs-vat').value=sh.vatMode||'exclude'; g('cs-vat').dataset.userset='1';
       g('cs-wh-from').value=sh.whFromId||'__un__'; g('cs-wh-to').value=sh.whToId||'';
       g('cs-recv-addr').value=sh.recvAddr||''; g('cs-recv-mgr').value=sh.recvManager||''; g('cs-recv-phone').value=sh.recvPhone||'';
-      g('cs-sup-mgr').value=sh.supplierManager||''; g('cs-sup-phone').value=sh.supplierPhone||'';  // v2.3.504
+      // v2.3.505: 저장된 담당자명이 현재 회사정보 목록에 없으면 옵션 보강 후 선택
+      (function(){ const mEl=g('cs-sup-mgr'); const nm=sh.supplierManager||'';
+        if(mEl){ mEl.innerHTML=_consignSupMgrOptions(nm);
+          if(nm && mEl.value!==nm){ const o=document.createElement('option'); o.value=nm; o.textContent=nm+' (저장값)'; o.dataset.phone=sh.supplierPhone||''; o.selected=true; mEl.appendChild(o); } } })();
+      g('cs-sup-phone').value=sh.supplierPhone||'';
       g('cs-lines').innerHTML='';
       (sh.lines||[]).forEach(ln=>{
         _consignAddLine();
@@ -28331,13 +28335,12 @@ async function openConsignShip(editId){
     // 신규: 바로팜 자동선택
     const _baro = sellers.find(s=>/바로팜/.test(String(s.company||'')));
     if (_baro) { document.getElementById('cs-seller').value = _baro.id; }
-    // v2.3.504: 출고 담당자 기본값 = 로그인 사용자 (연락처는 회사정보 담당자 목록에서 이름 일치 시)
+    // v2.3.505: 출고 담당자 기본값 = 로그인 사용자와 이름이 일치하는 회사정보 담당자(드롭다운 자동선택+연락처)
     try {
       const _me=(window._currentUser&&(window._currentUser.name||window._currentUser.displayName))||'';
-      const _mEl=document.getElementById('cs-sup-mgr'); if(_mEl&&_me) _mEl.value=_me;
-      const _cts=(DB._companyInfo&&Array.isArray(DB._companyInfo.contacts))?DB._companyInfo.contacts:[];
-      const _hit=_cts.find(c=>c&&c.name&&_me&&_me.indexOf(c.name)>=0);
-      const _pEl=document.getElementById('cs-sup-phone'); if(_pEl&&_hit&&_hit.phone) _pEl.value=_hit.phone;
+      const _hit=_consignSupContacts().find(c=>c&&c.name&&_me&&(_me===c.name||_me.indexOf(c.name)>=0));
+      const _mEl=document.getElementById('cs-sup-mgr');
+      if(_mEl&&_hit){ _mEl.value=(_hit.name||'').trim(); _consignSupMgrChanged(); }
     } catch(_){}
     _consignAddLine();
   }
@@ -28380,6 +28383,26 @@ function _consignApplyVatFrom(sp){
   // 품목 공급가의 부가세 기준을 명세서 부가세 select 에 반영(첫 조회건 기준)
   const v=document.getElementById('cs-vat');
   if (v && sp && sp.vat && !v.dataset.userset) v.value = sp.vat;
+}
+// v2.3.505: 출고 담당자(르니브) — 회사정보 담당자 드롭다운 + 선택 시 연락처 자동
+function _consignSupContacts(){
+  const cts=(DB._companyInfo&&Array.isArray(DB._companyInfo.contacts))?DB._companyInfo.contacts:[];
+  return cts.filter(c=>c&&(c.name||'').trim());
+}
+function _consignSupMgrOptions(selName){
+  let h='<option value="">— 담당자 선택 —</option>';
+  _consignSupContacts().forEach(c=>{
+    const nm=(c.name||'').trim();
+    const lbl=nm+(c.role?' ('+c.role+')':'');
+    h+='<option value="'+escapeHtml(nm)+'" data-phone="'+escapeHtml(c.phone||'')+'"'+(selName&&selName===nm?' selected':'')+'>'+escapeHtml(lbl)+'</option>';
+  });
+  return h;
+}
+function _consignSupMgrChanged(){
+  const sel=document.getElementById('cs-sup-mgr'); if(!sel) return;
+  const opt=sel.options[sel.selectedIndex];
+  const ph=document.getElementById('cs-sup-phone');
+  if(ph) ph.value = (opt && opt.dataset.phone) ? opt.dataset.phone : '';
 }
 function _consignLineItemChanged(sel){
   const row=sel.closest('.cs-line'); if(!row) return;
