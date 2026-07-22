@@ -6061,7 +6061,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.507';
+const ERP_VERSION = 'v2.3.508';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7036,6 +7036,9 @@ async function _doSaveData() {
 }
 
 async function _doSaveDataInner() {
+  // v2.3.508: 이번 저장이 실제로 Firestore 에 썼는지 추적 — 무음 no-op(아래 API 미준비 return 등)을
+  //   호출측(saveFeedPost 등)이 '성공'으로 오인해 슬랙 알림만 나가고 데이터는 유실되는 사고 방지.
+  window._lastFsWriteOk = false;
   const dbToSave = JSON.parse(JSON.stringify(DB));
 
   // v2.3.369: 지출 표시용 임시 캐시 _hydratedFiles 제거 — 인쇄/결재양식이 첨부를 base64 로
@@ -7633,6 +7636,14 @@ async function _doSaveDataInner() {
   // Firestore 저장 (공유) - 순차적으로 저장해서 에러 추적
   if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) {
     console.warn('⚠️ Firestore API 미준비 — localStorage만 저장됨');
+    // v2.3.508: 콘솔에만 남기면 사용자는 '저장됨'으로 오인(권다빈 업무공유 글 유실 사례) → 토스트로 표면화(60초 스로틀)
+    try {
+      const _nw = Date.now();
+      if (!window._fsApiWarnTs || _nw - window._fsApiWarnTs > 60000) {
+        window._fsApiWarnTs = _nw;
+        showNotif('⚠️ 클라우드 연결이 안 돼 서버 저장을 못 했습니다 — 내 기기에만 저장됨. 페이지를 새로고침 해주세요', 'error');
+      }
+    } catch(_){}
     return;
   }
   // 🛡️ 초기 로드 완료 전에는 Firestore에 쓰지 않음 (stale 데이터 덮어쓰기 방지)
@@ -7951,6 +7962,7 @@ async function _doSaveDataInner() {
       }
     }
   }
+  window._lastFsWriteOk = true;  // v2.3.508: 컬렉션 루프가 실제 Firestore 쓰기까지 도달함
 
   // meta 저장
   let _metaStr = '';
@@ -34654,7 +34666,10 @@ async function saveFeedPost(){
   //   갔는데 데이터는 유실"). 권다빈 업무공유 글 유실 사례. [[savedata-debounce-vs-savenow]]
   let _syncOk = false;
   try {
-    if (typeof saveDataNow === 'function') { await saveDataNow(); _syncOk = true; }
+    // v2.3.508: saveDataNow 가 무음 no-op(_doSaveDataInner 의 API 미준비/미로드 return)으로 끝나면
+    //   resolve 는 되지만 Firestore 엔 아무것도 안 써진다 — _lastFsWriteOk 로 실쓰기 여부까지 확인.
+    //   (권다빈 업무공유 글: 슬랙 알림만 나가고 서버엔 미저장이었던 사례의 직접 원인)
+    if (typeof saveDataNow === 'function') { await saveDataNow(); _syncOk = (window._lastFsWriteOk !== false); }
     else if (typeof saveData === 'function') { saveData(); _syncOk = true; }
     else { _syncOk = true; }
   } catch(e) {
@@ -34666,7 +34681,7 @@ async function saveFeedPost(){
   if (!_syncOk) {
     // 확정 저장 실패 — 오알림 방지 위해 슬랙 미발송, 모달 유지(재시도 유도). 글은 로컬엔 남아있음.
     if (saveBtn) { saveBtn.disabled = false; saveBtn.style.cursor = ''; saveBtn.style.opacity = ''; saveBtn.innerHTML = prevBtnHtml || '저장'; }
-    try { showNotif('☁️ 서버 저장 실패 — 글이 서버에 반영되지 않았습니다. 잠시 후 다시 저장해주세요 (알림 미발송)', 'error'); } catch(_){}
+    try { showNotif('☁️ 서버 저장 실패 — 글이 서버에 반영되지 않았습니다. 페이지를 새로고침한 뒤 다시 저장해주세요 (알림 미발송, 작성 글은 이 기기에 보관됨)', 'error'); } catch(_){}
     return;
   }
 
