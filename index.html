@@ -6061,7 +6061,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.503';
+const ERP_VERSION = 'v2.3.504';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28279,10 +28279,15 @@ async function openConsignShip(editId){
     +   '<div class="fg" style="margin:0"><label>출고 창고(르니브)</label><select class="fs" id="cs-wh-from">'+whOptsFrom+'</select></div>'
     +   '<div class="fg" style="margin:0"><label>입고 창고(바로팜)<span class="req">*</span></label><select class="fs" id="cs-wh-to" onchange="_consignFillWhInfo()">'+whOptsTo+'</select></div>'
     + '</div>'
-    + '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin-bottom:14px">'
+    + '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin-bottom:10px">'
     +   '<div class="fg" style="margin:0"><label>입고지(주소)</label><input class="fi" id="cs-recv-addr" placeholder="입고 창고 주소"></div>'
     +   '<div class="fg" style="margin:0"><label>입고 담당자</label><input class="fi" id="cs-recv-mgr" placeholder="담당자명"></div>'
     +   '<div class="fg" style="margin:0"><label>담당자 연락처</label><input class="fi" id="cs-recv-phone" placeholder="010-…"></div>'
+    + '</div>'
+    // v2.3.504: 르니브(공급자) 출고 담당자 — 거래명세서 공급자 담당자 란에 표기 (비우면 회사정보 담당자)
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">'
+    +   '<div class="fg" style="margin:0"><label>출고 담당자(르니브)</label><input class="fi" id="cs-sup-mgr" placeholder="르니브 담당자명"></div>'
+    +   '<div class="fg" style="margin:0"><label>출고 담당자 연락처</label><input class="fi" id="cs-sup-phone" placeholder="010-…"></div>'
     + '</div>'
     // ── 품목 라인 ──
     + '<div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:8px">'
@@ -28309,6 +28314,7 @@ async function openConsignShip(editId){
       g('cs-vat').value=sh.vatMode||'exclude'; g('cs-vat').dataset.userset='1';
       g('cs-wh-from').value=sh.whFromId||'__un__'; g('cs-wh-to').value=sh.whToId||'';
       g('cs-recv-addr').value=sh.recvAddr||''; g('cs-recv-mgr').value=sh.recvManager||''; g('cs-recv-phone').value=sh.recvPhone||'';
+      g('cs-sup-mgr').value=sh.supplierManager||''; g('cs-sup-phone').value=sh.supplierPhone||'';  // v2.3.504
       g('cs-lines').innerHTML='';
       (sh.lines||[]).forEach(ln=>{
         _consignAddLine();
@@ -28325,6 +28331,14 @@ async function openConsignShip(editId){
     // 신규: 바로팜 자동선택
     const _baro = sellers.find(s=>/바로팜/.test(String(s.company||'')));
     if (_baro) { document.getElementById('cs-seller').value = _baro.id; }
+    // v2.3.504: 출고 담당자 기본값 = 로그인 사용자 (연락처는 회사정보 담당자 목록에서 이름 일치 시)
+    try {
+      const _me=(window._currentUser&&(window._currentUser.name||window._currentUser.displayName))||'';
+      const _mEl=document.getElementById('cs-sup-mgr'); if(_mEl&&_me) _mEl.value=_me;
+      const _cts=(DB._companyInfo&&Array.isArray(DB._companyInfo.contacts))?DB._companyInfo.contacts:[];
+      const _hit=_cts.find(c=>c&&c.name&&_me&&_me.indexOf(c.name)>=0);
+      const _pEl=document.getElementById('cs-sup-phone'); if(_pEl&&_hit&&_hit.phone) _pEl.value=_hit.phone;
+    } catch(_){}
     _consignAddLine();
   }
 }
@@ -28451,6 +28465,7 @@ async function _consignSubmit(){
     if(moveErrs.length && !confirm('일부 재고 조정 실패:\n'+moveErrs.join('\n')+'\n\n그래도 명세서는 수정 저장할까요?')) return;
     orig.sellerId=seller.id; orig.sellerName=seller.company||''; orig.date=date; orig.vatMode=vatMode;
     orig.recvAddr=_gv('cs-recv-addr'); orig.recvManager=_gv('cs-recv-mgr'); orig.recvPhone=_gv('cs-recv-phone');
+    orig.supplierManager=_gv('cs-sup-mgr'); orig.supplierPhone=_gv('cs-sup-phone');  // v2.3.504
     orig.lines=lines; orig.updatedAt=Date.now();
   } else {
     // ── 신규: 전량 이동 ──
@@ -28468,6 +28483,7 @@ async function _consignSubmit(){
       whFromId: whFromId, whFromName: whFromId==='__un__'?'미지정':_whName(whFromId),
       whToId: whToId, whToName: _whName(whToId),
       recvAddr:_gv('cs-recv-addr'), recvManager:_gv('cs-recv-mgr'), recvPhone:_gv('cs-recv-phone'),
+      supplierManager:_gv('cs-sup-mgr'), supplierPhone:_gv('cs-sup-phone'),  // v2.3.504
       lines: movedLines, createdAt: Date.now(), createdBy:(window._currentUser&&(window._currentUser.name||window._currentUser.email))||''
     });
   }
@@ -28501,7 +28517,10 @@ function _consignStatementHtml(sh){
   const A = _consignAmounts(sh);
   const esc = s => escapeHtml(s==null?'':String(s));
   const won = n => '₩'+(Number(n)||0).toLocaleString();
-  const supplierContact = (Array.isArray(ci.contacts)&&ci.contacts[0]) ? (ci.contacts[0].name+' / '+(ci.contacts[0].phone||'')) : '';
+  // v2.3.504: 출고 건별 담당자(폼 입력) 우선, 없으면 회사정보 담당자 폴백
+  const supplierContact = sh.supplierManager
+    ? (sh.supplierManager + (sh.supplierPhone ? ' / ' + sh.supplierPhone : ''))
+    : ((Array.isArray(ci.contacts)&&ci.contacts[0]) ? (ci.contacts[0].name+' / '+(ci.contacts[0].phone||'')) : '');
   // v2.3.503: VAT 포함 기준으로 단순화(공급단가·총액 모두 VAT포함, 세액 열 제거) + 재고ID(위탁처) 열.
   //   재고ID 는 품목정보 거래처 카드(supplyPrices[].stockId)에서 자동 — 구버전 저장분은 라이브 조회 폴백.
   const _stockIdOf = (ln) => {
