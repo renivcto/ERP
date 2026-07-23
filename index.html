@@ -5331,8 +5331,8 @@ EXP YYYYMMDD 까지</textarea></div>
       <!-- 발주서 원본 PDF -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
         <div class="fg">
-          <label>📎 견적서</label>
-          <input type="file" id="o-pdf" accept=".pdf,.jpg,.jpeg,.png" onchange="handleOrderFile(this,'origin')">
+          <label>📎 견적서 <span style="color:var(--gray-400);font-weight:400;font-size:10.5px">(여러 파일 가능)</span></label>
+          <input type="file" id="o-pdf" accept=".pdf,.jpg,.jpeg,.png" multiple onchange="handleOrderFile(this,'origin')">
           <div id="o-pdf-preview" style="margin-top:8px;display:none">
             <div style="display:flex;align-items:center;gap:8px;background:var(--sky-50);border:1px solid var(--sky-200);border-radius:7px;padding:8px 12px;font-size:12px;color:var(--sky-700)">
               <span>📄</span><span id="o-pdf-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
@@ -5346,6 +5346,8 @@ EXP YYYYMMDD 까지</textarea></div>
               <button class="btn btn-outline btn-xs" style="color:#b91c1c;border-color:#fca5a5" onclick="deleteOrderFileFromEdit('origin')">삭제</button>
             </div>
           </div>
+          <!-- v2.3.511: 추가 견적서 (다중) -->
+          <div id="o-quote-docs-list" style="margin-top:6px;display:flex;flex-direction:column;gap:5px"></div>
         </div>
         <div class="fg">
           <label>🔴 결재 완료 PDF <span style="color:var(--gray-400);font-weight:400">(도장 날인)</span></label>
@@ -6061,7 +6063,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.510';
+const ERP_VERSION = 'v2.3.511';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6230,6 +6232,7 @@ window._migrateAttachmentsCore = async function() {
     await _one('order_astamp_' + o.id, o.approvalStampImage, () => (typeof _loadSharedOrderPdf === 'function' ? _loadSharedOrderPdf(o.id, 'astamp') : null), u => { o.approvalStampImage = u; });
     if (o.invoiceFile) await _one('order_invoice_' + o.id, o.invoiceFile.data, null, u => { o.invoiceFile.data = u; });
     if (Array.isArray(o.closingDocs)) for (let di = 0; di < o.closingDocs.length; di++) { const d0 = o.closingDocs[di]; if (d0) await _one('order_closing_' + o.id + '_' + di, d0.data, () => (typeof _loadSharedOrderClosing === 'function' ? _loadSharedOrderClosing(o.id, di) : null), u => { d0.data = u; }); }
+    if (Array.isArray(o.quoteDocs)) for (let di = 0; di < o.quoteDocs.length; di++) { const q0 = o.quoteDocs[di]; if (q0) await _one('order_qdoc_' + o.id + '_' + di, q0.data, () => (typeof _loadSharedOrderQdoc === 'function' ? _loadSharedOrderQdoc(o.id, di) : null), u => { q0.data = u; }); }
     if (Array.isArray(o.otherFiles)) for (let fi = 0; fi < o.otherFiles.length; fi++) { const f0 = o.otherFiles[fi]; if (f0) await _one('order_other_' + o.id + '_' + fi, f0.data, null, u => { f0.data = u; }); }
     if (Array.isArray(o.rows)) for (let ri = 0; ri < o.rows.length; ri++) { const r0 = o.rows[ri]; if (r0 && r0.image) await _one('order_rowimg_' + o.id + '_' + ri, r0.image, null, u => { r0.image = u; }); }
   }
@@ -6291,6 +6294,7 @@ window._autoMigrateAttachmentsOnce = async function() {
       if (_hasMarker(o.pdfData) || _hasMarker(o.stampData) || _hasMarker(o.approvalStampImage)) { pending = true; break; }
       if (o.invoiceFile && _hasMarker(o.invoiceFile.data)) { pending = true; break; }
       if ((o.closingDocs||[]).some(d => d && _hasMarker(d.data))) { pending = true; break; }
+      if ((o.quoteDocs||[]).some(d => d && _hasMarker(d.data))) { pending = true; break; }
       if ((o.otherFiles||[]).some(f => f && _hasMarker(f.data))) { pending = true; break; }
       if ((o.rows||[]).some(r => r && _hasMarker(r.image))) { pending = true; break; }
     }
@@ -6683,6 +6687,14 @@ function _backupOrdersNow(tag) {
       }
       if (Array.isArray(c.closingDocs)) {
         c.closingDocs = c.closingDocs.map(function(d){
+          if (d && typeof d.data === 'string' && d.data.length > 100 && d.data !== '__idb__' && !_stoIsHttp(d.data)) {
+            return Object.assign({}, d, { data: '__idb__' });
+          }
+          return d;
+        });
+      }
+      if (Array.isArray(c.quoteDocs)) {  // v2.3.511
+        c.quoteDocs = c.quoteDocs.map(function(d){
           if (d && typeof d.data === 'string' && d.data.length > 100 && d.data !== '__idb__' && !_stoIsHttp(d.data)) {
             return Object.assign({}, d, { data: '__idb__' });
           }
@@ -7113,6 +7125,19 @@ async function _doSaveDataInner() {
           try { idbSet('order_closing_' + o.id + '_' + di, doc.data); } catch(e) { console.warn('IDB save closing doc 실패:', e); }
           _fsUpTryUpload('order_' + o.id + '_closing_' + di, doc.data, (d) => _saveSharedOrderClosing(o.id, di, d, doc.name||''));
           { const _b = doc.data, _oid = o.id, _di = di; _stoMigrate('order_closing_' + _oid + '_' + _di, _b, (u) => { const t = (DB.orders||[]).find(x => x && x.id === _oid); const c = t && Array.isArray(t.closingDocs) && t.closingDocs[_di]; if (c && c.data === _b) c.data = u; }); }
+          return { ...doc, data: '__idb__' };
+        }
+        return doc;
+      });
+    }
+    // v2.3.511: 추가 견적서(quoteDocs, 다중) IDB 오프로드 + Firestore 백업 — closingDocs 동형
+    if (Array.isArray(o.quoteDocs) && o.quoteDocs.length > 0) {
+      dbToSave.orders[i].quoteDocs = o.quoteDocs.map((doc, di) => {
+        if (!doc) return doc;
+        if (doc.data && typeof doc.data === 'string' && doc.data !== '__idb__' && doc.data.length > 100 && !_stoIsHttp(doc.data)) {
+          try { idbSet('order_qdoc_' + o.id + '_' + di, doc.data); } catch(e) { console.warn('IDB save quote doc 실패:', e); }
+          _fsUpTryUpload('order_' + o.id + '_qdoc_' + di, doc.data, (d) => _saveSharedOrderQdoc(o.id, di, d, doc.name||''));
+          { const _b = doc.data, _oid = o.id, _di = di; _stoMigrate('order_qdoc_' + _oid + '_' + _di, _b, (u) => { const t = (DB.orders||[]).find(x => x && x.id === _oid); const c = t && Array.isArray(t.quoteDocs) && t.quoteDocs[_di]; if (c && c.data === _b) c.data = u; }); }
           return { ...doc, data: '__idb__' };
         }
         return doc;
@@ -11883,6 +11908,8 @@ function openModal(id) {
           _orderClosingDocs = [];
           if ($('o-closing-docs-input')) $('o-closing-docs-input').value = '';
           if (typeof renderOrderClosingDocsList === 'function') renderOrderClosingDocsList();
+          _orderQuoteDocs = [];  // v2.3.511
+          if (typeof renderOrderQuoteDocsList === 'function') renderOrderQuoteDocsList();
         }
       } catch(_){}
       // v1.9.194 — 작성 중 드래프트 자동 복원 제안 (신규 작성 시에만)
@@ -29803,6 +29830,9 @@ function _editOrderDirect(o, dbIdx) {
   _orderClosingDocs = Array.isArray(o.closingDocs) ? o.closingDocs.slice() : [];
   if ($('o-closing-docs-input')) $('o-closing-docs-input').value = '';
   try { renderOrderClosingDocsList(); } catch(_){}
+  // v2.3.511: 추가 견적서 복원 (IDB 마커는 viewOrderQuoteDoc 가 lazy load)
+  _orderQuoteDocs = Array.isArray(o.quoteDocs) ? o.quoteDocs.slice() : [];
+  try { renderOrderQuoteDocsList(); } catch(_){}
   // v1.9.111 — 결재 날인 필요 없음 체크박스 상태 복원
   if ($('o-stamp-not-required')) $('o-stamp-not-required').checked = !!o.stampNotRequired;
   openModal('add-order');
@@ -32474,6 +32504,62 @@ let _orderStampData = null; // 도장 날인본
 // v1.9.786: 마감자료 (거래명세서·마감서) — 다중 첨부
 let _orderClosingDocs = [];  // [{ name, data, type, size, addedAt }]
 
+// ═══ v2.3.511: 추가 견적서(quoteDocs, 다중) — closingDocs 와 동형. IDB 키 order_qdoc_<oid>_<idx> ═══
+let _orderQuoteDocs = [];    // [{ name, data, type, size, addedAt }]
+function renderOrderQuoteDocsList() {
+  const wrap = document.getElementById('o-quote-docs-list');
+  if (!wrap) return;
+  if (!_orderQuoteDocs.length) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = _orderQuoteDocs.map((d, i) => {
+    const nm = (d.name || '견적서').replace(/</g, '&lt;');
+    const sizeKB = d.size ? Math.round(d.size / 1024) : 0;
+    const sizeText = sizeKB > 1024 ? (sizeKB / 1024).toFixed(1) + 'MB' : sizeKB + 'KB';
+    return '<div style="display:flex;align-items:center;justify-content:space-between;background:var(--sky-50);border:1px solid var(--sky-200);border-radius:7px;padding:6px 11px;font-size:12px">' +
+      '<span style="display:flex;align-items:center;gap:7px;overflow:hidden;flex:1">📄 ' +
+      '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--sky-700);font-weight:600">' + nm + '</span>' +
+      '<span style="color:#64748b;font-size:10.5px;flex-shrink:0">(' + sizeText + ')</span></span>' +
+      '<div style="display:flex;gap:4px;flex-shrink:0">' +
+      '<button type="button" onclick="viewOrderQuoteDoc(' + i + ')" style="background:#fff;color:var(--sky-700);border:1px solid var(--sky-200);padding:2px 8px;border-radius:4px;font-size:10.5px;cursor:pointer;font-weight:600">보기</button>' +
+      '<button type="button" onclick="_orderRemoveQuoteDoc(' + i + ')" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;padding:2px 8px;border-radius:4px;font-size:10.5px;cursor:pointer;font-weight:600">삭제</button>' +
+      '</div></div>';
+  }).join('');
+}
+function _orderRemoveQuoteDoc(idx) {
+  if (idx < 0 || idx >= _orderQuoteDocs.length) return;
+  if (!confirm('이 견적서를 삭제하시겠습니까?')) return;
+  _orderQuoteDocs.splice(idx, 1);
+  renderOrderQuoteDocsList();
+}
+async function viewOrderQuoteDoc(idx) {
+  const d = _orderQuoteDocs[idx];
+  if (!d) { showNotif('파일을 찾을 수 없습니다', 'warning'); return; }
+  if (d.data === '__idb__' || !d.data) {
+    const oid = window._currentEditOrderId;
+    if (!oid) { showNotif('파일 로드 실패: 발주서 ID 없음', 'warning'); return; }
+    try {
+      let real = null;
+      try { real = await idbGet('order_qdoc_' + oid + '_' + idx); } catch(_){}
+      if (!real || real === '__idb__') {
+        try { real = await _loadSharedOrderQdoc(oid, idx); } catch(_){}
+      }
+      if (real && real !== '__idb__') d.data = real;
+      else { showNotif('⚠️ 파일 데이터 없음 (IDB/Firestore 모두 미발견)', 'warning'); return; }
+    } catch(e) { console.warn('견적서 lazy load 실패:', e); showNotif('파일 로드 실패', 'warning'); return; }
+  }
+  if (_stoIsHttp(d.data)) { window.open(d.data, '_blank'); return; }
+  try {
+    const parts = d.data.split(',');
+    const mimeMatch = (parts[0] || '').match(/data:([^;]+)/);
+    const mime = (mimeMatch ? mimeMatch[1] : d.type) || 'application/octet-stream';
+    const byteString = atob(parts[1] || '');
+    const buf = new Uint8Array(byteString.length);
+    for (let i = 0; i < byteString.length; i++) buf[i] = byteString.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([buf], { type: mime }));
+    window.open(url, '_blank');
+    setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 30000);
+  } catch(e) { console.warn('viewOrderQuoteDoc 실패:', e); showNotif('파일 보기 실패', 'warning'); }
+}
+
 function handleOrderClosingDocs(input) {
   const files = input.files;
   if (!files || !files.length) return;
@@ -32878,8 +32964,42 @@ function syncApprovalFromOrderStamp(orderId) {
 }
 
 function handleOrderFile(input, type) {
-  const file = input.files[0];
-  if (!file) return;
+  const files = Array.from(input.files || []);
+  if (!files.length) return;
+  // v2.3.511: 견적서(origin)는 다중 파일 지원 — 대표 슬롯이 비어 있으면 첫 파일이 대표,
+  //   나머지는 추가 견적서(_orderQuoteDocs). 대표가 이미 있으면 전부 추가 견적서로.
+  if (type === 'origin') {
+    const originOccupied = !!_orderPdfData || ($('o-pdf-existing') && $('o-pdf-existing').style.display === 'block');
+    let rest = files;
+    if (!originOccupied) {
+      const first = files[0];
+      rest = files.slice(1);
+      if (first.size > 10 * 1024 * 1024) { showNotif('파일 크기는 10MB 이하여야 합니다: ' + first.name,'warning'); }
+      else {
+        const r0 = new FileReader();
+        r0.onload = e => {
+          _orderPdfData = e.target.result;
+          _orderPdfName = first.name;
+          $('o-pdf-name').textContent = first.name;
+          $('o-pdf-preview').style.display = 'block';
+          $('o-pdf-existing').style.display = 'none';
+        };
+        r0.readAsDataURL(first);
+      }
+    }
+    rest.forEach(f => {
+      if (f.size > 10 * 1024 * 1024) { showNotif('파일 크기는 10MB 이하여야 합니다: ' + f.name,'warning'); return; }
+      const r = new FileReader();
+      r.onload = e => {
+        _orderQuoteDocs.push({ name: f.name, data: e.target.result, type: f.type, size: f.size, addedAt: Date.now() });
+        renderOrderQuoteDocsList();
+      };
+      r.readAsDataURL(f);
+    });
+    input.value = '';  // 같은 파일 재선택 가능
+    return;
+  }
+  const file = files[0];
   if (file.size > 10 * 1024 * 1024) { showNotif('파일 크기는 10MB 이하여야 합니다','warning'); return; }
   const reader = new FileReader();
   reader.onload = e => {
@@ -32890,12 +33010,6 @@ function handleOrderFile(input, type) {
       $('o-stamp-preview').style.display = 'block';
       $('o-stamp-existing').style.display = 'none';
       showNotif('도장 날인본이 첨부되었습니다','success');
-    } else {
-      _orderPdfData = e.target.result;
-      _orderPdfName = file.name;
-      $('o-pdf-name').textContent = file.name;
-      $('o-pdf-preview').style.display = 'block';
-      $('o-pdf-existing').style.display = 'none';
     }
   };
   reader.readAsDataURL(file);
@@ -33323,6 +33437,8 @@ function saveOrder() {
     taxInvoice: existing.taxInvoice || '미수령',
     // v1.9.786: 마감자료 (거래명세서·마감서)
     closingDocs: Array.isArray(_orderClosingDocs) ? _orderClosingDocs.slice() : (existing.closingDocs || []),
+    // v2.3.511: 추가 견적서 (다중)
+    quoteDocs: Array.isArray(_orderQuoteDocs) ? _orderQuoteDocs.slice() : (existing.quoteDocs || []),
     // v1.9.787: 머지 보호 (v1.9.405 머지 로직이 updatedAt 큰 쪽을 선택)
     updatedAt: Date.now(),
   };
@@ -33416,6 +33532,7 @@ function saveOrder() {
   _orderPdfData=null; _orderPdfName=null; _orderStampData=null; _orderStampName=null;
   // v1.9.787: 마감자료 임시 변수도 초기화
   _orderClosingDocs = [];
+  _orderQuoteDocs = [];  // v2.3.511
   window._currentEditOrderId = null;
 
   // 드래프트 비우기 (v1.9.194)
@@ -56063,6 +56180,32 @@ async function _loadSharedOrderClosing(orderId, idx) {
     const snap = await window._firestoreGetDoc(ref);
     if (snap.exists()) return snap.data().data || null;
   } catch(e) { console.warn('closing Firestore 로드 실패:', e); }
+  return null;
+}
+// v2.3.511: 추가 견적서(quoteDocs) 공유 백업 — closing 동형 (orderPdfs/order_<id>_qdoc_<idx>)
+async function _saveSharedOrderQdoc(orderId, idx, dataUrl, fileName) {
+  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return false;
+  if (!dataUrl || dataUrl === '__idb__' || dataUrl === '__stored__') return false;
+  if (typeof dataUrl !== 'string') return false;
+  if (dataUrl.length > 900000) {
+    console.log('📦 [qdoc] order ' + orderId + '#' + idx + ' 너무 큼 (' + dataUrl.length + ' bytes), Firestore 백업 안 함 (IDB 만)');
+    return true;
+  }
+  try {
+    const docId = 'order_' + orderId + '_qdoc_' + idx;
+    const ref = window._firestoreDoc(window._firebaseDb, 'orderPdfs', docId);
+    await window._firestoreSetDoc(ref, { data: dataUrl, name: fileName||'', kind: 'qdoc', idx: idx, ts: Date.now() });
+    return true;
+  } catch(e) { console.warn('qdoc Firestore 백업 실패:', e); return false; }
+}
+async function _loadSharedOrderQdoc(orderId, idx) {
+  if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return null;
+  try {
+    const docId = 'order_' + orderId + '_qdoc_' + idx;
+    const ref = window._firestoreDoc(window._firebaseDb, 'orderPdfs', docId);
+    const snap = await window._firestoreGetDoc(ref);
+    if (snap.exists()) return snap.data().data || null;
+  } catch(e) { console.warn('qdoc Firestore 로드 실패:', e); }
   return null;
 }
 
