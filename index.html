@@ -6061,7 +6061,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.509';
+const ERP_VERSION = 'v2.3.510';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -11255,9 +11255,12 @@ function _finOpenBudgetModal(editId){
       <div><label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">제목</label><input id="fin-bi-title" placeholder="예산 항목을 입력하세요" value="${_ed?_finEsc(_ed.title||''):''}" style="${inS}" onkeydown="if(event.key==='Enter')_finAddBudgetItem(${_eidArg})"></div>
       <div><label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:5px">금액</label><input id="fin-bi-amount" type="number" placeholder="금액" value="${_ed?(Number(_ed.amount)||0):''}" style="${inS};text-align:right" onkeydown="if(event.key==='Enter')_finAddBudgetItem(${_eidArg})"></div>
     </div>
-    <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 22px;border-top:1px solid #f1f5f9;background:#fafbfc">
-      <button onclick="document.getElementById('fin-budget-modal')?.remove()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:9px 18px;font-size:13.5px;font-weight:700;cursor:pointer">취소</button>
-      <button onclick="_finAddBudgetItem(${_eidArg})" style="background:#0f172a;color:#fff;border:0;border-radius:8px;padding:9px 22px;font-size:13.5px;font-weight:700;cursor:pointer">${_ed?'💾 저장':'+ 예산 추가'}</button>
+    <div style="display:flex;justify-content:space-between;gap:8px;padding:14px 22px;border-top:1px solid #f1f5f9;background:#fafbfc">
+      <div>${_ed?`<button onclick="if(confirm('이 예산 항목을 삭제할까요?\\n${_finEsc((_ed.title||'(제목 없음)').replace(/['\\\\]/g,''))} · ${_finWon(_ed.amount)}'))_finDelBudgetItem('${String(_ed.id)}')" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer">🗑 삭제</button>`:''}</div>
+      <div style="display:flex;gap:8px">
+        <button onclick="document.getElementById('fin-budget-modal')?.remove()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:9px 18px;font-size:13.5px;font-weight:700;cursor:pointer">취소</button>
+        <button onclick="_finAddBudgetItem(${_eidArg})" style="background:#0f172a;color:#fff;border:0;border-radius:8px;padding:9px 22px;font-size:13.5px;font-weight:700;cursor:pointer">${_ed?'💾 저장':'+ 예산 추가'}</button>
+      </div>
     </div>
   </div>`;
   document.body.appendChild(ov);
@@ -11280,7 +11283,7 @@ function _finBudgetCmpHtml(){
       const items=_finBudgetItemsFor(year,c.key,months).slice().sort((a,b)=>String(a.month).localeCompare(String(b.month)));
       detail=`<tr><td colspan="5" style="padding:0 8px 10px 8px;background:#fafbff"><div style="padding:6px 10px">`+
         (items.length
-          ? `<table style="width:100%;border-collapse:collapse;font-size:12px">${items.map(it=>`<tr style="border-bottom:1px solid #eef2f7;cursor:pointer" title="클릭하면 수정" onclick="event.stopPropagation();_finOpenBudgetModal('${it.id}')"><td style="padding:4px 6px;color:#64748b;white-space:nowrap;width:48px">${Number(it.month)}월</td><td style="padding:4px 6px">${_finEsc(it.title||'(제목 없음)')}</td><td style="padding:4px 6px;text-align:right;font-weight:600">${_finWon(it.amount)}</td><td style="padding:4px 6px;text-align:center;width:30px"><button onclick="event.stopPropagation();_finOpenBudgetModal('${it.id}')" style="background:none;border:0;color:#94a3b8;cursor:pointer;font-size:12px" title="수정">✏️</button></td><td style="padding:4px 6px;text-align:center;width:30px"><button onclick="event.stopPropagation();_finDelBudgetItem('${it.id}')" style="background:none;border:0;color:#cbd5e1;cursor:pointer;font-size:13px" title="삭제">✕</button></td></tr>`).join('')}</table>`
+          ? `<table style="width:100%;border-collapse:collapse;font-size:12px">${items.map(it=>`<tr style="border-bottom:1px solid #eef2f7;cursor:pointer" title="클릭하면 수정·삭제" onclick="event.stopPropagation();_finOpenBudgetModal('${it.id}')"><td style="padding:4px 6px;color:#64748b;white-space:nowrap;width:48px">${Number(it.month)}월</td><td style="padding:4px 6px">${_finEsc(it.title||'(제목 없음)')}</td><td style="padding:4px 6px;text-align:right;font-weight:600">${_finWon(it.amount)}</td><td style="padding:4px 6px;text-align:center;width:30px"><span style="color:#94a3b8;font-size:12px" title="수정·삭제">✏️</span></td></tr>`).join('')}</table>`
           : `<div style="color:#94a3b8;font-size:12px">이 기간에 등록된 ${c.label} 예산 항목이 없습니다. 아래에서 추가하세요.</div>`)+
         `</div></td></tr>`;
     }
@@ -11346,6 +11349,8 @@ async function _finDelBudgetItem(id){
   const F=window._FIN; const y=String(F.year);
   if(F.budgetItems && F.budgetItems[y]) F.budgetItems[y]=F.budgetItems[y].filter(it=>String(it.id)!==String(id));
   await saveSharedSetting('budget_items', F.budgetItems);
+  try { document.getElementById('fin-budget-modal')?.remove(); } catch(_){}  // v2.3.510: 수정 모달 내 삭제 버튼 경유
+  try { showNotif('예산 항목이 삭제되었습니다','success'); } catch(_){}
   const cmp=document.getElementById('fin-budget-cmp'); if(cmp) cmp.innerHTML=_finBudgetCmpHtml();
 }
 
