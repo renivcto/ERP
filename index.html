@@ -6063,7 +6063,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.511';
+const ERP_VERSION = 'v2.3.512';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -45539,6 +45539,14 @@ async function openExpenseApprovalForm(expenseId) {
           const d = await _hyd(_po.pdfData, 'order_pdf_' + _po.id, () => (typeof _loadSharedOrderPdf === 'function' ? _loadSharedOrderPdf(_po.id, 'pdf') : null));
           e._hydratedFiles.push({ name: _po.pdfName, data: d, type: 'application/pdf', size: 0, kind: '견적서' });
         }
+        // v2.3.512: 추가 견적서(quoteDocs, 다중) — v2.3.511 에서 신설된 배열도 지출결의서 첨부에 동반
+        if (Array.isArray(_po.quoteDocs)) {
+          for (let di = 0; di < _po.quoteDocs.length; di++) {
+            const f = _po.quoteDocs[di]; if (!f || !f.name) continue;
+            const d = await _hyd(f.data, 'order_qdoc_' + _po.id + '_' + di, () => (typeof _loadSharedOrderQdoc === 'function' ? _loadSharedOrderQdoc(_po.id, di) : null));
+            e._hydratedFiles.push({ ...f, data: d, kind: '견적서' });
+          }
+        }
         if (_po.stampData && _po.stampName) {
           // v2.2.97: _loadSharedOrderPdf(_po.id, 'stamp') Firestore fallback
           const d = await _hyd(_po.stampData, 'order_stamp_' + _po.id, () => (typeof _loadSharedOrderPdf === 'function' ? _loadSharedOrderPdf(_po.id, 'stamp') : null));
@@ -45962,6 +45970,7 @@ async function openExpenseApprovalForm(expenseId) {
                 const _po = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
                 if (_po) {
                   if (_po.pdfData && _po.pdfName) arr.push({ name: _po.pdfName, data: _po.pdfData, type: 'application/pdf', size: 0, kind:'견적서' });
+                  if (Array.isArray(_po.quoteDocs)) _po.quoteDocs.forEach(f => { if (f && f.name) arr.push({...f, kind:'견적서'}); });  // v2.3.512
                   if (_po.stampData && _po.stampName) arr.push({ name: _po.stampName, data: _po.stampData, type: 'application/pdf', size: 0, kind:'결재 PDF' });
                   if (Array.isArray(_po.closingDocs)) _po.closingDocs.forEach(f => { if (f && f.name) arr.push({...f, kind:'마감자료'}); });
                   if (_po.isOverseas) {
