@@ -6063,7 +6063,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.513';
+const ERP_VERSION = 'v2.3.514';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12229,7 +12229,7 @@ window._dashAddComment = async function(postId){
   try { if (typeof saveDataNow==='function'){ await saveDataNow(); _saved = (window._lastFsWriteOk !== false); } else if (typeof saveData==='function'){ saveData(); _saved = true; } } catch(e){ console.warn('[dash] 댓글 저장 실패', e); }
   window._criticalSaving = false; try { _hideSavingOverlay(); } catch(_){}
   if (!_saved) { try { showNotif('☁️ 댓글이 서버에 저장되지 않았습니다 — 새로고침 후 다시 시도해주세요 (알림 미발송)', 'error'); } catch(_){} }
-  if (_saved) { try { var _t = (typeof _kstShortTimeMin==='function')?_kstShortTimeMin():''; var _msg = '💬 *댓글* · ' + (u.name||'익명') + (_t?('  _( ' + _t + ' )_'):'') + '\n' + (text.length>500?(text.slice(0,500)+' …'):text); if (typeof _boardDispatch==='function') _boardDispatch(p.id, 'comment', _msg); } catch(_){} }
+  if (_saved) { try { var _t = (typeof _kstShortTimeMin==='function')?_kstShortTimeMin():''; var _msg = '💬 *댓글* · ' + (u.name||'익명') + (_t?('  _( ' + _t + ' )_'):'') + '\n' + (text.length>500?(text.slice(0,500)+' …'):text); if (typeof _boardDispatch==='function') _boardDispatch(p.relayPostId || p.id, 'comment', _msg); } catch(_){} }
 };
 window._dashEditComment = function(postId, cid){
   var p = (DB.feedPosts||[]).find(function(x){ return x && x.id === postId; }); if (!p) return;
@@ -35206,7 +35206,7 @@ async function addFeedComment(postId){
       const _time = _kstShortTimeMin();
       const _ctext = (text && text.length > 500) ? (text.slice(0, 500) + ' …') : (text || '');
       const _msg = `💬 *${_kind}* · ${_author}  _( ${_time} )_\n${_ctext}`;  // v2.3.173: 스레드용 — 본문 위주
-      _boardDispatch(p.id, _isReply ? 'reply' : 'comment', _msg);
+      _boardDispatch(p.relayPostId || p.id, _isReply ? 'reply' : 'comment', _msg);  // v2.3.514: 복구 글 별칭
     } catch(e) { console.warn('[v2.3.23] board_comment 알림 실패:', e); }
   }
 }
@@ -41491,7 +41491,10 @@ function _applySlackInboxEntries(posts, inbox, nowMs) {
   let added = 0;
   (inbox || []).forEach(en => {
     if (!en || !en.ts || !en.postId) { applied.push(en); return; }  // 형식 불량 → 제거
-    const p = (posts || []).find(x => x && String(x.id) === String(en.postId));
+    // v2.3.514: relayPostId 별칭 매칭 — 글이 유실 후 새 id 로 복구되면 슬랙 릴레이의 스레드
+    //   매핑은 원본 id 로 남는다. 복구 글에 relayPostId=원본id 를 심어 양방향 재연결.
+    const p = (posts || []).find(x => x && (String(x.id) === String(en.postId)
+      || (x.relayPostId != null && String(x.relayPostId) === String(en.postId))));
     if (!p) {
       // 글 없음(아직 머지 전이거나 삭제됨) — 14일 지나면 폐기, 아니면 보류
       if ((nowMs - (Number(en.at) || 0)) > MAX_AGE) applied.push(en);
