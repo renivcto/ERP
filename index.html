@@ -6063,7 +6063,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.514';
+const ERP_VERSION = 'v2.3.515';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7744,6 +7744,46 @@ async function _doSaveDataInner() {
         if (_srvExists) {
           const srvLen = Array.isArray(srvArr) ? srvArr.length : 0;
           const locLen = Array.isArray(val) ? val.length : 0;
+          // v2.3.515: feedPosts 저장 전 서버 댓글 union — stale 세션의 통째 저장이 타 기기
+          //   댓글을 지우던 사고(권다빈 댓글 반복 유실) 근본 차단. 의도적 삭제는 묘비로 존중.
+          //   (로드 union v1.9.267 은 로드 시점만 보호 — 저장 시점 보호가 빠져 있었음)
+          if (key === 'feedPosts' && Array.isArray(srvArr) && srvArr.length > 0 && Array.isArray(val)) {
+            try {
+              const _ct = (typeof _feedCmtTombSet==='function') ? _feedCmtTombSet() : new Set();
+              const _srvByIdF = new Map(srvArr.filter(p=>p&&p.id!=null).map(p=>[String(p.id), p]));
+              let _rescued = 0, _aliasGrafted = 0;
+              val.forEach(lp => {
+                if (!lp || lp.id == null) return;
+                const sp = _srvByIdF.get(String(lp.id));
+                if (!sp || !Array.isArray(sp.comments) || !sp.comments.length) return;
+                if (!Array.isArray(lp.comments)) lp.comments = [];
+                const have = new Set(lp.comments.filter(c=>c&&c.id!=null).map(c=>String(c.id)));
+                const haveTs = new Set(lp.comments.filter(c=>c&&c.slackTs).map(c=>String(c.slackTs)));
+                let _added = 0;
+                sp.comments.forEach(sc => {
+                  if (!sc || sc.id == null) return;
+                  if (have.has(String(sc.id))) return;
+                  if (sc.slackTs && haveTs.has(String(sc.slackTs))) return;
+                  if (_ct.has(String(sc.id))) return;  // 의도적 삭제 존중
+                  lp.comments.push(sc); _added++;
+                });
+                if (_added > 0) {
+                  lp.comments.sort((a,b)=>String((a&&a.createdAt)||'').localeCompare(String((b&&b.createdAt)||'')));
+                  _rescued += _added;
+                }
+                // relayPostId 별칭도 서버본에서 보존(슬랙 스레드 재연결 유지)
+                if (sp.relayPostId != null && lp.relayPostId == null) { lp.relayPostId = sp.relayPostId; _aliasGrafted++; }
+              });
+              if (_rescued > 0 || _aliasGrafted > 0) {
+                payload.data = JSON.stringify(val);
+                try {
+                  const _liveById = new Map((DB.feedPosts||[]).filter(p=>p&&p.id!=null).map(p=>[String(p.id), p]));
+                  val.forEach(lp => { const t=_liveById.get(String(lp&&lp.id)); if (t) { t.comments = JSON.parse(JSON.stringify(lp.comments||[])); if (lp.relayPostId!=null && t.relayPostId==null) t.relayPostId = lp.relayPostId; } });
+                } catch(_){}
+                console.warn('🛟 [FEED CMT UNION v2.3.515] 저장 전 서버 댓글 ' + _rescued + '건 보존(union)');
+              }
+            } catch(eU) { console.warn('[FEED CMT UNION] 실패:', eU); }
+          }
           // v1.9.955: 로컬 컬렉션이 통째로 비었는데 서버엔 데이터가 있으면 = 비정상 상태 →
           //   그 컬렉션은 Firestore 저장을 건너뛰어 서버의 실제 데이터를 보호한다.
           if (locLen === 0 && srvLen > 0) {
@@ -8013,6 +8053,7 @@ async function _doSaveDataInner() {
       // v1.9.543 — expense / feedPost tombstone 도 Firestore 저장
       _deletedExpenseIds: Array.isArray(dbToSave._deletedExpenseIds) ? dbToSave._deletedExpenseIds : [],
       _deletedFeedPostIds: Array.isArray(dbToSave._deletedFeedPostIds) ? dbToSave._deletedFeedPostIds : [],
+      _deletedFeedCommentIds: Array.isArray(dbToSave._deletedFeedCommentIds) ? dbToSave._deletedFeedCommentIds : [],  // v2.3.515
       _deletedApprovalIds: Array.isArray(dbToSave._deletedApprovalIds) ? dbToSave._deletedApprovalIds : [],
       _deletedCommentIds: Array.isArray(dbToSave._deletedCommentIds) ? dbToSave._deletedCommentIds : [],
       _deletedCommentSigs: Array.isArray(dbToSave._deletedCommentSigs) ? dbToSave._deletedCommentSigs : [],  // v2.3.288
@@ -9190,6 +9231,7 @@ const DEFAULT_DB = {
   // v1.9.543 — 삭제한 expense / feedPost ID 기록 (다른 탭/기기 동기화 시 부활 차단)
   _deletedExpenseIds: [],
   _deletedFeedPostIds: [],
+  _deletedFeedCommentIds: [],
   _deletedApprovalIds: [],
   _deletedCommentIds: [],
   _deletedCommentSigs: [],  // v2.3.288: 의견 콘텐츠 sig tombstone (작은-정수 id 충돌 방어)
@@ -9225,6 +9267,7 @@ if (DB == null) {
     // v1.9.543 — expense / feedPost tombstone 마이그레이션
     if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
     if (!Array.isArray(DB._deletedFeedPostIds)) DB._deletedFeedPostIds = [];
+    if (!Array.isArray(DB._deletedFeedCommentIds)) DB._deletedFeedCommentIds = [];
     if (!Array.isArray(DB._deletedApprovalIds)) DB._deletedApprovalIds = [];
     // v1.9.945: 전용 백업(reniv_deleted_approval_ids)에서 결재 tombstone 복원 —
     //   메인 DB 가 머지로 잃어버려도 삭제 상태가 유지되도록.
@@ -12242,6 +12285,7 @@ window._dashEditComment = function(postId, cid){
 window._dashDeleteComment = function(postId, cid){
   if (!confirm('이 댓글을 삭제할까요?')) return;
   var p = (DB.feedPosts||[]).find(function(x){ return x && x.id === postId; }); if (!p) return;
+  try { if (typeof _feedCmtTombAdd==='function') _feedCmtTombAdd(cid); } catch(_){}  // v2.3.515
   p.comments = (p.comments||[]).filter(function(x){ return x && String(x.id) !== String(cid); });
   try { renderDashStats(); } catch(_){}
   try { if (typeof saveDataNow==='function') saveDataNow(); else if (typeof saveData==='function') saveData(); } catch(_){}
@@ -35211,9 +35255,30 @@ async function addFeedComment(postId){
   }
 }
 
+// ═══ v2.3.515: 피드 댓글 삭제 묘비 — 저장/로드 union 이 삭제된 댓글을 되살리지 않게 ═══
+//   등록: DB._deletedFeedCommentIds(meta 영속) + localStorage 금고(meta 클로버 대비, v485 패턴)
+function _feedCmtTombSet(){
+  const s = new Set();
+  try { (Array.isArray(DB._deletedFeedCommentIds)?DB._deletedFeedCommentIds:[]).forEach(id=>{ if(id!=null) s.add(String(id)); }); } catch(_){}
+  try { (JSON.parse(localStorage.getItem('reniv_deleted_feed_comment_ids')||'[]')||[]).forEach(id=>{ if(id!=null) s.add(String(id)); }); } catch(_){}
+  return s;
+}
+function _feedCmtTombAdd(commentId){
+  const idStr = String(commentId);
+  try {
+    if (!Array.isArray(DB._deletedFeedCommentIds)) DB._deletedFeedCommentIds = [];
+    if (!DB._deletedFeedCommentIds.some(x=>String(x)===idStr)) DB._deletedFeedCommentIds.push(idStr);
+    if (DB._deletedFeedCommentIds.length > 2000) DB._deletedFeedCommentIds = DB._deletedFeedCommentIds.slice(-2000);
+  } catch(_){}
+  try {
+    const v = JSON.parse(localStorage.getItem('reniv_deleted_feed_comment_ids')||'[]')||[];
+    if (!v.some(x=>String(x)===idStr)) { v.push(idStr); localStorage.setItem('reniv_deleted_feed_comment_ids', JSON.stringify(v.slice(-2000))); }
+  } catch(_){}
+}
 async function deleteFeedComment(postId, commentId){
   const p = DB.feedPosts.find(x => x.id === postId);
   if (!p || !Array.isArray(p.comments)) return;
+  _feedCmtTombAdd(commentId);  // v2.3.515
   p.comments = p.comments.filter(c => c.id !== commentId);
   renderFeed();
   // v2.3.243: 삭제도 즉시·검증 저장 — 디바운스 중 이탈 시 '삭제가 되살아나는' 대칭 버그 방지
@@ -57279,6 +57344,12 @@ function initERPWhenReady() {
         if (k === 'feedPosts' && Array.isArray(merged[k]) && Array.isArray(localDB[k]) && localDB[k].length > 0) {
           const localById = new Map(localDB[k].filter(p => p && p.id != null).map(p => [p.id, p]));
           let _reactionRescued = 0, _commentRescued = 0;
+          // v2.3.515: 댓글 삭제 묘비 — union 이 의도적으로 삭제된 댓글을 되살리지 않게
+          const _cmtTomb = new Set();
+          try {
+            [firestoreDB._deletedFeedCommentIds, localDB._deletedFeedCommentIds].forEach(a => { (Array.isArray(a)?a:[]).forEach(id => { if (id!=null) _cmtTomb.add(String(id)); }); });
+            (JSON.parse(localStorage.getItem('reniv_deleted_feed_comment_ids')||'[]')||[]).forEach(id => { if (id!=null) _cmtTomb.add(String(id)); });
+          } catch(_){}
           merged[k] = merged[k].map(srvPost => {
             if (!srvPost || srvPost.id == null) return srvPost;
             const locPost = localById.get(srvPost.id);
@@ -57309,6 +57380,7 @@ function initERPWhenReady() {
             const commentById = new Map();
             [...srvComments, ...locComments].forEach(c => {
               if (!c) return;
+              if (c.id != null && _cmtTomb.has(String(c.id))) return;  // v2.3.515: 삭제 묘비 존중
               const key = c.id != null ? `id:${c.id}` : `txt:${c.authorEmail||''}:${c.createdAt||''}:${(c.text||'').slice(0,40)}`;
               if (!commentById.has(key)) commentById.set(key, c);
             });
