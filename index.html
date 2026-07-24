@@ -6063,7 +6063,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.512';
+const ERP_VERSION = 'v2.3.513';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12224,7 +12224,11 @@ window._dashAddComment = async function(postId){
   inp.value = '';
   try { renderDashStats(); } catch(_){}
   var _saved = false;
-  try { if (typeof saveDataNow==='function'){ await saveDataNow(); _saved = true; } else if (typeof saveData==='function'){ saveData(); _saved = true; } } catch(e){ console.warn('[dash] 댓글 저장 실패', e); }
+  // v2.3.513: 저장 중 오버레이(이탈 방지) + 실쓰기(_lastFsWriteOk) 판정 — 무음 no-op 시 슬랙 미발송
+  window._criticalSaving = true; try { _showSavingOverlay(); } catch(_){}
+  try { if (typeof saveDataNow==='function'){ await saveDataNow(); _saved = (window._lastFsWriteOk !== false); } else if (typeof saveData==='function'){ saveData(); _saved = true; } } catch(e){ console.warn('[dash] 댓글 저장 실패', e); }
+  window._criticalSaving = false; try { _hideSavingOverlay(); } catch(_){}
+  if (!_saved) { try { showNotif('☁️ 댓글이 서버에 저장되지 않았습니다 — 새로고침 후 다시 시도해주세요 (알림 미발송)', 'error'); } catch(_){} }
   if (_saved) { try { var _t = (typeof _kstShortTimeMin==='function')?_kstShortTimeMin():''; var _msg = '💬 *댓글* · ' + (u.name||'익명') + (_t?('  _( ' + _t + ' )_'):'') + '\n' + (text.length>500?(text.slice(0,500)+' …'):text); if (typeof _boardDispatch==='function') _boardDispatch(p.id, 'comment', _msg); } catch(_){} }
 };
 window._dashEditComment = function(postId, cid){
@@ -35183,13 +35187,16 @@ async function addFeedComment(postId){
   // v2.3.243: 디바운스 saveData() 는 Firestore 반영 전에 새로고침/이탈/타사용자 저장 시 댓글이
   //   유실되는데(슬랙은 이미 발송) → 즉시·검증 저장 saveDataNow() 로 Firestore 확정 후에만 슬랙 발송.
   let _saved = false;
+  // v2.3.513: 저장 중 오버레이(이탈 방지, 결재 의견 v2.3.486 동일 패턴) + 실쓰기(_lastFsWriteOk) 판정
+  window._criticalSaving = true; try { _showSavingOverlay(); } catch(_){}
   try {
-    if (typeof saveDataNow === 'function') { await saveDataNow(); _saved = true; }
+    if (typeof saveDataNow === 'function') { await saveDataNow(); _saved = (window._lastFsWriteOk !== false); }
     else { saveData(); _saved = true; }
   } catch(e) {
     console.warn('[v2.3.243] 댓글 저장 실패:', e);
-    try { showNotif('댓글 저장 실패 — 네트워크 확인 후 다시 시도해주세요', 'warning'); } catch(_){}
   }
+  window._criticalSaving = false; try { _hideSavingOverlay(); } catch(_){}
+  if (!_saved) { try { showNotif('☁️ 댓글이 서버에 저장되지 않았습니다 — 새로고침 후 다시 시도해주세요 (알림 미발송)', 'error'); } catch(_){} }
   // v2.3.23: 댓글/대댓글 슬랙 알림 (저장 확정 후에만 — '슬랙만 가고 댓글 유실' 방지)
   if (_saved) {
     try {
@@ -35210,10 +35217,13 @@ async function deleteFeedComment(postId, commentId){
   p.comments = p.comments.filter(c => c.id !== commentId);
   renderFeed();
   // v2.3.243: 삭제도 즉시·검증 저장 — 디바운스 중 이탈 시 '삭제가 되살아나는' 대칭 버그 방지
+  // v2.3.513: 저장 중 오버레이(이탈 방지) 동반
+  window._criticalSaving = true; try { _showSavingOverlay(); } catch(_){}
   try {
     if (typeof saveDataNow === 'function') await saveDataNow();
     else saveData();
   } catch(e) { console.warn('[v2.3.243] 댓글 삭제 저장 실패:', e); }
+  window._criticalSaving = false; try { _hideSavingOverlay(); } catch(_){}
 }
 
 function toggleFeedAllComments(postId){
