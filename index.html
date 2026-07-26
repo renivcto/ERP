@@ -1748,7 +1748,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <table style="table-layout:fixed;width:100%">
             <colgroup>
               <!-- v2.3.530: 용량 140→88px 축소(길면 두 줄로 줄바꿈), 남는 폭은 auto 열인 품목명이 흡수 -->
-              <col style="width:32px"><col style="width:58px"><col style="width:92px"><col><col style="width:52px"><col style="width:88px"><col style="width:74px"><col id="col-item-stock" style="width:66px"><col style="width:84px"><col id="col-item-vendor" style="width:86px"><col id="col-item-quote" style="width:56px"><col style="width:50px">
+              <!-- v2.3.534: 여유 있던 열(분류·품목코드·이미지·원가·평가액·관리)을 4~8px씩 줄여 판매업체·판매가에 배분 -->
+              <col style="width:32px"><col style="width:52px"><col style="width:84px"><col><col style="width:48px"><col style="width:88px"><col style="width:70px"><col id="col-item-stock" style="width:66px"><col style="width:80px"><col id="col-item-vendor" style="width:86px"><col id="col-item-quote" style="width:56px"><col style="width:46px">
             </colgroup>
             <!-- v2.3.529: 완제품 탭에서 재고수량→창고 실제 재고, 업체·견적서→판매업체·판매가 로 renderItemTable() 이 교체 -->
             <thead><tr style="font-size:11.5px"><th style="text-align:center"><input type="checkbox" id="item-check-all" onchange="toggleAllItemChecks(this.checked)" style="cursor:pointer"></th><th style="text-align:center">분류</th><th style="text-align:center">품목코드</th><th style="text-align:center">품목명</th><th style="text-align:center">이미지</th><th style="text-align:center">용량</th><th style="text-align:center">원가</th><th id="th-item-stock" style="text-align:center">재고수량</th><th style="text-align:center">재고평가액</th><th id="th-item-vendor" style="text-align:center">업체</th><th id="th-item-quote" style="text-align:center">견적서</th><th style="text-align:center">관리</th></tr></thead>
@@ -6069,7 +6070,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.533';
+const ERP_VERSION = 'v2.3.534';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -24386,8 +24387,9 @@ function renderItemTable() {
     if (thQ) thQ.textContent = _finTab ? '판매가' : '견적서';
     // v2.3.532: 배경 강조는 과해서 철회 — 헤더는 기본 스타일 그대로, 데이터 글씨만 블루톤
     if (cS) cS.style.width = _finTab ? '92px' : '66px';   // '🔄 실시간 조회' 버튼이 잘리지 않을 최소 폭
-    if (cV) cV.style.width = _finTab ? '100px' : '86px';
-    if (cQ) cQ.style.width = _finTab ? '78px' : '56px';
+    // v2.3.534: 완제품 탭 판매업체·판매가 열 확대 ('쿠팡 로켓그로스' 급 긴 업체명도 줄임표 없이)
+    if (cV) cV.style.width = _finTab ? '128px' : '86px';
+    if (cQ) cQ.style.width = _finTab ? '92px' : '56px';
     if (thS) thS.innerHTML = _finTab
       ? '<div style="display:inline-flex;flex-direction:column;align-items:center;gap:3px"><span onclick="openPlusclMatchModal()" title="클릭 — 완제품↔PlusCL 품목 연결·실재고 매칭" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;white-space:nowrap">창고 실제 재고</span><button onclick="_loadPlusclStock()" title="PlusCL 물류창고 실재고를 지금 실시간으로 조회" style="background:#7c3aed;color:#fff;border:1px solid #6d28d9;border-radius:5px;font-size:10px;padding:2px 8px;cursor:pointer;font-weight:600;white-space:nowrap">🔄 실시간 조회</button></div>'
       : '재고수량';
@@ -29126,7 +29128,8 @@ function _itemFinStockCell(item){
 //   · 판매업체가 아예 없으면 두 칸 모두 빈칸
 function _itemSellerPriceCells(item){
   // v2.3.532: 배경·테두리 강조는 철회(행 배경 그대로) — 데이터 글씨만 블루톤으로 구분
-  const tdBase = 'text-align:center;padding:6px 4px;line-height:1.7';
+  // v2.3.534: 좌우 여백 4→7px (열 확대와 함께 글씨가 칸에 붙지 않게)
+  const tdBase = 'text-align:center;padding:6px 7px;line-height:1.7';
   const rows = (item && Array.isArray(item.supplyPrices)) ? item.supplyPrices.filter(r => r && r.sellerId) : [];
   if (!rows.length) return `<td style="${tdBase}"></td><td style="${tdBase}"></td>`;
   const sep = 'border-top:1px solid #eef2f7;margin-top:2px;padding-top:2px';
@@ -29138,8 +29141,9 @@ function _itemSellerPriceCells(item){
     prices.push(has ? fmtW(Number(r.salePrice)||0) : '');
   });
   // 두 셀의 줄 수·줄높이를 똑같이 맞춰 업체↔판매가가 같은 줄에서 대응되게 함(nowrap 로 줄바꿈 차단)
-  // v2.3.530: 품목명 셀과 동일한 글씨 크기(12.5px). 줄높이는 두 셀 공통 고정값이라 업체↔판매가 줄이 계속 맞음
-  const lineCss = 'font-size:12.5px;line-height:20px;height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+  // v2.3.530: 품목명 셀과 동일한 글씨 크기 / v2.3.534: 0.5pt 축소(12.5→12px).
+  //   줄높이는 두 셀 공통 고정값이라 업체↔판매가 줄이 계속 맞음
+  const lineCss = 'font-size:12px;line-height:20px;height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
   const nameRows = names.map((t,k) => `<div title="${escapeHtml(t)}" style="${k?sep:''};${lineCss};font-weight:600;color:#2563eb">${escapeHtml(t)}</div>`).join('');
   const priceRows = prices.map((t,k) => `<div style="${k?sep:''};${lineCss};font-variant-numeric:tabular-nums;${t?'font-weight:700;color:#1d4ed8':'color:#cbd5e1'}">${t||'-'}</div>`).join('');
   return `<td style="${tdBase}">${nameRows}</td><td style="${tdBase}">${priceRows}</td>`;
