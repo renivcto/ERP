@@ -4382,7 +4382,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         </div>
         <!-- v2.3.493: 거래처별 품목명 · 공급가 (품목명 바로 아래) / v2.3.519: 완제품 전용 표시 -->
         <div class="fg full" id="i-supply-wrap" style="display:none">
-          <label onclick="_itemSupplyToggle()" style="cursor:pointer;user-select:none"><span id="i-supply-caret" style="display:inline-block;width:18px;font-size:16px;color:#2563eb;vertical-align:-1px">▸</span>🏷️ 판매업체별 판매가 · 공급가 <sup><span title="판매업체 선택 → 그 업체용 품목명·판매가·공급가·재고ID 입력&#10;위탁 재고이동/거래명세서에서 자동으로 불러옵니다&#10;(제목 클릭 = 접기/펴기)" style="cursor:help;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:var(--gray-100);color:var(--gray-500);font-size:10px;font-weight:700;font-style:normal">i</span></sup></label>
+          <label onclick="_itemSupplyToggle()" style="cursor:pointer;user-select:none"><span id="i-supply-caret" style="display:inline-block;width:24px;font-size:24px;line-height:1;color:#2563eb;vertical-align:-4px">▸</span>🏷️ 판매업체별 판매가 · 공급가 <sup><span title="판매업체 선택 → 그 업체용 품목명·판매가·공급가·재고ID 입력&#10;위탁 재고이동/거래명세서에서 자동으로 불러옵니다&#10;(제목 클릭 = 접기/펴기)" style="cursor:help;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:var(--gray-100);color:var(--gray-500);font-size:10px;font-weight:700;font-style:normal">i</span></sup></label>
           <div id="i-supply-body" style="display:none">
             <div id="i-supply-list" style="border:1px solid var(--gray-200);border-radius:8px;background:#fff;padding:4px"></div>
             <button type="button" class="btn btn-outline btn-sm" style="margin-top:6px" onclick="_itemSupplyAddRow()">+ 거래처 추가</button>
@@ -6069,7 +6069,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.532';
+const ERP_VERSION = 'v2.3.533';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -25492,6 +25492,19 @@ function _rawDocRemove(idx) {
 // ── v2.3.491: 판매업체 공급가 (item.supplyPrices = [{sellerId, price, vat}]) ──
 window._itemSupplyPrices = window._itemSupplyPrices || [];
 function _itemSupplySellers(){ return (DB.sellers||[]).slice().sort((a,b)=>String(a.company||'').localeCompare(String(b.company||''))); }
+// v2.3.533: 판매업체 드롭다운에 쇼핑몰(DB.shops)도 노출. 쇼핑몰은 sellers 와 id 체계가 달라
+//   충돌 위험이 있으므로 값을 'shop:<id>' 로 접두어 저장한다(기존 판매업체 행은 숫자 id 그대로 유지 →
+//   위탁 재고이동·거래명세서의 _itemSupplyPrice(it, sellerId) 조회는 영향 없음).
+function _itemSupplyShops(){ return (DB.shops||[]).filter(s=>s && s.active!==false).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''))); }
+function _itemSupplyPartnerName(key){
+  const k = String(key==null?'':key);
+  if (k.indexOf('shop:') === 0){
+    const s = (DB.shops||[]).find(x => String(x.id) === k.slice(5));
+    return s ? String(s.name||'') : '(삭제된 쇼핑몰)';
+  }
+  const s = (DB.sellers||[]).find(x => String(x.id) === k);
+  return s ? String(s.company||'') : '(삭제된 업체)';
+}
 function _itemSupplyRefreshNamePick(){
   const sel=document.getElementById('i-name-pick'); if(!sel) return;
   const names=[]; const en=(document.getElementById('i-name-en')||{}).value; if(en) names.push(en);
@@ -25500,12 +25513,16 @@ function _itemSupplyRefreshNamePick(){
 }
 function _renderItemSupplyList(){
   const box=document.getElementById('i-supply-list'); if(!box) return;
-  const rows=window._itemSupplyPrices||[]; const sellers=_itemSupplySellers();
+  const rows=window._itemSupplyPrices||[]; const sellers=_itemSupplySellers(); const shops=_itemSupplyShops();
   if(!rows.length){ box.innerHTML='<div style="color:var(--gray-400);font-size:11.5px;padding:8px 6px">등록된 업체 공급가가 없습니다. 아래 버튼으로 추가하세요.</div>'; _itemSupplyRefreshNamePick(); return; }
   // v2.3.516: 레이아웃 재구성 — 1행: 거래처+거래처 품목명 / 2행: 판매가·공급가·부가세·재고ID (칸 위 제목)
   const _lb=t=>'<label style="display:block;font-size:10px;font-weight:700;color:#94a3b8;margin-bottom:2px">'+t+'</label>';
   box.innerHTML=rows.map((r,i)=>{
-    const opts='<option value="">— 업체 —</option>'+sellers.map(s=>'<option value="'+s.id+'"'+(String(s.id)===String(r.sellerId)?' selected':'')+'>'+escapeHtml(s.company||'')+'</option>').join('');
+    // v2.3.533: 판매업체 + 쇼핑몰(값은 'shop:<id>')을 optgroup 으로 나눠 노출
+    const _op=(val,label,cur)=>'<option value="'+escapeHtml(String(val))+'"'+(String(val)===String(cur)?' selected':'')+'>'+escapeHtml(label)+'</option>';
+    let opts='<option value="">— 업체 —</option>';
+    if(sellers.length) opts+='<optgroup label="🛒 판매업체">'+sellers.map(s=>_op(s.id, s.company||'', r.sellerId)).join('')+'</optgroup>';
+    if(shops.length)   opts+='<optgroup label="🏪 쇼핑몰">'+shops.map(s=>_op('shop:'+s.id, s.name||'', r.sellerId)).join('')+'</optgroup>';
     return '<div style="border:1px solid var(--gray-100);border-radius:7px;padding:7px;margin-bottom:6px;background:#fafcff">'
       +'<div style="display:grid;grid-template-columns:180px 1fr 26px;gap:6px;align-items:end;margin-bottom:5px">'
       +  '<div>'+_lb('판매업체')+'<select class="fs" style="height:32px;font-size:12px;width:100%" onchange="_itemSupplySet('+i+',\'sellerId\',this.value)">'+opts+'</select></div>'
@@ -25531,7 +25548,9 @@ function _itemSupplyToggle(force){
 }
 function _itemSupplySet(i,k,v){ if(window._itemSupplyPrices&&window._itemSupplyPrices[i]){ window._itemSupplyPrices[i][k]=(k==='price'||k==='salePrice')?(v===''?'':Number(v)):v; } }
 function _itemSupplyRemove(i){ if(window._itemSupplyPrices){ window._itemSupplyPrices.splice(i,1); _renderItemSupplyList(); } }
-function _itemSupplyForSave(){ return (window._itemSupplyPrices||[]).filter(r=>r&&r.sellerId&&((r.price!==''&&r.price!=null)||(r.salePrice!==''&&r.salePrice!=null)||(r.itemName&&r.itemName.trim())||(r.stockId&&r.stockId.trim()))).map(r=>({sellerId:r.sellerId, itemName:(r.itemName||'').trim(), price:(r.price===''||r.price==null)?'':(Number(r.price)||0), salePrice:(r.salePrice===''||r.salePrice==null)?'':(Number(r.salePrice)||0), vat:r.vat==='include'?'include':'exclude', stockId:(r.stockId||'').trim()})); }
+// v2.3.533: 거래처만 선택하고 금액을 비워둔 행도 저장한다(이전엔 통째로 버려져 품목현황
+//   판매업체 열에 업체가 안 나오고 판매가 '-' 표기도 불가능했음). 거래처 미선택 행만 제외.
+function _itemSupplyForSave(){ return (window._itemSupplyPrices||[]).filter(r=>r&&r.sellerId).map(r=>({sellerId:r.sellerId, itemName:(r.itemName||'').trim(), price:(r.price===''||r.price==null)?'':(Number(r.price)||0), salePrice:(r.salePrice===''||r.salePrice==null)?'':(Number(r.salePrice)||0), vat:r.vat==='include'?'include':'exclude', stockId:(r.stockId||'').trim()})); }
 function _itemSupplyPrice(item, sellerId){
   if(!item||!Array.isArray(item.supplyPrices)) return null;
   const row=item.supplyPrices.find(r=>r&&String(r.sellerId)===String(sellerId));
@@ -29113,8 +29132,8 @@ function _itemSellerPriceCells(item){
   const sep = 'border-top:1px solid #eef2f7;margin-top:2px;padding-top:2px';
   const names = [], prices = [];
   rows.forEach(r => {
-    const s = (DB.sellers||[]).find(x => String(x.id) === String(r.sellerId));
-    names.push(s ? String(s.company||'') : '(삭제된 업체)');
+    // v2.3.533: 판매업체(숫자 id) · 쇼핑몰('shop:<id>') 양쪽 해석
+    names.push(_itemSupplyPartnerName(r.sellerId));
     const has = (r.salePrice !== '' && r.salePrice != null);
     prices.push(has ? fmtW(Number(r.salePrice)||0) : '');
   });
