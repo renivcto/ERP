@@ -6069,7 +6069,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.530';
+const ERP_VERSION = 'v2.3.531';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -24384,6 +24384,14 @@ function renderItemTable() {
     const cS=$('col-item-stock'), cV=$('col-item-vendor'), cQ=$('col-item-quote');
     if (thV) thV.textContent = _finTab ? '판매업체' : '업체';
     if (thQ) thQ.textContent = _finTab ? '판매가' : '견적서';
+    // v2.3.531: 판매업체·판매가 두 열을 하나의 띠로 강조 (완제품 탭에서만, 벗어나면 원복)
+    [[thV,true],[thQ,false]].forEach(([el,isLeft]) => {
+      if (!el) return;
+      el.style.background   = _finTab ? '#e7f7ef' : '';
+      el.style.color        = _finTab ? '#0f766e' : '';
+      el.style.borderLeft   = (_finTab && isLeft)  ? '2px solid #5eead4' : '';
+      el.style.borderRight  = (_finTab && !isLeft) ? '2px solid #5eead4' : '';
+    });
     if (cS) cS.style.width = _finTab ? '92px' : '66px';   // '🔄 실시간 조회' 버튼이 잘리지 않을 최소 폭
     if (cV) cV.style.width = _finTab ? '100px' : '86px';
     if (cQ) cQ.style.width = _finTab ? '78px' : '56px';
@@ -29105,10 +29113,13 @@ function _itemFinStockCell(item){
 //   · 그 업체의 판매가가 비어 있으면 대표 판매가로 대체하지 않고 '-' (fallback 금지)
 //   · 판매업체가 아예 없으면 두 칸 모두 빈칸
 function _itemSellerPriceCells(item){
-  const tdBase = 'text-align:center;padding:6px 4px;line-height:1.7';
+  // v2.3.531: 두 열을 민트 배경 띠 + 티얼/에메랄드 글씨로 강조 (빈 행도 같은 배경이라 띠가 끊기지 않음)
+  const tdBase  = 'text-align:center;padding:6px 4px;line-height:1.7;background:#f4fcf8';
+  const tdLeft  = tdBase + ';border-left:2px solid #5eead4';
+  const tdRight = tdBase + ';border-right:2px solid #5eead4';
   const rows = (item && Array.isArray(item.supplyPrices)) ? item.supplyPrices.filter(r => r && r.sellerId) : [];
-  if (!rows.length) return `<td style="${tdBase}"></td><td style="${tdBase}"></td>`;
-  const sep = 'border-top:1px solid #eef2f7;margin-top:2px;padding-top:2px';
+  if (!rows.length) return `<td style="${tdLeft}"></td><td style="${tdRight}"></td>`;
+  const sep = 'border-top:1px solid #cdeee0;margin-top:2px;padding-top:2px';
   const names = [], prices = [];
   rows.forEach(r => {
     const s = (DB.sellers||[]).find(x => String(x.id) === String(r.sellerId));
@@ -29119,9 +29130,9 @@ function _itemSellerPriceCells(item){
   // 두 셀의 줄 수·줄높이를 똑같이 맞춰 업체↔판매가가 같은 줄에서 대응되게 함(nowrap 로 줄바꿈 차단)
   // v2.3.530: 품목명 셀과 동일한 글씨 크기(12.5px). 줄높이는 두 셀 공통 고정값이라 업체↔판매가 줄이 계속 맞음
   const lineCss = 'font-size:12.5px;line-height:20px;height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-  const nameRows = names.map((t,k) => `<div title="${escapeHtml(t)}" style="${k?sep:''};${lineCss};color:#334155">${escapeHtml(t)}</div>`).join('');
-  const priceRows = prices.map((t,k) => `<div style="${k?sep:''};${lineCss};font-variant-numeric:tabular-nums;${t?'font-weight:700;color:#0f172a':'color:#cbd5e1'}">${t||'-'}</div>`).join('');
-  return `<td style="${tdBase}">${nameRows}</td><td style="${tdBase}">${priceRows}</td>`;
+  const nameRows = names.map((t,k) => `<div title="${escapeHtml(t)}" style="${k?sep:''};${lineCss};font-weight:600;color:#0f766e">${escapeHtml(t)}</div>`).join('');
+  const priceRows = prices.map((t,k) => `<div style="${k?sep:''};${lineCss};font-variant-numeric:tabular-nums;${t?'font-weight:800;color:#047857':'color:#9fd8c2'}">${t||'-'}</div>`).join('');
+  return `<td style="${tdLeft}">${nameRows}</td><td style="${tdRight}">${priceRows}</td>`;
 }
 async function _loadPlusclStock(){
   // v2.3.380: 관리자 전용 → 쓰기 권한자면 조회 가능(서버 manualFetchPlusclStock 도 canWrite 로 완화)
