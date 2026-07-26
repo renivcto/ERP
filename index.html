@@ -1909,7 +1909,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           <div class="card-body p0 tbl-wrap">
             <table>
               <colgroup><col style="width:58px"><col style="width:85px"><col style="width:220px"><col style="width:65px"><col style="width:75px"><col style="width:95px"><col style="width:55px"></colgroup>
-              <thead><tr><th style="text-align:center">분류</th><th style="text-align:center">품목코드</th><th style="text-align:center">품목명</th><th style="text-align:center">용량</th><th style="text-align:center" title="재고가 보관된 위치별 재고 수량 (ERP 기록 기준)">재고 위치</th><th id="pluscl-stock-th" style="text-align:center;display:none;white-space:nowrap"><div style="display:inline-flex;flex-direction:column;align-items:center;gap:4px"><span onclick="openPlusclMatchModal()" title="클릭 — 완제품↔PlusCL 품목 연결·실재고 매칭" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px">창고 실제 재고</span><button onclick="_loadPlusclStock()" title="PlusCL 물류창고 실재고를 지금 실시간으로 조회(관리자)" style="background:#7c3aed;color:#fff;border:1px solid #6d28d9;border-radius:5px;font-size:10px;padding:2px 8px;cursor:pointer;font-weight:600">🔄 실시간 조회</button></div></th><th style="text-align:center">재고평가액</th><th style="text-align:center">관리</th></tr></thead>
+              <thead><tr><th style="text-align:center">분류</th><th style="text-align:center">품목코드</th><th style="text-align:center">품목명</th><th style="text-align:center">용량</th><th style="text-align:center" title="재고가 보관된 위치(창고·본사 등)">재고 위치</th><th style="text-align:center" title="위치별 재고 수량 (ERP 기록 기준)">재고 수량</th><th id="pluscl-stock-th" style="text-align:center;display:none;white-space:nowrap"><div style="display:inline-flex;flex-direction:column;align-items:center;gap:4px"><span onclick="openPlusclMatchModal()" title="클릭 — 완제품↔PlusCL 품목 연결·실재고 매칭" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px">창고 실제 재고</span><button onclick="_loadPlusclStock()" title="PlusCL 물류창고 실재고를 지금 실시간으로 조회(관리자)" style="background:#7c3aed;color:#fff;border:1px solid #6d28d9;border-radius:5px;font-size:10px;padding:2px 8px;cursor:pointer;font-weight:600">🔄 실시간 조회</button></div></th><th style="text-align:center">재고평가액</th><th style="text-align:center">관리</th></tr></thead>
               <tbody id="stock-table"></tbody>
             </table>
           </div>
@@ -6066,7 +6066,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.523';
+const ERP_VERSION = 'v2.3.524';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28031,26 +28031,30 @@ function _reconcileWhToStock(item, newStock){
   }catch(e){ console.warn('_reconcileWhToStock 실패:', e); }
 }
 // 재고현황 '창고' 열 배지
-function _stockWhBadges(item){
-  // v2.3.522: 배지(pill) → 텍스트 목록 — '창고명   수량' 정렬 표기, 2곳 이상이면 합계 줄
+// v2.3.524: 재고 위치 / 재고 수량 을 별도 표 열(td 2개)로 분리 — 창고명 줄과 수량 줄이 행 단위로 대응.
+//   (v2.3.522 텍스트 목록 → v2.3.523 가운데 정렬 → 이제 진짜 두 열)
+function _stockWhCells(item, isOem){
+  const tdBase = 'text-align:center;line-height:1.9;padding-top:6px;padding-bottom:6px';
+  if (isOem) return `<td style="${tdBase}"><span style="color:var(--gray-300)">-</span></td><td style="${tdBase}"><span style="color:var(--gray-300)">-</span></td>`;
   const stock = Number(item&&item.stock)||0;
   const eff = _itemWhEffective(item);
   const keys = Object.keys(eff);
-  if (keys.length===0 && stock===0) return '<span style="color:var(--gray-300)">-</span>';
-  // v2.3.523: 창고명·수량 각각 가운데 정렬(열 폭 고정), 합계는 옅은 회색
-  const line = (name, qty, muted) =>
-    `<div style="display:flex;align-items:baseline;gap:10px;white-space:nowrap">`+
-    `<span style="flex:1;text-align:center;font-size:12px;color:${muted?'#94a3b8':'#334155'}">${name}</span>`+
-    `<b style="flex:0 0 62px;text-align:center;font-size:13px;font-variant-numeric:tabular-nums;color:${muted?'#94a3b8':'#0f172a'}">${fmt(qty)}</b></div>`;
-  const parts = [];
-  keys.forEach(k=>{ if (k !== '__un__') parts.push(line(_whEsc(_whName(k)), eff[k], false)); });
-  if (eff['__un__'] != null && eff['__un__'] !== 0) parts.push(line('미지정', eff['__un__'], true));
-  if (parts.length === 0) return '<span style="color:var(--gray-300)">-</span>';
-  if (parts.length > 1) parts.push(
-    `<div style="display:flex;align-items:baseline;gap:10px;white-space:nowrap;border-top:1px solid #e2e8f0;margin-top:2px;padding-top:2px">`+
-    `<span style="flex:1;text-align:center;font-size:11px;color:#b0b7c3;font-weight:700">합계</span>`+
-    `<b style="flex:0 0 62px;text-align:center;font-size:13px;font-variant-numeric:tabular-nums;color:#b0b7c3">${fmt(stock)}</b></div>`);
-  return `<div style="display:inline-block;min-width:190px;text-align:left">${parts.join('')}</div>`;
+  const names = [], qtys = [];
+  keys.forEach(k=>{
+    if (k === '__un__') return;
+    names.push({ t:_whEsc(_whName(k)), muted:false });
+    qtys.push({ t:fmt(eff[k]), muted:false });
+  });
+  if (eff['__un__'] != null && eff['__un__'] !== 0) { names.push({ t:'미지정', muted:true }); qtys.push({ t:fmt(eff['__un__']), muted:true }); }
+  if (names.length === 0) return `<td style="${tdBase}"><span style="color:var(--gray-300)">-</span></td><td style="${tdBase}"><span style="color:var(--gray-300)">-</span></td>`;
+  const multi = names.length > 1;
+  const sep = 'border-top:1px solid #e2e8f0;margin-top:2px;padding-top:2px';
+  const nameRows = names.map(n=>`<div style="font-size:12px;color:${n.muted?'#94a3b8':'#334155'};white-space:nowrap">${n.t}</div>`).join('')
+    + (multi ? `<div style="${sep};font-size:11px;font-weight:700;color:#b0b7c3">합계</div>` : '');
+  const qtyRows = qtys.map(q=>`<div style="font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;color:${q.muted?'#94a3b8':'#0f172a'}">${q.t}</div>`).join('')
+    + (multi ? `<div style="${sep};font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;color:#b0b7c3">${fmt(stock)}</div>` : '');
+  const click = `onclick="openItemWhPanel(${item.id})" title="클릭 — 창고 이동 · 이동 히스토리 보기" style="${tdBase};cursor:pointer;transition:background .12s" onmouseover="this.style.background='#f5f3ff'" onmouseout="this.style.background=''"`;
+  return `<td ${click}>${nameRows}</td><td ${click}>${qtyRows}</td>`;
 }
 function _ensureOverlay(id){
   let o = document.getElementById('overlay-'+id);
@@ -29372,7 +29376,7 @@ function renderStockTable() {
       <td style="font-family:monospace;font-size:12px;font-weight:500;text-align:center">${i.code}</td>
       <td class="lnk" onclick="showItemDetail(${i.id})" style="text-align:center">${i.name}</td>
       <td style="font-size:12px;color:var(--gray-500);text-align:center">${i.spec||'-'}</td>
-      <td style="text-align:center;line-height:1.7">${_isOemRow2 ? '<span style="color:var(--gray-300)">-</span>' : `<div onclick="openItemWhPanel(${i.id})" title="클릭 — 창고 이동 · 이동 히스토리 보기" style="cursor:pointer;border-radius:8px;padding:2px 6px;transition:background .12s" onmouseover="this.style.background='#f5f3ff'" onmouseout="this.style.background='transparent'">${_stockWhBadges(i)}</div>`}</td>
+      ${_stockWhCells(i, _isOemRow2)}
       <td style="text-align:center;font-size:13px;${_showPl?'':'display:none'}">${_showPl ? _plusclCellHtml(i) : ''}</td>
       <td style="text-align:center;color:var(--sky-700);font-weight:500;font-size:13px;font-variant-numeric:tabular-nums">${fmtW(stockVal)}</td>
       <td style="text-align:center">
