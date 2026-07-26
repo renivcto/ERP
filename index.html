@@ -1747,9 +1747,10 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <div class="card-body p0" style="overflow-x:hidden">
           <table style="table-layout:fixed;width:100%">
             <colgroup>
-              <col style="width:32px"><col style="width:58px"><col style="width:92px"><col><col style="width:52px"><col style="width:140px"><col style="width:74px"><col style="width:66px"><col style="width:84px"><col style="width:86px"><col style="width:56px"><col style="width:50px">
+              <col style="width:32px"><col style="width:58px"><col style="width:92px"><col><col style="width:52px"><col style="width:140px"><col style="width:74px"><col id="col-item-stock" style="width:66px"><col style="width:84px"><col id="col-item-vendor" style="width:86px"><col id="col-item-quote" style="width:56px"><col style="width:50px">
             </colgroup>
-            <thead><tr style="font-size:11.5px"><th style="text-align:center"><input type="checkbox" id="item-check-all" onchange="toggleAllItemChecks(this.checked)" style="cursor:pointer"></th><th style="text-align:center">분류</th><th style="text-align:center">품목코드</th><th style="text-align:center">품목명</th><th style="text-align:center">이미지</th><th style="text-align:center">용량</th><th style="text-align:center">원가</th><th style="text-align:center">재고수량</th><th style="text-align:center">재고평가액</th><th style="text-align:center">업체</th><th style="text-align:center">견적서</th><th style="text-align:center">관리</th></tr></thead>
+            <!-- v2.3.529: 완제품 탭에서 재고수량→창고 실제 재고, 업체·견적서→판매업체·판매가 로 renderItemTable() 이 교체 -->
+            <thead><tr style="font-size:11.5px"><th style="text-align:center"><input type="checkbox" id="item-check-all" onchange="toggleAllItemChecks(this.checked)" style="cursor:pointer"></th><th style="text-align:center">분류</th><th style="text-align:center">품목코드</th><th style="text-align:center">품목명</th><th style="text-align:center">이미지</th><th style="text-align:center">용량</th><th style="text-align:center">원가</th><th id="th-item-stock" style="text-align:center">재고수량</th><th style="text-align:center">재고평가액</th><th id="th-item-vendor" style="text-align:center">업체</th><th id="th-item-quote" style="text-align:center">견적서</th><th style="text-align:center">관리</th></tr></thead>
             <tbody id="item-table"></tbody>
           </table>
         </div>
@@ -6067,7 +6068,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.528';
+const ERP_VERSION = 'v2.3.529';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -24369,6 +24370,26 @@ function renderItemTable() {
   const totalVal = filtered.reduce((s,i) => s + (_isPhantomStock(i.type) ? 0 : (i.stock||0)*(i.price||0)), 0);
   const tvEl = $('item-total-stock-value');
   if (tvEl) tvEl.textContent = fmtW(totalVal);
+  // ── v2.3.529: 완제품 탭 전용 열 구성 ──
+  //   재고수량 → 창고 실제 재고(PlusCL 실시간 조회, 재고관리와 동일 소스로 연동)
+  //   업체·견적서 → 판매업체·판매가 (품목 등록/수정의 '판매업체별 판매가' 데이터)
+  const _finTab = (itemFilter === '완제품');
+  if (_finTab && (!window._PLUSCL || !window._PLUSCL.loaded)) {
+    // 실재고 스냅샷·매핑 지연 로드 후 1회 재렌더 (재고관리 renderStock 과 동일 패턴)
+    try { _ensurePlusclLoaded().then(() => { try { const p=$('page-item'); if (p && p.classList.contains('active')) renderItemTable(); } catch(_){} }).catch(()=>{}); } catch(_){}
+  }
+  (function(){
+    const thS=$('th-item-stock'), thV=$('th-item-vendor'), thQ=$('th-item-quote');
+    const cS=$('col-item-stock'), cV=$('col-item-vendor'), cQ=$('col-item-quote');
+    if (thV) thV.textContent = _finTab ? '판매업체' : '업체';
+    if (thQ) thQ.textContent = _finTab ? '판매가' : '견적서';
+    if (cS) cS.style.width = _finTab ? '92px' : '66px';   // '🔄 실시간 조회' 버튼이 잘리지 않을 최소 폭
+    if (cV) cV.style.width = _finTab ? '112px' : '86px';
+    if (cQ) cQ.style.width = _finTab ? '88px' : '56px';
+    if (thS) thS.innerHTML = _finTab
+      ? '<div style="display:inline-flex;flex-direction:column;align-items:center;gap:3px"><span onclick="openPlusclMatchModal()" title="클릭 — 완제품↔PlusCL 품목 연결·실재고 매칭" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;white-space:nowrap">창고 실제 재고</span><button onclick="_loadPlusclStock()" title="PlusCL 물류창고 실재고를 지금 실시간으로 조회" style="background:#7c3aed;color:#fff;border:1px solid #6d28d9;border-radius:5px;font-size:10px;padding:2px 8px;cursor:pointer;font-weight:600;white-space:nowrap">🔄 실시간 조회</button></div>'
+      : '재고수량';
+  })();
   const typeRowBg = {원자재:'#fafef9', 부자재:'#fefaff', OEM:'#fafcff', 완제품:'#fffefa', 외주가공:'#fafbfc'};
   $('item-table').innerHTML = filtered.map(i => {
     const v = getVendor(i.vendorId);
@@ -24392,10 +24413,10 @@ function renderItemTable() {
       <td style="text-align:center;padding:6px 2px">${imgHtml}</td>
       <td style="font-size:12px;color:#475569;text-align:center;white-space:pre-wrap;word-break:break-word;vertical-align:middle;line-height:1.55;padding:6px 4px">${(i.spec||'-').replace(/\n/g,'<br>').replace(/\*/g,'<span style="vertical-align:middle;font-size:12px;line-height:1">*</span>')}</td>
       <td style="text-align:center;font-size:12.5px;font-variant-numeric:tabular-nums;padding:6px 2px;white-space:nowrap">${fmtW(i.price)}</td>
-      <td style="text-align:center;font-size:12.5px;font-variant-numeric:tabular-nums;padding:6px 2px"><strong>${_isOemRow ? '<span style="color:#cbd5e1">-</span>' : fmt(i.stock)}</strong></td>
+      ${_finTab ? _itemFinStockCell(i) : `<td style="text-align:center;font-size:12.5px;font-variant-numeric:tabular-nums;padding:6px 2px"><strong>${_isOemRow ? '<span style="color:#cbd5e1">-</span>' : fmt(i.stock)}</strong></td>`}
       <td style="text-align:center;color:var(--sky-700);font-weight:600;font-size:12.5px;font-variant-numeric:tabular-nums;padding:6px 2px;white-space:nowrap">${_isOemRow ? '<span style="color:#cbd5e1">-</span>' : fmtW(stockVal)}</td>
-      <td class="lnk" onclick="viewVendor(${i.vendorId})" style="text-align:center;font-size:12px;padding:6px 4px;line-height:1.4;word-break:keep-all">${v.company||'-'}</td>
-      <td style="text-align:center;padding:6px 2px">${i.quoteFileName ? `<button onclick="openItemQuoteFile(${i.id})" title="${i.quoteFileName}" style="display:inline-flex;align-items:center;gap:3px;background:#fdf2f8;color:#c4708a;border:1px solid #f0c0d4;padding:2px 7px;border-radius:5px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#d97b9a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>보기</button>` : '<span style="color:var(--gray-300);font-size:11px">-</span>'}</td>
+      ${_finTab ? _itemSellerPriceCells(i) : `<td class="lnk" onclick="viewVendor(${i.vendorId})" style="text-align:center;font-size:12px;padding:6px 4px;line-height:1.4;word-break:keep-all">${v.company||'-'}</td>
+      <td style="text-align:center;padding:6px 2px">${i.quoteFileName ? `<button onclick="openItemQuoteFile(${i.id})" title="${i.quoteFileName}" style="display:inline-flex;align-items:center;gap:3px;background:#fdf2f8;color:#c4708a;border:1px solid #f0c0d4;padding:2px 7px;border-radius:5px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#d97b9a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>보기</button>` : '<span style="color:var(--gray-300);font-size:11px">-</span>'}</td>`}
       <td style="text-align:center;padding:6px 2px">
         <div style="display:inline-flex;flex-direction:column;gap:3px;align-items:center">
           <button title="수정" onclick="editItem(${i.id})" style="background:#eef2ff;color:#6366f1;border:1px solid #e0e7ff;width:24px;height:22px;padding:0;border-radius:5px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1">✏️</button>
@@ -29058,6 +29079,48 @@ function _plusclMapPick(itemId){
   // v2.3.377: 기존 prompt(번호 입력) → 매칭 테이블 모달로 대체
   openPlusclMatchModal();
 }
+// v2.3.529: 연결된 PlusCL 실재고 수량만 숫자로 반환 (미연결·미조회 = null).
+//   품목 현황(완제품)·재고 관리가 같은 소스(shared/pluscl_stock + pluscl_item_map)를 읽어 연동된다.
+function _plusclQtyOf(item){
+  if (!item || item.type !== '완제품') return null;
+  const code = _plusclMapGet()[item.id];
+  if (!code) return null;
+  const rec = _plusclStockList().find(s => String(s.code) === String(code));
+  return rec ? (Number(rec.qty)||0) : null;
+}
+// v2.3.529: 품목 현황 완제품 탭 재고수량 셀 = 창고 실제 재고(PlusCL).
+//   재고관리의 '창고 실제 재고' 셀과 완전히 같은 렌더(_plusclCellHtml)를 써서 두 화면이 항상 같은 값을 보여준다.
+//   ERP 기록 재고와 다를 때만 아래에 작게 병기(재고평가액은 ERP 기록 재고 × 원가 기준이므로 근거를 남김).
+function _itemFinStockCell(item){
+  const q = _plusclQtyOf(item);
+  const erp = Number(item && item.stock) || 0;
+  const sub = (q != null && q !== erp)
+    ? `<div style="font-size:9.5px;color:#b0b7c3;line-height:1.2;margin-top:1px" title="ERP 기록 재고 (재고평가액 계산 기준)">ERP ${fmt(erp)}</div>`
+    : '';
+  return `<td style="text-align:center;font-size:12.5px;padding:6px 2px">${_plusclCellHtml(item)}${sub}</td>`;
+}
+// v2.3.529: 품목 현황 완제품 탭 — 판매업체 / 판매가 2셀 (재고관리 창고·수량 스택과 동일 정렬).
+//   · 판매업체별 판매가(item.supplyPrices[].salePrice)를 업체와 같은 줄에 맞춰 표시
+//   · 그 업체의 판매가가 비어 있으면 대표 판매가로 대체하지 않고 '-' (fallback 금지)
+//   · 판매업체가 아예 없으면 두 칸 모두 빈칸
+function _itemSellerPriceCells(item){
+  const tdBase = 'text-align:center;padding:6px 4px;line-height:1.7';
+  const rows = (item && Array.isArray(item.supplyPrices)) ? item.supplyPrices.filter(r => r && r.sellerId) : [];
+  if (!rows.length) return `<td style="${tdBase}"></td><td style="${tdBase}"></td>`;
+  const sep = 'border-top:1px solid #eef2f7;margin-top:2px;padding-top:2px';
+  const names = [], prices = [];
+  rows.forEach(r => {
+    const s = (DB.sellers||[]).find(x => String(x.id) === String(r.sellerId));
+    names.push(s ? String(s.company||'') : '(삭제된 업체)');
+    const has = (r.salePrice !== '' && r.salePrice != null);
+    prices.push(has ? fmtW(Number(r.salePrice)||0) : '');
+  });
+  // 두 셀의 줄 수·줄높이를 똑같이 맞춰 업체↔판매가가 같은 줄에서 대응되게 함(nowrap 로 줄바꿈 차단)
+  const lineCss = 'font-size:11.5px;line-height:19px;height:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+  const nameRows = names.map((t,k) => `<div title="${escapeHtml(t)}" style="${k?sep:''};${lineCss};color:#334155">${escapeHtml(t)}</div>`).join('');
+  const priceRows = prices.map((t,k) => `<div style="${k?sep:''};${lineCss};font-variant-numeric:tabular-nums;${t?'font-weight:700;color:#0f172a':'color:#cbd5e1'}">${t||'-'}</div>`).join('');
+  return `<td style="${tdBase}">${nameRows}</td><td style="${tdBase}">${priceRows}</td>`;
+}
 async function _loadPlusclStock(){
   // v2.3.380: 관리자 전용 → 쓰기 권한자면 조회 가능(서버 manualFetchPlusclStock 도 canWrite 로 완화)
   if (typeof requireWrite==='function' && !requireWrite()) return;
@@ -29073,6 +29136,8 @@ async function _loadPlusclStock(){
     try { await saveSharedSetting('pluscl_stock', window._PLUSCL.stock); } catch(_){}
     showNotif('✅ PlusCL 현재고 ' + (d.count||0) + '건 불러옴', 'success');
     renderStockTable();
+    // v2.3.529: 품목 현황(완제품) 재고수량도 같은 소스라 즉시 갱신 — 두 화면 연동
+    try { const p=document.getElementById('page-item'); if (p && p.classList.contains('active') && typeof renderItemTable==='function') renderItemTable(); } catch(_){}
   } catch(e){ console.error('[PlusCL 현재고]', e); showNotif('❌ PlusCL 현재고 실패: ' + ((e&&e.message)||e), 'error'); }
 }
 // ── v2.3.377: PlusCL 현재고 연결 매칭 모달 — 완제품 ↔ PlusCL 품목을 드롭박스로 직접 매칭 + 수량 표시.
@@ -29135,6 +29200,8 @@ function _plusclMatchSelect(itemId, code){
   try { saveSharedSetting('pluscl_item_map', window._PLUSCL.map); } catch(_){}
   _renderPlusclMatch();
   try{ if(typeof renderStockTable==='function') renderStockTable(); }catch(_){}
+  // v2.3.529: 품목 현황(완제품)도 같은 매핑을 쓰므로 함께 갱신
+  try{ const p=document.getElementById('page-item'); if(p && p.classList.contains('active') && typeof renderItemTable==='function') renderItemTable(); }catch(_){}
 }
 async function _plusclMatchRefresh(){
   await _loadPlusclStock();
