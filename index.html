@@ -6077,7 +6077,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.551';
+const ERP_VERSION = 'v2.3.552';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -24401,8 +24401,11 @@ function renderItemTable() {
     if (thV) thV.textContent = _finTab ? '판매업체' : '업체';
     if (thQ) thQ.textContent = _finTab ? '판매가' : '견적서';
     // v2.3.551: 판매채널 열은 완제품 탭에서만 노출 (채널은 완제품 전용 데이터)
+    // v2.3.552: display:none 은 그 칸을 레이아웃에서 제거해 col 폭 매핑이 한 칸씩 밀린다
+    //   (품목명이 0px 폭을 받아 좁아지고 이미지가 auto 폭을 받아 넓어지던 버그)
+    //   → th/td 는 항상 렌더하고, 숨길 땐 폭 0 + 내용·패딩 제거로 처리
     const thC=$('th-item-channel'), cC=$('col-item-channel');
-    if (thC) thC.style.display = _finTab ? '' : 'none';
+    if (thC) { thC.style.display=''; thC.textContent = _finTab ? '판매채널' : ''; thC.style.padding = _finTab ? '' : '0'; }
     if (cC) cC.style.width = _finTab ? '68px' : '0px';
     // v2.3.532: 배경 강조는 과해서 철회 — 헤더는 기본 스타일 그대로, 데이터 글씨만 블루톤
     if (cS) cS.style.width = _finTab ? '92px' : '66px';   // '🔄 실시간 조회' 버튼이 잘리지 않을 최소 폭
@@ -24432,7 +24435,7 @@ function renderItemTable() {
       <td style="text-align:center;padding:6px 2px"><input type="checkbox" class="item-check" data-id="${i.id}" onchange="updateArchiveBtn()" style="cursor:pointer"></td>
       <td style="text-align:center;padding:6px 2px"><span class="badge ${typeBadge(i.type)}" style="font-size:10.5px;padding:1px 6px">${i.type}</span></td>
       <td style="text-align:center;font-size:12.5px;font-weight:600;color:#0f172a;letter-spacing:.2px;padding:6px 2px;white-space:nowrap">${i.code}</td>
-      <td style="text-align:center;padding:6px 3px;line-height:1.6${_finTab?'':';display:none'}">${_finTab ? _itemChannelCellHtml(i) : ''}</td>
+      ${_finTab ? `<td style="text-align:center;padding:6px 3px;line-height:1.6">${_itemChannelCellHtml(i)}</td>` : '<td style="padding:0;font-size:0;border:none"></td>'}
       <td class="lnk" style="text-align:center;word-break:keep-all;white-space:normal;line-height:1.45;padding:6px 8px;font-size:12.5px" onclick="showItemDetail(${i.id})">${i.name}</td>
       <td style="text-align:center;padding:6px 2px">${imgHtml}</td>
       <td style="font-size:12px;color:#475569;text-align:center;white-space:pre-wrap;word-break:break-word;vertical-align:middle;line-height:1.55;padding:6px 4px">${(i.spec||'-').replace(/\n/g,'<br>').replace(/\*/g,'<span style="vertical-align:middle;font-size:12px;line-height:1">*</span>')}</td>
@@ -29608,8 +29611,11 @@ function renderStockTable() {
   const _showPl = (_stockTypeFilter === '완제품');
   const _plTh = document.getElementById('pluscl-stock-th'); if (_plTh) _plTh.style.display = _showPl ? '' : 'none';
   // v2.3.551: 판매채널 열도 완제품 탭에서만 노출 (채널은 완제품 전용 데이터)
+  // v2.3.552: display:none 대신 폭 0 + 내용·패딩 제거 — display:none 은 col 매핑을 밀어
+  //   품목명이 좁아지고 이미지/용량이 넓어지는 열 뒤틀림을 만든다 (품목 현황과 동일 수정)
   const _showCh = (_stockTypeFilter === '완제품');
-  const _chTh = document.getElementById('stock-channel-th'); if (_chTh) _chTh.style.display = _showCh ? '' : 'none';
+  const _chTh = document.getElementById('stock-channel-th');
+  if (_chTh) { _chTh.style.display=''; _chTh.textContent = _showCh ? '판매채널' : ''; _chTh.style.padding = _showCh ? '' : '0'; }
   const _chCol = document.getElementById('stock-channel-col'); if (_chCol) _chCol.style.width = _showCh ? '62px' : '0px';
   const typeRowBg = {원자재:'#fafef9', 부자재:'#fefaff', OEM:'#fafcff', 완제품:'#fffefa', 외주가공:'#fafbfc'};
   $('stock-table').innerHTML = items.map(i => {
@@ -29622,7 +29628,7 @@ function renderStockTable() {
     return `<tr style="background:${rowBg}${i._archived?';opacity:0.85':''}">
       <td style="text-align:center"><span class="badge ${typeBadge(i.type)}" style="font-size:11px">${i.type}</span></td>
       <td style="text-align:center;font-size:13px;font-weight:600;color:#0f172a;letter-spacing:.2px">${i.code}</td>
-      <td style="text-align:center;padding:6px 3px;line-height:1.6${_showCh?'':';display:none'}">${_showCh ? _itemChannelCellHtml(i) : ''}</td>
+      ${_showCh ? `<td style="text-align:center;padding:6px 3px;line-height:1.6">${_itemChannelCellHtml(i)}</td>` : '<td style="padding:0;font-size:0;border:none"></td>'}
       <td class="lnk" onclick="showItemDetail(${i.id})" style="text-align:center;font-size:13px">${i.name}</td>
       <td style="text-align:center;font-size:12.5px;color:#475569;line-height:1.55">${i.spec||'-'}</td>
       ${_stockWhCells(i, _isOemRow2)}
