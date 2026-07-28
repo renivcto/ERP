@@ -4497,7 +4497,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       <div class="sec-title" style="margin-top:8px">구성 품목</div>
       <div class="tbl-wrap" style="margin-bottom:10px">
         <table>
-          <thead><tr><th>품목</th><th>투입량</th><th>단위</th><th>비고</th><th></th></tr></thead>
+          <thead><tr><th>품목</th><th>투입량</th><th>단위</th><th>단가</th><th></th></tr></thead>
           <tbody id="bom-modal-rows"></tbody>
         </table>
       </div>
@@ -6071,7 +6071,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.541';
+const ERP_VERSION = 'v2.3.542';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27307,6 +27307,24 @@ function populateBOMRows() {
   addBOMRow();
 }
 
+// v2.3.542: BOM 행의 '단가' 셀 동기화 — 선택된 구성 품목의 등록 단가(item.price)를 자동 표시.
+//   (기존 '비고' 열 대체. 비고 값 자체는 hidden input 으로 보존해 저장 시 유실되지 않음)
+function _bomRowPriceSync(sel) {
+  try {
+    const tr = sel && sel.closest ? sel.closest('tr') : null; if (!tr) return;
+    const cell = tr.querySelector('.bom-price'); if (!cell) return;
+    const it = (sel.value && typeof getItem === 'function') ? getItem(parseInt(sel.value)) : null;
+    if (it && it.price != null && it.price !== '') {
+      cell.textContent = fmtW(Number(it.price) || 0);
+      cell.style.color = '#0f172a';
+      cell.title = (it.name || '') + ' 등록 단가';
+    } else {
+      cell.textContent = '-';
+      cell.style.color = '#cbd5e1';
+      cell.title = it ? '단가 미등록' : '';
+    }
+  } catch(_){}
+}
 function addBOMRow(itemId, qty, unit, note) {
   const tbody = $('bom-modal-rows');
   const tr = document.createElement('tr');
@@ -27315,20 +27333,21 @@ function addBOMRow(itemId, qty, unit, note) {
   tr.innerHTML = `<td style="min-width:260px;padding:6px 4px">
     <div style="display:flex;gap:4px;margin-bottom:4px">
       <select id="${fId}" class="fs" style="width:80px;font-size:12px"
-        onchange="(()=>{const s=document.getElementById('${selId}');s.innerHTML=getBOMItemOptions(this.value,document.getElementById('${sId}').value);})()">
+        onchange="(()=>{const s=document.getElementById('${selId}');s.innerHTML=getBOMItemOptions(this.value,document.getElementById('${sId}').value);_bomRowPriceSync(s);})()">
         <option value="">전체</option><option value="원자재">원자재</option><option value="부자재">부자재</option><option value="OEM">OEM</option><option value="외주가공">외주가공</option>
       </select>
       <input id="${sId}" class="fi" placeholder="품목을 검색하세요." style="flex:1;font-size:11px"
-        oninput="(()=>{const s=document.getElementById('${selId}');s.innerHTML=getBOMItemOptions(document.getElementById('${fId}').value,this.value);})()">
+        oninput="(()=>{const s=document.getElementById('${selId}');s.innerHTML=getBOMItemOptions(document.getElementById('${fId}').value,this.value);_bomRowPriceSync(s);})()">
     </div>
-    <select id="${selId}" class="fs bom-item-sel" style="width:100%;font-size:12px">${getBOMItemOptions('','')}</select>
+    <select id="${selId}" class="fs bom-item-sel" style="width:100%;font-size:12px" onchange="_bomRowPriceSync(this)">${getBOMItemOptions('','')}</select>
   </td>
   <td><input class="fi bom-qty" value="${qty!==undefined?qty:''}" placeholder="" style="width:95px;font-size:12px;text-align:center"></td>
   <td><input class="fi bom-unit" value="${unit||'EA'}" style="width:45px;font-size:12px;text-align:center"></td>
-  <td><input class="fi bom-note" value="${note||''}" style="width:100px;font-size:12px;text-align:center"></td>
+  <td style="text-align:center"><span class="bom-price" style="display:inline-block;min-width:88px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;color:#cbd5e1">-</span><input type="hidden" class="bom-note" value="${String(note||'').replace(/"/g,'&quot;')}"></td>
   <td><button class="btn btn-danger btn-xs" onclick="this.closest('tr').remove()">✕</button></td>`;
   tbody.appendChild(tr);
-  if (itemId) setTimeout(()=>{ const s=tr.querySelector('.bom-item-sel'); if(s) s.value=itemId; }, 10);
+  if (itemId) setTimeout(()=>{ const s=tr.querySelector('.bom-item-sel'); if(s){ s.value=itemId; _bomRowPriceSync(s); } }, 10);
+  else { const s0=tr.querySelector('.bom-item-sel'); if(s0) _bomRowPriceSync(s0); }
 }
 
 function saveBOM() {
