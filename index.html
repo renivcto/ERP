@@ -6070,7 +6070,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.539';
+const ERP_VERSION = 'v2.3.540';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -32741,18 +32741,7 @@ async function viewOrderQuoteDoc(idx) {
       else { showNotif('⚠️ 파일 데이터 없음 (IDB/Firestore 모두 미발견)', 'warning'); return; }
     } catch(e) { console.warn('견적서 lazy load 실패:', e); showNotif('파일 로드 실패', 'warning'); return; }
   }
-  if (_stoIsHttp(d.data)) { window.open(d.data, '_blank'); return; }
-  try {
-    const parts = d.data.split(',');
-    const mimeMatch = (parts[0] || '').match(/data:([^;]+)/);
-    const mime = (mimeMatch ? mimeMatch[1] : d.type) || 'application/octet-stream';
-    const byteString = atob(parts[1] || '');
-    const buf = new Uint8Array(byteString.length);
-    for (let i = 0; i < byteString.length; i++) buf[i] = byteString.charCodeAt(i);
-    const url = URL.createObjectURL(new Blob([buf], { type: mime }));
-    window.open(url, '_blank');
-    setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 30000);
-  } catch(e) { console.warn('viewOrderQuoteDoc 실패:', e); showNotif('파일 보기 실패', 'warning'); }
+  await _openOrDownloadAttachment(d.data, d.name, d.type);  // v2.3.540
 }
 
 function handleOrderClosingDocs(input) {
@@ -32831,26 +32820,8 @@ async function viewOrderClosingDoc(idx) {
       }
     } catch(e) { console.warn('마감자료 lazy load 실패:', e); showNotif('파일 로드 실패', 'warning'); return; }
   }
-  // v2.3.365: Storage 이전된 첨부(https URL)는 직접 열기
-  if (_stoIsHttp(d.data)) { window.open(d.data, '_blank'); return; }
-  try {
-    // base64 data URL → Blob → 새 탭에서 열기
-    const parts = d.data.split(',');
-    const meta = parts[0] || '';
-    const b64 = parts[1] || '';
-    const mimeMatch = meta.match(/data:([^;]+)/);
-    const mime = (mimeMatch ? mimeMatch[1] : d.type) || 'application/octet-stream';
-    const byteString = atob(b64);
-    const buf = new Uint8Array(byteString.length);
-    for (let i = 0; i < byteString.length; i++) buf[i] = byteString.charCodeAt(i);
-    const blob = new Blob([buf], { type: mime });
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
-    setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 30000);
-  } catch(e) {
-    console.warn('viewOrderClosingDoc 실패:', e);
-    showNotif('파일 보기 실패', 'warning');
-  }
+  // v2.3.365: Storage 이전본(https URL)·base64 모두 처리. v2.3.540: 표시 불가 형식은 파일명대로 다운로드.
+  await _openOrDownloadAttachment(d.data, d.name, d.type);
 }
 
 // ═══════ v1.9.907: 마감서 (closingDocs) — 결재요청 표 ↔ 발주서 연동 ═══════
@@ -33029,6 +33000,57 @@ function removeClosingModalDoc(idx) {
   try { renderOrderClosingDocsList(); } catch(_){}
   showNotif('🗑 마감서 파일 삭제 완료', 'success');
 }
+// v2.3.540: 첨부 열기 공용 — 브라우저가 표시 못 하는 형식(xlsx·docx·hwp·zip 등)은 window.open 대신
+//   원래 파일명으로 '다운로드'. 기존엔 blob/Storage URL 을 새 탭으로 열어, 확장자·파일명이 없는 파일로
+//   저장되거나 빈 탭만 떠서 "다운로드가 안 돼 열 수 없다"는 증상이 났다(마감서 xlsx).
+async function _openOrDownloadAttachment(data, fileName, mimeType) {
+  const name = String(fileName || 'attachment');
+  const ext = (name.indexOf('.') >= 0 ? name.split('.').pop() : '').toLowerCase();
+  const mime = String(mimeType || '');
+  const INLINE_EXT = ['png','jpg','jpeg','gif','webp','bmp','svg','pdf','txt'];
+  const canInline = INLINE_EXT.indexOf(ext) >= 0 || /^image\//.test(mime) || mime === 'application/pdf' || mime === 'text/plain';
+  const isHttp = (typeof _stoIsHttp === 'function') ? _stoIsHttp(data) : /^https?:/i.test(String(data));
+  const saveBlob = (blob) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.style.display = 'none';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { try { a.remove(); URL.revokeObjectURL(url); } catch(_){} }, 30000);
+    try { showNotif('⬇️ ' + name + ' 다운로드', 'success'); } catch(_){}
+  };
+  try {
+    if (isHttp) {
+      if (canInline) { window.open(data, '_blank'); return; }
+      // 파일명 보존을 위해 직접 받아서 저장(CORS 실패 시 새 탭 폴백)
+      try {
+        const res = await fetch(data);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        saveBlob(await res.blob());
+      } catch(e) {
+        console.warn('[attach] fetch 저장 실패 — 새 탭으로 대체:', e);
+        window.open(data, '_blank');
+      }
+      return;
+    }
+    const parts = String(data).split(',');
+    const meta = parts[0] || '', b64 = parts[1] || '';
+    const mm = meta.match(/data:([^;]+)/);
+    const realMime = (mm ? mm[1] : mime) || 'application/octet-stream';
+    const bs = atob(b64);
+    const buf = new Uint8Array(bs.length);
+    for (let i = 0; i < bs.length; i++) buf[i] = bs.charCodeAt(i);
+    const blob = new Blob([buf], { type: realMime });
+    if (canInline) {
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 30000);
+    } else saveBlob(blob);
+  } catch(e) {
+    console.warn('첨부 열기 실패:', e);
+    try { showNotif('파일 열기 실패', 'warning'); } catch(_){}
+  }
+}
+
 async function viewClosingModalDoc(idx) {
   const ord = (DB.orders||[]).find(o => o && String(o.id) === String(_closingModalOrderId));
   if (!ord || !Array.isArray(ord.closingDocs)) return;
@@ -33044,21 +33066,8 @@ async function viewClosingModalDoc(idx) {
       else { showNotif('⚠️ 파일 데이터 없음 (IDB/Firestore 미발견)', 'warning'); return; }
     } catch(e) { showNotif('파일 로드 실패', 'warning'); return; }
   }
-  // v2.3.465: Storage 이전된 첨부(https URL)는 직접 열기 — v2.3.365 때 발주서 폼 뷰어(31712)에만
-  //   적용되고 이 모달엔 누락돼, URL 로 이전된 마감서가 atob() 로 들어가 '보기'가 깨졌다.
-  if (typeof _stoIsHttp === 'function' && _stoIsHttp(data)) { window.open(data, '_blank'); return; }
-  try {
-    const parts = String(data).split(',');
-    const meta = parts[0] || '', b64 = parts[1] || '';
-    const mm = meta.match(/data:([^;]+)/);
-    const mime = (mm ? mm[1] : d.type) || 'application/octet-stream';
-    const bs = atob(b64);
-    const buf = new Uint8Array(bs.length);
-    for (let i = 0; i < bs.length; i++) buf[i] = bs.charCodeAt(i);
-    const url = URL.createObjectURL(new Blob([buf], { type: mime }));
-    window.open(url, '_blank');
-    setTimeout(function(){ try { URL.revokeObjectURL(url); } catch(_){} }, 30000);
-  } catch(e) { showNotif('파일 보기 실패', 'warning'); }
+  // v2.3.465: Storage 이전본(https URL)·base64 모두 처리. v2.3.540: 표시 불가 형식은 파일명대로 다운로드.
+  await _openOrDownloadAttachment(data, d.name, d.type);
 }
 
 let _orderStampName = null;
