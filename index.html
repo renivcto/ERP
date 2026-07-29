@@ -6077,7 +6077,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.553';
+const ERP_VERSION = 'v2.3.554';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30787,6 +30787,7 @@ function _syncOverseasPoApprovalExpense(orderId) {
       expPre.vendor = vendorName;
       expPre.note = noteP;
       expPre.urgent = !!o.urgentPrepay;  // v2.2.40: urgent 갱신
+      expPre.dueDate = o.orderDate || expPre.dueDate || '';  // v2.3.554: 발주서 수정 시 예정일 동기화
       expPre.updatedAt = Date.now();
     } else {
       expPre.title = `[해외 선급금] ${vendorName}`;
@@ -30794,6 +30795,7 @@ function _syncOverseasPoApprovalExpense(orderId) {
       expPre.note = noteP;
       expPre.poAmount = _prepayAmt; if (!expPre.amountManual) expPre.amount = _prepayAmt;  // v2.3.289: 실지급 override 보존
       expPre.urgent = !!o.urgentPrepay;  // v2.2.40: urgent 갱신
+      expPre.dueDate = o.orderDate || expPre.dueDate || '';  // v2.3.554: 발주서 수정 시 예정일 동기화
       expPre.__krwConverted = false;
       expPre.updatedAt = Date.now();
     }
@@ -30844,14 +30846,14 @@ function _syncOverseasPoApprovalExpense(orderId) {
     exp.title = `[해외 잔금] ${vendorName}`;
     exp.vendor = vendorName;
     exp.note = note;
-    if (!exp.dueDate) exp.dueDate = dueDate || '';
+    exp.dueDate = dueDate || exp.dueDate || '';  // v2.3.554: 발주서 값이 있으면 동기화(빈값 채움→갱신)
     exp.updatedAt = Date.now();
   } else {
     // v1.9.862: 미환산 + 미지급 expense — amount 외화로 reset + __krwConverted=false → 1회 환산
     exp.title = `[해외 잔금] ${vendorName}`;
     exp.vendor = vendorName;
     exp.note = note;
-    if (!exp.dueDate) exp.dueDate = dueDate || '';
+    exp.dueDate = dueDate || exp.dueDate || '';  // v2.3.554: 발주서 값이 있으면 동기화(빈값 채움→갱신)
     exp.poAmount = _balanceAmt; if (!exp.amountManual) exp.amount = _balanceAmt;  // v2.3.289: 실지급 override 보존
     exp.urgent = !!o.urgentBalance;  // v2.2.40: urgent 갱신
     exp.__krwConverted = false;
@@ -36126,6 +36128,10 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
       expPre.poAmount = prepay; if (!expPre.amountManual) expPre.amount = prepay;  // v2.3.289: 실지급 override 보존
       expPre.urgent = !!o.urgentPrepay;  // v1.9.210
       expPre.note = `${pctDisp}% 선입금 (발주금액 VAT포함 ${fmtWon(total)})`;
+      // v2.3.554: 발주서 수정 시 선급금 지급예정일도 동기화(생성 규칙과 동일: 발주일).
+      //   잔금(36165)만 동기화되고 선급금은 생성 때 값이 고정돼 "발주서 날짜를 바꿔도 안 바뀌는" 버그.
+      expPre.dueDate = o.orderDate || expPre.dueDate || '';
+      expPre.updatedAt = Date.now();  // 머지 EDIT RECOVERY 보호
     }
   } else if (expPre) {
     // 선입금% 0으로 수정 시: 아직 미지급이면 삭제, 지급됐으면 남김
@@ -36165,6 +36171,7 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
       expBal.dueDate = o.balanceDueDate || o.payDate || expBal.dueDate || '';
       expBal.urgent = !!o.urgentBalance;  // v1.9.210
       expBal.note = `${balPctDisp}% 잔금 (발주금액 VAT포함 ${fmtWon(total)})`;
+      expBal.updatedAt = Date.now();  // v2.3.554: 머지 EDIT RECOVERY 보호
     }
   } else if (expBal && expBal.paidStatus !== 'paid') {
     DB.expenses = DB.expenses.filter(e => e.id !== expBal.id);
