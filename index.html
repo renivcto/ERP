@@ -345,6 +345,8 @@ body{font-family:var(--font);background:var(--gray-50);color:var(--gray-800);hei
 .sync-dot{width:7px;height:7px;background:var(--green-500);border-radius:50%;display:inline-block;animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 @keyframes apBlink{0%,100%{opacity:1;transform:scale(1);box-shadow:0 0 0 0 rgba(244,114,182,.55)}50%{opacity:.75;transform:scale(1.07);box-shadow:0 0 0 8px rgba(244,114,182,0)}}
+/* v2.3.558: ⚡ 즉시 지급 전용 — apBlink 의 절반 강도(확대·투명도·퍼짐 축소, 주기 완화) */
+@keyframes apBlinkSoft{0%,100%{opacity:1;transform:scale(1);box-shadow:0 0 0 0 rgba(220,38,38,.3)}50%{opacity:.88;transform:scale(1.03);box-shadow:0 0 0 4px rgba(220,38,38,0)}}
 @keyframes apPulseBadge{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.65;transform:scale(1.12)}}
 /* v1.9.344: NEW 라벨 — 배경/테두리 제거, 골드 글씨만 살짝 깜빡 */
 @keyframes newGifSoftPulse{
@@ -6096,7 +6098,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.557';
+const ERP_VERSION = 'v2.3.558';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -38548,9 +38550,11 @@ function renderApprovalExpenseTable() {
     // v1.9.215: 지급 버튼 — 발주서 결재 페이지와 동일한 PAY_BTN_STYLE + 살구 크림/살몬 핑크 톤
     // v1.9.214: (orderId, category) 복합키 전달 — id 중복 방어
     // v1.9.258: 지급예정일 경과(isOverdue) 시에도 blink
+    // v2.3.558: 깜빡임은 ⚡ 즉시 지급 건에만(절반 강도 apBlinkSoft). 응급·기한경과 건은 일반 버튼(정적).
+    const _payNowBlink = !paid && !!e.payNow;
     const payBtn = paid
       ? `<button class="btn btn-sm" onclick="togglePayStatus('${String(e.id).replace(/'/g, '&#39;')}',${e.orderId?`'${String(e.orderId).replace(/'/g, '&#39;')}'`:'null'},'${e.category||''}')" title="클릭하여 지급 요청 상태로 되돌리기" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;${PAY_BTN_STYLE}">✅ 지급완료${e.paidDate?' · '+e.paidDate:''}</button>`
-      : `<button class="btn btn-sm" onclick="openPayDatePicker('${String(e.id).replace(/'/g, '&#39;')}',${e.orderId?`'${String(e.orderId).replace(/'/g, '&#39;')}'`:'null'},'${e.category||''}')" title="${isOverdue?'⚠️ 지급 예정일 경과 — 클릭하여 지급일 선택':'클릭하여 지급일 선택'}" style="background:${blinkAttention?'#ffe4e6':'#fff4e6'};color:${blinkAttention?'#be123c':'#c2410c'};border:1px solid ${blinkAttention?'#fecdd3':'#fed7aa'};${PAY_BTN_STYLE};${blinkAttention?'animation:apBlink .9s infinite;':''}">💳 지급 요청${blinkAttention?(isOverdue?' ⚠️':' 🚨'):''}</button>`;
+      : `<button class="btn btn-sm" onclick="openPayDatePicker('${String(e.id).replace(/'/g, '&#39;')}',${e.orderId?`'${String(e.orderId).replace(/'/g, '&#39;')}'`:'null'},'${e.category||''}')" title="${_payNowBlink?'⚡ 즉시 지급 — 클릭하여 지급일 선택':(isOverdue?'⚠️ 지급 예정일 경과 — 클릭하여 지급일 선택':'클릭하여 지급일 선택')}" style="background:${_payNowBlink?'#ffe4e6':'#fff4e6'};color:${_payNowBlink?'#be123c':'#c2410c'};border:1px solid ${_payNowBlink?'#fecdd3':'#fed7aa'};${PAY_BTN_STYLE};${_payNowBlink?'animation:apBlinkSoft 1.4s infinite;':''}">💳 지급 요청${_payNowBlink?' ⚡':''}</button>`;
     // v1.9.908: 증빙 셀 — 3단계 순환 (미수령 노랑 / 요청 핑크 / 수령 연두). 클릭 시 다음 상태로
     const tax = e.taxInvoice || '미수령';
     const _txSty = 'padding:3px 8px;border-radius:6px;font-size:10.5px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-align:center;min-width:54px;line-height:1';
