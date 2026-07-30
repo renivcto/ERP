@@ -5315,6 +5315,16 @@ EXP YYYYMMDD 까지</textarea></div>
               <input type="checkbox" id="o-urgent-balance" style="cursor:pointer;width:13px;height:13px;margin:0">
               <span style="font-weight:600;color:#9a3412;font-size:11.5px">잔금</span>
             </label>
+            <!-- v2.3.556: ⚡ 즉시 지급 (선급금/잔금 지출을 목록 최상단 구역으로 + 슬랙 알림) -->
+            <span style="font-size:11.5px;color:var(--gray-600);font-weight:700;margin:0 2px 0 8px">⚡ 즉시 지급</span>
+            <label title="저장 시 선급금 지출이 ⚡ 즉시 지급 구역으로 이동 + 슬랙 알림" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;background:#fee2e2;border:1px solid #fca5a5;padding:5px 9px;border-radius:7px;white-space:nowrap;margin:0">
+              <input type="checkbox" id="o-paynow-prepay" style="cursor:pointer;width:13px;height:13px;margin:0">
+              <span style="font-weight:700;color:#b91c1c;font-size:11.5px">선급금</span>
+            </label>
+            <label title="저장 시 잔금 지출이 ⚡ 즉시 지급 구역으로 이동 + 슬랙 알림" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;background:#fee2e2;border:1px solid #fca5a5;padding:5px 9px;border-radius:7px;white-space:nowrap;margin:0">
+              <input type="checkbox" id="o-paynow-balance" style="cursor:pointer;width:13px;height:13px;margin:0">
+              <span style="font-weight:700;color:#b91c1c;font-size:11.5px">잔금</span>
+            </label>
             <span style="width:10px"></span>
             <!-- 선입금 비율 (좁게) -->
             <div style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap">
@@ -5740,6 +5750,11 @@ EXP YYYYMMDD 까지</textarea></div>
             <input type="checkbox" id="ape-urgent" style="cursor:pointer;width:13px;height:13px;margin:0">
             <span style="font-weight:600;color:#b91c1c;font-size:11.5px">지급</span>
           </label>
+          <!-- v2.3.556: ⚡ 즉시 지급 — 체크 후 저장 시 목록 최상단 구역 + 슬랙 알림 -->
+          <label title="체크 후 저장하면 목록 맨 위 ⚡ 즉시 지급 구역으로 이동하고 슬랙 알림이 발송됩니다" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;background:#fee2e2;border:1px solid #fca5a5;padding:5px 9px;border-radius:7px;white-space:nowrap;margin:0">
+            <input type="checkbox" id="ape-paynow" style="cursor:pointer;width:13px;height:13px;margin:0">
+            <span style="font-weight:700;color:#b91c1c;font-size:11.5px">⚡ 즉시 지급</span>
+          </label>
         </div>
       </div>
       <div class="fg">
@@ -6077,7 +6092,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.555';
+const ERP_VERSION = 'v2.3.556';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30115,6 +30130,8 @@ function _editOrderDirect(o, dbIdx) {
   if ($('o-urgent')) $('o-urgent').checked = !!o.urgent;
   // v1.9.210: 선급금/잔금 응급 플래그 로드
   if ($('o-urgent-prepay')) $('o-urgent-prepay').checked = !!o.urgentPrepay;
+  if ($('o-paynow-prepay')) $('o-paynow-prepay').checked = !!o.payNowPrepay;   // v2.3.556
+  if ($('o-paynow-balance')) $('o-paynow-balance').checked = !!o.payNowBalance;
   if ($('o-urgent-balance')) $('o-urgent-balance').checked = !!o.urgentBalance;
   try { if (typeof updatePrepayPreview === 'function') updatePrepayPreview(); } catch(_){}
   if (o.balanceDueDate || o.payDate) updateGCalLink('pay');
@@ -33775,6 +33792,8 @@ function saveOrder() {
     urgent: !!($('o-urgent') && $('o-urgent').checked),
     // v1.9.210: 선급금/잔금 응급 플래그 분리
     urgentPrepay: !!($('o-urgent-prepay') && $('o-urgent-prepay').checked),
+    payNowPrepay: !!($('o-paynow-prepay') && $('o-paynow-prepay').checked),   // v2.3.556
+    payNowBalance: !!($('o-paynow-balance') && $('o-paynow-balance').checked),
     urgentBalance: !!($('o-urgent-balance') && $('o-urgent-balance').checked),
     taxInvoice: existing.taxInvoice || '미수령',
     // v1.9.786: 마감자료 (거래명세서·마감서)
@@ -36133,6 +36152,15 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
       expPre.dueDate = o.orderDate || expPre.dueDate || '';
       expPre.updatedAt = Date.now();  // 머지 EDIT RECOVERY 보호
     }
+    // v2.3.556: ⚡ 즉시 지급 매핑 — 발주서 체크박스(o.payNowPrepay) → 선급금 지출. 새로 켜지면 슬랙.
+    if (expPre && expPre.paidStatus !== 'paid') {
+      const _wasPN = !!expPre.payNow;
+      expPre.payNow = !!o.payNowPrepay;
+      if (expPre.payNow && !_wasPN) {
+        expPre.payNowAt = Date.now();
+        try { slackNotify('pay_now', { title: expPre.title || '-', vendor: expPre.vendor || '-', amount: expPre.amount || 0, dueDate: expPre.dueDate || '' }); } catch(_){}
+      }
+    }
   } else if (expPre) {
     // 선입금% 0으로 수정 시: 아직 미지급이면 삭제, 지급됐으면 남김
     if (expPre.paidStatus !== 'paid') {
@@ -36172,6 +36200,15 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
       expBal.urgent = !!o.urgentBalance;  // v1.9.210
       expBal.note = `${balPctDisp}% 잔금 (발주금액 VAT포함 ${fmtWon(total)})`;
       expBal.updatedAt = Date.now();  // v2.3.554: 머지 EDIT RECOVERY 보호
+    }
+    // v2.3.556: ⚡ 즉시 지급 매핑 — 발주서 체크박스(o.payNowBalance) → 잔금 지출. 새로 켜지면 슬랙.
+    if (expBal && expBal.paidStatus !== 'paid') {
+      const _wasPNB = !!expBal.payNow;
+      expBal.payNow = !!o.payNowBalance;
+      if (expBal.payNow && !_wasPNB) {
+        expBal.payNowAt = Date.now();
+        try { slackNotify('pay_now', { title: expBal.title || '-', vendor: expBal.vendor || '-', amount: expBal.amount || 0, dueDate: expBal.dueDate || '' }); } catch(_){}
+      }
     }
   } else if (expBal && expBal.paidStatus !== 'paid') {
     DB.expenses = DB.expenses.filter(e => e.id !== expBal.id);
@@ -38618,9 +38655,7 @@ function renderApprovalExpenseTable() {
       <td style="text-align:center;font-weight:400;color:${paid?'#0f172a':'#b91c1c'}${_poAdjustable?';cursor:pointer':''}" ${_poAdjustable?`onclick="_openExpenseAmountOverride(${e.id})" title="클릭해 실지급 금액·사유 입력"`:''}>${_fmtExpenseAmount(e)}</td>
       <td style="text-align:center">${dueCell}</td>
       <td style="text-align:center">${closingCell}</td>
-      <td style="text-align:center"><div style="display:inline-flex;flex-direction:column;gap:3px;align-items:center">${payBtn}${paid ? '' : (e.payNow
-        ? `<button onclick="toggleExpensePayNow(${e.id})" title="즉시 지급 해제" style="background:#dc2626;color:#fff;border:1px solid #b91c1c;${PAY_BTN_STYLE}">⚡ 즉시 해제</button>`
-        : `<button onclick="toggleExpensePayNow(${e.id})" title="목록 맨 위 ⚡ 즉시 지급 구역으로 이동 + 슬랙 알림" style="background:#fff;color:#dc2626;border:1px dashed #fca5a5;${PAY_BTN_STYLE}">⚡ 즉시 지급</button>`)}</div></td>
+      <td style="text-align:center">${payBtn}</td>
       <td style="text-align:center">${taxBtn}</td>
       <td style="text-align:center;padding:6px 4px">${manageCell}</td>
     </tr>`;
@@ -40583,6 +40618,7 @@ function openExpenseModal() {
   if ($('ape-duedate')) $('ape-duedate').value = today;
   if ($('ape-note')) $('ape-note').value = APE_TEMPLATES[preCat] || APE_TEMPLATES['other'] || '';
   if ($('ape-urgent')) $('ape-urgent').checked = false;
+  if ($('ape-paynow')) $('ape-paynow').checked = false;  // v2.3.556
   // v1.9.308: 지급 방법 기본 계좌이체 + 힌트/계좌 행 표시 상태 동기화
   if ($('ape-paymethod')) $('ape-paymethod').value = '계좌이체';
   // v2.2.49: 증빙 디폴트 + userSet 플래그 reset
@@ -40721,6 +40757,7 @@ function editExpense(id) {
   if ($('ape-duedate')) $('ape-duedate').value = e.dueDate || '';
   if ($('ape-note')) $('ape-note').value = e.note || '';
   if ($('ape-urgent')) $('ape-urgent').checked = !!e.urgent;
+  if ($('ape-paynow')) $('ape-paynow').checked = !!e.payNow;  // v2.3.556
   // v1.9.308: 지급 방법 복원 + 힌트/계좌 행 상태 동기화 (기존 건은 '계좌이체' 기본 가정)
   if ($('ape-paymethod')) $('ape-paymethod').value = e.payMethod || '계좌이체';
   // v2.2.49: proofType 복원 (옛 데이터는 payMethod 기반 기본값으로 fallback)
@@ -40917,6 +40954,15 @@ function saveExpense() {
       ex.accountHolder = ($('ape-account-holder') && $('ape-account-holder').value) || '';
       ex.dueDate = $('ape-duedate').value || '';
       ex.urgent = $('ape-urgent').checked;
+      // v2.3.556: ⚡ 즉시 지급 — 새로 켜지면 payNowAt 스탬프 + 슬랙 알림(pay_now)
+      {
+        const _wasPayNow = !!ex.payNow;
+        ex.payNow = !!($('ape-paynow') && $('ape-paynow').checked) && ex.paidStatus !== 'paid';
+        if (ex.payNow && !_wasPayNow) {
+          ex.payNowAt = Date.now();
+          try { slackNotify('pay_now', { title: ex.title || '-', vendor: ex.vendor || '-', amount: ex.amount || 0, dueDate: ex.dueDate || '' }); } catch(_){}
+        }
+      }
       ex.note = $('ape-note').value || '';
       ex.attachments = Array.isArray(_apeAttachments) ? _apeAttachments.slice() : [];
       ex.quotes = Array.isArray(_apeQuotes) ? _apeQuotes.slice() : []; // v1.9.694
@@ -41008,6 +41054,8 @@ function saveExpense() {
     proofType: ($('ape-proof-type') && $('ape-proof-type').value) || '',
     payMethod: _newPm,
     urgent: $('ape-urgent').checked,
+    payNow: !!($('ape-paynow') && $('ape-paynow').checked),  // v2.3.556
+    payNowAt: ($('ape-paynow') && $('ape-paynow').checked) ? Date.now() : 0,
     createdAt: Date.now(),
     note: $('ape-note').value || '',
     attachments: Array.isArray(_apeAttachments) ? _apeAttachments.slice() : [],
@@ -41048,6 +41096,7 @@ function saveExpense() {
     try { saveData(); } catch(_){}
   }
   slackNotify('pay_request', e);
+  if (e.payNow) { try { slackNotify('pay_now', { title: e.title || '-', vendor: e.vendor || '-', amount: e.amount || 0, dueDate: e.dueDate || '' }); } catch(_){} }  // v2.3.556
   closeModal('ap-expense');
   _apeAttachments = [];
   renderApprovalPage();
