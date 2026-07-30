@@ -6077,7 +6077,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.554';
+const ERP_VERSION = 'v2.3.555';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -38408,6 +38408,12 @@ function renderApprovalExpenseTable() {
     const aPaid = (a && a.paidStatus === 'paid') ? 1 : 0;
     const bPaid = (b && b.paidStatus === 'paid') ? 1 : 0;
     if (aPaid !== bPaid) return aPaid - bPaid;
+    // v2.3.555: ⚡ 즉시 지급(payNow) 건은 미지급 그룹 최상단 (등록 순)
+    if (aPaid === 0 && bPaid === 0) {
+      const aNow = (a && a.payNow) ? 0 : 1, bNow = (b && b.payNow) ? 0 : 1;
+      if (aNow !== bNow) return aNow - bNow;
+      if (aNow === 0) { const _d = (Number(a.payNowAt)||0) - (Number(b.payNowAt)||0); if (_d) return _d; }
+    }
     if (aPaid === 1 && bPaid === 1) {
       // v2.2.70: 지급완료는 paidDate 내림차순 (최신이 위), 없으면 dueDate / createdAt 내림차순
       const ap = (a && a.paidDate) || '';
@@ -38457,6 +38463,9 @@ function renderApprovalExpenseTable() {
   };
   // v1.9.215: 지급 요청 버튼을 발주서 결재 페이지와 동일한 스타일로 통일 (살구 크림 / 살몬 핑크 응급)
   const PAY_BTN_STYLE = 'font-size:11px;padding:3px 7px;min-width:62px;border-radius:6px;font-weight:400;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:0;box-sizing:border-box;line-height:1;box-shadow:0 1px 2px rgba(0,0,0,.03)';
+  // v2.3.555: ⚡ 즉시 지급 구역 — 첫 payNow 행 앞에 구역 헤더 삽입
+  const _firstPayNowId = (list.find(x => x && x.payNow && x.paidStatus !== 'paid') || {}).id;
+  const _payNowHeader = '<tr><td colspan="9" style="background:linear-gradient(90deg,#b91c1c,#dc2626);color:#fff;font-size:12px;font-weight:800;padding:6px 14px;letter-spacing:.5px;border-radius:6px 6px 0 0">⚡ 즉시 지급 — 오늘 바로 지급이 필요한 건</td></tr>';
   tb.innerHTML = list.map(e => {
     const paid = e.paidStatus === 'paid';
     // v2.2.40: 발주 카테고리는 PO 의 현재 urgent 플래그를 직접 조회 (stale e.urgent 무시)
@@ -38593,20 +38602,25 @@ function renderApprovalExpenseTable() {
     }
     // v2.2.43: 행 배경색 — 응급/예정/완료
     // v2.3.254: 지급예정일 2일 이내 또는 경과(미지급) 건도 레드톤 — urgent 플래그와 동일 취급
+    // v2.3.555: ⚡ 즉시 지급(payNow) = 최상단 진한 레드 구역. 기존 레드존은 한 톤 낮춰 구분.
     var _dueRed = !paid && daysLeft !== null && daysLeft <= 2;
-    var _expState = (urgent || _dueRed) ? 'urgent' : (paid ? 'done' : 'pending');
+    var _payNow = !paid && !!e.payNow;
+    var _expState = _payNow ? 'paynow' : ((urgent || _dueRed) ? 'urgent' : (paid ? 'done' : 'pending'));
     var _expRowBg;
-    if (_expState === 'urgent') _expRowBg = 'background:#fef1f2;border-left:3px solid #f87171';
+    if (_expState === 'paynow') _expRowBg = 'background:#fee2e2;border-left:4px solid #dc2626';
+    else if (_expState === 'urgent') _expRowBg = 'background:#fdf4f6;border-left:3px solid #fbb6c2';
     else if (_expState === 'done') _expRowBg = 'background:#f9fafb;border-left:3px solid #e5e7eb';
     else _expRowBg = 'background:#f0f9ff;border-left:3px solid #7dd3fc';
-    return `<tr style="${_expRowBg}">
+    return `${_payNow && e.id === _firstPayNowId ? _payNowHeader : ''}<tr style="${_expRowBg}">
       <td style="text-align:center">${catBadge}</td>
       <td style="text-align:center;font-weight:400">${e.vendor||'-'}</td>
       <td style="text-align:center;padding:8px 10px"><div style="font-size:12.5px;font-weight:400;cursor:pointer;color:var(--sky-700);max-width:240px;margin:0 auto;white-space:normal;word-break:break-word;overflow-wrap:anywhere;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden" class="po-item-link" title="클릭하면 지출결의서 PDF 열기" onclick="openExpenseApprovalForm(${e.id})">${itemName}</div></td>
       <td style="text-align:center;font-weight:400;color:${paid?'#0f172a':'#b91c1c'}${_poAdjustable?';cursor:pointer':''}" ${_poAdjustable?`onclick="_openExpenseAmountOverride(${e.id})" title="클릭해 실지급 금액·사유 입력"`:''}>${_fmtExpenseAmount(e)}</td>
       <td style="text-align:center">${dueCell}</td>
       <td style="text-align:center">${closingCell}</td>
-      <td style="text-align:center">${payBtn}</td>
+      <td style="text-align:center"><div style="display:inline-flex;flex-direction:column;gap:3px;align-items:center">${payBtn}${paid ? '' : (e.payNow
+        ? `<button onclick="toggleExpensePayNow(${e.id})" title="즉시 지급 해제" style="background:#dc2626;color:#fff;border:1px solid #b91c1c;${PAY_BTN_STYLE}">⚡ 즉시 해제</button>`
+        : `<button onclick="toggleExpensePayNow(${e.id})" title="목록 맨 위 ⚡ 즉시 지급 구역으로 이동 + 슬랙 알림" style="background:#fff;color:#dc2626;border:1px dashed #fca5a5;${PAY_BTN_STYLE}">⚡ 즉시 지급</button>`)}</div></td>
       <td style="text-align:center">${taxBtn}</td>
       <td style="text-align:center;padding:6px 4px">${manageCell}</td>
     </tr>`;
@@ -41573,6 +41587,7 @@ function _buildWebhookPayload(kind, type, payload) {
     approval_done:    '✅ 결재 완료',
     pay_request:      '💳 지출결의서 등록',
     pay_reminder:     '⏰ 지급예정일 경과',
+    pay_now:          '⚡ 즉시 지급 요청',
     pay_done:         '💰 지급 완료',
     recurring_added:  '🔁 정기 결제 등록',
     test:             '🧪 연결 테스트',
@@ -41590,6 +41605,9 @@ function _buildWebhookPayload(kind, type, payload) {
     // 지급예정일 경과
     const overdueLine = payload.overdueDays ? `\n• 경과: ${payload.overdueDays}일` : '';
     bodyText = `${urgentPrefix}${payload.title}\n지급예정일이 지났습니다. 빠른 지급 부탁드립니다.\n• 거래처: ${payload.vendor||'-'}\n• 금액: ${fmtWon(payload.amount||0)}${payload.dueDate?`\n• 예정일: ${payload.dueDate}`:''}${overdueLine}`;
+  } else if (type === 'pay_now' && payload && payload.title) {
+    // v2.3.555: ⚡ 즉시 지급 — 오늘 바로 지급 요청
+    bodyText = `🚨 *즉시 지급 요청 — 오늘 바로 지급 부탁드립니다*\n\n${payload.title}\n• 거래처: ${payload.vendor||'-'}\n• 금액: ${fmtWon(payload.amount||0)}${payload.dueDate?`\n• 기존 예정일: ${payload.dueDate}`:''}`;
   } else if (type === 'pay_request' && payload && payload.title) {
     // 지출결의서 등록
     bodyText = `${urgentPrefix}${payload.title}${urgentTag}\n지급 금액 ${payload.amountText || fmtWon(payload.amount||0)} 의 지출결의서가 등록되었습니다.\n결재 부탁드립니다.${payload.vendor?`\n• 거래처: ${payload.vendor}`:''}${payload.dueDate?`\n• 결제예정일: ${payload.dueDate}`:''}`;  // v2.3.161: amountText(외화) 지원
@@ -41628,6 +41646,7 @@ function _buildWebhookPayload(kind, type, payload) {
       approval_done:    '#16A34A',
       pay_request:      '#F59E0B',
       pay_reminder:     '#DC2626',
+      pay_now:          '#B91C1C',
       pay_done:         '#2563EB',
       recurring_added:  '#8B5CF6',
       test:             '#64748B',
@@ -43095,6 +43114,49 @@ async function _sendFolderSlackAdd(folder, text) {
 }
 
 // v1.9.260: 지급 예정일 경과 건에 대한 슬랙 독촉 — 날짜 옆 🔔 아이콘 클릭 시 호출
+// ═══ v2.3.555: ⚡ 즉시 지급 — 지출 건을 목록 최상단 진한 레드 구역으로 올리고 슬랙 알림 발송 ═══
+//   e.payNow(+payNowAt) 플래그. 저장은 saveDataNow 확정 + _lastFsWriteOk 실쓰기 판정 후에만
+//   슬랙 발송(v2.3.508 무음 no-op 교훈). 해제는 알림 없이 플래그만 제거.
+async function toggleExpensePayNow(expenseId) {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  const e = DB.expenses.find(x => x && x.id === expenseId);
+  if (!e) { showNotif('지출 건을 찾을 수 없습니다', 'warning'); return; }
+  if (e.paidStatus === 'paid') { showNotif('이미 지급완료된 건입니다', 'warning'); return; }
+  const turnOn = !e.payNow;
+  if (turnOn) {
+    if (!confirm('이 건을 ⚡ 즉시 지급으로 올릴까요?\n목록 맨 위(즉시 지급 구역)로 이동하고 슬랙 알림이 발송됩니다.')) return;
+    e.payNow = true; e.payNowAt = Date.now();
+  } else {
+    if (!confirm('⚡ 즉시 지급을 해제할까요?')) return;
+    e.payNow = false;
+  }
+  e.updatedAt = Date.now();
+  try { renderApprovalExpenseTable(); } catch(_){}
+  let _saved = false;
+  window._criticalSaving = true; try { _showSavingOverlay(); } catch(_){}
+  try { await saveDataNow(); _saved = (window._lastFsWriteOk !== false); } catch(err) { console.warn('[payNow] 저장 실패:', err); }
+  window._criticalSaving = false; try { _hideSavingOverlay(); } catch(_){}
+  if (!_saved) {
+    showNotif('☁️ 서버 저장 실패 — 새로고침 후 다시 시도해주세요' + (turnOn ? ' (알림 미발송)' : ''), 'error');
+    return;
+  }
+  if (!turnOn) { showNotif('⚡ 즉시 지급을 해제했습니다', 'info'); return; }
+  // 슬랙 알림 (저장 확정 후)
+  let itemTitle = e.title || '-';
+  if (e.orderId) {
+    const linkedOrd = DB.orders.find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
+    if (linkedOrd && Array.isArray(linkedOrd.rows) && linkedOrd.rows.length) {
+      itemTitle = (linkedOrd.rows[0].name || '-') + (linkedOrd.rows.length > 1 ? ` 외 ${linkedOrd.rows.length - 1}건` : '');
+    }
+  }
+  try {
+    await slackNotify('pay_now', { title: itemTitle, vendor: e.vendor || '-', amount: e.amount || 0, dueDate: e.dueDate || '' });
+    showNotif('⚡ 즉시 지급으로 등록 — 슬랙 알림이 전송되었습니다', 'success');
+  } catch(err) {
+    console.warn('[payNow] 슬랙 알림 실패:', err);
+    showNotif('⚡ 즉시 지급 등록됨 (슬랙 알림 실패 — 네트워크 확인)', 'warning');
+  }
+}
 async function sendPayReminderSlack(expenseId) {
   const e = DB.expenses.find(x => x.id === expenseId);
   if (!e) { showNotif('지출 건을 찾을 수 없습니다', 'warning'); return; }
