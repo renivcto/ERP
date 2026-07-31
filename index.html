@@ -6143,7 +6143,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.591';
+const ERP_VERSION = 'v2.3.592';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10553,7 +10553,10 @@ async function _finEnsureLoaded(){
     window._FIN.quarter = parseInt(localStorage.getItem('reniv_fin_quarter')) || (Math.floor(now.getMonth()/3)+1);
     window._FIN.period = localStorage.getItem('reniv_fin_period') || 'month';
     window._FIN.basis = localStorage.getItem('reniv_fin_basis') || (window._FIN.config.realBasisDefault || 'paid');
-    window._FIN.tab = localStorage.getItem('reniv_fin_tab') || 'accounts';
+    window._FIN.tab = localStorage.getItem('reniv_fin_tab') || 'dashboard';   // v2.3.592: 삭제된 accounts 기본값 정리
+    // v2.3.592: 자동결제 정기 결제가 고정비·자금계획에 들어가므로, 정기 결제 탭을 한 번도
+    //   열지 않은 세션에서도 데이터가 있어야 한다(_rpData 는 lazy load 라 null 일 수 있음).
+    try { if (typeof _rpData !== 'undefined' && !_rpData && typeof _rpLoad === 'function') await _rpLoad(); } catch(_){}
     await _finLoadYear(window._FIN.year);
     window._FIN.loaded = true;
   }catch(e){ console.warn('[재무] 로드 실패:', e); window._FIN.loaded = true; }
@@ -10577,6 +10580,10 @@ async function renderFinance(){
     await _finEnsureLoaded();
   }
   _finRender();
+  // v2.3.592: 정기 결제가 아직 로드 전이면(다른 경로로 재무만 먼저 연 경우) 로드 후 1회 재렌더
+  if (typeof _rpData !== 'undefined' && !_rpData && typeof _rpLoad === 'function') {
+    try { await _rpLoad(); _finRender(); } catch(_){}
+  }
 }
 function _finRender(){
   const root = document.getElementById('finance-root'); if(!root) return;
@@ -11285,7 +11292,18 @@ function _finTabRecurring(){
   const F=window._FIN; const rec=F.recurring||[];
   const inS='border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px';
   const cycleLabel={monthly:'매월',quarterly:'분기',yearly:'매년'};
-  const monthlyTotal=rec.filter(x=>x.active!==false).reduce((s,x)=>{ const a=Number(x.amount)||0; return s + (x.cycle==='monthly'?a : x.cycle==='quarterly'?a/3 : a/12); },0);
+  // v2.3.592: 자동결제 정기 결제(결재 관리 탭) 파생 행 — 읽기전용, 원본은 정기 결제 한 곳
+  const rpRec=(typeof _finRpAutoAsRecurring==='function')?_finRpAutoAsRecurring():[];
+  const monthlyTotal=rec.concat(rpRec).filter(x=>x.active!==false).reduce((s,x)=>{ const a=Number(x.amount)||0; return s + (x.cycle==='monthly'?a : x.cycle==='quarterly'?a/3 : a/12); },0);
+  const rpRows=rpRec.map(x=>`<tr style="border-bottom:1px solid #f1f5f9;background:#faf9ff">
+      <td style="padding:6px 8px"><span style="display:inline-block;background:#ede9fe;color:#6d28d9;border-radius:5px;padding:1px 6px;font-size:10.5px;font-weight:700;margin-right:6px">🔁 정기결제</span><span style="font-size:13px;color:#0f172a">${_finEsc(x.name)}</span>${x._rpMetered?'<span style="font-size:10.5px;color:#a16207;margin-left:5px">종량제 예상</span>':''}</td>
+      <td style="padding:6px 8px;text-align:right;font-size:13px;color:#0f172a">${_finWon(x.amount)}${x._rpCur!=='KRW'?`<div style="font-size:10.5px;color:#94a3b8">${_finEsc(x._rpCur)} ${x._rpAmt}</div>`:''}</td>
+      <td style="padding:6px 8px;font-size:13px;color:#64748b">매월</td>
+      <td style="padding:6px 8px;text-align:center;font-size:13px;color:#64748b">${x.dayOfMonth}</td>
+      <td style="padding:6px 8px;font-size:12px;color:#94a3b8">자동결제</td>
+      <td style="padding:6px 8px;text-align:center;font-size:11px;color:#94a3b8">자동</td>
+      <td style="padding:6px 8px;text-align:center"><button onclick="go('approval');switchApprovalTab('rpay')" style="background:none;border:0;color:#8b5cf6;cursor:pointer;font-size:11px;font-weight:700" title="정기 결제에서 수정">수정 ↗</button></td>
+    </tr>`).join('');
   const rows=rec.map(x=>`<tr style="border-bottom:1px solid #f1f5f9;opacity:${x.active===false?0.5:1}">
       <td style="padding:6px 8px"><input value="${_finEsc(x.name||'')}" onchange="_finUpdateRecurring('${x.id}','name',this.value)" style="${inS};width:140px"></td>
       <td style="padding:6px 8px"><input type="number" value="${Number(x.amount)||0}" onchange="_finUpdateRecurring('${x.id}','amount',this.value)" style="${inS};width:110px;text-align:right"></td>
@@ -11300,7 +11318,7 @@ function _finTabRecurring(){
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-size:14px;font-weight:800;color:#0f172a">🔁 고정비 / 정기지출</div><div style="font-size:13px;color:#475569">월 환산 합계 <b>${_finWon(monthlyTotal)}</b></div></div>
     <table style="width:100%;border-collapse:collapse;font-size:13px">
       <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left">항목</th><th style="padding:6px 8px;text-align:right">금액</th><th style="padding:6px 8px;text-align:left">주기</th><th style="padding:6px 8px;text-align:center">결제일</th><th style="padding:6px 8px;text-align:left">분류</th><th style="padding:6px 8px;text-align:center">사용</th><th></th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="7" style="padding:14px;text-align:center;color:#94a3b8">등록된 고정비가 없습니다</td></tr>'}</tbody>
+      <tbody>${(rows+rpRows) || '<tr><td colspan="7" style="padding:14px;text-align:center;color:#94a3b8">등록된 고정비가 없습니다</td></tr>'}</tbody>
     </table>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;border-top:1px dashed #e5e7eb;padding-top:10px">
       <input id="fin-rec-name" placeholder="항목(예: 사무실 임대료)" style="${inS};flex:1;min-width:140px">
@@ -11547,6 +11565,8 @@ function _finBuildCashEvents(fromDate, toDate){
   const ev=[];
   ((typeof DB!=='undefined'&&DB.expenses)||[]).forEach(e=>{ if(!e||e.paidStatus==='paid') return; const d=String(e.dueDate||'').slice(0,10); if(!d||d<fromDate||d>toDate) return; ev.push({ date:d, delta:-(Number(e.amount)||0), name:e.title||_finCatLabel(e.category), kind:'미지급' }); });
   _finExpandRecurring(window._FIN.recurring, fromDate, toDate).forEach(r=> ev.push({ date:r.date, delta:-(Number(r.amount)||0), name:r.name, kind:'고정비' }));
+  // v2.3.592: 자동결제 정기 결제(구독) — 고정비와 동일 규칙으로 매월 전개
+  try { _finExpandRecurring(_finRpAutoAsRecurring(), fromDate, toDate).forEach(r=> ev.push({ date:r.date, delta:-(Number(r.amount)||0), name:r.name, kind:'정기결제' })); } catch(_){}
   (window._FIN.planItems||[]).forEach(p=>{ if(!p||p.status==='done') return; const d=String(p.date||'').slice(0,10); if(!d||d<fromDate||d>toDate) return; ev.push({ date:d, delta:(p.dir==='in'?1:-1)*(Number(p.amount)||0), name:p.name||'', kind:'예정' }); });
   // v2.3.305: 쇼핑몰 정산 입금 예정 (주문별 입금예정일·예정금액, 미수령·미취소) → 예정 입금
   try {
@@ -11626,7 +11646,7 @@ function _finTabPlan(){
   dispRows.forEach(x=>{ endBal=x.balance; if(x.balance<minBal){ minBal=x.balance; minDate=x.date; } if(x.delta>=0) inSum+=x.delta; else outSum+=-x.delta; });
   const netSum=inSum-outSum;
   const totCard=(lbl,sign,val,color,sub,opt)=>{ const o=opt||{}; return `<div style="flex:1;min-width:150px;background:${o.bg||'#f8fafc'};border:1.5px solid ${o.border||'#e5e7eb'};border-radius:10px;padding:12px 14px"><div style="font-size:11.5px;color:${o.lblColor||'#64748b'};font-weight:${o.lblColor?'700':'600'};margin-bottom:5px">${lbl}</div><div style="font-size:18px;font-weight:800;color:${color}">${sign}${_finWon(val)}</div>${sub?`<div style="font-size:10.5px;color:${o.subColor||'#94a3b8'};margin-top:2px">${sub}</div>`:''}</div>`; };
-  const kindColor={ '미지급':'#dc2626','고정비':'#d97706','예정':'#6366f1','정산입금':'#059669' };
+  const kindColor={ '미지급':'#dc2626','고정비':'#d97706','예정':'#6366f1','정산입금':'#059669','정기결제':'#7c3aed' };
   const rows=dispRows.map(r=>{ const neg=r.balance<0; const dpos=r.delta>=0;
     return `<tr style="border-bottom:1px solid #f1f5f9;background:${neg?'#fef2f2':'transparent'}">
       <td style="padding:6px 8px;white-space:nowrap">${r.date}</td>
@@ -11661,7 +11681,7 @@ function _finTabPlan(){
       ${totCard('예상 지출 합계','−',outSum,'#dc2626','미지급 · 고정비 · 수동 출금')}
       ${totCard('예상 순증감 (입금−지출)',netSum>=0?'+':'−',Math.abs(netSum),netSum>=0?'#047857':'#b91c1c','선택 기간 순현금흐름',{bg:netSum>=0?'#ecfdf5':'#fef2f2',border:netSum>=0?'#6ee7b7':'#fca5a5',lblColor:netSum>=0?'#047857':'#b91c1c',subColor:netSum>=0?'#059669':'#dc2626'})}
     </div>
-    <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">예정 지출 = 미지급 지출결의서(예정일 기준) + 고정비 + 아래 수동 예정 출금. 예정 입금 = 쇼핑몰 정산입금(주문별 입금예정, 미수령) + 아래 수동 입금.</div>
+    <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">예정 지출 = 미지급 지출결의서(예정일 기준) + 고정비 + 정기결제(자동결제) + 아래 수동 예정 출금. 예정 입금 = 쇼핑몰 정산입금(주문별 입금예정, 미수령) + 아래 수동 입금.</div>
     <table style="width:100%;border-collapse:collapse;font-size:13px">
       <thead><tr style="background:#f8fafc;color:#475569;font-size:11.5px"><th style="padding:6px 8px;text-align:left">날짜</th><th style="padding:6px 8px;text-align:left">구분</th><th style="padding:6px 8px;text-align:left">내용</th><th style="padding:6px 8px;text-align:right">증감</th><th style="padding:6px 8px;text-align:right">예상 잔액</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="5" style="padding:14px;text-align:center;color:#94a3b8">${rangeLabel} 예정 입·출금이 없습니다</td></tr>`}</tbody>
@@ -14751,6 +14771,12 @@ function _rpSave() {
   var payload = JSON.stringify(_rpData);
   try { if (typeof idbSet === 'function') idbSet('reniv_recurring_payments', payload); } catch(_){}
   try { localStorage.setItem('reniv_recurring_payments', payload); } catch(_){}
+  // v2.3.592: 서버 공유 — 자동결제 건이 고정비·자금계획에 들어가므로 기기 로컬만으론 예측이 갈린다.
+  //   Promise 를 반환해 '저장 후 슬랙 발송'을 지킬 수 있게 한다(알림만 가고 서버 미저장 방지).
+  try {
+    if (typeof saveSharedSetting === 'function') return saveSharedSetting('recurring_payments', _rpData);
+  } catch(_){}
+  return Promise.resolve();
 }
 async function _rpLoad() {
   var cand = [];
@@ -14761,8 +14787,42 @@ async function _rpLoad() {
       if (raw) { var p2 = JSON.parse(raw); if (p2 && Array.isArray(p2.items)) cand.push(p2); }
     }
   } catch(_){}
+  // v2.3.592: 서버 공유본도 후보에 — updatedAt 최신본 채택(로컬이 최신이면 로컬 유지)
+  try {
+    if (typeof loadSharedSetting === 'function') {
+      var sh = await loadSharedSetting('recurring_payments');
+      if (sh && Array.isArray(sh.items)) cand.push(sh);
+    }
+  } catch(_){}
   cand.sort(function(a, b){ return (Number(b.updatedAt)||0) - (Number(a.updatedAt)||0); });
   _rpData = cand[0] || _rpDefault();
+}
+
+// v2.3.592: 자동결제 정기 결제 → 고정비 형태(원화 월정액)로 파생.
+// 복사가 아니라 파생 — 원본은 _rpData 하나뿐이라 양쪽이 갈릴 일이 없다.
+function _finRpAutoAsRecurring() {
+  var src = (typeof _rpData !== 'undefined' && _rpData && Array.isArray(_rpData.items)) ? _rpData.items : [];
+  var out = [];
+  src.forEach(function(x){
+    if (!x || x.paymentMode !== 'auto') return;
+    var amt = Number(x.amount) || 0;
+    if (!amt) return;
+    var cur = String(x.currency || 'KRW').toUpperCase();
+    var krw = amt;
+    if (cur !== 'KRW') {
+      var rate = (typeof _getKrwRateSync === 'function') ? _getKrwRateSync(cur) : 0;
+      if (!(rate > 0)) return;           // 환율을 모르면 미환산 금액이 섞이므로 제외
+      krw = Math.round(amt * rate);
+    }
+    if (!krw) return;
+    out.push({
+      id: 'rp_' + x.id, name: (x.site || '정기 결제'), amount: krw, cycle: 'monthly',
+      dayOfMonth: ((typeof _rpDayOf === 'function' ? _rpDayOf(x.autoPayDate) : 0) || 1),
+      startDate: x.startDate || '', endDate: '', category: 'other', active: true,
+      _rp: true, _rpId: x.id, _rpCur: cur, _rpAmt: amt, _rpMetered: !!x.isMetered
+    });
+  });
+  return out;
 }
 function _rpGenId() { var id = Date.now(); var ex = new Set((_rpData && _rpData.items ? _rpData.items : []).map(function(x){ return String(x && x.id); })); while (ex.has(String(id))) id++; return id; }
 function _rpEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
@@ -15013,13 +15073,17 @@ function saveRecurringPayment() {
     var maxSort = (_rpData.items||[]).reduce(function(m, x){ var s = Number(x && x.sortOrder)||0; return s > m ? s : m; }, 0);
     _rpData.items.push(Object.assign({ id: _rpGenId(), sortOrder: maxSort + 10, createdAt: Date.now() }, data));
   }
-  _rpSave();
+  var _saved = _rpSave();
   closeRecurringModal();
   _rpRender();
   try { showNotif('✅ 저장 완료', 'success'); } catch(_){}
   // v2.3.12: 신규 등록 시 슬랙 알림
+  // v2.3.592: 서버 저장이 끝난 뒤 발송 — 알림만 나가고 서버엔 없는 사고 방지
   if (_isNewEntry) {
-    try { slackNotify('recurring_added', data); } catch(_){}
+    Promise.resolve(_saved)
+      .then(function(){ try { slackNotify('recurring_added', data); } catch(_){} })
+      .catch(function(e){ console.warn('정기 결제 서버 저장 실패 — 슬랙 미발송:', e);
+        try { showNotif('☁️ 서버 저장 실패 — 로컬에만 저장됨(새로고침 전 확인 필요)', 'warning'); } catch(_){} });
   }
 }
 function deleteRecurringPayment(id) {
@@ -56639,6 +56703,9 @@ function _sharedSettingCollection(key) {
       || k === 'pluscl_stock' || k === 'pluscl_item_map' || k === 'ad_refunds'
       || k === 'approval_signatures' || k === 'pharmacy_cal_events' || k === 'claims'
       || k === 'item_channels'   // v2.3.543: 완제품 판매 채널 목록(약국·온라인·홈쇼핑 등) — 전 직원 공유
+      // v2.3.592: 정기 결제(구독) — 자동결제 건이 고정비·자금계획에 반영되므로 기기 로컬만으론
+      //   기기마다 현금흐름 예측이 갈린다. 전 직원 read 필요 → shared/.
+      || k === 'recurring_payments'
       || /^consignment_/.test(k)  // v2.3.490: 위탁판매(제품별 공급가·출고 명세서) — 전 직원 공유
       // v2.3.470: 데일리 브리핑 '오늘 보냄' 가드 — 비밀 없음({lastSentDate,sentBy,ts}). settings/ 로 가면
       //   비관리자가 못 읽어(관리자 전용 read) 각 기기가 중복 발송한다(하루 4번 사고). 전 직원 read 필요 → shared/.
