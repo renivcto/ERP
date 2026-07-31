@@ -6136,7 +6136,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.588';
+const ERP_VERSION = 'v2.3.589';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10575,7 +10575,7 @@ function _finRender(){
   const root = document.getElementById('finance-root'); if(!root) return;
   const F = window._FIN;
   // v2.3.259: '생산 예상 비용'을 '예산' 오른쪽의 정식 탭으로 편입(검정 활성 + 인플레이스 렌더)
-  const tabs = [['dashboard','📊 자금 현황'],['costest','💰 생산 예상 비용'],['budget','🎯 예산'],['plan','📈 자금 계획'],['recurring','🔁 고정비'],['asset','🏛️ 자산'],['cards','💳 법인 카드']];
+  const tabs = [['dashboard','📊 자금 현황'],['costest','💰 생산 예상 비용'],['budget','🎯 예산'],['plan','📈 자금 계획'],['recurring','🔁 고정비'],['rpay','🔄 정기 결제'],['asset','🏛️ 자산'],['cards','💳 법인 카드']];
   // v2.3.586: 법인 계좌 기능 삭제 — 저장된 탭 상태가 accounts 면 자금 현황으로 회귀
   if (F.tab==='accounts') F.tab='dashboard';
   let body = '';
@@ -10586,6 +10586,8 @@ function _finRender(){
   else if (F.tab==='dashboard') body = _finTabDashboard();
   else if (F.tab==='plan') body = _finTabPlan();
   else if (F.tab==='asset') body = _finTabAsset();
+  // v2.3.589: 정기 결제(사이드바 페이지와 동일 데이터·렌더) 탭 편입 — 본문은 렌더 후 주입
+  else if (F.tab==='rpay') body = '<div id="fin-recurring-content" style="padding:4px 0"><div style="padding:48px;text-align:center;color:#94a3b8;font-size:13px">불러오는 중…</div></div>';
   else body = _finStagePlaceholder(F.tab);
   root.innerHTML =
     _finTopBarHtml() +
@@ -10594,6 +10596,7 @@ function _finRender(){
     '</div><div id="finance-tab-body">' + body + '</div>';
   if(F.tab==='cards'){ try{ _finUpdateReceiptIndicator(); }catch(_){} }
   if(F.tab==='costest'){ try{ renderCostEstPage(); }catch(_){} }  // 표/제품목록 채우기
+  if(F.tab==='rpay'){ try{ renderRecurringPage(); }catch(_){} }
 }
 // v2.3.259: 생산 예상 비용 탭 본문 — 작성 버튼 + 저장된 시나리오 표 + 선택 합계 (모달은 상시 오버레이)
 function _finTabCostest(){
@@ -14768,8 +14771,16 @@ function _rpFmtMoney(amount, currency) {
   return amount.toLocaleString() + ' ' + currency;
 }
 
+// v2.3.589: 사이드바 '정기 결제' 페이지와 재무 관리 '정기 결제' 탭 양쪽에서 렌더.
+// 재무 탭 호스트가 화면에 보일 때만 그쪽을 쓴다(숨은 탭에 그리면 사이드바 페이지가 빈다).
+function _rpHost() {
+  var t = document.getElementById('fin-recurring-content');
+  if (t && t.offsetParent !== null) return t;
+  return document.getElementById('recurring-content') || t;
+}
+
 function renderRecurringPage() {
-  var host = document.getElementById('recurring-content');
+  var host = _rpHost();
   if (!host) return;
   if (!_rpData) {
     host.innerHTML = '<div style="padding:48px;text-align:center;color:#94a3b8;font-size:13px">불러오는 중…</div>';
@@ -14780,7 +14791,7 @@ function renderRecurringPage() {
 }
 
 function _rpRender() {
-  var host = document.getElementById('recurring-content');
+  var host = _rpHost();
   if (!host) return;
   if (!_rpData) _rpData = _rpDefault();
   var items = (_rpData.items || []).slice().sort(function(a, b){
