@@ -1540,6 +1540,11 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
                     <img src="https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_document_x32.png" style="width:22px;height:22px;flex-shrink:0">
                     <span style="font-size:13px;color:var(--gray-800)">Google 문서</span>
                   </div>
+                  <!-- v2.3.585: 링크 없이 ERP 안에서 바로 내용을 쓰는 직접 작성 문서 -->
+                  <div onclick="chooseGdocType('note')" style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;transition:background .1s;border-top:1px solid var(--gray-100)" onmouseover="this.style.background='#faf5ff'" onmouseout="this.style.background='#fff'">
+                    <span style="font-size:19px;width:22px;height:22px;flex-shrink:0;display:flex;align-items:center;justify-content:center">📝</span>
+                    <span style="font-size:13px;color:var(--gray-800)">직접 작성 문서 <span style="font-size:11px;color:var(--gray-400)">(ERP에 바로 입력)</span></span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1548,14 +1553,19 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
               <input class="fi" id="gdoc-title-inp" placeholder="문서 제목 입력">
             </div>
             <!-- v2.3.584: 새 구글 문서 바로 만들기 바로가기 (만든 뒤 URL 붙여넣기) -->
-            <div style="margin:2px 0 10px;background:#f0f7ff;border:1px solid #dbeafe;border-radius:8px;padding:8px 12px;font-size:11.5px;color:#475569;line-height:1.7">💡 새 문서를 먼저 만들려면
+            <div id="gdoc-newdoc-tip" style="margin:2px 0 10px;background:#f0f7ff;border:1px solid #dbeafe;border-radius:8px;padding:8px 12px;font-size:11.5px;color:#475569;line-height:1.7">💡 새 문서를 먼저 만들려면
               <a href="https://sheets.new" target="_blank" style="color:#188038;font-weight:700;text-decoration:underline">시트</a> ·
               <a href="https://slides.new" target="_blank" style="color:#e8710a;font-weight:700;text-decoration:underline">슬라이드</a> ·
               <a href="https://docs.new" target="_blank" style="color:#1a73e8;font-weight:700;text-decoration:underline">문서</a>
               를 눌러 새 창에서 만들고, 그 주소(URL)를 아래에 붙여넣으세요</div>
-            <div class="fg">
+            <div class="fg" id="gdoc-url-fg">
               <label>구글 공유 링크<span class="req">*</span></label>
               <input class="fi" id="gdoc-url-inp" placeholder="https://docs.google.com/...">
+            </div>
+            <!-- v2.3.585: 직접 작성 문서 내용 입력 (note 타입일 때만 표시) -->
+            <div class="fg" id="gdoc-note-fg" style="display:none">
+              <label>문서 내용<span class="req">*</span></label>
+              <textarea class="fi" id="gdoc-note-inp" rows="10" placeholder="여기에 내용을 바로 작성하세요" style="resize:vertical;min-height:180px;line-height:1.65;font-family:inherit"></textarea>
             </div>
           </div>
           <div class="modal-ft" style="justify-content:space-between">
@@ -6126,7 +6136,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.584';
+const ERP_VERSION = 'v2.3.585';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -48242,8 +48252,8 @@ const GDOC_ICONS = {
   slides: 'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_presentation_x16.png',
   docs:   'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_document_x16.png'
 };
-const GDOC_LABELS = { sheets:'스프레드시트', slides:'슬라이드', docs:'문서' };
-const GDOC_COLORS = { sheets:'#0f9d58', slides:'#f4b400', docs:'#4285f4' };
+const GDOC_LABELS = { sheets:'스프레드시트', slides:'슬라이드', docs:'문서', note:'직접 작성' };
+const GDOC_COLORS = { sheets:'#0f9d58', slides:'#f4b400', docs:'#4285f4', note:'#7c3aed' };
 
 let _gdocList = [];
 let _gdocEditId = null;
@@ -48393,20 +48403,20 @@ function renderGdocList() {
   el.style.flexWrap = 'wrap';
   el.innerHTML = _gdocList.map((doc, idx) => `
     <div style="position:relative;display:flex;align-items:center;gap:8px;background:#f7fef9;border:1px solid #d1fae5;border-radius:9px;padding:10px 14px;padding-top:22px;cursor:pointer;transition:all .12s;flex:0 0 calc(25% - 8px);min-width:180px;box-sizing:border-box"
-      onclick="window.open('${doc.url}','_blank')"
+      onclick="${doc.type === 'note' ? `openGdocNote('${doc.id}')` : `window.open('${doc.url}','_blank')`}"
       onmouseover="this.style.borderColor='#a7f3d0';this.style.background='#ecfdf5';this.style.boxShadow='0 2px 8px rgba(0,0,0,.05)'"
       onmouseout="this.style.borderColor='#d1fae5';this.style.background='#f7fef9';this.style.boxShadow='none'">
       ${canWrite ? `<div style="position:absolute;top:4px;right:5px;display:flex;align-items:center;gap:2px">
         ${idx > 0 ? `<span onclick="event.stopPropagation();moveGdoc('${doc.id}',-1)" style="font-size:7px;color:var(--gray-500);width:13px;height:12px;display:flex;align-items:center;justify-content:center;border-radius:3px;cursor:pointer;background:rgba(0,0,0,.07);line-height:1" title="왼쪽으로">◀</span>` : `<span style="width:13px;height:12px;display:inline-block"></span>`}
         ${idx < _gdocList.length - 1 ? `<span onclick="event.stopPropagation();moveGdoc('${doc.id}',1)" style="font-size:7px;color:var(--gray-500);width:13px;height:12px;display:flex;align-items:center;justify-content:center;border-radius:3px;cursor:pointer;background:rgba(0,0,0,.07);line-height:1" title="오른쪽으로">▶</span>` : `<span style="width:13px;height:12px;display:inline-block"></span>`}
       </div>` : ''}
-      <img src="${GDOC_ICONS[doc.type]||GDOC_ICONS.docs}" style="width:22px;height:22px;flex-shrink:0">
+      ${doc.type === 'note' ? '<span style="font-size:19px;width:22px;height:22px;flex-shrink:0;display:flex;align-items:center;justify-content:center">📝</span>' : `<img src="${GDOC_ICONS[doc.type]||GDOC_ICONS.docs}" style="width:22px;height:22px;flex-shrink:0">`}
       <div style="flex:1;min-width:0">
         <div style="font-size:13.5px;font-weight:600;color:var(--gray-800);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${doc.title}</div>
         <div style="font-size:11.5px;color:#558b2f">${GDOC_LABELS[doc.type]||'문서'}</div>
       </div>
       <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
-        <span style="font-size:10px;background:${GDOC_COLORS[doc.type]||'#4285f4'};color:#fff;padding:2px 7px;border-radius:8px;white-space:nowrap">열기 ↗</span>
+        <span style="font-size:10px;background:${GDOC_COLORS[doc.type]||'#4285f4'};color:#fff;padding:2px 7px;border-radius:8px;white-space:nowrap">${doc.type === 'note' ? '보기 📖' : '열기 ↗'}</span>
         ${canWrite ? `<span onclick="event.stopPropagation();editGdoc('${doc.id}')" style="font-size:11px;color:var(--gray-400);padding:2px 5px;border-radius:4px;cursor:pointer" title="수정">✏️</span>` : ''}
       </div>
     </div>
@@ -48437,6 +48447,9 @@ function openGdocModal(editId) {
   _gdocSelectedType = '';
   document.getElementById('gdoc-title-inp').value = '';
   document.getElementById('gdoc-url-inp').value = '';
+  const noteInp = document.getElementById('gdoc-note-inp');
+  if (noteInp) noteInp.value = '';
+  selectGdocType('');
   const dd = document.getElementById('gdoc-type-dropdown');
   if (dd) dd.style.display = 'none';
   const ico = document.getElementById('gdoc-type-selected-ico');
@@ -48450,7 +48463,8 @@ function openGdocModal(editId) {
     if (doc) {
       document.getElementById('gdoc-modal-title').textContent = '✏️ 문서 수정';
       document.getElementById('gdoc-title-inp').value = doc.title;
-      document.getElementById('gdoc-url-inp').value = doc.url;
+      document.getElementById('gdoc-url-inp').value = doc.url || '';
+      if (noteInp) noteInp.value = doc.content || '';
       selectGdocType(doc.type);
       document.getElementById('gdoc-delete-btn').style.display = '';
     }
@@ -48467,12 +48481,43 @@ function closeGdocModal() {
 
 function editGdoc(id) { openGdocModal(id); }
 
+// v2.3.585: 직접 작성 문서 뷰어 — 카드 클릭 시 내용 표시
+function openGdocNote(id) {
+  const doc = _gdocList.find(d=>d.id===id);
+  if (!doc) return;
+  let ov = document.getElementById('overlay-gdoc-note');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'overlay-gdoc-note';
+    ov.className = 'overlay';
+    ov.style.zIndex = '401';
+    ov.innerHTML = '<div class="modal" style="max-width:640px">'
+      + '<div class="modal-hdr"><span class="modal-ttl" id="gdoc-note-view-title"></span>'
+      + '<button class="modal-x" onclick="document.getElementById(\'overlay-gdoc-note\').classList.remove(\'show\')">✕</button></div>'
+      + '<div class="modal-body"><div id="gdoc-note-view-body" style="white-space:pre-wrap;word-break:break-word;font-size:13.5px;line-height:1.75;color:var(--gray-800);max-height:60vh;overflow-y:auto;background:#fafafa;border:1px solid var(--gray-100);border-radius:10px;padding:14px 16px"></div></div>'
+      + '<div class="modal-ft" style="justify-content:flex-end;gap:8px">'
+      + '<button class="btn btn-outline btn-sm" id="gdoc-note-view-edit">✏️ 수정</button>'
+      + '<button class="btn btn-primary btn-sm" onclick="document.getElementById(\'overlay-gdoc-note\').classList.remove(\'show\')">닫기</button>'
+      + '</div></div>';
+    document.body.appendChild(ov);
+  }
+  document.getElementById('gdoc-note-view-title').textContent = '📝 ' + doc.title;
+  document.getElementById('gdoc-note-view-body').textContent = doc.content || '';
+  const editBtn = document.getElementById('gdoc-note-view-edit');
+  const canWrite = window._currentUser && (window._currentUser.isAdmin || window._currentUser.permission === 'write');
+  if (editBtn) {
+    editBtn.style.display = canWrite ? '' : 'none';
+    editBtn.onclick = () => { ov.classList.remove('show'); openGdocModal(id); };
+  }
+  ov.classList.add('show');
+}
+
 const GDOC_SEL_ICONS = {
   sheets: 'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_spreadsheet_x32.png',
   slides: 'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_presentation_x32.png',
   docs:   'https://ssl.gstatic.com/docs/doclist/images/mediatype/icon_1_document_x32.png'
 };
-const GDOC_SEL_LABELS = { sheets:'Google 스프레드시트', slides:'Google 슬라이드', docs:'Google 문서' };
+const GDOC_SEL_LABELS = { sheets:'Google 스프레드시트', slides:'Google 슬라이드', docs:'Google 문서', note:'직접 작성 문서' };
 
 function toggleGdocDropdown() {
   const dd = document.getElementById('gdoc-type-dropdown');
@@ -48491,24 +48536,38 @@ function selectGdocType(type) {
   const ico = document.getElementById('gdoc-type-selected-ico');
   const txt = document.getElementById('gdoc-type-selected-txt');
   const box = document.getElementById('gdoc-type-selected');
-  if (ico) ico.innerHTML = type ? `<img src="${GDOC_SEL_ICONS[type]}" style="width:18px;height:18px">` : '';
+  if (ico) ico.innerHTML = type === 'note' ? '<span style="font-size:15px;line-height:18px">📝</span>' : (type ? `<img src="${GDOC_SEL_ICONS[type]}" style="width:18px;height:18px">` : '');
   if (txt) { txt.textContent = GDOC_SEL_LABELS[type] || '— 선택해주세요 —'; txt.style.color = type ? 'var(--gray-800)' : 'var(--gray-500)'; }
   if (box) box.style.borderColor = type ? 'var(--sky-400)' : 'var(--gray-300)';
+  // v2.3.585: note 타입이면 링크 대신 내용 입력란 표시
+  const isNote = type === 'note';
+  const urlFg = document.getElementById('gdoc-url-fg');
+  const noteFg = document.getElementById('gdoc-note-fg');
+  const tip = document.getElementById('gdoc-newdoc-tip');
+  if (urlFg) urlFg.style.display = isNote ? 'none' : '';
+  if (noteFg) noteFg.style.display = isNote ? '' : 'none';
+  if (tip) tip.style.display = isNote ? 'none' : '';
 }
 
 // v1.9.352: 모달을 Firestore 동기화 끝나기 전에 즉시 닫음 — 사용자 대기 시간 제거
 async function saveGdoc() {
   const title = document.getElementById('gdoc-title-inp').value.trim();
   const url = document.getElementById('gdoc-url-inp').value.trim();
+  const content = (document.getElementById('gdoc-note-inp')?.value || '').trim();
+  const isNote = _gdocSelectedType === 'note';
   if (!_gdocSelectedType) { showNotif('문서 종류를 선택해주세요','warning'); return; }
   if (!title) { showNotif('제목을 입력해주세요','warning'); return; }
-  if (!url) { showNotif('링크를 입력해주세요','warning'); return; }
+  if (isNote) {
+    if (!content) { showNotif('문서 내용을 입력해주세요','warning'); return; }
+    // meta 문서 1MB 한도 보호 — 장문은 구글 문서 사용 유도
+    if (content.length > 50000) { showNotif('내용이 너무 깁니다 (5만자 이내). 긴 문서는 구글 문서를 이용해주세요','warning'); return; }
+  } else if (!url) { showNotif('링크를 입력해주세요','warning'); return; }
   if (_gdocEditId) {
     const idx = _gdocList.findIndex(d=>d.id===_gdocEditId);
-    if (idx>=0) _gdocList[idx] = {..._gdocList[idx], type:_gdocSelectedType, title, url};
+    if (idx>=0) _gdocList[idx] = {..._gdocList[idx], type:_gdocSelectedType, title, url: isNote ? '' : url, content: isNote ? content : undefined};
     showNotif('문서가 수정되었습니다','success');
   } else {
-    _gdocList.push({ id:'gdoc_'+Date.now(), type:_gdocSelectedType, title, url });
+    _gdocList.push({ id:'gdoc_'+Date.now(), type:_gdocSelectedType, title, url: isNote ? '' : url, ...(isNote ? {content} : {}) });
     showNotif('문서가 추가되었습니다','success');
   }
   // 즉시 화면 갱신 + 모달 닫기 (Firestore 동기화는 백그라운드)
