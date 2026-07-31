@@ -6143,7 +6143,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.597';
+const ERP_VERSION = 'v2.3.598';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -42261,11 +42261,18 @@ function _approvalSlackHeader(refKey) {
 }
 
 // 결재 의견을 슬랙으로 — 그 결재의 첫(비-슬랙) 댓글이면 부모로, 아니면 스레드 답글로
-function _dispatchApprovalCommentToSlack(refKey, authorName, text, attachCount) {
+function _dispatchApprovalCommentToSlack(refKey, authorName, text, attachCount, parentId) {
   try {
     const s = DB.appSettings || {};
     if (!s.slackApprovalEnabled || !(s.slackApprovalRelayUrl || '').trim()) return;
     let line = '*' + (authorName || '담당자') + '*: ' + (text || '');
+    // v2.3.598: 대댓글이면 '↳ 부모작성자' 접두 — 슬랙에서도 답글임이 보이고,
+    //   슬랙→ERP 인바운드의 '↳' 파싱 규칙과 표기가 대칭이 된다.
+    if (parentId != null) {
+      const _p = (DB.approvalComments || []).find(c => c && String(c.id) === String(parentId));
+      const _pn = _p ? String(_p.author || '').replace(/\s*\(Slack\)\s*$/, '') : '';
+      line = '↳ ' + (_pn ? ('*' + _pn + '* 님에게 — ') : '') + line;
+    }
     if (attachCount > 0) line += '  📎(첨부 ' + attachCount + ')';
     // 이 결재의 비-슬랙 댓글 수 — 1이면(방금 추가된 것뿐) 첫 댓글 → 부모 메시지 게시
     const humanCount = (DB.approvalComments||[]).filter(c => c && String(c.approvalId) === String(refKey) && c.origin !== 'slack').length;
@@ -45044,7 +45051,11 @@ async function addApprovalComment() {
   }
   renderApprovalComments(ref);
   // v2.3.205: 결재 의견 → 슬랙(전용 채널) 스레드 전송 (양방향). slack-origin 댓글은 이 경로를 안 거침 → 루프 없음.
-  try { _dispatchApprovalCommentToSlack(ref, _apMyName, text, attaches.length); } catch(_){}
+  // v2.3.598: 대댓글 여부 전달 — _apReplyToId 는 위에서 이미 초기화되므로 저장된 댓글에서 읽는다
+  try {
+    const _justAdded = (DB.approvalComments || []).find(c => c && String(c.id) === String(_newCmtId));
+    _dispatchApprovalCommentToSlack(ref, _apMyName, text, attaches.length, _justAdded && _justAdded.parentId);
+  } catch(_){}
   // v1.9.676: 외부 표의 의견 카운트 배지 즉시 갱신
   try { if (typeof renderApprovalPage === 'function') renderApprovalPage(); } catch(_){}
   try { if (typeof updateApprovalBadges === 'function') updateApprovalBadges(); } catch(_){}
