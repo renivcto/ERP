@@ -2516,7 +2516,9 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         <button id="ap-tab-expense" onclick="switchApprovalTab('expense')" class="ap-tab" style="padding:8px 16px;border:1px solid #0f172a;background:#0f172a;font-size:13px;font-weight:700;cursor:pointer;color:#fff;border-radius:7px;line-height:1.2;transition:all .12s">💳 지출 결의서</button>
         <button id="ap-tab-po" onclick="switchApprovalTab('po')" class="ap-tab" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">📄 발주서 결재</button>
         <button id="ap-tab-nonpo" onclick="switchApprovalTab('nonpo')" class="ap-tab" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">📝 일반 결재</button>
-        <button id="ap-tab-sample" onclick="switchApprovalTab('sample')" class="ap-tab" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">🧪 샘플 구매</button><button onclick="openUnpaidUnifiedView()" class="btn btn-primary btn-sm" style="margin-left:12px;padding:5px 12px;font-size:12.5px">📋 미결재 모아보기</button>
+        <button id="ap-tab-sample" onclick="switchApprovalTab('sample')" class="ap-tab" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">🧪 샘플 구매</button>
+        <!-- v2.3.590: 정기 결제 — 사이드바 페이지와 동일 데이터·렌더를 결재 관리 탭으로 편입 -->
+        <button id="ap-tab-rpay" onclick="switchApprovalTab('rpay')" class="ap-tab" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">🔁 정기 결제</button><button onclick="openUnpaidUnifiedView()" class="btn btn-primary btn-sm" style="margin-left:12px;padding:5px 12px;font-size:12.5px">📋 미결재 모아보기</button>
         <!-- v1.9.418: 월별 → 월/주/일/기간별/전체 5종 필터로 확장 — 발주서 결재 / 일반 결재 / 지출 결의서 / 샘플 구매 공용 -->
         <div class="period-filter" data-prefix="ap" style="margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:nowrap">
           <span style="font-size:12px;color:var(--gray-500);font-weight:500;flex-shrink:0">📅</span>
@@ -2662,6 +2664,11 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
             </table>
           </div>
         </div>
+      </div>
+
+      <!-- v2.3.590: 정기 결제 — 사이드바 페이지와 동일 데이터·렌더 (호스트만 다름) -->
+      <div id="ap-sub-rpay" class="ap-sub" style="margin-top:14px;display:none">
+        <div id="ap-recurring-content" style="padding:4px 0"></div>
       </div>
     </div>
 
@@ -6136,7 +6143,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.589';
+const ERP_VERSION = 'v2.3.590';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10575,9 +10582,10 @@ function _finRender(){
   const root = document.getElementById('finance-root'); if(!root) return;
   const F = window._FIN;
   // v2.3.259: '생산 예상 비용'을 '예산' 오른쪽의 정식 탭으로 편입(검정 활성 + 인플레이스 렌더)
-  const tabs = [['dashboard','📊 자금 현황'],['costest','💰 생산 예상 비용'],['budget','🎯 예산'],['plan','📈 자금 계획'],['recurring','🔁 고정비'],['rpay','🔄 정기 결제'],['asset','🏛️ 자산'],['cards','💳 법인 카드']];
+  const tabs = [['dashboard','📊 자금 현황'],['costest','💰 생산 예상 비용'],['budget','🎯 예산'],['plan','📈 자금 계획'],['recurring','🔁 고정비'],['asset','🏛️ 자산'],['cards','💳 법인 카드']];
   // v2.3.586: 법인 계좌 기능 삭제 — 저장된 탭 상태가 accounts 면 자금 현황으로 회귀
-  if (F.tab==='accounts') F.tab='dashboard';
+  // v2.3.590: 정기 결제는 결재 관리로 이동 — 저장된 rpay 탭도 동일 처리
+  if (F.tab==='accounts' || F.tab==='rpay') F.tab='dashboard';
   let body = '';
   if (F.tab==='cards') body = _finTabCards();
   else if (F.tab==='recurring') body = _finTabRecurring();
@@ -10586,8 +10594,6 @@ function _finRender(){
   else if (F.tab==='dashboard') body = _finTabDashboard();
   else if (F.tab==='plan') body = _finTabPlan();
   else if (F.tab==='asset') body = _finTabAsset();
-  // v2.3.589: 정기 결제(사이드바 페이지와 동일 데이터·렌더) 탭 편입 — 본문은 렌더 후 주입
-  else if (F.tab==='rpay') body = '<div id="fin-recurring-content" style="padding:4px 0"><div style="padding:48px;text-align:center;color:#94a3b8;font-size:13px">불러오는 중…</div></div>';
   else body = _finStagePlaceholder(F.tab);
   root.innerHTML =
     _finTopBarHtml() +
@@ -10596,7 +10602,6 @@ function _finRender(){
     '</div><div id="finance-tab-body">' + body + '</div>';
   if(F.tab==='cards'){ try{ _finUpdateReceiptIndicator(); }catch(_){} }
   if(F.tab==='costest'){ try{ renderCostEstPage(); }catch(_){} }  // 표/제품목록 채우기
-  if(F.tab==='rpay'){ try{ renderRecurringPage(); }catch(_){} }
 }
 // v2.3.259: 생산 예상 비용 탭 본문 — 작성 버튼 + 저장된 시나리오 표 + 선택 합계 (모달은 상시 오버레이)
 function _finTabCostest(){
@@ -14771,10 +14776,10 @@ function _rpFmtMoney(amount, currency) {
   return amount.toLocaleString() + ' ' + currency;
 }
 
-// v2.3.589: 사이드바 '정기 결제' 페이지와 재무 관리 '정기 결제' 탭 양쪽에서 렌더.
-// 재무 탭 호스트가 화면에 보일 때만 그쪽을 쓴다(숨은 탭에 그리면 사이드바 페이지가 빈다).
+// v2.3.590: 사이드바 '정기 결제' 페이지와 결재 관리 '정기 결제' 탭 양쪽에서 렌더.
+// 결재 탭 호스트가 화면에 보일 때만 그쪽을 쓴다(숨은 탭에 그리면 사이드바 페이지가 빈다).
 function _rpHost() {
-  var t = document.getElementById('fin-recurring-content');
+  var t = document.getElementById('ap-recurring-content');
   if (t && t.offsetParent !== null) return t;
   return document.getElementById('recurring-content') || t;
 }
@@ -37546,6 +37551,10 @@ function switchApprovalTab(tab, skipSwitch) {
   }
   else if (tab === 'nonpo') renderApprovalNonPoTable();
   else if (tab === 'sample') renderApprovalSampleTable();
+  // v2.3.590: 정기 결제 — 사이드바 페이지와 동일 렌더 함수 재사용
+  else if (tab === 'rpay') { try { renderRecurringPage(); } catch(e) { console.warn('renderRecurringPage 실패:', e); } }
+  // 기간 필터는 결재 목록 전용 — 정기 결제 탭에서는 숨김
+  try { const _pf = document.querySelector('#page-approval .period-filter[data-prefix="ap"]'); if (_pf) _pf.style.display = (tab === 'rpay') ? 'none' : ''; } catch(_){}
   updateApprovalStats();
 }
 
