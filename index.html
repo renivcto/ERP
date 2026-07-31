@@ -6143,7 +6143,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.600';
+const ERP_VERSION = 'v2.3.601';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -47295,34 +47295,34 @@ async function saveGeminiKey() {
   // 1) 개인 백업 (localStorage)
   localStorage.setItem('reniv_gemini_key', key);
   // 2) 회사 공용 (Firestore) — 쓰기 권한이 있는 사용자만 실제로 저장됨
+  // v2.3.601: 서버 반영을 되읽어 확인한 뒤에만 '공용' 으로 표시(실패를 성공으로 오인하지 않도록)
   let sharedOk = false;
   try {
-    await saveSharedSetting('gemini_api_key', key);
+    sharedOk = await _saveSharedApiKeyVerified('gemini_api_key', key);
     if (!window._sharedApiKeys) window._sharedApiKeys = { gemini: null, claude: null };
     window._sharedApiKeys.gemini = key;
-    sharedOk = true;
   } catch(e) { console.warn('Gemini 공유 저장 실패:', e); }
-  const msg = sharedOk ? '🏢 Gemini API Key가 회사 공용으로 저장되었습니다' : 'Gemini API Key가 내 기기에 저장되었습니다';
+  const msg = sharedOk ? '🏢 Gemini API Key가 회사 공용으로 저장되었습니다' : '⚠️ 서버 저장 실패 — 내 기기에만 저장됨(다른 직원은 사용 불가)';
   showNotif(msg, 'success');
   const st = document.getElementById('gemini-save-status');
-  if (st) { st.textContent = sharedOk ? '✅ 저장 완료 (🏢 회사 공용 · 모든 직원 즉시 반영)' : '✅ 저장 완료 (내 기기에만)'; setTimeout(() => { st.textContent = ''; }, 5000); }
+  if (st) { st.textContent = sharedOk ? '✅ 저장 완료 (🏢 회사 공용 · 모든 직원 즉시 반영)' : '⚠️ 내 기기에만 저장됨 — 다른 직원은 사용 불가(관리자 권한/네트워크 확인)'; setTimeout(() => { st.textContent = ''; }, 5000); }
 }
 
 async function saveClaudeKey() {
   const key = (document.getElementById('claude-api-key') || {}).value?.trim();
   if (!key) { showNotif('API Key를 입력하세요', 'warning'); return; }
   localStorage.setItem('reniv_claude_key', key);
+  // v2.3.601: Gemini 와 동일 — 서버 반영을 되읽어 확인한 뒤에만 '공용' 으로 표시
   let sharedOk = false;
   try {
-    await saveSharedSetting('claude_api_key', key);
+    sharedOk = await _saveSharedApiKeyVerified('claude_api_key', key);
     if (!window._sharedApiKeys) window._sharedApiKeys = { gemini: null, claude: null };
     window._sharedApiKeys.claude = key;
-    sharedOk = true;
   } catch(e) { console.warn('Claude 공유 저장 실패:', e); }
-  const msg = sharedOk ? '🏢 Claude API Key가 회사 공용으로 저장되었습니다' : 'Claude API Key가 내 기기에 저장되었습니다';
+  const msg = sharedOk ? '🏢 Claude API Key가 회사 공용으로 저장되었습니다' : '⚠️ 서버 저장 실패 — 내 기기에만 저장됨(다른 직원은 사용 불가)';
   showNotif(msg, 'success');
   const st = document.getElementById('claude-save-status');
-  if (st) { st.textContent = sharedOk ? '✅ 저장 완료 (🏢 회사 공용 · 모든 직원 즉시 반영)' : '✅ 저장 완료 (내 기기에만)'; setTimeout(() => { st.textContent = ''; }, 5000); }
+  if (st) { st.textContent = sharedOk ? '✅ 저장 완료 (🏢 회사 공용 · 모든 직원 즉시 반영)' : '⚠️ 내 기기에만 저장됨 — 다른 직원은 사용 불가(관리자 권한/네트워크 확인)'; setTimeout(() => { st.textContent = ''; }, 5000); }
 }
 
 function saveTrelloSettings() {
@@ -56857,17 +56857,36 @@ function _sharedSettingCollection(key) {
       || k === 'slack_digest_state') return 'shared';
   return 'settings';
 }
+// v2.3.601: 서버 저장 성공 여부를 boolean 으로 반환한다(true=Firestore 반영, false=내 기기에만).
+//   기존엔 실패를 catch 로 삼켜 무조건 resolve → 호출부가 '공유됨'으로 오인(전 직원에겐 안 보이는데
+//   관리자 화면엔 성공으로 표시되던 구멍). 반환값을 안 쓰는 기존 호출부의 동작은 그대로.
 async function saveSharedSetting(key, value) {
   const coll = _sharedSettingCollection(key);
+  let fsOk = false;
   // 1차: Firestore (있으면)
   if (window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
     try {
       const ref = window._firestoreDoc(window._firebaseDb, coll, key);
       await window._firestoreSetDoc(ref, { value: JSON.stringify(value) }, { merge: true });
+      fsOk = true;
     } catch(e) { console.warn('Firestore 저장 실패:', e); }
   }
   // 2차: localStorage 백업
   try { localStorage.setItem('reniv_shared_' + key, JSON.stringify(value)); } catch(e) {}
+  return fsOk;
+}
+
+// v2.3.601: 공용 API Key 전용 저장 — 서버에 실제로 반영됐는지 되읽어 확인한다.
+//   (키는 '전 직원이 읽을 수 있어야' 의미가 있으므로, 저장했다는 말만으론 부족)
+async function _saveSharedApiKeyVerified(key, value) {
+  const ok = await saveSharedSetting(key, value);
+  if (!ok) return false;
+  try {
+    const coll = _sharedSettingCollection(key);
+    const ref = window._firestoreDoc(window._firebaseDb, coll, key);
+    const snap = await window._firestoreGetDoc(ref);
+    return !!(snap && snap.exists() && JSON.parse(snap.data().value) === value);
+  } catch(e) { console.warn('공용 키 검증 읽기 실패:', e); return false; }
 }
 
 async function loadSharedSetting(key) {
