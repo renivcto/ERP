@@ -5367,7 +5367,12 @@ EXP YYYYMMDD 까지</textarea></div>
             </fieldset>
             <!-- v2.3.556: ⚡ 즉시 지급 (선급금/잔금 지출을 목록 최상단 구역으로 + 슬랙 알림) -->
             <fieldset style="display:inline-flex;align-items:center;gap:6px;border:1.5px solid #f87171;border-radius:10px;background:#fffafa;padding:6px 10px 8px;margin:0">
-              <legend style="font-size:11px;color:#b91c1c;font-weight:800;padding:0 5px;margin:0">⚡ 즉시 지급</legend>
+              <legend style="font-size:11px;color:#b91c1c;font-weight:800;padding:0 5px;margin:0">⚡ 당일</legend>
+              <!-- v2.3.605: 당일 결재 요청 — 발주서 결재 목록 최상단 레드존으로 이동 -->
+              <label title="저장 시 이 발주서가 '당일 결재 요청' 구역(목록 최상단)으로 이동" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;background:#fee2e2;border:1px solid #fca5a5;padding:5px 9px;border-radius:7px;white-space:nowrap;margin:0">
+                <input type="checkbox" id="o-paynow-approval" style="cursor:pointer;width:13px;height:13px;margin:0">
+                <span style="font-weight:700;color:#b91c1c;font-size:11.5px">결재</span>
+              </label>
               <label title="저장 시 선급금 지출이 ⚡ 즉시 지급 구역으로 이동 + 슬랙 알림" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;background:#fee2e2;border:1px solid #fca5a5;padding:5px 9px;border-radius:7px;white-space:nowrap;margin:0">
                 <input type="checkbox" id="o-paynow-prepay" style="cursor:pointer;width:13px;height:13px;margin:0">
                 <span style="font-weight:700;color:#b91c1c;font-size:11.5px">선급금</span>
@@ -5633,6 +5638,13 @@ EXP YYYYMMDD 까지</textarea></div>
           <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;background:#fef2f2;border:1px solid #fecaca;padding:5px 9px;border-radius:7px;white-space:nowrap;margin:0">
             <input type="checkbox" id="apn-urgent" style="cursor:pointer;width:13px;height:13px;margin:0">
             <span style="font-weight:600;color:#b91c1c;font-size:11.5px">결재</span>
+          </label>
+          <!-- v2.3.605: 당일 결재 요청 — 일반 결재 목록 최상단 레드존으로 이동 -->
+          <span style="width:10px"></span>
+          <span style="font-size:11.5px;color:#b91c1c;font-weight:800;margin-right:2px">⚡ 당일</span>
+          <label title="저장 시 이 결재가 '당일 결재 요청' 구역(목록 최상단)으로 이동" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;background:#fee2e2;border:1px solid #fca5a5;padding:5px 9px;border-radius:7px;white-space:nowrap;margin:0">
+            <input type="checkbox" id="apn-approve-now" style="cursor:pointer;width:13px;height:13px;margin:0">
+            <span style="font-weight:700;color:#b91c1c;font-size:11.5px">결재</span>
           </label>
         </div>
       </div>
@@ -6144,7 +6156,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.604';
+const ERP_VERSION = 'v2.3.605';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30427,6 +30439,7 @@ function _editOrderDirect(o, dbIdx) {
   if ($('o-urgent-prepay')) $('o-urgent-prepay').checked = !!o.urgentPrepay;
   if ($('o-paynow-prepay')) $('o-paynow-prepay').checked = !!o.payNowPrepay;   // v2.3.556
   if ($('o-paynow-balance')) $('o-paynow-balance').checked = !!o.payNowBalance;
+  if ($('o-paynow-approval')) $('o-paynow-approval').checked = !!o.payNowApproval;   // v2.3.605
   if ($('o-urgent-balance')) $('o-urgent-balance').checked = !!o.urgentBalance;
   try { if (typeof updatePrepayPreview === 'function') updatePrepayPreview(); } catch(_){}
   if (o.balanceDueDate || o.payDate) updateGCalLink('pay');
@@ -34089,6 +34102,7 @@ function saveOrder() {
     urgentPrepay: !!($('o-urgent-prepay') && $('o-urgent-prepay').checked),
     payNowPrepay: !!($('o-paynow-prepay') && $('o-paynow-prepay').checked),   // v2.3.556
     payNowBalance: !!($('o-paynow-balance') && $('o-paynow-balance').checked),
+    payNowApproval: !!($('o-paynow-approval') && $('o-paynow-approval').checked),   // v2.3.605 당일 결재 요청
     urgentBalance: !!($('o-urgent-balance') && $('o-urgent-balance').checked),
     taxInvoice: existing.taxInvoice || '미수령',
     // v1.9.786: 마감자료 (거래명세서·마감서)
@@ -38026,7 +38040,11 @@ function renderApprovalPoTable() {
   if (!tb) return;
   // v1.9.271: 작성일자(orderDate) 기준 최신순 DESC — 최근 작성된 발주서가 맨 위
   // v1.9.415: 월별 필터 적용 — orderDate 기준
+  // v2.3.605: ⚡ 당일 결재 요청(payNowApproval, 미결재) 건은 목록 최상단 구역으로
+  const _apvNow = o => !!(o && o.payNowApproval) && getOrderApprovalStatus(o) !== 'approved';
   const orders = [...DB.orders].filter(o => _apMatchMonth(o && o.orderDate)).sort((a,b) => {
+    const aNow = _apvNow(a) ? 0 : 1, bNow = _apvNow(b) ? 0 : 1;
+    if (aNow !== bNow) return aNow - bNow;
     const ad = (a && a.orderDate) || '';
     const bd = (b && b.orderDate) || '';
     const cmp = bd.localeCompare(ad);
@@ -38034,6 +38052,9 @@ function renderApprovalPoTable() {
     // 동일 작성일인 경우 id 큰 것(=나중에 저장된 것) 우선
     return (Number(b && b.id)||0) - (Number(a && a.id)||0);
   });
+  // 첫 당일결재 행 앞에 삽입할 구역 헤더 (지출결의서 ⚡ 즉시 지급 구역과 동일 포맷)
+  const _firstApvNowId = (orders.find(_apvNow) || {}).id;
+  const _apvNowHeader = '<tr><td colspan="8" style="background:linear-gradient(90deg,#b91c1c,#dc2626);color:#fff;font-size:12px;font-weight:800;padding:6px 14px;letter-spacing:.5px;border-radius:6px 6px 0 0;border-left:4px solid #b91c1c">⚡ 당일 결재 요청 — 오늘 바로 결재가 필요한 건</td></tr>';
   if (!orders.length) {
     tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--gray-400)">등록된 발주서가 없습니다</td></tr>';
     return;
@@ -38078,7 +38099,10 @@ function renderApprovalPoTable() {
       apBtn = `<span class="badge" style="cursor:pointer;${BADGE_STYLE_AP};background:var(--sky-50);color:var(--sky-700);border-color:var(--sky-300);font-weight:500" onclick="openPoApprovalSheet(${o.id})" title="발주서 양식 + 도장 + 결재 완료 저장">✅ 결재 완료</span>`;
     } else {
       // v2.0.0: 결재 전 → ERP 양식 팝업으로 진입 (도장 추가 → 저장 → 결재 완료 전환)
-      apBtn = `<span class="badge" style="cursor:pointer;${BADGE_STYLE_AP};background:var(--sky-100);color:var(--sky-800);border-color:var(--sky-400);font-weight:500${urgent?';animation:apBlink .9s infinite':''}" onclick="openPoApprovalSheet(${o.id})" title="클릭하면 발주서 양식이 열립니다 — 도장 추가 후 결재 완료 저장">결재 전</span>`;
+      // v2.3.605: ⚡ 당일 결재 요청 건 — 깜빡임 대신 종 딸랑 애니메이션(지출결의서 즉시 지급 버튼과 동일 포맷)
+      apBtn = _apvNow(o)
+        ? `<span class="badge" style="cursor:pointer;${BADGE_STYLE_AP};background:#ffe4e6;color:#be123c;border:1.5px solid #dc2626;border-radius:999px;padding:4px 12px;font-weight:600;display:inline-flex;align-items:center" onclick="openPoApprovalSheet(${o.id})" title="⚡ 당일 결재 요청 — 클릭하면 발주서 양식이 열립니다"><span style="display:inline-flex;flex-direction:column;align-items:center;line-height:1.3;font-weight:600"><span>결재</span><span>요청</span></span><span style="display:inline-block;margin-left:6px;font-size:16px;transform-origin:50% 0;animation:bellRing 2.2s ease-in-out infinite;filter:drop-shadow(0 2px 2px rgba(146,64,14,.45)) drop-shadow(0 -1px 1px rgba(255,255,255,.55)) saturate(1.15)">🔔</span></span>`
+        : `<span class="badge" style="cursor:pointer;${BADGE_STYLE_AP};background:var(--sky-100);color:var(--sky-800);border-color:var(--sky-400);font-weight:500" onclick="openPoApprovalSheet(${o.id})" title="클릭하면 발주서 양식이 열립니다 — 도장 추가 후 결재 완료 저장">결재 전</span>`;
     }
     // v1.9.211: 선급금 expense — 중복 방지 (paid 우선, 가장 최근 id)
     // v1.9.212: orderId 문자열/숫자 혼재 대응 (Number 정규화)
@@ -38193,12 +38217,16 @@ function renderApprovalPoTable() {
     //   결재완료 → 흰색 (최우선)
     //   긴급 결재요청 (a.priority === 'urgent' && status !== 'approved') → 연한 레드
     //   일반 결재요청 → 연한 블루
+    // v2.3.605: ⚡ 당일 결재 요청 = 최상단 진한 레드 구역(지출결의서 즉시 지급과 동일 포맷)
+    var _isApvNow = _apvNow(o);
     var _rowState;
-    if (apStatus === 'approved') _rowState = 'done';
+    if (_isApvNow) _rowState = 'apvnow';
+    else if (apStatus === 'approved') _rowState = 'done';
     else if (urgent) _rowState = 'urgent';
     else _rowState = 'pending';
     var rowBg;
-    if (_rowState === 'done') rowBg = 'background:#ffffff;border-left:3px solid #e5e7eb';
+    if (_rowState === 'apvnow') rowBg = 'background:#fee2e2;border-left:4px solid #dc2626';
+    else if (_rowState === 'done') rowBg = 'background:#ffffff;border-left:3px solid #e5e7eb';
     else if (_rowState === 'urgent') rowBg = 'background:#fef1f2;border-left:3px solid #f87171';
     else rowBg = 'background:#f0f9ff;border-left:3px solid #7dd3fc';
     // v1.9.213:
@@ -38209,7 +38237,7 @@ function renderApprovalPoTable() {
     // v1.9.417: 발주금액 아래 발주일(MM-DD) 회색 톤 보조 표시 / 삭제 버튼 제거 / 수정 버튼 잘림 방지
     const _orderDateShort = (o.orderDate && typeof o.orderDate === 'string' && o.orderDate.length >= 10)
       ? o.orderDate.slice(5,10) : (o.orderDate || '');
-    return `<tr style="${rowBg}">
+    return `${_isApvNow && o.id === _firstApvNowId ? _apvNowHeader : ''}<tr style="${rowBg}">
       <td style="text-align:center;font-weight:400;padding:8px 4px">${urgentBadge}<div>${v}</div></td>
       <td style="text-align:center;font-size:12.5px;font-weight:400;cursor:pointer;color:var(--sky-700);padding:8px 6px" class="po-item-link" title="클릭하면 발주 품의서 페이지 열기" onclick="openPoApprovalPage(${o.id})">${itemSummary}</td>
       <td style="text-align:center;padding:8px 2px">
@@ -39227,6 +39255,8 @@ function renderApprovalNonPoTable() {
   if (!tb) return;
   // v1.9.271: 작성일자(createdAt) 기준 최신순 DESC — 최근 작성된 결재 요청이 맨 위
   // v1.9.415: 월별 필터 적용 — createdAt 기준
+  // v2.3.605: 당일 결재 요청 판정 — 아직 결재되지 않은 건만
+  const _npApvNow = a => !!(a && a.approveNow) && a.status !== 'approved';
   const list = DB.approvals.filter(a => a.type === 'non_po_approval')
     .filter(a => {
       if (!_apMonthFilterValue()) return true;
@@ -39234,11 +39264,17 @@ function renderApprovalNonPoTable() {
       return _apMatchMonth(ts);
     })
     .sort((a,b) => {
+      // v2.3.605: ⚡ 당일 결재 요청(미결재) 건은 목록 최상단 구역으로
+      const aNow = _npApvNow(a) ? 0 : 1, bNow = _npApvNow(b) ? 0 : 1;
+      if (aNow !== bNow) return aNow - bNow;
       const at = Number((a && a.createdAt) || 0);
       const bt = Number((b && b.createdAt) || 0);
       if (bt !== at) return bt - at;
       return (Number(b && b.id)||0) - (Number(a && a.id)||0);
     });
+  // 첫 당일결재 행 앞에 삽입할 구역 헤더 (지출결의서 ⚡ 즉시 지급 구역과 동일 포맷)
+  const _firstNpApvNowId = (list.find(_npApvNow) || {}).id;
+  const _npApvNowHeader = '<tr><td colspan="8" style="background:linear-gradient(90deg,#b91c1c,#dc2626);color:#fff;font-size:12px;font-weight:800;padding:6px 14px;letter-spacing:.5px;border-radius:6px 6px 0 0;border-left:4px solid #b91c1c">⚡ 당일 결재 요청 — 오늘 바로 결재가 필요한 건</td></tr>';
   if (!list.length) {
     tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--gray-400)">등록된 결재 요청이 없습니다</td></tr>';
     return;
@@ -39253,13 +39289,18 @@ function renderApprovalNonPoTable() {
         ? `<span class="badge" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700">대기</span>`
         : `<span class="badge" style="background:${urgent?'#fecdd3':'#fef3c7'};color:${urgent?'#9f1239':'#92400e'};border:1px solid ${urgent?'#fda4af':'#fde68a'};padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700;${urgent?'animation:apPulseBadge .9s infinite':''}">${urgent?'🚨 응급 · ':''}대기</span>`;
     // v2.3.396: 완료 상태 — 서명 주체(본부장 전결/대표이사 결재)별 아이콘·문구 구분
-    const apBtn = a.status === 'approved'
+    // v2.3.605: 당일 결재 요청 건은 아래에서 종 애니메이션 버튼으로 교체 → let
+    let apBtn = a.status === 'approved'
       ? (a.signRole === 'ceo'
           ? `<span class="badge" title="대표이사 결재 완료" style="background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;padding:4px 9px;border-radius:999px;font-size:10.5px;font-weight:800;white-space:normal;line-height:1.3;display:inline-block;text-align:center">👑 대표이사<br>결재 완료</span>`
           : `<span class="badge" title="본부장 전결 완료" style="background:#dcfce7;color:#166534;padding:4px 9px;border-radius:999px;font-size:10.5px;font-weight:800;white-space:normal;line-height:1.3;display:inline-block;text-align:center">✅ 본부장<br>전결 완료</span>`)
       : _ceoReq
         ? `<button class="btn btn-sm" onclick="approveNonPo(${a.id})" title="대표이사 결재 단계 — 클릭하여 서명·결재" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:4px 8px;border-radius:8px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04);white-space:normal;line-height:1.3;text-align:center;animation:apBlink .9s infinite">✍️ 대표이사<br>결재</button>`
-        : `<button class="btn btn-sm" onclick="approveNonPo(${a.id})" style="background:${urgent?'#fecdd3':'#fef9c3'};color:${urgent?'#9f1239':'#854d0e'};border:1px solid ${urgent?'#fda4af':'#fcd34d'};padding:4px 10px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04);white-space:nowrap;${urgent?'animation:apBlink .9s infinite;':''}">🖋️ 결재 요청</button>`;
+        : `<button class="btn btn-sm" onclick="approveNonPo(${a.id})" style="background:${urgent?'#fecdd3':'#fef9c3'};color:${urgent?'#9f1239':'#854d0e'};border:1px solid ${urgent?'#fda4af':'#fcd34d'};padding:4px 10px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04);white-space:nowrap;">🖋️ 결재 요청</button>`;
+    // v2.3.605: ⚡ 당일 결재 요청 건 — 깜빡임 대신 종 딸랑 애니메이션(지출결의서 즉시 지급 버튼과 동일 포맷)
+    if (_npApvNow(a) && a.status !== 'approved') {
+      apBtn = `<button class="btn btn-sm" onclick="approveNonPo(${a.id})" title="⚡ 당일 결재 요청 — 클릭하여 서명·결재" style="background:#ffe4e6;color:#be123c;border:1.5px solid #dc2626;border-radius:999px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center"><span style="display:inline-flex;flex-direction:column;align-items:center;line-height:1.3;font-weight:600"><span>결재</span><span>요청</span></span><span style="display:inline-block;margin-left:6px;font-size:16px;transform-origin:50% 0;animation:bellRing 2.2s ease-in-out infinite;filter:drop-shadow(0 2px 2px rgba(146,64,14,.45)) drop-shadow(0 -1px 1px rgba(255,255,255,.55)) saturate(1.15)">🔔</span></button>`;
+    }
     const date = a.createdAt ? new Date(a.createdAt).toISOString().slice(0,10) : '';
     // v1.9.731: 첨부 — 모든 파일을 개별 버튼으로 (세로 스택)
     const attachArr = Array.isArray(a.attachments) ? a.attachments : [];
@@ -39300,12 +39341,15 @@ function renderApprovalNonPoTable() {
       ? `<span title="첨부 파일 포함" style="position:absolute;top:-6px;right:${cmtCountNonPo>0?14:-6}px;background:#2563eb;color:#fff;border-radius:999px;padding:0 4px;font-size:10px;line-height:16px;min-width:16px;height:16px;box-shadow:0 1px 3px rgba(37,99,235,.5);text-align:center;display:inline-flex;align-items:center;justify-content:center"><span style="filter:brightness(0) invert(1);display:inline-block;line-height:1;font-size:10px">📎</span></span>`
       : '';
     // v2.2.43: 행 배경색 — 응급/예정/완료
-    var _npState = urgent ? 'urgent' : (a.status === 'approved' ? 'done' : 'pending');
+    // v2.3.605: ⚡ 당일 결재 요청 = 최상단 진한 레드 구역(지출결의서 즉시 지급과 동일 포맷)
+    var _isNpApvNow = _npApvNow(a);
+    var _npState = _isNpApvNow ? 'apvnow' : (urgent ? 'urgent' : (a.status === 'approved' ? 'done' : 'pending'));
     var _npRowBg;
-    if (_npState === 'urgent') _npRowBg = 'background:#fef1f2;border-left:3px solid #f87171';
+    if (_npState === 'apvnow') _npRowBg = 'background:#fee2e2;border-left:4px solid #dc2626';
+    else if (_npState === 'urgent') _npRowBg = 'background:#fef1f2;border-left:3px solid #f87171';
     else if (_npState === 'done') _npRowBg = 'background:#f9fafb;border-left:3px solid #e5e7eb';
     else _npRowBg = 'background:#f0f9ff;border-left:3px solid #7dd3fc';
-    return `<tr style="${_npRowBg}">
+    return `${_isNpApvNow && a.id === _firstNpApvNowId ? _npApvNowHeader : ''}<tr style="${_npRowBg}">
       <td style="text-align:center;vertical-align:middle">${statusCell}</td>
       <td style="text-align:center;font-size:11.5px;font-weight:600;vertical-align:middle"><div>${a.category||'기타'}</div>${phaseBadge}</td>
       <td style="text-align:center;vertical-align:middle">${authorCell}</td>
@@ -40342,6 +40386,7 @@ function openNonPoApprovalModal() {
   if ($('apn-title')) $('apn-title').value = '';
   if ($('apn-note')) $('apn-note').value = APN_TEMPLATES['기안서'] || '';
   if ($('apn-urgent')) $('apn-urgent').checked = false;
+  if ($('apn-approve-now')) $('apn-approve-now').checked = false;   // v2.3.605
   if ($('apn-date')) $('apn-date').value = today;
   // v1.9.307: 단계 초기화 + 기안서이므로 phase 행 노출
   _apnSetPhase('');
@@ -40368,6 +40413,7 @@ async function saveNonPoApproval() {
       a.title = title;
       // v1.9.230: amount 필드는 더 이상 입력받지 않음. 기존 값은 유지.
       a.priority = $('apn-urgent').checked ? 'urgent' : 'normal';
+      a.approveNow = !!($('apn-approve-now') && $('apn-approve-now').checked);   // v2.3.605 당일 결재 요청
       a.note = $('apn-note').value || '';
       a.attachments = Array.isArray(_apnAttachments) ? _apnAttachments.slice() : [];
       // v1.9.741: 진단 로그
@@ -40421,6 +40467,7 @@ async function saveNonPoApproval() {
     amount: 0, // v1.9.230: 일반 결재는 금액 사용 안 함 (비용은 지출결의서에서)
     status: 'pending',
     priority: $('apn-urgent').checked ? 'urgent' : 'normal',
+    approveNow: !!($('apn-approve-now') && $('apn-approve-now').checked),   // v2.3.605
     note: $('apn-note').value || '',
     attachments: Array.isArray(_apnAttachments) ? _apnAttachments.slice() : [],
     // v1.9.288: 기안자 (로그인 사용자 자동 저장)
@@ -40468,6 +40515,7 @@ function editNonPo(id) {
   if ($('apn-title')) $('apn-title').value = a.title || '';
   if ($('apn-note')) $('apn-note').value = a.note || '';
   if ($('apn-urgent')) $('apn-urgent').checked = a.priority === 'urgent';
+  if ($('apn-approve-now')) $('apn-approve-now').checked = !!a.approveNow;   // v2.3.605
   if ($('apn-date')) $('apn-date').value = a.createdAt ? new Date(a.createdAt).toISOString().slice(0,10) : (new Date().toISOString().slice(0,10));
   // v1.9.307: phase 복원 + 분류에 따른 phase 행 노출
   _apnSetPhase(a.phase || '');
