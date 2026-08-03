@@ -6143,7 +6143,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.601';
+const ERP_VERSION = 'v2.3.602';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -24448,8 +24448,18 @@ function viewVendor(id) {
     ? '<div style="display:flex;flex-wrap:wrap;gap:5px">' + items.map(i => '<span class="chip" onclick="document.getElementById(\'vendor-view-overlay\')?.remove();showItemDetail(' + i.id + ')">' + safe(i.name) + '</span>').join('') + '</div>'
     : '<span style="color:#cbd5e1">등록된 품목 없음</span>';
   // 견적서
-  const quotesHtml = (v.quotes && v.quotes.length)
-    ? '<div style="display:flex;flex-direction:column;gap:4px">' + v.quotes.map((q, i) => '<a href="javascript:void(0)" onclick="openVendorQuoteById(' + v.id + ',' + i + ')" style="color:#0284c7;cursor:pointer;font-size:12px;font-weight:600" onmouseenter="this.style.textDecoration=\'underline\'" onmouseleave="this.style.textDecoration=\'none\'">📄 ' + safe(q.name || q.fileName || ('견적서 ' + (i+1))) + '</a>').join('') + '</div>'
+  // v2.3.602: 업체에 직접 등록한 견적서 + 이 업체 품목에 첨부된 견적서를 함께 표시.
+  //   품목 견적서는 복사하지 않고 '파생' 표시 — 원본은 품목 한 곳뿐이라 품목에서 수정하면 여기도 즉시 반영된다.
+  //   (기존엔 두 저장소가 분리돼 있어 품목에서 견적서를 바꿔도 업체 정보엔 안 보였음)
+  const _vqRows = (v.quotes && v.quotes.length)
+    ? v.quotes.map((q, i) => '<a href="javascript:void(0)" onclick="openVendorQuoteById(' + v.id + ',' + i + ')" style="color:#0284c7;cursor:pointer;font-size:12px;font-weight:600" onmouseenter="this.style.textDecoration=\'underline\'" onmouseleave="this.style.textDecoration=\'none\'">📄 ' + safe(q.name || q.fileName || ('견적서 ' + (i+1))) + '</a>')
+    : [];
+  const _itemQRows = (items || []).filter(i => i && i.quoteFileName).map(i =>
+    '<a href="javascript:void(0)" onclick="openItemQuoteFile(' + i.id + ')" title="' + safe(i.quoteFileName) + '" style="color:#0284c7;cursor:pointer;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:5px" onmouseenter="this.style.textDecoration=\'underline\'" onmouseleave="this.style.textDecoration=\'none\'">📄 ' + safe(i.name || i.quoteFileName)
+    + '<span style="background:#eef2ff;color:#4338ca;border-radius:5px;padding:1px 6px;font-size:10px;font-weight:700;text-decoration:none">품목</span></a>');
+  const _allQRows = _vqRows.concat(_itemQRows);
+  const quotesHtml = _allQRows.length
+    ? '<div style="display:flex;flex-direction:column;gap:4px">' + _allQRows.join('') + '</div>'
     : '<span style="color:#cbd5e1">없음</span>';
   // 첨부파일
   const attachHtml = (v.attachments && v.attachments.length)
