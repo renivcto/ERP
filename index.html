@@ -5327,7 +5327,8 @@ EXP YYYYMMDD 까지</textarea></div>
         <div class="fg"><label>발주일<span class="req">*</span></label><input class="fi" id="o-date" type="date"></div>
         <div class="fg"><label>납기일(입고예정)</label><input class="fi" id="o-in-date" type="date"></div>
         <!-- 줄 3: 입고처 | 입고처 주소 -->
-        <div class="fg"><label>입고처</label><input class="fi" id="o-receiver" placeholder="입고할 회사명"></div>
+        <!-- v2.3.603: 창고 목록에서 입고처 선택 → 주소·담당자·연락처 자동 입력 (직접 입력도 그대로 가능) -->
+        <div class="fg"><label>입고처</label><input class="fi" id="o-receiver" list="o-receiver-list" placeholder="입고할 회사명 (창고 목록에서 선택)" autocomplete="off" onfocus="_orderReceiverInit()" oninput="_orderReceiverAutofill()" onchange="_orderReceiverAutofill()"><datalist id="o-receiver-list"></datalist></div>
         <div class="fg"><label>입고처 주소</label><textarea class="fta" id="o-addr" placeholder="입고처 주소" rows="3" style="resize:vertical;min-height:60px"></textarea></div>
         <!-- 발주 상태 (숨김 - 기본값 진행중) -->
         <input type="hidden" id="o-status" value="진행중">
@@ -6143,7 +6144,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.602';
+const ERP_VERSION = 'v2.3.603';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28433,6 +28434,44 @@ async function _whEnsureLoaded(force){
   return window._WH.list;
 }
 async function _whSaveList(){ try { await saveSharedSetting('warehouse_list', window._WH.list||[]); } catch(e){ console.warn('[창고] 저장 실패:', e); } }
+// v2.3.603: 발주서 '입고처' — 창고 목록을 후보로 제공하고, 고르면 주소/담당자/연락처를 자동 입력.
+//   입고처는 창고에 없는 곳(임시 입고지 등)도 쓸 수 있어야 하므로 select 가 아니라 datalist(선택+직접입력).
+async function _orderReceiverInit(){
+  try { await _whEnsureLoaded(); } catch(_){}
+  const dl = document.getElementById('o-receiver-list');
+  if (!dl) return;
+  const seen = new Set();
+  dl.innerHTML = (window._WH.list||[]).map(w => {
+    const n = String((w && w.name) || '').trim();
+    if (!n || seen.has(n)) return '';
+    seen.add(n);
+    const sub = [w.vendorName, w.address].filter(Boolean).join(' · ');
+    return '<option value="' + _whEsc(n) + '"' + (sub ? ' label="' + _whEsc(sub) + '"' : '') + '>';
+  }).join('');
+}
+// 입고처 이름으로 창고 찾기 — 창고명 우선, 없으면 연결된 업체명으로도 매칭
+function _whFindByReceiverName(name){
+  const n = String(name || '').trim();
+  if (!n) return null;
+  const list = window._WH.list || [];
+  return list.find(w => w && String(w.name || '').trim() === n)
+      || list.find(w => w && String(w.vendorName || '').trim() === n)
+      || null;
+}
+function _orderReceiverAutofill(){
+  const inp = document.getElementById('o-receiver');
+  const addr = document.getElementById('o-addr');
+  if (!inp || !addr) return;
+  const w = _whFindByReceiverName(inp.value);
+  if (!w) return;
+  const block = '주소 : ' + (w.address || '') + '\n담당자 : ' + (w.manager || '') + '\n연락처 : ' + (w.phone || '');
+  // 직접 써 넣은 주소를 덮지 않는다 — 비어있거나 이 형식으로 자동 입력된 값일 때만 갱신
+  const cur = String(addr.value || '').trim();
+  if (cur && !/^주소\s*:/.test(cur)) return;
+  if (cur === block.trim()) return;
+  addr.value = block;
+}
+
 function _whById(id){ return (window._WH.list||[]).find(w => String(w.id) === String(id)) || null; }
 function _whName(id){ const w = _whById(id); return w ? w.name : ''; }
 function _whEsc(s){ return (typeof escapeHtml==='function') ? escapeHtml(s) : String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
