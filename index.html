@@ -71,6 +71,11 @@
     window._storageDeletePath = async function(path) {
       try { await _storageDelete(_storageRefFn(storage, path)); } catch(_){}
     };
+    // v2.3.613: 저장된 다운로드 URL 의 토큰이 만료(같은 경로 재업로드 시 토큰 회전)되면 403 이 난다.
+    //   경로로 새 URL 을 다시 받아오는 헬퍼 — 깨진 이미지 자동 복구에 사용.
+    window._storageFreshUrl = async function(path) {
+      try { return await _storageGetUrl(_storageRefFn(storage, path)); } catch(e) { console.warn('[Storage] URL 재발급 실패:', path, e && e.code); return ''; }
+    };
   } catch(e) { console.warn('Firebase Storage 초기화 실패(설정 필요):', e); }
 
   window._firebaseAuth = auth;  // v2.3.191 진단: 콘솔에서 auth.currentUser 확인용
@@ -6144,7 +6149,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.612';
+const ERP_VERSION = 'v2.3.613';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -32505,7 +32510,21 @@ async function _generateOrderFormStampedPdf(o) {
             var _stampSrc = o.approvalStampImage;
             if (typeof _stoIsHttp === 'function' && _stoIsHttp(_stampSrc)) {
               try { _stampSrc = await window._stoFetchAsDataUrl(_stampSrc); }
-              catch(_se) { console.warn('도장 URL→base64 변환 실패, URL 직접 사용:', _se); _stampSrc = o.approvalStampImage; img.crossOrigin = 'anonymous'; }
+              catch(_se) {
+                // v2.3.613: 같은 경로로 재업로드되면 Storage 다운로드 토큰이 회전해 저장된 URL 이 403 이 된다.
+                //   → 경로로 새 URL 을 재발급받아 자동 복구하고, 고친 URL 을 발주서에 되저장(다음부터 정상).
+                console.warn('도장 URL 실패 — Storage 에서 URL 재발급 시도:', _se && _se.message);
+                var _fresh = '';
+                try { if (typeof window._storageFreshUrl === 'function') _fresh = await window._storageFreshUrl('erp/order_astamp_' + o.id); } catch(_){}
+                if (_fresh) {
+                  try { _stampSrc = await window._stoFetchAsDataUrl(_fresh); } catch(_){ _stampSrc = _fresh; img.crossOrigin = 'anonymous'; }
+                  try {
+                    o.approvalStampImage = _fresh;
+                    if (typeof saveData === 'function') saveData();
+                    console.log('✅ [도장] URL 재발급 복구 — order id=' + o.id);
+                  } catch(_){}
+                } else { _stampSrc = o.approvalStampImage; img.crossOrigin = 'anonymous'; }
+              }
             }
             img.src = _stampSrc;
             img.style.cssText = 'position:absolute;top:50%;right:10px;transform:translateY(-50%);width:58px;height:58px;object-fit:contain;opacity:.88;mix-blend-mode:multiply';
