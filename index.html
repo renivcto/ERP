@@ -6144,7 +6144,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.611';
+const ERP_VERSION = 'v2.3.612';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -35301,12 +35301,15 @@ async function _feedUploadAttachments(post){
 // v2.3.239: 큰 이미지(>=900KB base64)는 Firestore feedImages 1MB 한계로 동기화 실패 → Storage 업로드 후
 //   post.images 의 base64 를 다운로드 URL 로 치환(다른 사용자도 보임). 작은 이미지는 기존 IDB+feedImages 유지.
 //   이미 URL 이거나 마커면 건너뜀(idempotent). Storage 미설정 시 기존 경로 유지(graceful).
+// v2.3.612: 크기 조건(≥900KB) 제거 — 모든 이미지를 Storage 로 올린다.
+//   ① 슬랙 알림에 이미지를 실으려면 공개 URL 이 필요(base64 는 보낼 수 없음)
+//   ② base64 인라인은 이 프로젝트의 반복 유실 클래스(Firestore 1MB) — URL 화가 더 안전
 async function _feedUploadBigImages(post){
   if (!post || !Array.isArray(post.images)) return;
   if (typeof window._storageUploadDataUrl !== 'function') return;
   for (let i = 0; i < post.images.length; i++){
     const src = post.images[i];
-    if (typeof src !== 'string' || src.indexOf('data:') !== 0 || src.length < 900000) continue;
+    if (typeof src !== 'string' || src.indexOf('data:') !== 0) continue;
     try {
       const path = 'commentFiles/feed/' + post.id + '/img_' + i + '.jpg';
       const url = await window._storageUploadDataUrl(path, src, 'image/jpeg');
@@ -35396,6 +35399,11 @@ async function saveFeedPost(){
       ? DB.feedPosts.find(x => x && String(x.id) === String(window._lastSavedFeedPostId))
       : DB.feedPosts.find(x => x && String(x.id) === String(id));
     if (_savedPost) { await _feedUploadAttachments(_savedPost); await _feedUploadBigImages(_savedPost); }
+    // v2.3.612: 슬랙 알림에 실을 이미지·첨부 URL 캡처 (업로드 완료 후 = 공개 URL 확정 시점)
+    try {
+      window._lastSavedFeedImages = (_savedPost && Array.isArray(_savedPost.images)) ? _savedPost.images.slice() : [];
+      window._lastSavedFeedFiles  = (_savedPost && Array.isArray(_savedPost.files))  ? _savedPost.files.slice()  : [];
+    } catch(_){ window._lastSavedFeedImages = []; window._lastSavedFeedFiles = []; }
   } catch(e){ console.warn('피드 첨부 업로드 처리 실패:', e); }
   // v1.9.267/337 — localStorage 즉시 플러시 → 저장 전 닫힘/새로고침 방지
   //   이미지가 raw base64 채로 들어가면 quota 초과(5MB)로 silent fail → 새로고침 시 글이 사라지는 버그.
@@ -35498,8 +35506,22 @@ async function saveFeedPost(){
       const _plain = (typeof _htmlToSlackMrkdwn === 'function')
         ? _htmlToSlackMrkdwn(content)
         : String(content || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
-      const _bodyLine = _plain ? ('\n\n' + (_plain.length > 700 ? _plain.slice(0, 700) + ' …' : _plain)) : '';
-      const _msg = `📝 *르니브 운영 업무 공유 — 새 글*\n*${_catLabel}*  ${title}${_bodyLine}\n\n👤 ${_author}  ·  ⏰ ${_time}`;
+      // v2.3.612: 본문 700자 잘림 해제 — 슬랙 text 한도(4만자) 안에서 전문 전송.
+      //   그보다 긴 글만 잘라내고 ERP 링크로 전체 열람 안내.
+      const _FEED_SLACK_MAX = 30000;
+      const _tooLong = _plain.length > _FEED_SLACK_MAX;
+      const _bodyLine = _plain ? ('\n\n' + (_tooLong ? _plain.slice(0, _FEED_SLACK_MAX) + '\n\n… (본문이 길어 일부만 표시)' : _plain)) : '';
+      // v2.3.612: 이미지·첨부파일 링크 동봉 (Storage 공개 URL). 슬랙이 이미지 URL 은 미리보기로 펼침.
+      const _imgUrls = (Array.isArray(window._lastSavedFeedImages) ? window._lastSavedFeedImages : [])
+        .filter(s => typeof s === 'string' && s.indexOf('http') === 0);
+      const _fileList = (Array.isArray(window._lastSavedFeedFiles) ? window._lastSavedFeedFiles : [])
+        .filter(f => f && f.url);
+      let _mediaLine = '';
+      if (_imgUrls.length) _mediaLine += '\n\n🖼️ *이미지 ' + _imgUrls.length + '장*\n' + _imgUrls.join('\n');
+      if (_fileList.length) _mediaLine += '\n\n📎 *첨부파일 ' + _fileList.length + '개*\n'
+        + _fileList.map(f => '• <' + f.url + '|' + String(f.name || '파일') + '>').join('\n');
+      const _erpLink = '\n\n🔗 <https://renivcto.github.io/ERP/|ERP에서 전체 보기>';
+      const _msg = `📝 *르니브 운영 업무 공유 — 새 글*\n*${_catLabel}*  ${title}${_bodyLine}${_mediaLine}${_tooLong ? _erpLink : ''}\n\n👤 ${_author}  ·  ⏰ ${_time}`;
       const _pid = (typeof window !== 'undefined' && window._lastSavedFeedPostId) || '';
       if (_pid) _boardDispatch(_pid, 'post', _msg);
       else slackBoardNotify('board_post', { text: _msg });
