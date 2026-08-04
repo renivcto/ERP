@@ -6149,7 +6149,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.614';
+const ERP_VERSION = 'v2.3.615';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -39416,6 +39416,30 @@ async function _loadApnSignatures() {
   return window._apnSignatures;
 }
 
+// v2.3.615: 서명 권한 — 해당 역할 본인(본부장/대표이사)이 로그인했을 때만 사인 가능
+function _nonPoCanSign(signMode) {
+  const u = window._currentUser;
+  if (!u) return false;
+  const role = String(u.role || '');
+  const nm = String(u.name || u.displayName || '').trim();
+  const sig = (window._apnSignatures) || {};
+  const regName = String((sig[signMode] && sig[signMode].name) || '').trim();
+  if (signMode === 'ceo') return role === 'CEO' || role === '대표이사' || (!!nm && (nm === regName || nm === '이재호'));
+  return role === '본부장' || (!!nm && (nm === regName || nm === '이주연'));
+}
+
+// v2.3.615: 📚 저장된 사인 — 본인 역할의 공유 레지스트리 사인을 우선 적용, 없으면 브라우저 라이브러리에서 선택
+function _nonPoPickSavedSign(signMode) {
+  if (!_nonPoCanSign(signMode)) {
+    showNotif((signMode === 'ceo' ? '대표이사' : '본부장') + ' 본인만 저장된 사인을 불러올 수 있습니다', 'warning');
+    return;
+  }
+  const sig = (window._apnSignatures) || {};
+  const rec = sig[signMode];
+  if (rec && rec.img) { _nonPoApplySign(rec.img); showNotif('저장된 사인을 불러왔습니다 — ✅ 완료 저장을 눌러야 결재가 완료됩니다', 'success'); return; }
+  _openSavedSignaturesPicker(_nonPoApplySign);
+}
+
 // v2.3.397: 일반 결재 문서(모달) — 발주서 결재처럼 결재란에서 바로 사인 -> 완료 저장
 function openNonPoApprovalSheet(id) {
   const a = DB.approvals.find(x => x.id === id && x.type === 'non_po_approval');
@@ -39436,15 +39460,22 @@ function openNonPoApprovalSheet(id) {
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:99985;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto';
   ov.onclick = function(ev){ if (ev.target === ov) _closeNonPoSignSheet(); };
   const btn = 'padding:8px 13px;border-radius:7px;cursor:pointer;font-size:12.5px;font-weight:700;border:1px solid';
-  let toolbarBtns = ''
-    + '<button onclick="_openSignaturePad(_nonPoApplySign)" style="' + btn + ' #93c5fd;background:#fff;color:#1e40af">🎨 직접 사인</button>'
-    + '<button onclick="_openSavedSignaturesPicker(_nonPoApplySign)" style="' + btn + ' #93c5fd;background:#fff;color:#1e40af">📚 저장된 사인</button>';
-  if (signMode === 'ceo') {
-    toolbarBtns += '<button onclick="_nonPoSaveSign(' + a.id + ',\'ceo\')" style="' + btn + ' #4338ca;background:#4f46e5;color:#fff">✅ 대표이사 결재 완료 저장</button>'
-      + '<button onclick="_nonPoSheetClearCeo(' + a.id + ')" style="' + btn + ' #fcd34d;background:#fef9c3;color:#854d0e">↩ 본부장 전결로 되돌리기</button>';
+  const canSign = _nonPoCanSign(signMode);  // v2.3.615: 해당 역할 본인 로그인 시에만 사인 버튼 노출
+  let toolbarBtns = '';
+  if (canSign) {
+    toolbarBtns += '<button onclick="_openSignaturePad(_nonPoApplySign)" style="' + btn + ' #93c5fd;background:#fff;color:#1e40af">🎨 직접 사인</button>'
+      + '<button onclick="_nonPoPickSavedSign(\'' + signMode + '\')" style="' + btn + ' #93c5fd;background:#fff;color:#1e40af">📚 저장된 사인</button>'
+      + (signMode === 'ceo'
+        ? '<button onclick="_nonPoSaveSign(' + a.id + ',\'ceo\')" style="' + btn + ' #4338ca;background:#4f46e5;color:#fff">✅ 대표이사 결재 완료 저장</button>'
+        : '<button onclick="_nonPoSaveSign(' + a.id + ',\'director\')" style="' + btn + ' #15803d;background:#16a34a;color:#fff">✅ 본부장 전결 완료 저장</button>')
+      + '<button onclick="_nonPoClearSignCell()" style="' + btn + ' #cbd5e1;background:#fff;color:#475569">✕ 사인 지우기</button>';
   } else {
-    toolbarBtns += '<button onclick="_nonPoSaveSign(' + a.id + ',\'director\')" style="' + btn + ' #15803d;background:#16a34a;color:#fff">✅ 본부장 전결 완료 저장</button>'
-      + '<button onclick="_nonPoSheetSetCeo(' + a.id + ')" style="' + btn + ' #c7d2fe;background:#eef2ff;color:#4338ca">👔 대표이사 결재 요청</button>';
+    toolbarBtns += '<span style="font-size:12px;font-weight:700;color:#9a3412;background:#fff7ed;border:1px solid #fdba74;border-radius:7px;padding:8px 12px">🔒 ' + (signMode === 'ceo' ? '대표이사' : '본부장') + ' 본인이 로그인해야 사인할 수 있습니다</span>';
+  }
+  if (signMode === 'ceo') {
+    toolbarBtns += '<button onclick="_nonPoSheetClearCeo(' + a.id + ')" style="' + btn + ' #fcd34d;background:#fef9c3;color:#854d0e">↩ 본부장 전결로 되돌리기</button>';
+  } else {
+    toolbarBtns += '<button onclick="_nonPoSheetSetCeo(' + a.id + ')" style="' + btn + ' #c7d2fe;background:#eef2ff;color:#4338ca">👔 대표이사 결재 요청</button>';
   }
   ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#f3f4f6;border-radius:14px;width:880px;max-width:96vw;box-shadow:0 18px 50px rgba(0,0,0,.35);overflow:hidden;margin:auto">'
     + '<div style="padding:12px 18px;background:#0f172a;color:#fff;display:flex;align-items:center;justify-content:space-between">'
@@ -39453,19 +39484,16 @@ function openNonPoApprovalSheet(id) {
     + '</div>'
     + '<div style="padding:11px 16px;background:#eff6ff;border-bottom:1px solid #bfdbfe;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
     + toolbarBtns
-    + '<button onclick="_nonPoClearSignCell()" style="' + btn + ' #cbd5e1;background:#fff;color:#475569">✕ 사인 지우기</button>'
-    + '<span style="flex-basis:100%;font-size:11px;color:#1e40af;line-height:1.45">문서 하단 <b>결재란</b>에 사인이 표시됩니다 · 사인 추가 후 <b>✅ 완료 저장</b> 을 눌러야 결재가 완료됩니다 · 저장된 사인은 브라우저에 보관되어 재사용됩니다</span>'
+    + '<span style="flex-basis:100%;font-size:11px;color:#1e40af;line-height:1.45">'
+    + (canSign
+      ? '문서 하단 <b>결재란</b>에 사인이 표시됩니다 · 📚 <b>저장된 사인</b>으로 본인 사인을 불러오거나 🎨 직접 사인 후 <b>✅ 완료 저장</b> 을 눌러야 결재가 완료됩니다'
+      : '결재란은 ' + (signMode === 'ceo' ? '대표이사' : '본부장') + ' 본인이 로그인하여 사인하기 전까지 비어 있습니다')
+    + '</span>'
     + '</div>'
     + '<div style="padding:20px 22px 28px;max-height:calc(92vh - 140px);overflow:auto">' + built.innerHtml + '</div>'
     + '</div>';
   document.body.appendChild(ov);
-  setTimeout(function(){
-    try {
-      const sig = (window._apnSignatures) || {};
-      const rec = sig[signMode];
-      if (rec && rec.img) _nonPoApplySign(rec.img);
-    } catch(_){}
-  }, 50);
+  // v2.3.615: 저장된 사인 자동 채움 제거 — 결재자 본인이 📚 저장된 사인 / 🎨 직접 사인으로 직접 불러와야 함
 }
 function _closeNonPoSignSheet() {
   const ov = document.getElementById('nonpo-sign-overlay');
@@ -39490,6 +39518,7 @@ function _nonPoClearSignCell() {
 async function _nonPoSaveSign(id, role) {
   const _canWr = window._currentUser && (window._currentUser.isAdmin === true || window._currentUser.permission === 'write');
   if (!_canWr) { showNotif('결재 처리는 쓰기 권한자만 가능합니다', 'warning'); return; }
+  if (!_nonPoCanSign(role)) { showNotif((role === 'ceo' ? '대표이사' : '본부장') + ' 본인이 로그인해야 결재 완료할 수 있습니다', 'warning'); return; }  // v2.3.615
   const a = DB.approvals.find(x => x.id === id && x.type === 'non_po_approval');
   if (!a) return;
   const cell = document.getElementById('nonpo-sign-cell');
@@ -39510,7 +39539,8 @@ async function _nonPoSaveSign(id, role) {
   a.signRole = role;
   a.signName = sig[role].name;
   a.signedAt = Date.now();
-  try { saveData(); } catch(_){}
+  a.signedBy = (window._currentUser && (window._currentUser.name || window._currentUser.email)) || '';  // v2.3.615: 실제 서명자 기록
+  try { await saveDataNow(); } catch(_) { try { saveData(); } catch(__){} }  // v2.3.615: 슬랙 발송 전 즉시 저장 (디바운스 유실 방지)
   try { slackNotify('approval_done', a); } catch(_){}
   _closeNonPoSignSheet();
   renderApprovalPage();
