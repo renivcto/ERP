@@ -2505,7 +2505,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           </div>
         </div>
         <div class="card" style="padding:12px">
-          <div style="font-size:11px;color:var(--gray-500);font-weight:600">지급 예정 금액</div>
+          <div style="font-size:11px;color:var(--gray-500);font-weight:600">이번 달 지급 예정</div>
           <div id="ap-stat-balance-due" style="font-size:22px;font-weight:800;color:#be185d">₩0</div>
         </div>
         <div class="card" style="padding:12px">
@@ -6150,7 +6150,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.616';
+const ERP_VERSION = 'v2.3.617';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12245,6 +12245,31 @@ function closeModal(id) {
   }
 }
 
+// v2.3.617: '이번 달 지급 예정' 단일 기준 — 홈 대시보드 카드와 결재 관리 상단 KPI 가 공유한다.
+//   (이전엔 두 곳이 각자 계산해 금액이 달랐음: 결재관리=미지급 발주잔금 전체 / 홈=이번달 지급예정 전분류)
+//   기준: 미지급(paidStatus!=='paid') 중 지급예정일이 '이번 달 말일 이내'인 건.
+//   - 지난달 이전인데 아직 미지급인 '기한 경과' 건도 이번 달에 갚아야 할 돈이므로 포함
+//   - 지급예정일 미정(빈 값)도 포함 — 미결제 건수와 금액의 대상이 어긋나지 않게
+//   - 다음 달 이후 예정 건만 제외
+function _dueThisMonthTotal() {
+  const list = (typeof DB !== 'undefined' && Array.isArray(DB.expenses)) ? DB.expenses : [];
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();
+  const endYmd = y + '-' + String(m+1).padStart(2,'0') + '-' + String(new Date(y, m+1, 0).getDate()).padStart(2,'0');
+  const todayYmd = (typeof _todayKstYmd === 'function')
+    ? _todayKstYmd()
+    : (y + '-' + String(m+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0'));
+  const krw = e => (typeof _expenseTodayKrw === 'function') ? (Number(_expenseTodayKrw(e))||0) : (Number(e.amount)||0);
+  const unpaid = list.filter(e => e && e.paidStatus !== 'paid');
+  let sum = 0, count = 0, urgentCount = 0;
+  unpaid.forEach(e => {
+    const due = String(e.dueDate || '').slice(0,10);
+    if (!due || due <= endYmd) { sum += krw(e); count++; }
+    if (e.urgent || e.payNow || (due && due < todayYmd)) urgentCount++;
+  });
+  return { sum, count, unpaidCount: unpaid.length, urgentCount };
+}
+
 // v1.9.75 — 모달이 갑자기 닫히는 버그 수정
 // 원인: 모달 내부에서 텍스트 드래그(복사) / input 드래그 선택 후 마우스를 오버레이
 //       (모달 바깥 어두운 배경)에서 놓으면, 그 click 이벤트의 target이 overlay가 되어
@@ -12728,22 +12753,11 @@ function renderDashStats() {
     </div>`;
 
   // ── v2.3.441: 이번 달 지급 예정 / 미결제 (매출 열 중간 카드) ──
-  const _payNow = new Date();
-  const _payYm = _payNow.getFullYear() + '-' + String(_payNow.getMonth()+1).padStart(2,'0');
-  const _payTodayYmd = (typeof _todayKstYmd === 'function')
-    ? _todayKstYmd()
-    : (_payNow.getFullYear() + '-' + String(_payNow.getMonth()+1).padStart(2,'0') + '-' + String(_payNow.getDate()).padStart(2,'0'));
-  const _payUnpaid = (DB.expenses||[]).filter(e => e && e.paidStatus !== 'paid');
-  const _payKrw = e => (typeof _expenseTodayKrw === 'function') ? (Number(_expenseTodayKrw(e))||0) : (Number(e.amount)||0);
-  const _payDueThisMonth = _payUnpaid
-    .filter(e => String(e.dueDate||'').slice(0,7) === _payYm)
-    .reduce((s,e) => s + _payKrw(e), 0);
-  const _payUnpaidCount = _payUnpaid.length;
-  const _payUrgent = _payUnpaid.filter(e => {
-    if (e.urgent) return true;
-    const due = String(e.dueDate||'').slice(0,10);
-    return due && due < _payTodayYmd;
-  }).length;
+  // v2.3.617: 결재 관리 상단 KPI 와 같은 함수(_dueThisMonthTotal)를 사용 — 두 화면 금액 불일치 해소
+  const _payDue = _dueThisMonthTotal();
+  const _payDueThisMonth = _payDue.sum;
+  const _payUnpaidCount = _payDue.unpaidCount;
+  const _payUrgent = _payDue.urgentCount;
   const payDueHtml = `
     <div class="stat c-red" style="cursor:pointer;flex-shrink:0" onclick="go('approval')" title="결재 관리(지출 결의)로 이동">
       <div class="stat-lbl" style="display:flex;align-items:center;gap:8px">
@@ -37934,12 +37948,11 @@ function updateApprovalStats() {
       return false;
     }).length;
 
-    // 3) 발주 잔금: 지급 예정(미지급) po_balance 금액 합
-    // v2.3.236: 해외 PO 잔금은 외화로 저장될 수 있어 KRW 환산(_expenseTodayKrw)으로 합산
-    //   — 발주서별 표시(_balAmt)와 동일 기준. ₩ 박스에 외화가 섞이던 문제 방지.
-    const balanceDue = (DB.expenses||[])
-      .filter(e => e && e.category === 'po_balance' && e.paidStatus !== 'paid')
-      .reduce((s,e) => s + ((typeof _expenseTodayKrw === 'function') ? (Number(_expenseTodayKrw(e))||0) : (Number(e.amount)||0)), 0);
+    // 3) 이번 달 지급 예정 — 홈 대시보드 카드와 동일 기준(_dueThisMonthTotal)
+    // v2.3.617: 기존엔 '미지급 po_balance(발주 잔금) 전체'만 세어, 선급금·현금환급·기타가 빠지고
+    //   기간 제한도 없어 홈 '이번 달 지급 예정'과 금액이 달랐다(₩20,515,000 vs ₩31,147,120).
+    //   두 화면이 같은 함수를 쓰도록 통일.
+    const balanceDue = _dueThisMonthTotal().sum;
 
     // 4) 이번달 발주 금액: 발주일(orderDate)이 이번달인 발주의 VAT 포함 합계
     const now = new Date();
