@@ -6150,7 +6150,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.619';
+const ERP_VERSION = 'v2.3.620';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -46964,8 +46964,19 @@ async function openExpenseApprovalForm(expenseId) {
         });
         h += 'window._openFile = function(key) {';
         h += '  const f = window._fileData[key];';
-        // v2.3.365: Storage 이전된 첨부(https URL)는 새 탭에서 직접 열기
-        h += '  if (f && f.data && (f.data.indexOf("https://") === 0 || f.data.indexOf("http://") === 0)) { window.open(f.data, "_blank"); return false; }';
+        // v2.3.620: Storage 첨부(https URL) — 그냥 열면 브라우저가 저장소 내부 이름(확장자 없음)으로 받아
+        //   파일이 열리지 않는다. 이미지·PDF 는 새 탭에서 보고, 그 외(xlsx 등)는 원본 파일명으로 다운로드.
+        h += '  if (f && f.data && (f.data.indexOf("https://") === 0 || f.data.indexOf("http://") === 0)) {';
+        h += '    var _n = String(f.name || "file");';
+        h += '    var _viewable = (f.type||"").indexOf("image/") === 0 || f.type === "application/pdf" || /[.](png|jpe?g|gif|webp|bmp|pdf)$/i.test(_n);';
+        h += '    if (_viewable) { window.open(f.data, "_blank"); return false; }';
+        h += '    fetch(f.data).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.blob(); }).then(function(b){';
+        h += '      var u = URL.createObjectURL(b); var a = document.createElement("a");';
+        h += '      a.href = u; a.download = _n; document.body.appendChild(a); a.click();';
+        h += '      setTimeout(function(){ URL.revokeObjectURL(u); a.remove(); }, 1500);';
+        h += '    }).catch(function(err){ console.warn("첨부 다운로드 실패, 새 탭으로 대체:", err); window.open(f.data, "_blank"); });';
+        h += '    return false;';
+        h += '  }';
         h += '  if (!f || !f.data || f.data === "__idb__" || f.data.indexOf("data:") !== 0) {';
         // v2.3.20: \n\n 이 raw newline 으로 들어가서 새 창 JS parser 가 syntax error
         // → _openFile 함수 정의 실패 → 클릭 시 아무 일도 안 일어났음
