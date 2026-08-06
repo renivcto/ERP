@@ -120,7 +120,7 @@ function kstTimestampForFilename() {
 // Slack 알림 헬퍼
 //   level: 'success' | 'error' | 'info' | 'warning'
 // ─────────────────────────────────────────────────────────────
-async function notifySlack({ title, level, details, webhookOverride, titlePrefix }) {
+async function notifySlack({ title, level, details, webhookOverride, titlePrefix, compact }) {
   // v2.5: webhookOverride 가 있으면 그쪽으로 전송 (예: 주문 알림은 별도 채널)
   // v2.16: titlePrefix 옵션 추가 — 미지정 시 [Reniv ERP 백업] (기본), 주문 알림은 [Reniv ERP 주문]
   const webhook = webhookOverride || (functions.config().slack || {}).webhook;
@@ -140,7 +140,16 @@ async function notifySlack({ title, level, details, webhookOverride, titlePrefix
   //         titlePrefix === undefined 이면 기본값 '[Reniv ERP 백업]'
   const prefix = (titlePrefix === undefined) ? '[Reniv ERP 백업]' : titlePrefix;
   const titleText = prefix ? `${prefix} ${title}` : title;
-  const payload = {
+  // v2.25(2026-08-06): compact — 시각/상태 필드 없이 본문 한 블록 (주문 수집 알림 간결 포맷)
+  const payload = compact ? {
+    text: `${meta.emoji} ${titleText}`,
+    attachments: [{
+      color: meta.color,
+      text: details || '(내용 없음)',
+      footer: 'Reniv ERP Cloud Functions',
+      ts: Math.floor(Date.now() / 1000),
+    }],
+  } : {
     text: `${meta.emoji} ${titleText}`,
     attachments: [{
       color: meta.color,
@@ -796,9 +805,8 @@ const _off_fetchCoupangOrders = functions
     try {
       const result = await ingestCoupangOrders({ daysBack: 1 });
       const sampleText = result.sampleNew.length
-        ? '\n\n*신규 주문 샘플:*\n' + result.sampleNew.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`).join('\n')
+        ? '\n\n*신규 주문*\n' + result.sampleNew.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`).join('\n') + (result.added > result.sampleNew.length ? '\n… 외 ' + (result.added - result.sampleNew.length) + '건' : '')
         : '';
-      // v2.18: 자동 취소 비활성화 — removedText / safetyText 제거
       const titleText = result.added > 0 ? `신규 ${result.added}건` : '신규 없음';
       await notifySlack({
         title: `쿠팡 자동 주문 수집 — ${titleText}`,
@@ -1219,7 +1227,8 @@ async function ingestCafe24Orders({ daysBack = 1 } = {}) {
 // 6) Cafe24 자동 수집 — KST 9/13/18시 (쿠팡과 동일 스케줄)
 // ─────────────────────────────────────────────────────────────
 // v2.19: PlusCL 전환 — 자사몰(Cafe24) 자동 크롤러 비활성(export 제거 → 배포 시 삭제).
-const _off_fetchCafe24Orders = functions
+// v2.23(2026-08-05): PlusCL 전환으로 비활성이던 것을 카페24·스마트스토어 API 수집 복귀에 따라 재활성화.
+exports.fetchCafe24Orders = functions
   .region(REGION)
   .runWith({
     secrets: ['CAFE24_MALL_ID', 'CAFE24_CLIENT_ID', 'CAFE24_CLIENT_SECRET', 'CAFE24_REFRESH_TOKEN', 'SLACK_ORDERS_WEBHOOK'],
@@ -1233,22 +1242,25 @@ const _off_fetchCafe24Orders = functions
     try {
       const result = await ingestCafe24Orders({ daysBack: 1 });
       const sampleText = result.sampleNew.length
-        ? '\n\n*신규 주문 샘플:*\n' + result.sampleNew.map(s =>
+        ? '\n\n*신규 주문*\n' + result.sampleNew.map(s =>
             `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`
-          ).join('\n')
+          ).join('\n') + (result.added > result.sampleNew.length ? '\n… 외 ' + (result.added - result.sampleNew.length) + '건' : '')
         : '';
-      // v2.18: 자동 취소 비활성화 — removedText 제거
-      const titleText = result.added > 0 ? `신규 ${result.added}건` : '신규 없음';
-      await notifySlack({
-        title: `자사몰(Cafe24) 자동 주문 수집 — ${titleText}`,
-        level: result.added > 0 ? 'success' : 'info',
-        details:
-          `📦 가져옴: ${result.fetched}건\n` +
-          `✅ 신규 추가: ${result.added}건\n` +
-          `📅 조회 기간: ${result.range}` + sampleText,
-        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
-        titlePrefix: ''
-      });
+      // v2.25(2026-08-06): 신규가 있을 때만 알림(스마트스토어와 동일) + 간결 문구
+      if (result.added > 0) {
+        await notifySlack({
+          title: `자사몰 – 신규 ${result.added}건`,
+          level: 'success',
+          compact: true,
+          details:
+            `📦 가져옴: ${result.fetched}건\n` +
+            `✅ 신규: ${result.added}건\n` +
+            `📅 조회: ${result.range}\n` +
+            `⏰ ${kstTimestamp()} (KST)` + sampleText,
+          webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+          titlePrefix: ''
+        });
+      }
       console.log('[CAFE24 SCHED] 성공:', JSON.stringify(result));
       return result;
     } catch (err) {
@@ -1585,7 +1597,8 @@ async function ingestSmartstoreOrders({ minutesBack = 30 } = {}) {
 // 스마트스토어 자동 수집 — 10분마다 (KST)
 // ─────────────────────────────────────────────────────────────
 // v2.19: PlusCL 전환 — 스마트스토어 자동 크롤러 비활성(export 제거 → 배포 시 삭제).
-const _off_fetchSmartstoreOrders = functions
+// v2.23(2026-08-05): PlusCL 전환으로 비활성이던 것을 카페24·스마트스토어 API 수집 복귀에 따라 재활성화.
+exports.fetchSmartstoreOrders = functions
   .region(REGION)
   .runWith({
     secrets: ['NAVER_CLIENT_ID', 'NAVER_CLIENT_SECRET', 'SLACK_ORDERS_WEBHOOK'],
@@ -1594,19 +1607,23 @@ const _off_fetchSmartstoreOrders = functions
     vpcConnector: 'erp-coupang-vpc-conn',
     vpcConnectorEgressSettings: 'ALL_TRAFFIC'
   })
-  .pubsub.schedule('*/10 * * * *')
+  .pubsub.schedule('0 9,13,18 * * *')   // v2.24(2026-08-05): 10분마다 → 매일 09/13/18시 (카페24와 동일)
   .timeZone('Asia/Seoul')
   .onRun(async () => {
     try {
-      const result = await ingestSmartstoreOrders({ minutesBack: 30 });
+      const result = await ingestSmartstoreOrders({ minutesBack: 1440 });  // v2.24: 이력 없을 때만 사용되는 초기 조회창(24h 상한)
       if (result.added > 0) {
         const sampleText = result.sampleNew.length
-          ? '\n\n*신규 주문 샘플:*\n' + result.sampleNew.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`).join('\n')
+          ? '\n\n*신규 주문*\n' + result.sampleNew.map(s => `• ${s.orderNo} — ${s.customer || '-'} / ${s.product || '-'} × ${s.qty || 1}개 / ₩${(s.amount || 0).toLocaleString()}`).join('\n') + (result.added > result.sampleNew.length ? '\n… 외 ' + (result.added - result.sampleNew.length) + '건' : '')
           : '';
         await notifySlack({
-          title: `스마트스토어 자동 주문 수집 — 신규 ${result.added}건`,
+          title: `스마트스토어 – 신규 ${result.added}건`,
           level: 'success',
-          details: `📦 가져옴: ${result.fetched}건\n✅ 신규 추가: ${result.added}건${sampleText}`,
+          compact: true,   // v2.25(2026-08-06): 간결 문구
+          details:
+            `📦 가져옴: ${result.fetched}건\n` +
+            `✅ 신규: ${result.added}건\n` +
+            `⏰ ${kstTimestamp()} (KST)` + sampleText,
           webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
           titlePrefix: ''
         });
@@ -1867,7 +1884,11 @@ async function ingestPlusclShipments({ daysBack = 1 } = {}) {
 
 // 스케줄: 월~금 KST 18:00 (평일 하루 1회) — 슬랙 요약 1건.
 //   daysBack:3 — 금요일 크롤 이후 주말(토·일) 출고를 월요일에 포함하려고 3일 조회(plusclUid dedup 으로 중복 없음).
-exports.fetchPlusclShipments = functions
+// v2.23(2026-08-05): 카페24·스마트스토어 API 수집으로 복귀 — 창고(PlusCL) 출고 기준 자동수집 비활성.
+//   병행하면 주문번호 체계가 달라 중복 적재됨(스마트스토어 API=상품주문번호 vs PlusCL=주문번호,
+//   카페24 다상품 접미사 규칙 상이) → dedup 키(orderNo|customerName)로 안 걸러져 매출 이중계상.
+//   코드는 롤백 대비 보존(다른 비활성 크롤러와 동일 관례). 수동 트리거·재고 조회는 유지.
+const _off_fetchPlusclShipments = functions
   .region(REGION)
   .runWith({ secrets: ['PLUSCL_AUTH_KEY', 'SLACK_ORDERS_WEBHOOK'], timeoutSeconds: 300, memory: '256MB' })
   .pubsub.schedule('0 18 * * 1-5')

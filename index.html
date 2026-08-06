@@ -6150,7 +6150,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.617';
+const ERP_VERSION = 'v2.3.618';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -35556,13 +35556,15 @@ async function saveFeedPost(){
       const _fileList = (Array.isArray(window._lastSavedFeedFiles) ? window._lastSavedFeedFiles : [])
         .filter(f => f && f.url);
       let _mediaLine = '';
-      if (_imgUrls.length) _mediaLine += '\n\n🖼️ *이미지 ' + _imgUrls.length + '장*\n' + _imgUrls.join('\n');
+      // v2.3.618: 긴 URL 나열 대신 짧은 링크로 — 실제 미리보기는 아래 _boardDispatch 의 images(블록)로 처리
+      if (_imgUrls.length) _mediaLine += '\n\n🖼️ *이미지 ' + _imgUrls.length + '장*  '
+        + _imgUrls.map((u, i) => '<' + u + '|' + (i + 1) + '>').join(' ');
       if (_fileList.length) _mediaLine += '\n\n📎 *첨부파일 ' + _fileList.length + '개*\n'
         + _fileList.map(f => '• <' + f.url + '|' + String(f.name || '파일') + '>').join('\n');
       const _erpLink = '\n\n🔗 <https://renivcto.github.io/ERP/|ERP에서 전체 보기>';
       const _msg = `📝 *르니브 운영 업무 공유 — 새 글*\n*${_catLabel}*  ${title}${_bodyLine}${_mediaLine}${_tooLong ? _erpLink : ''}\n\n👤 ${_author}  ·  ⏰ ${_time}`;
       const _pid = (typeof window !== 'undefined' && window._lastSavedFeedPostId) || '';
-      if (_pid) _boardDispatch(_pid, 'post', _msg);
+      if (_pid) _boardDispatch(_pid, 'post', _msg, _imgUrls);   // v2.3.618: 이미지 미리보기용 URL 동봉
       else slackBoardNotify('board_post', { text: _msg });
     } catch(e) { console.warn('[v2.3.23] board_post 알림 실패:', e); }
   }
@@ -42294,13 +42296,16 @@ async function slackNotify(type, payload) {
 }
 
 // v2.3.173: 업무공유 → 슬랙 릴레이(Apps Script chat.postMessage). 설정 시 스레드/본문 지원.
-function _boardRelaySend(postId, kind, text) {
+// v2.3.618: images 인자 추가 — 슬랙에서 이미지를 '링크 나열'이 아니라 미리보기(image block)로 띄우기 위해
+//   본문 텍스트와 분리해 URL 배열로 전달한다. (릴레이가 구버전이면 무시되고 기존과 동일 동작)
+function _boardRelaySend(postId, kind, text, images) {
   try {
     const s = DB.appSettings || {};
     const url = (s.slackBoardRelayUrl || '').trim();
     if (!url) return false;  // 릴레이 미설정 → fallback
-    const body = JSON.stringify({ postId: String(postId), kind: kind, text: text, secret: s.slackBoardRelaySecret || '' });
-    fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body: body });
+    const payload = { postId: String(postId), kind: kind, text: text, secret: s.slackBoardRelaySecret || '' };
+    if (Array.isArray(images) && images.length) payload.images = images.slice(0, 10);  // 슬랙 블록 상한 여유
+    fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body: JSON.stringify(payload) });
     return true;
   } catch(e) { console.warn('[board relay] 실패:', e); return false; }
 }
@@ -42329,9 +42334,9 @@ function _htmlToSlackMrkdwn(html){
   return s;
 }
 // 새 글/댓글/대댓글을 릴레이(있으면) 또는 기존 webhook(없으면)으로 전송
-function _boardDispatch(postId, kind, text) {
+function _boardDispatch(postId, kind, text, images) {
   try {
-    if (_boardRelaySend(postId, kind, text)) return;  // chat.postMessage 경유
+    if (_boardRelaySend(postId, kind, text, images)) return;  // chat.postMessage 경유
   } catch(_){}
   const type = (kind === 'post') ? 'board_post' : (kind === 'reply' ? 'board_reply' : 'board_comment');
   try { slackBoardNotify(type, { text: text }); } catch(_){}
