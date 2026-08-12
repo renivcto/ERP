@@ -6150,7 +6150,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.621';
+const ERP_VERSION = 'v2.3.622';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -46572,6 +46572,7 @@ async function openExpenseApprovalForm(expenseId) {
   // 집행내역 rows 추출
   let execRows = [];
   let poSerial = '';
+  let poCats = '';   // v2.3.622: 발주 품목 분류(원자재/부자재/OEM 등) — 적요·문서 상단 배지 표시용
   let percent = 100;
   let supplyAmt = 0;
   let vatAmt = 0;
@@ -46579,6 +46580,17 @@ async function openExpenseApprovalForm(expenseId) {
     const ord = DB.orders.find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
     if (ord) {
       poSerial = ord.serial || ('PO-'+String(ord.id).padStart(3,'0'));
+      // v2.3.622: 발주 품목들의 분류 수집(중복 제거, 등장 순) — 품목 미매칭 시 거래처 분류로 폴백
+      try {
+        const _tset = [];
+        (ord.rows||[]).forEach(r => {
+          const it = (DB.items||[]).find(x => x && String(x.id) === String(r.itemId));
+          const t = it && it.type;
+          if (t && _tset.indexOf(t) < 0) _tset.push(t);
+        });
+        if (!_tset.length) { const _v = (typeof getVendor === 'function') ? getVendor(ord.vendorId) : null; if (_v && _v.type) _tset.push(_v.type); }
+        poCats = _tset.join(' · ');
+      } catch(_){}
       const prepayPct = parseFloat(ord.prepayPercent) || 0;
       // v1.9.323: 표시용 1 소수점 반올림
       percent = Math.round((e.category === 'po_prepay' ? prepayPct : (100 - prepayPct)) * 10) / 10;
@@ -46692,8 +46704,8 @@ async function openExpenseApprovalForm(expenseId) {
 
   // 적요 (요약 설명)
   let summary = '';
-  if (e.category === 'po_prepay' && poSerial) summary = `발주서 ${poSerial} 의 선급금 ${percent}% 지급 건`;
-  else if (e.category === 'po_balance' && poSerial) summary = `발주서 ${poSerial} 의 잔금 ${percent}% 지급 건`;
+  if (e.category === 'po_prepay' && poSerial) summary = `발주서 ${poSerial}${poCats ? ` (${poCats})` : ''} 의 선급금 ${percent}% 지급 건`;
+  else if (e.category === 'po_balance' && poSerial) summary = `발주서 ${poSerial}${poCats ? ` (${poCats})` : ''} 의 잔금 ${percent}% 지급 건`;
   else if (e.category === 'sample') summary = `샘플 구매 대금 지급 — ${e.title||''}`;
   else summary = e.title || catInfo.desc;
 
@@ -46842,6 +46854,7 @@ async function openExpenseApprovalForm(expenseId) {
     </div>
     <div class="sheet">
       <!-- v1.9.337: 상단 결재라인(담당/과장/이사/대표) 제거 — 회사 규모상 불필요 -->
+      ${poCats ? `<div style="height:0;text-align:left"><span style="display:inline-block;background:#eef2ff;color:#3730a3;border:1.5px solid #c7d2fe;border-radius:8px;padding:5px 14px;font-size:12.5px;font-weight:800;letter-spacing:1px">${poCats}</span></div>` : ''}
       <h1 class="title" style="margin-bottom:6px;padding-bottom:6px;border-bottom:none">지 출 결 의 서</h1>
       ${_isOverseasPo ? '<div style="text-align:center;font-size:14px;color:#475569;font-weight:600;letter-spacing:3px;margin-bottom:20px;padding-bottom:12px;border-bottom:3px double #111">EXPENSE VOUCHER</div>' : '<div style="margin-bottom:26px;padding-bottom:12px;border-bottom:3px double #111"></div>'}
       <table class="info">
