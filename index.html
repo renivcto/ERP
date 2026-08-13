@@ -6151,7 +6151,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.626';
+const ERP_VERSION = 'v2.3.627';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -25137,7 +25137,8 @@ async function openCompanyInfoModal() {
 
 function _renderCompanyInfoBody(editMode) {
   const ci = DB._companyInfo;
-  const _esc = s => String(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  // v2.3.627: & 와 " 도 이스케이프 — value="…" 속성에 큰따옴표가 들어가면 입력칸이 통째로 깨졌다
+  const _esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   // v1.9.889: 회사명은 모달 헤더에 인라인 표시
   const dispKo = document.getElementById('ci-company-display');
   const dispEn = document.getElementById('ci-company-en-display');
@@ -25221,9 +25222,23 @@ function toggleCompanyEdit(edit) {
   _renderCompanyInfoBody(!!edit);
 }
 
+// v2.3.627: 담당자 추가/삭제는 폼을 통째로 다시 그린다.
+//   기존에는 contacts 만 다시 수집해서, 입력 중이던 회사명·주소·비고 등이 재렌더 때 옛 값으로 되돌아갔다
+//   ("타이핑이 안 먹는다"의 실제 원인 — 붙여넣고 바로 저장할 때만 살아남았음).
+function _collectCompanyFields() {
+  const ci = DB._companyInfo;
+  if (!ci) return;
+  const _g = id => { const el = document.getElementById(id); return el ? String(el.value || '') : null; };
+  const map = { company:'ci-company', companyEn:'ci-company-en', bizNo:'ci-bizno', ceo:'ci-ceo',
+                ceoEn:'ci-ceo-en', email:'ci-email', addr:'ci-addr', addrEn:'ci-addr-en',
+                bankName:'ci-bank-name', bankAccount:'ci-bank-account', bankHolder:'ci-bank-holder', note:'ci-note' };
+  Object.keys(map).forEach(k => { const v = _g(map[k]); if (v !== null) ci[k] = v; });   // 폼에 없는 필드는 건드리지 않음
+}
+
 function _addCompanyContact() {
   // 현재 화면 값 수집 후 +1 항목 추가
   const ci = DB._companyInfo;
+  _collectCompanyFields();
   ci.contacts = _collectCompanyContacts();
   ci.contacts.push({ name: '', role: '', phone: '' });
   _renderCompanyInfoBody(true);
@@ -25231,6 +25246,7 @@ function _addCompanyContact() {
 
 function _removeCompanyContact(idx) {
   const ci = DB._companyInfo;
+  _collectCompanyFields();
   ci.contacts = _collectCompanyContacts();
   ci.contacts.splice(idx, 1);
   _renderCompanyInfoBody(true);
