@@ -6151,7 +6151,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.624';
+const ERP_VERSION = 'v2.3.625';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28997,7 +28997,7 @@ async function openConsignShip(editId){
     if (sh){
       const g=id=>document.getElementById(id);
       // v2.3.624: 수신처가 쇼핑몰이면 탭을 쇼핑몰로 전환 후 값 채움
-      if ((DB.shops||[]).some(s=>s&&String(s.id)===String(sh.sellerId))) _consignRecvTab('shop', sh.sellerId||'');
+      if (String(sh.sellerId||'').indexOf('shop:')===0) _consignRecvTab('shop', sh.sellerId||'');
       g('cs-seller').value=sh.sellerId||''; g('cs-date').value=sh.date||today();
       g('cs-vat').value=sh.vatMode||'exclude'; g('cs-vat').dataset.userset='1';
       g('cs-wh-from').value=sh.whFromId||'__un__'; g('cs-wh-to').value=sh.whToId||'';
@@ -29113,8 +29113,9 @@ function _consignLineItemChanged(sel){
 // v2.3.624: 수신처 옵션 — 판매업체(DB.sellers) / 쇼핑몰(DB.shops) 탭 전환
 function _consignRecvOptions(kind, selected){
   if (kind === 'shop') {
-    const shops=(DB.shops||[]).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
-    return '<option value="">— 쇼핑몰 선택 —</option>'+shops.map(s=>'<option value="'+s.id+'"'+(String(selected)===String(s.id)?' selected':'')+'>'+escapeHtml(s.name||'')+'</option>').join('');
+    // 공급가 테이블(item.supplyPrices)이 쇼핑몰을 'shop:<id>' 로 키잉하므로 동일 규약을 따른다
+    const shops=(typeof _itemSupplyShops==='function') ? _itemSupplyShops() : (DB.shops||[]).filter(s=>s&&s.active!==false);
+    return '<option value="">— 쇼핑몰 선택 —</option>'+shops.map(s=>'<option value="shop:'+s.id+'"'+(String(selected)==='shop:'+s.id?' selected':'')+'>'+escapeHtml(s.name||'')+'</option>').join('');
   }
   const sellers=(DB.sellers||[]).slice().sort((a,b)=>String(a.company||'').localeCompare(String(b.company||'')));
   return '<option value="">— 판매업체 선택 —</option>'+sellers.map(s=>'<option value="'+s.id+'"'+(String(selected)===String(s.id)?' selected':'')+'>'+escapeHtml(s.company||'')+'</option>').join('');
@@ -29158,7 +29159,10 @@ async function _consignSubmit(){
   const sellerId=(document.getElementById('cs-seller')||{}).value;
   // v2.3.624: 쇼핑몰 탭에서 고른 수신처도 허용 — 이후 로직은 {id, company} 형태만 쓰므로 매핑
   let seller=(DB.sellers||[]).find(s=>String(s.id)===String(sellerId));
-  if(!seller){ const _sh=(DB.shops||[]).find(s=>String(s.id)===String(sellerId)); if(_sh) seller={ id:_sh.id, company:_sh.name||'' }; }
+  if(!seller && String(sellerId).indexOf('shop:')===0){
+    const _sh=(DB.shops||[]).find(s=>String(s.id)===String(sellerId).slice(5));
+    if(_sh) seller={ id:sellerId, company:_sh.name||'' };   // id 는 'shop:<id>' 그대로 보존(공급가 키 일치)
+  }
   if(!seller){ alert('판매업체(수신처)를 선택하세요'); return; }
   const whToId=(document.getElementById('cs-wh-to')||{}).value;
   if(!whToId){ alert('입고 창고를 선택하세요'); return; }
@@ -29326,9 +29330,12 @@ function _consignPrint(shId){
 function _consignEmail(shId){
   const sh=(window._consign.shipments||[]).find(x=>x&&String(x.id)===String(shId));
   if(!sh){ showNotif('명세서를 찾을 수 없습니다','warning'); return; }
-  const seller=(DB.sellers||[]).find(s=>String(s.id)===String(sh.sellerId));
+  // v2.3.624: 수신처가 쇼핑몰('shop:<id>')인 경우도 연락처를 찾는다
+  let seller=(DB.sellers||[]).find(s=>String(s.id)===String(sh.sellerId));
+  if(!seller && String(sh.sellerId||'').indexOf('shop:')===0) seller=(DB.shops||[]).find(s=>String(s.id)===String(sh.sellerId).slice(5));
   let to='';
   try { const cs=(typeof _partnerNormalizeContacts==='function')?_partnerNormalizeContacts(seller||{}):[]; to=(cs.find(c=>c.email)||{}).email||''; } catch(_){}
+  if(!to && seller && seller.email) to=String(seller.email);
   const A=_consignAmounts(sh);
   const subject='[르니브] 거래명세서 — '+(sh.sellerName||'')+' ('+(sh.date||'')+')';
   const utf8Base64 = s => btoa(unescape(encodeURIComponent(s)));
