@@ -3404,7 +3404,12 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
               </div>
               <div id="shop-settle-preview" style="font-size:11.5px;color:#2563eb;margin-top:5px;font-weight:600"></div>
             </div>
-            <div class="fg"><label>담당자</label><input class="fi" id="shop-manager" placeholder="담당자 이름"></div>
+            <!-- v2.3.631: 담당자를 이름/전화번호/이메일 3칸으로 분리 -->
+            <div style="display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:10px">
+              <div class="fg"><label>담당자</label><input class="fi" id="shop-manager" placeholder="이름"></div>
+              <div class="fg"><label>전화번호</label><input class="fi" id="shop-phone" placeholder="010-0000-0000"></div>
+              <div class="fg"><label>이메일</label><input class="fi" id="shop-email" placeholder="example@reniv.co.kr"></div>
+            </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
               <div class="fg">
                 <label>채널 유형</label>
@@ -6197,7 +6202,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.630';
+const ERP_VERSION = 'v2.3.631';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -20286,7 +20291,16 @@ function shopShowDetail(idx) {
     + '<div class="pcr"><div class="pcl">무료배송 기준</div><div class="pcv">' + (s.freeShippingThreshold || 0).toLocaleString() + '원</div></div>'
     + '<div class="pcr"><div class="pcl">쿠폰 자부담률</div><div class="pcv">' + (s.couponBorneRate || 0) + '%</div></div>'
     + '<div class="pcr"><div class="pcl">정산 주기</div><div class="pcv">' + safe((typeof _shopSettleLabel==='function' ? _shopSettleLabel(s.settlement) : '') || s.settlementCycle || '-') + '</div></div>'
-    + '<div class="pcr"><div class="pcl">담당자</div><div class="pcv">' + safe(s.manager || '-') + '</div></div>'
+    // v2.3.631: 담당자 이름 + 전화 + 이메일 함께 표시
+    + '<div class="pcr"><div class="pcl">담당자</div><div class="pcv">'
+      + (function(){
+          const parts = [];
+          if (s.manager) parts.push('<span style="font-weight:700">' + safe(s.manager) + '</span>');
+          if (s.phone) parts.push('<span style="font-family:ui-monospace,Menlo,Consolas,monospace;color:#475569">' + safe(s.phone) + '</span>');
+          if (s.email) parts.push('<span style="color:#2563eb">✉ ' + safe(s.email) + '</span>');
+          return parts.length ? parts.join('<span style="color:#cbd5e1;margin:0 8px">·</span>') : '-';
+        })()
+      + '</div></div>'
     + '<div class="pcr"><div class="pcl">API 연동</div><div class="pcv">' + apiTxt + '</div></div>'
     + (s.memo ? '<div class="pcr"><div class="pcl">비고</div><div class="pcv" style="line-height:1.6;white-space:pre-wrap;word-break:break-word">' + safe(s.memo) + '</div></div>' : '')
     + '<div style="margin-top:14px;padding:0 10px"><div style="font-size:12px;color:#64748b;font-weight:700;margin-bottom:6px">📊 광고비 이력</div>'
@@ -20382,7 +20396,21 @@ function loadShopDetail(idx) {
     if(typeof _shopSettleTypeChange==='function') _shopSettleTypeChange();
     if(typeof _shopSettlePreview==='function') _shopSettlePreview();
   } catch(_){}
-  if($('shop-manager')) $('shop-manager').value = s.manager || '';
+  // v2.3.631: 담당자 3칸 분리 — 옛 데이터는 '이름 010-0000-0000' 처럼 한 칸에 합쳐져 있어 표시할 때 나눠 채운다
+  (function(){
+    let nm = String(s.manager || ''), ph = String(s.phone || ''), em = String(s.email || '');
+    if (!ph) {
+      const m = nm.match(/(0\d{1,2}[-\s.]?\d{3,4}[-\s.]?\d{4})/);
+      if (m) { ph = m[1]; nm = nm.replace(m[1], '').trim().replace(/[,\/·]+$/, '').trim(); }
+    }
+    if (!em) {
+      const e = nm.match(/([\w.+-]+@[\w-]+\.[\w.]+)/);
+      if (e) { em = e[1]; nm = nm.replace(e[1], '').trim().replace(/[,\/·]+$/, '').trim(); }
+    }
+    if($('shop-manager')) $('shop-manager').value = nm;
+    if($('shop-phone')) $('shop-phone').value = ph;
+    if($('shop-email')) $('shop-email').value = em;
+  })();
   if($('shop-memo')) $('shop-memo').value = s.memo || '';
   if($('shop-commission')) $('shop-commission').value = s.commissionBase || 0;
   if($('shop-shipping-policy')) $('shop-shipping-policy').value = s.shippingPolicy || 'seller';
@@ -20441,6 +20469,8 @@ function saveShopInfo() {
   try { const _st=_shopSettleFromForm(); s.settlement=_st; s.settlementCycle = _shopSettleLabel(_st) || ($('shop-settle')?.value||''); }
   catch(_){ s.settlementCycle = $('shop-settle')?.value || ''; }
   s.manager = $('shop-manager')?.value || '';
+  s.phone = $('shop-phone')?.value || '';     // v2.3.631
+  s.email = $('shop-email')?.value || '';
   s.memo = $('shop-memo')?.value || '';
   s.commissionBase = parseFloat($('shop-commission')?.value) || 0;
   s.shippingPolicy = $('shop-shipping-policy')?.value || 'seller';
