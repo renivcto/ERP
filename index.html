@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.637';
+const ERP_VERSION = 'v2.3.638';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -25888,21 +25888,47 @@ function previewItemImg(input) {
   });
 }
 
-function copyItem(id) {
+// v2.3.638: 복사는 '틀'만 가져온다 — 품목명·품목코드·분류·공급업체(+이미지)만 남기고 나머지는 초기화.
+//   예전엔 통째로 복제해 단가·바코드·유통기한·재고 같은 원본 값이 남아 새 품목에 잘못 딸려갔다.
+async function copyItem(id) {
   const src = DB.items.find(i => i.id === id);
   if (!src) return;
-  const copy = JSON.parse(JSON.stringify(src));
   const maxId = Math.max(...(DB.items||[]).map(i=>parseInt(i.id)||0), 0);
-  copy.id = maxId + 1;
-  DB._nextId['item'] = copy.id + 1;
-  copy.name = src.name + ' (복사)';
-  copy.code = src.code ? src.code + '_1' : '';
-  copy.stock = 0;
+  const newId = maxId + 1;
+  const copy = {
+    id: newId,
+    // ── 유지 ──
+    type: src.type,
+    name: (src.name || '') + ' (복사)',
+    code: src.code ? src.code + '_1' : '',
+    vendorId: src.vendorId,
+    vendorName: src.vendorName,
+    image: src.image || '',
+    // ── 초기화 ──
+    spec: '', price: 0, stock: 0, minStock: 0, maxStock: 0,
+    lot: '', expiry: '', material: '', note: '', contact: '',
+    barcode: '', barcodeImg: '',
+    quoteFile: '', quoteFileName: '',
+    nameEn: '', consumerPrice: '', actualSalePrice: '',
+    priceCurrency: src.priceCurrency || 'KRW', priceForeign: null,
+    channels: [], supplyPrices: [], rawDocs: {},
+    whStock: {}, defaultWh: '',
+    updatedAt: Date.now()
+  };
+  DB._nextId['item'] = newId + 1;
+  // 이미지가 IDB 마커면 복사본 키로도 복제해야 보인다(키가 item_img_<id> 라 원본 것을 못 찾음)
+  if (src.image === '__idb__') {
+    try {
+      const _img = await idbGet('item_img_' + src.id);
+      if (_img) await idbSet('item_img_' + newId, _img);
+      else copy.image = '';
+    } catch(_) { copy.image = ''; }
+  }
   DB.items.push(copy);
   saveData();
   // 필터와 검색어 모두 유지한 채로 렌더링
   renderItemTable();
-  showNotif(`[${src.name}] 복사되었습니다.`, 'success');
+  showNotif(`[${src.name}] 복사되었습니다. (품목명·코드·분류·공급업체만 유지)`, 'success');
 }
 
 // v2.3.109: 강제 item 부활 도구 — tombstone 청소 + sentinel 등록
