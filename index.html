@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.632';
+const ERP_VERSION = 'v2.3.633';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29583,8 +29583,45 @@ function _consignPrint(shId){
     +'<script>setTimeout(function(){try{window.focus();window.print();}catch(e){}},400);<\/script></body></html>');
   w.document.close();
 }
-// 거래명세서 이메일 — HTML 본문 .eml (첨부 없이 Outlook 새 메일에 표 그대로)
-function _consignEmail(shId){
+// v2.3.633: 거래명세서 → PDF (발주서와 동일한 html2canvas + jsPDF 경로)
+//   화면 밖 컨테이너에 인쇄용 HTML 을 그대로 그린 뒤 캡처한다.
+async function _generateConsignPdf(sh){
+  await _ensurePdfLibs();
+  const host = document.createElement('div');
+  // 화면에 보이지 않게 두되, display:none 이면 html2canvas 가 렌더 못 하므로 화면 밖으로 밀어둔다
+  host.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;background:#fff;z-index:-1';
+  host.innerHTML = '<style>' + _CONSIGN_PRINT_CSS + '</style>' + _consignStatementHtml(sh);
+  document.body.appendChild(host);
+  try {
+    await new Promise(r => setTimeout(r, 120));
+    const target = host.firstElementChild && host.firstElementChild.tagName === 'STYLE'
+      ? (host.children[1] || host) : host;
+    const canvas = await window.html2canvas(target, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+    const jsPDF = window.jspdf.jsPDF;
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const pdfW = pdf.internal.pageSize.getWidth();
+    const pdfH = pdf.internal.pageSize.getHeight();
+    const ratio = canvas.height / canvas.width;
+    const margin = 8;
+    let imgW = pdfW - 2 * margin;
+    let imgH = imgW * ratio;
+    if (imgH > pdfH - 2 * margin) { imgH = pdfH - 2 * margin; imgW = imgH / ratio; }
+    pdf.addImage(imgData, 'JPEG', (pdfW - imgW) / 2, margin, imgW, imgH);
+    const blob = pdf.output('blob');
+    return await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => reject(new Error('FileReader 실패'));
+      r.readAsDataURL(blob);
+    });
+  } finally {
+    try { host.remove(); } catch(_){}
+  }
+}
+
+// 거래명세서 이메일 — v2.3.633: 발주서와 동일하게 PDF 첨부 .eml (본문은 텍스트)
+async function _consignEmail(shId){
   const sh=(window._consign.shipments||[]).find(x=>x&&String(x.id)===String(shId));
   if(!sh){ showNotif('명세서를 찾을 수 없습니다','warning'); return; }
   // v2.3.624: 수신처가 쇼핑몰('shop:<id>')인 경우도 연락처를 찾는다
@@ -29596,24 +29633,48 @@ function _consignEmail(shId){
   const A=_consignAmounts(sh);
   const subject='[르니브] 거래명세서 — '+(sh.sellerName||'')+' ('+(sh.date||'')+')';
   const utf8Base64 = s => btoa(unescape(encodeURIComponent(s)));
-  const bodyHtml = '<div style="font-family:Malgun Gothic,sans-serif;color:#0f172a">'
-    + '<p>'+escapeHtml(sh.recvManager||'담당자')+'님, 르니브 거래명세서 송부드립니다.</p>'
-    + '<p>· 출고일: '+escapeHtml(sh.date||'')+'<br>· 입고 창고: '+escapeHtml(sh.whToName||'')+'<br>· 합계금액(VAT포함): <b>₩'+A.total.toLocaleString()+'</b></p>'
-    + _consignStatementHtml(sh).replace('<style>','')
-    + '<p>확인 부탁드립니다. 감사합니다.<br>㈜르니브</p></div>';
-  const fullHtml='<html><head><meta charset="utf-8"><style>'+_CONSIGN_PRINT_CSS+'</style></head><body>'+bodyHtml+'</body></html>';
+  // ── PDF 생성 (첨부용) ──
+  let pdfBase64 = '';
+  const pdfName = '거래명세서_' + (sh.sellerName||'') + '_' + (sh.date||'') + '.pdf';
+  try {
+    showNotif('🔄 거래명세서 PDF 생성 중… (~1-2초)', 'info');
+    const dataUrl = await _generateConsignPdf(sh);
+    const m = String(dataUrl).match(/;base64,([\s\S]+)$/);
+    if (!m) throw new Error('PDF 데이터 형식 오류');
+    pdfBase64 = m[1];
+  } catch(e) {
+    console.error('거래명세서 PDF 생성 실패:', e);
+    showNotif('PDF 생성 실패: ' + (e && e.message || e), 'error');
+    return;
+  }
+  const bodyText = (sh.recvManager||'담당자') + '님, 안녕하십니까.\n\n'
+    + '르니브에서 거래명세서 송부드립니다. 첨부 파일 확인 부탁드립니다.\n\n'
+    + '· 출고일: ' + (sh.date||'-') + '\n'
+    + '· 입고 창고: ' + (sh.whToName||'-') + '\n'
+    + '· 합계금액(VAT 포함): ₩' + (Number(A.total)||0).toLocaleString() + '\n\n'
+    + '확인 후 회신 부탁드리겠습니다.\n감사합니다.\n\n'
+    + '────────────────────────\n㈜르니브 (RENIV)\nE-mail : cto@reniv.co.kr\nPhone : 070-8065-3279';
+  // v2.3.633: 본문은 텍스트, 명세서는 PDF 첨부 (발주서와 동일 구조 multipart/mixed)
+  //   첨부 파일명 한글은 RFC2047 인코딩 — raw 한글이면 Outlook 발송 시 오류
+  const encPdfName = '=?UTF-8?B?' + utf8Base64(pdfName) + '?=';
   const boundary='----=_RenivStmt_'+Date.now().toString(36);
   const eml = (to?('To: '+to+'\r\n'):'')
     + 'X-Unsent: 1\r\nSubject: =?UTF-8?B?'+utf8Base64(subject)+'?=\r\nMIME-Version: 1.0\r\n'
-    + 'Content-Type: multipart/alternative; boundary="'+boundary+'"\r\n\r\n'
-    + '--'+boundary+'\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n'
-    + utf8Base64(fullHtml).match(/.{1,76}/g).join('\r\n')+'\r\n\r\n--'+boundary+'--\r\n';
+    + 'Content-Type: multipart/mixed; boundary="'+boundary+'"\r\n\r\n'
+    + '--'+boundary+'\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n'
+    + utf8Base64(bodyText).match(/.{1,76}/g).join('\r\n')+'\r\n'
+    + '\r\n--'+boundary+'\r\n'
+    + 'Content-Type: application/pdf; name="'+encPdfName+'"\r\n'
+    + 'Content-Transfer-Encoding: base64\r\n'
+    + 'Content-Disposition: attachment; filename="'+encPdfName+'"\r\n\r\n'
+    + pdfBase64.match(/.{1,76}/g).join('\r\n')+'\r\n'
+    + '\r\n--'+boundary+'--\r\n';
   const blob=new Blob([eml],{type:'message/rfc822'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a'); a.href=url; a.download='거래명세서_'+(sh.sellerName||'')+'_'+(sh.date||'')+'.eml';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(()=>URL.revokeObjectURL(url),200);
-  showNotif('✉️ 거래명세서 메일(.eml) 다운로드 — Outlook 새 메일 창이 열립니다'+(to?'':' (받는사람 미설정 — 직접 입력)'),'info');
+  showNotif('📧 거래명세서 PDF 첨부 메일(.eml) 다운로드 — 파일을 더블클릭하면 Outlook 이 열립니다'+(to?'':' (받는사람 미설정 — 직접 입력)'),'info');
 }
 async function _consignDelete(shId){
   if(!confirm('이 거래명세서 기록을 삭제하시겠습니까?\n(이미 반영된 재고이동은 되돌아가지 않습니다)')) return;
