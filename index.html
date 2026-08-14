@@ -6948,6 +6948,48 @@ async function _soWriteSharded(arr){
   return { archN, shards: shards.length };
 }
 
+// ═══ RENIV 패치 — 서버(자동화) 변경 덮어쓰기 방지 ═══
+//   서버 스크립트(바로팜 자동입력 등)가 이 페이지를 연 뒤에 추가/변경한 내용을
+//   앱이 저장할 때 그대로 덮어쓰지 않도록 병합한다.
+//   - shopOrders / stockHistory : 서버가 추가한 행(_srvTs 가 페이지 로드보다 나중)만 되살림
+//   - items                     : 서버가 갱신한 재고(stock/whStock)를 서버 값으로 채택
+//   사용자가 의도적으로 지운 예전 행은 _srvTs 가 오래되어 되살아나지 않는다.
+const _SRV_SESSION_START = Date.now();
+function _srvTsOf(o) { const t = o && (o._srvTs || o.srvTs); return Number(t) || 0; }
+function _mergeServerSideChanges(key, val, srvArr, payload) {
+  if (!Array.isArray(val) || !Array.isArray(srvArr)) return;
+  let changed = false;
+  if (key === 'items') {
+    const locById = new Map(val.map(i => [i && i.id, i]));
+    srvArr.forEach(si => {
+      if (!si) return;
+      const li = locById.get(si.id);
+      if (!li) return;
+      const su = Number(si.updatedAt) || 0;
+      const lu = Number(li.updatedAt) || 0;
+      if (su > lu && su >= _SRV_SESSION_START) {
+        li.stock = si.stock;
+        li.whStock = si.whStock;
+        li.updatedAt = si.updatedAt;
+        changed = true;
+        console.warn('🔄 [SRV-MERGE] 재고 서버값 채택:', si.code || si.id);
+      }
+    });
+  } else if (key === 'shopOrders' || key === 'stockHistory') {
+    const ids = new Set(val.map(o => o && o.id));
+    let added = 0;
+    srvArr.forEach(so => {
+      if (!so || ids.has(so.id)) return;
+      if (_srvTsOf(so) > _SRV_SESSION_START) { val.push(so); ids.add(so.id); added++; changed = true; }
+    });
+    if (added) console.warn('🔄 [SRV-MERGE] ' + key + ' 서버 추가분 ' + added + '건 병합');
+  }
+  if (changed && payload) {
+    payload.data = JSON.stringify(val);
+    try { showNotif('🔄 서버 자동입력 내용을 반영했습니다 (' + key + ')', 'info'); } catch(_){}
+  }
+}
+
 // 즉시 저장 (디바운스 없이) — 주문 업로드 등 중요 작업용
 async function saveDataNow() {
   if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
@@ -7857,7 +7899,7 @@ async function _doSaveDataInner() {
 
   // v1.9.194 — 중요 컬렉션(orders/shopOrders/productions/items/vendors)에 대해
   //            서버 > 로컬 이면 덮어쓰기 전에 사용자 확인 (다른 탭/기기 충돌 방지)
-  const GUARD_KEYS = new Set(['orders','shopOrders','productions','items','vendors','accounts','newProducts','samples','approvals','expenses','approvalComments','feedPosts']);
+  const GUARD_KEYS = new Set(['orders','shopOrders','productions','items','stockHistory','vendors','accounts','newProducts','samples','approvals','expenses','approvalComments','feedPosts']);
   // 순차 저장 (병렬 저장 시 Firestore 권한 오류 발생 가능)
   let _shopOrdersSaved = false;
   for (const [key, val] of Object.entries(collections)) {
@@ -7876,6 +7918,8 @@ async function _doSaveDataInner() {
           srvArr = _srvExists ? JSON.parse(srvSnap.data().data) : null;
         }
         if (_srvExists) {
+          try { _mergeServerSideChanges(key, val, srvArr, payload); }
+          catch(_sm) { console.warn('[SRV-MERGE] ' + key + ' 실패:', _sm && _sm.message); }
           const srvLen = Array.isArray(srvArr) ? srvArr.length : 0;
           const locLen = Array.isArray(val) ? val.length : 0;
           // v2.3.515: feedPosts 저장 전 서버 댓글 union — stale 세션의 통째 저장이 타 기기
@@ -13820,6 +13864,20 @@ function populateCsItemDropdown() {
 // v1.9.573 — 고객 관리 / CS 페이지 인터랙션
 // ═══════════════════════════════════════════════════════════
 
+// ═══ RENIV 패치 — 주문 횟수 집계 보정 ═══
+//   주문 1건에 상품이 여러 줄이면 줄 수만큼 세던 문제 수정.
+//   자사몰의 '…-0000012-1' 처럼 뒤에 붙는 줄 번호(-1,-2)만 떼고 주문번호 기준 고유 개수로 센다.
+function _baseOrderNo(no) {
+  const s = String(no == null ? '' : no).trim();
+  const m = s.match(/^(.*-\d{4,})-\d{1,2}$/);
+  return m ? m[1] : s;
+}
+function _customerOrderCount(c) {
+  if (!c) return 0;
+  if (c.orderNos && c.orderNos.size) return c.orderNos.size;
+  return (c.orders || []).length;
+}
+
 // 고객 식별 키 — 전화번호 우선, 없으면 이메일, 없으면 이름
 function _customerKey(o) {
   const phone = String((o && (o.customerPhone || o.recipientPhone || o.phone)) || '').replace(/[^\d]/g, '');
@@ -13842,7 +13900,7 @@ function _aggregateCustomers(searchText) {
     if (!map.has(k)) {
       map.set(k, {
         key: k, name: '', phone: '', email: '', addresses: new Set(),
-        orders: [], totalSpent: 0, lastDate: '', shops: new Map()
+        orders: [], orderNos: new Set(), totalSpent: 0, lastDate: '', shops: new Map()
       });
     }
     const c = map.get(k);
@@ -13851,6 +13909,10 @@ function _aggregateCustomers(searchText) {
     if (!c.email && (o.email || o.customerEmail)) c.email = o.email || o.customerEmail;
     if (o.address) c.addresses.add(o.address);
     c.orders.push(o);
+    try {
+      const _ono = _baseOrderNo(o.orderNo || o.orderNumber || '');
+      c.orderNos.add(_ono || ('#row:' + (o.id != null ? o.id : c.orders.length)));
+    } catch(_){}
     c.totalSpent += Number(o.paymentAmount || o.totalPrice || 0) || 0;
     const od = (o.orderDate || '').slice(0, 10);
     if (od && od > c.lastDate) c.lastDate = od;
@@ -13941,7 +14003,7 @@ function _customerTier(c) {
   //   회원   : 주문 2회 이상 OR  10만원 이상
   //   일반   : 그 외 (1회 + 10만원 미만)
   //   판정 우선순위: VIP → 단골 → 회원 → 일반
-  const cnt = (c.orders || []).length;
+  const cnt = _customerOrderCount(c);
   const spent = Number(c.totalSpent || 0);
   if (cnt >= 3 && spent >= 300000) return 'vip';
   if (cnt >= 3 || spent >= 200000) return 'regular';
@@ -13959,7 +14021,7 @@ function _customerTierLabel(t) {
 
 function _customerTierAuto(c) {
   // v1.9.587 — override 무시한 auto 결과 (4단계)
-  const cnt = (c.orders || []).length;
+  const cnt = _customerOrderCount(c);
   const spent = Number(c.totalSpent || 0);
   if (cnt >= 3 && spent >= 300000) return 'vip';
   if (cnt >= 3 || spent >= 200000) return 'regular';
@@ -14046,7 +14108,7 @@ function renderPharmaciesList() {
       <td style="padding:9px 8px;color:#1e40af;font-weight:700;font-size:13px;letter-spacing:-.2px">${escFn(c.name||'-')}</td>
       <td style="padding:9px 8px;color:var(--gray-700)">${escFn(c.phone||'-')}</td>
       <td style="padding:9px 8px;color:var(--gray-700)">${escFn(c.lastDate||'-')}</td>
-      <td style="padding:9px 8px;font-weight:700">${c.orders.length}건</td>
+      <td style="padding:9px 8px;font-weight:700">${_customerOrderCount(c)}건</td>
       <td style="padding:9px 8px;font-weight:700;color:var(--gray-800);font-variant-numeric:tabular-nums">${fmtW(c.totalSpent)}</td>
     </tr>`).join('');
 }
@@ -14087,7 +14149,7 @@ function renderCustomersList() {
       <td style="padding:9px 8px;color:var(--gray-700)">${escFn(c.phone||'-')}</td>
       <td style="padding:9px 8px;color:var(--gray-600);font-size:12px">${escFn(c.email||'-')}</td>
       <td style="padding:9px 8px;color:var(--gray-700)">${escFn(c.lastDate||'-')}</td>
-      <td style="padding:9px 8px;font-weight:700">${c.orders.length}건</td>
+      <td style="padding:9px 8px;font-weight:700">${_customerOrderCount(c)}건</td>
       <td style="padding:9px 8px;font-weight:700;color:var(--gray-800);font-variant-numeric:tabular-nums">${fmtW(c.totalSpent)}</td>
       <td style="padding:9px 8px;font-size:11.5px;color:var(--gray-600)">${escFn(topShops)}</td>
     </tr>`;
@@ -14230,7 +14292,7 @@ function showCustomerCard(key) {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;margin-bottom:18px;font-size:12.5px">
           <div style="display:flex;gap:8px"><span style="color:var(--gray-500);font-weight:600;min-width:60px">📞 연락처</span><span style="color:var(--gray-800);font-weight:600">${escFn(c.phone||'-')}</span></div>
           <div style="display:flex;gap:8px"><span style="color:var(--gray-500);font-weight:600;min-width:60px">📧 이메일</span><span style="color:var(--gray-800);font-weight:600">${escFn(c.email||'-')}</span></div>
-          <div style="display:flex;gap:8px"><span style="color:var(--gray-500);font-weight:600;min-width:60px">📦 주문</span><span style="color:var(--gray-800);font-weight:700">${c.orders.length}건 · 총 ${fmtW(c.totalSpent)}</span></div>
+          <div style="display:flex;gap:8px"><span style="color:var(--gray-500);font-weight:600;min-width:60px">📦 주문</span><span style="color:var(--gray-800);font-weight:700">${_customerOrderCount(c)}건 · 총 ${fmtW(c.totalSpent)}</span></div>
           <div style="display:flex;gap:8px"><span style="color:var(--gray-500);font-weight:600;min-width:60px">📅 최근</span><span style="color:var(--gray-800);font-weight:600">${escFn(c.lastDate||'-')}</span></div>
         </div>
         ${addressList.length ? `
