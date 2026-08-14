@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.635';
+const ERP_VERSION = 'v2.3.636';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -37057,6 +37057,9 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
   } else if (expPre) {
     // 선입금% 0으로 수정 시: 아직 미지급이면 삭제, 지급됐으면 남김
     if (expPre.paidStatus !== 'paid') {
+      // v2.3.636: 묘비 없이 지우면 타 기기 로컬 사본이 머지 때 되살린다(에코텍 중복 부활 사고)
+      if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
+      DB._deletedExpenseIds.push({ id: expPre.id, ts: Date.now(), reason: 'po-sync-prepay-removed' });
       DB.expenses = DB.expenses.filter(e => e.id !== expPre.id);
       expPre = null;
     }
@@ -37104,6 +37107,9 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
       }
     }
   } else if (expBal && expBal.paidStatus !== 'paid') {
+    // v2.3.636: 잔금 건 제거 시에도 묘비 등록 — 선입금 100% 전환 시 잔금 건이 부활하던 경로 차단
+    if (!Array.isArray(DB._deletedExpenseIds)) DB._deletedExpenseIds = [];
+    DB._deletedExpenseIds.push({ id: expBal.id, ts: Date.now(), reason: 'po-sync-balance-removed' });
     DB.expenses = DB.expenses.filter(e => e.id !== expBal.id);
   }
 
