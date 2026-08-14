@@ -3404,11 +3404,16 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
               </div>
               <div id="shop-settle-preview" style="font-size:11.5px;color:#2563eb;margin-top:5px;font-weight:600"></div>
             </div>
-            <!-- v2.3.631: 담당자를 이름/전화번호/이메일 3칸으로 분리 -->
-            <div style="display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:10px">
-              <div class="fg"><label>담당자</label><input class="fi" id="shop-manager" placeholder="이름"></div>
-              <div class="fg"><label>전화번호</label><input class="fi" id="shop-phone" placeholder="010-0000-0000"></div>
-              <div class="fg"><label>이메일</label><input class="fi" id="shop-email" placeholder="example@reniv.co.kr"></div>
+            <!-- v2.3.632: 담당자 여러 명 등록 (다른 거래처 유형과 동일한 contacts 구조) -->
+            <div class="fg full">
+              <label style="display:flex;align-items:center;justify-content:space-between">
+                <span>담당자 정보 <span style="color:#94a3b8;font-size:11px;font-weight:400">(여러 명: + 추가)</span></span>
+                <button type="button" onclick="_partnerAddContactRow('shop')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11.5px;font-weight:600">+ 추가</button>
+              </label>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1.4fr 30px;gap:6px;margin:6px 0 4px;font-size:11px;font-weight:600;color:var(--gray-500)">
+                <span>담당자</span><span>전화번호</span><span>이메일</span><span></span>
+              </div>
+              <div id="shop-edit-contacts-list" style="display:flex;flex-direction:column;gap:8px"></div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
               <div class="fg">
@@ -6202,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.631';
+const ERP_VERSION = 'v2.3.632';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -20291,14 +20296,20 @@ function shopShowDetail(idx) {
     + '<div class="pcr"><div class="pcl">무료배송 기준</div><div class="pcv">' + (s.freeShippingThreshold || 0).toLocaleString() + '원</div></div>'
     + '<div class="pcr"><div class="pcl">쿠폰 자부담률</div><div class="pcv">' + (s.couponBorneRate || 0) + '%</div></div>'
     + '<div class="pcr"><div class="pcl">정산 주기</div><div class="pcv">' + safe((typeof _shopSettleLabel==='function' ? _shopSettleLabel(s.settlement) : '') || s.settlementCycle || '-') + '</div></div>'
-    // v2.3.631: 담당자 이름 + 전화 + 이메일 함께 표시
+    // v2.3.632: 담당자 여러 명 표시 (이름 · 전화 · 이메일)
     + '<div class="pcr"><div class="pcl">담당자</div><div class="pcv">'
       + (function(){
-          const parts = [];
-          if (s.manager) parts.push('<span style="font-weight:700">' + safe(s.manager) + '</span>');
-          if (s.phone) parts.push('<span style="font-family:ui-monospace,Menlo,Consolas,monospace;color:#475569">' + safe(s.phone) + '</span>');
-          if (s.email) parts.push('<span style="color:#2563eb">✉ ' + safe(s.email) + '</span>');
-          return parts.length ? parts.join('<span style="color:#cbd5e1;margin:0 8px">·</span>') : '-';
+          const cs = (typeof _partnerNormalizeContacts === 'function') ? _partnerNormalizeContacts(s) : [];
+          const rows = (cs.length ? cs : [{ name: s.manager||'', phone: s.phone||'', email: s.email||'' }])
+            .filter(c => c.name || c.phone || c.email)
+            .map(c => {
+              const parts = [];
+              if (c.name) parts.push('<span style="font-weight:700">' + safe(c.name) + '</span>');
+              if (c.phone) parts.push('<span style="font-family:ui-monospace,Menlo,Consolas,monospace;color:#475569">' + safe(c.phone) + '</span>');
+              if (c.email) parts.push('<span style="color:#2563eb">✉ ' + safe(c.email) + '</span>');
+              return '<div>' + parts.join('<span style="color:#cbd5e1;margin:0 8px">·</span>') + '</div>';
+            });
+          return rows.length ? rows.join('') : '-';
         })()
       + '</div></div>'
     + '<div class="pcr"><div class="pcl">API 연동</div><div class="pcv">' + apiTxt + '</div></div>'
@@ -20396,8 +20407,12 @@ function loadShopDetail(idx) {
     if(typeof _shopSettleTypeChange==='function') _shopSettleTypeChange();
     if(typeof _shopSettlePreview==='function') _shopSettlePreview();
   } catch(_){}
-  // v2.3.631: 담당자 3칸 분리 — 옛 데이터는 '이름 010-0000-0000' 처럼 한 칸에 합쳐져 있어 표시할 때 나눠 채운다
+  // v2.3.632: 담당자 다중 입력 — 옛 데이터는 manager 한 칸에 '이름 010-0000-0000' 처럼 합쳐져 있어 분리해 seed
   (function(){
+    if (Array.isArray(s.contacts) && s.contacts.length) {
+      _partnerInitContacts('shop', s);
+      return;
+    }
     let nm = String(s.manager || ''), ph = String(s.phone || ''), em = String(s.email || '');
     if (!ph) {
       const m = nm.match(/(0\d{1,2}[-\s.]?\d{3,4}[-\s.]?\d{4})/);
@@ -20407,9 +20422,8 @@ function loadShopDetail(idx) {
       const e = nm.match(/([\w.+-]+@[\w-]+\.[\w.]+)/);
       if (e) { em = e[1]; nm = nm.replace(e[1], '').trim().replace(/[,\/·]+$/, '').trim(); }
     }
-    if($('shop-manager')) $('shop-manager').value = nm;
-    if($('shop-phone')) $('shop-phone').value = ph;
-    if($('shop-email')) $('shop-email').value = em;
+    window._partnerContacts_shop = [{ name: nm, phone: ph, email: em }];
+    _renderPartnerContactsList('shop');
   })();
   if($('shop-memo')) $('shop-memo').value = s.memo || '';
   if($('shop-commission')) $('shop-commission').value = s.commissionBase || 0;
@@ -20468,9 +20482,10 @@ function saveShopInfo() {
   // v2.3.302: 구조화 정산 주기 저장 + 사람이 읽는 라벨을 settlementCycle 에 자동 생성(표시·하위호환)
   try { const _st=_shopSettleFromForm(); s.settlement=_st; s.settlementCycle = _shopSettleLabel(_st) || ($('shop-settle')?.value||''); }
   catch(_){ s.settlementCycle = $('shop-settle')?.value || ''; }
-  s.manager = $('shop-manager')?.value || '';
-  s.phone = $('shop-phone')?.value || '';     // v2.3.631
-  s.email = $('shop-email')?.value || '';
+  // v2.3.632: 담당자 다중 저장 — 첫 담당자는 manager/phone/email 에도 반영(기존 조회 경로 호환)
+  s.contacts = (typeof _partnerGetContactsForSave === 'function') ? _partnerGetContactsForSave('shop') : [];
+  const _c0 = s.contacts[0] || { name:'', phone:'', email:'' };
+  s.manager = _c0.name; s.phone = _c0.phone; s.email = _c0.email;
   s.memo = $('shop-memo')?.value || '';
   s.commissionBase = parseFloat($('shop-commission')?.value) || 0;
   s.shippingPolicy = $('shop-shipping-policy')?.value || 'seller';
@@ -37183,10 +37198,12 @@ function _partnerEsc(s) {
 
 function _renderPartnerContactRow(prefix, idx, c) {
   c = c || { name: '', phone: '', email: '' };
+  // v2.3.632: 쇼핑몰 폼은 칸 위에 항목명이 따로 있어 안내문구를 비운다
+  const ph = (prefix === 'shop') ? ['', '', ''] : ['담당자', '전화번호', '이메일'];
   return '<div class="partner-contact-row" data-idx="' + idx + '" style="display:grid;grid-template-columns:1fr 1fr 1.4fr 30px;gap:6px;align-items:center">'
-    + '<input class="fi" type="text" placeholder="담당자" value="' + _partnerEsc(c.name) + '" oninput="_partnerSyncContact(\'' + prefix + '\',' + idx + ',\'name\',this.value)">'
-    + '<input class="fi" type="text" placeholder="전화번호" value="' + _partnerEsc(c.phone) + '" oninput="_partnerSyncContact(\'' + prefix + '\',' + idx + ',\'phone\',this.value)">'
-    + '<input class="fi" type="email" placeholder="이메일" value="' + _partnerEsc(c.email) + '" oninput="_partnerSyncContact(\'' + prefix + '\',' + idx + ',\'email\',this.value)">'
+    + '<input class="fi" type="text" placeholder="' + ph[0] + '" value="' + _partnerEsc(c.name) + '" oninput="_partnerSyncContact(\'' + prefix + '\',' + idx + ',\'name\',this.value)">'
+    + '<input class="fi" type="text" placeholder="' + ph[1] + '" value="' + _partnerEsc(c.phone) + '" oninput="_partnerSyncContact(\'' + prefix + '\',' + idx + ',\'phone\',this.value)">'
+    + '<input class="fi" type="email" placeholder="' + ph[2] + '" value="' + _partnerEsc(c.email) + '" oninput="_partnerSyncContact(\'' + prefix + '\',' + idx + ',\'email\',this.value)">'
     + '<button type="button" title="이 담당자 삭제" onclick="_partnerRemoveContactRow(\'' + prefix + '\',' + idx + ')" style="background:#fef2f2;color:#ef4444;border:1px solid #fecaca;border-radius:5px;cursor:pointer;width:28px;height:32px;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center">−</button>'
     + '</div>';
 }
