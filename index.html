@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.634';
+const ERP_VERSION = 'v2.3.635';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29776,13 +29776,29 @@ async function _consignEmail(shId){
     showNotif('PDF 생성 실패: ' + (e && e.message || e), 'error');
     return;
   }
-  const bodyText = (sh.recvManager||'담당자') + '님, 안녕하십니까.\n\n'
+  // v2.3.635: 인사말은 수신처 기준, 서명은 출고 담당자(회사정보 담당자) 기준으로 구성
+  const _ci = (DB && DB._companyInfo) || {};
+  const _sup = (typeof _consignSupContacts === 'function')
+    ? (_consignSupContacts().find(c => (c.name||'').trim() === String(sh.supplierManager||'').trim()) || null) : null;
+  const _supName = (_sup && _sup.name) || sh.supplierManager || '';
+  const _supRole = (_sup && _sup.role) || '';
+  const _supEmail = (_sup && _sup.email) || '';
+  const _supMobile = (_sup && _sup.phone) || sh.supplierPhone || '';
+  const _coTel = String(_ci.email || '').trim();          // 회사정보의 '회사전화'
+  const _coAddr = String(_ci.addr || '').replace(/\s*\(\d{5}\)\s*$/, '').trim();   // 끝의 우편번호 제거
+  let _sign = '────────────────────────\n'
+    + '㈜르니브' + (_supName ? ('  ' + _supName + (_supRole ? ' ' + _supRole : '')) : ' (RENIV)') + '\n';
+  if (_supEmail) _sign += 'E-mail : ' + _supEmail + '\n';
+  const _phoneLine = [ _coTel ? ('Phone : ' + _coTel) : '', _supMobile ? ('Mobile : ' + _supMobile) : '' ].filter(Boolean).join('     ');
+  if (_phoneLine) _sign += _phoneLine + '\n';
+  if (_coAddr) _sign += _coAddr;
+  const bodyText = '안녕하세요, ' + (sh.sellerName || '') + ' 담당자님\n\n'
     + '르니브에서 거래명세서 송부드립니다. 첨부 파일 확인 부탁드립니다.\n\n'
     + '· 출고일: ' + (sh.date||'-') + '\n'
     + '· 입고 창고: ' + (sh.whToName||'-') + '\n'
     + '· 합계금액(VAT 포함): ₩' + (Number(A.total)||0).toLocaleString() + '\n\n'
     + '확인 후 회신 부탁드리겠습니다.\n감사합니다.\n\n'
-    + '────────────────────────\n㈜르니브 (RENIV)\nE-mail : cto@reniv.co.kr\nPhone : 070-8065-3279';
+    + _sign;
   // v2.3.633: 본문은 텍스트, 명세서는 PDF 첨부 (발주서와 동일 구조 multipart/mixed)
   //   첨부 파일명 한글은 RFC2047 인코딩 — raw 한글이면 Outlook 발송 시 오류
   const encPdfName = '=?UTF-8?B?' + utf8Base64(pdfName) + '?=';
