@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>RENIV WORLD — 3D 가상 오피스</title>
+<style>
+  :root{
+    --navy:#0D1B2A; --ink:#12212E; --mut:#8FA3B3; --line:#1E3345;
+    --mint:#17977F; --blue:#1F6FEB; --dred:#C4485A; --gold:#C98A22;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:#070E16;
+    font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;color:#E8F0F6}
+  canvas{display:block}
+  #app{position:fixed;inset:0}
+
+  .bar{position:fixed;top:0;left:0;right:0;height:52px;z-index:10;
+    display:flex;align-items:center;gap:14px;padding:0 16px;
+    background:linear-gradient(180deg,rgba(7,14,22,.96),rgba(7,14,22,.72));
+    border-bottom:1px solid var(--line)}
+  .brand{font-weight:800;font-size:15px;letter-spacing:-.3px}
+  .brand span{color:var(--mint)}
+  .stamp{font-size:11.5px;color:var(--mut)}
+  .grow{flex:1}
+  .btn{background:#132434;border:1px solid var(--line);color:#CBDBE7;
+    font-size:12px;font-weight:700;padding:7px 13px;border-radius:8px;cursor:pointer}
+  .btn:hover{background:#1A3145;border-color:#2B4A63}
+  .btn.on{background:var(--blue);border-color:var(--blue);color:#fff}
+
+  .rooms{position:fixed;left:14px;top:66px;z-index:10;display:flex;flex-direction:column;gap:6px}
+  .rooms .btn{text-align:left;min-width:132px}
+
+  .panel{position:fixed;right:14px;top:66px;bottom:64px;width:310px;z-index:10;
+    background:rgba(11,22,33,.93);border:1px solid var(--line);border-radius:12px;
+    padding:16px;overflow-y:auto;backdrop-filter:blur(8px);display:none}
+  .panel.show{display:block}
+  .panel h3{margin:0 0 4px;font-size:16px;letter-spacing:-.3px}
+  .panel .sub{font-size:11.5px;color:var(--mut);margin-bottom:14px}
+  .kv{display:flex;justify-content:space-between;gap:10px;padding:8px 0;
+    border-bottom:1px solid rgba(255,255,255,.06);font-size:13px}
+  .kv b{font-variant-numeric:tabular-nums;font-weight:700}
+  .tag{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;
+    border-radius:99px;background:#16324A;color:#8FC7FF;margin-bottom:10px}
+  .warn{color:#FF8FA0}
+  .good{color:#4FD1B5}
+
+  .kpi{position:fixed;left:14px;bottom:14px;z-index:10;display:flex;gap:8px;flex-wrap:wrap;max-width:62vw}
+  .card{background:rgba(11,22,33,.9);border:1px solid var(--line);border-radius:10px;
+    padding:9px 13px;min-width:112px}
+  .card .l{font-size:10.5px;color:var(--mut)}
+  .card .v{font-size:17px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.4px}
+
+  .alerts{position:fixed;right:14px;bottom:14px;z-index:10;max-width:300px}
+  .alert{background:rgba(120,20,35,.9);border:1px solid #7E2334;border-radius:9px;
+    padding:8px 12px;font-size:12px;margin-top:6px}
+
+  .gate{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(1200px 600px at 50% 40%,#12293D,#070E16)}
+  .gate .box{text-align:center;max-width:380px;padding:32px}
+  .gate h1{font-size:26px;margin:0 0 8px;letter-spacing:-.6px}
+  .gate h1 span{color:var(--mint)}
+  .gate p{color:var(--mut);font-size:13px;line-height:1.6;margin:0 0 22px}
+  .gate .btn{font-size:14px;padding:11px 22px}
+  .err{color:#FF8FA0;font-size:12px;margin-top:14px;min-height:18px}
+
+  .tip{position:fixed;left:50%;transform:translateX(-50%);top:62px;z-index:9;
+    font-size:11.5px;color:var(--mut);background:rgba(11,22,33,.8);
+    border:1px solid var(--line);border-radius:99px;padding:6px 14px}
+  @media (max-width:820px){
+    .panel{left:14px;right:14px;width:auto;top:auto;bottom:14px;height:44vh}
+    .kpi{max-width:calc(100vw - 28px);bottom:auto;top:60px}
+    .alerts{display:none}.tip{display:none}
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div class="bar">
+  <div class="brand">RENIV <span>WORLD</span></div>
+  <div class="stamp" id="stamp">불러오는 중…</div>
+  <div class="grow"></div>
+  <button class="btn" id="btn-auto">자동회전 끄기</button>
+  <button class="btn" id="btn-reload">새로고침</button>
+</div>
+
+<div class="rooms" id="rooms"></div>
+<div class="panel" id="panel"></div>
+<div class="kpi" id="kpi"></div>
+<div class="alerts" id="alerts"></div>
+<div class="tip">드래그 회전 · 휠 확대 · 물체 클릭 시 상세</div>
+
+<div class="gate" id="gate">
+  <div class="box">
+    <h1>RENIV <span>WORLD</span></h1>
+    <p>르니브 ERP를 3차원으로 봅니다.<br>회사 계정으로 로그인해 주세요.</p>
+    <button class="btn" id="btn-login">구글 계정으로 로그인</button>
+    <div class="err" id="err"></div>
+  </div>
+</div>
+
+<script>window.__FB__ = {
+    apiKey: "AIzaSyDP8KBmUQzvH9iH9YQlFa-A87fcOIV09aM",
+    authDomain: "reniv-erp-135a3.firebaseapp.com",
+    projectId: "reniv-erp-135a3",
+    storageBucket: "reniv-erp-135a3.firebasestorage.app",
+    messagingSenderId: "462652770421",
+    appId: "1:462652770421:web:0ac37bf92ec724e70f903c"
+  };</script>
+
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ═══════════════ 설정 ═══════════════ */
+const FB = window.__FB__ || null;          // Firebase 설정 (배포 시 주입)
+const DEMO = new URLSearchParams(location.search).has('demo');
+
+const C = {
+  navy:0x0D1B2A, floor:0x10202E, grid:0x1B3348,
+  mint:0x17977F, blue:0x1F6FEB, dred:0xC4485A, gold:0xC98A22,
+  purple:0x8B5FBF, white:0xE8F0F6
+};
+
+const ROOMS = [
+  { id:'ceo',       name:'대표이사실',   x:0,   z:0,   w:26, d:20, color:C.mint,   cam:[0,26,34] },
+  { id:'sales',     name:'국내영업팀',   x:-34, z:0,   w:28, d:22, color:C.blue,   cam:[-34,22,30] },
+  { id:'marketing', name:'마케팅팀',     x:34,  z:0,   w:28, d:22, color:C.purple, cam:[34,22,30] },
+  { id:'warehouse', name:'창고',         x:0,   z:-36, w:46, d:24, color:C.gold,   cam:[0,32,2] },
+  { id:'design',    name:'디자인팀',     x:0,   z:27,  w:28, d:20, color:C.dred,   cam:[0,20,52] },
+];
+
+/* ═══════════════ 씬 ═══════════════ */
+const app = document.getElementById('app');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x070E16);
+scene.fog = new THREE.Fog(0x070E16, 70, 190);
+
+const camera = new THREE.PerspectiveCamera(48, innerWidth/innerHeight, 0.1, 500);
+camera.position.set(0, 60, 80);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+app.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.07;
+controls.maxPolarAngle = Math.PI/2 - 0.06;
+controls.minDistance = 12;
+controls.maxDistance = 150;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.35;
+
+scene.add(new THREE.HemisphereLight(0x9FC4E0, 0x0A1622, 0.75));
+const sun = new THREE.DirectionalLight(0xFFF3E0, 1.15);
+sun.position.set(40, 70, 34);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+const S = 90;
+Object.assign(sun.shadow.camera, { left:-S, right:S, top:S, bottom:-S, near:1, far:220 });
+scene.add(sun);
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(320, 320),
+  new THREE.MeshStandardMaterial({ color:0x0A1520, roughness:1, metalness:0 })
+);
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const grid = new THREE.GridHelper(320, 80, C.grid, 0x102030);
+grid.position.y = 0.01;
+grid.material.opacity = 0.35;
+grid.material.transparent = true;
+scene.add(grid);
+
+const dataGroup = new THREE.Group();
+scene.add(dataGroup);
+const pickable = [];
+
+/* ═══════════════ 헬퍼 ═══════════════ */
+function won(n){ return (Math.round(Number(n)||0)).toLocaleString('ko-KR') + '원'; }
+function shortWon(n){
+  n = Math.round(Number(n)||0);
+  if (Math.abs(n) >= 100000000) return (n/100000000).toFixed(1)+'억';
+  if (Math.abs(n) >= 10000) return Math.round(n/10000).toLocaleString('ko-KR')+'만';
+  return n.toLocaleString('ko-KR');
+}
+
+function makeLabel(text, opts={}){
+  const size = opts.size || 46, pad = 18;
+  const cv = document.createElement('canvas');
+  const ctx = cv.getContext('2d');
+  ctx.font = `700 ${size}px Pretendard, 'Malgun Gothic', sans-serif`;
+  const w = Math.ceil(ctx.measureText(text).width) + pad*2;
+  cv.width = w; cv.height = size + pad*2;
+  const c2 = cv.getContext('2d');
+  c2.font = `700 ${size}px Pretendard, 'Malgun Gothic', sans-serif`;
+  if (opts.bg){
+    c2.fillStyle = opts.bg;
+    c2.beginPath();
+    const r = 14;
+    c2.roundRect(0,0,cv.width,cv.height,r);
+    c2.fill();
+  }
+  c2.fillStyle = opts.color || '#E8F0F6';
+  c2.textBaseline = 'middle';
+  c2.fillText(text, pad, cv.height/2);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.anisotropy = 4;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, transparent:true, depthWrite:false }));
+  const scale = (opts.scale || 0.028);
+  sp.scale.set(cv.width*scale, cv.height*scale, 1);
+  return sp;
+}
+
+function roundedBox(w,h,d,color,emissive=0){
+  const m = new THREE.MeshStandardMaterial({
+    color, roughness:0.45, metalness:0.15,
+    emissive: emissive || 0x000000, emissiveIntensity: emissive ? 0.55 : 0
+  });
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), m);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  return mesh;
+}
+
+function barH(v, vmax, max=11, min=1.2){
+  v = Math.max(0, Number(v)||0); vmax = Math.max(1, Number(vmax)||1);
+  return min + (max-min) * Math.sqrt(Math.min(v/vmax, 1));
+}
+
+function addPick(mesh, info){ mesh.userData.info = info; pickable.push(mesh); }
+
+/* ═══════════════ 방 ═══════════════ */
+function buildRooms(){
+  ROOMS.forEach(r=>{
+    const plate = new THREE.Mesh(
+      new THREE.BoxGeometry(r.w, 0.4, r.d),
+      new THREE.MeshStandardMaterial({ color:0x142534, roughness:0.85 })
+    );
+    plate.position.set(r.x, 0.2, r.z);
+    plate.receiveShadow = true;
+    scene.add(plate);
+
+    const edge = new THREE.Mesh(
+      new THREE.BoxGeometry(r.w+0.5, 0.12, r.d+0.5),
+      new THREE.MeshStandardMaterial({ color:r.color, emissive:r.color, emissiveIntensity:0.5, roughness:0.4 })
+    );
+    edge.position.set(r.x, 0.05, r.z);
+    scene.add(edge);
+
+    const lb = makeLabel(r.name, { size:52, color:'#DCE9F2', bg:'rgba(10,20,32,.72)' });
+    lb.position.set(r.x, 2.6, r.z + r.d/2 - 1.6);
+    scene.add(lb);
+  });
+}
+
+/* ═══════════════ 시각화 ═══════════════ */
+function clearData(){
+  while(dataGroup.children.length) dataGroup.remove(dataGroup.children[0]);
+  pickable.length = 0;
+}
+
+function bar(x, z, h, w, color, info, labelText){
+  const g = new THREE.Group();
+  const m = roundedBox(w, Math.max(h,0.3), w, color, color);
+  m.position.y = Math.max(h,0.3)/2;
+  g.add(m);
+  addPick(m, info);
+  if (labelText){
+    const lb = makeLabel(labelText, { size:36, color:'#CFE0EC', scale:0.02 });
+    lb.position.y = Math.max(h,0.3) + 1.1;
+    g.add(lb);
+  }
+  g.position.set(x, 0.4, z);
+  dataGroup.add(g);
+  return g;
+}
+
+function crateStack(x, z, qty, low, info, name){
+  const g = new THREE.Group();
+  const per = Math.max(25, Math.ceil(qty/10));
+  const n = Math.max(1, Math.min(8, Math.ceil(qty/per)));
+  const color = low ? C.dred : C.gold;
+  for (let i=0;i<n;i++){
+    const c = roundedBox(2.2, 1.5, 2.2, color, low ? C.dred : 0);
+    c.position.set((i%2)*0.14 - 0.07, 0.75 + i*1.55, (i%3)*0.1 - 0.05);
+    g.add(c);
+    addPick(c, info);
+  }
+  const lb = makeLabel(`${name}·${qty}`, { size:30, color: low ? '#FFB4C0' : '#E6D5AE', scale:0.016 });
+  lb.position.y = 0.75 + n*1.55 + 1.0;
+  g.add(lb);
+  if (low){
+    const beacon = new THREE.Mesh(
+      new THREE.SphereGeometry(0.55, 18, 14),
+      new THREE.MeshStandardMaterial({ color:0xFF5B72, emissive:0xFF3355, emissiveIntensity:1.6 })
+    );
+    beacon.position.y = 0.75 + n*1.55 + 0.2;
+    beacon.userData.blink = true;
+    g.add(beacon);
+  }
+  g.position.set(x, 0.4, z);
+  dataGroup.add(g);
+}
+
+function avatar(x, z, name, color, info){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.62, 1.5, 6, 14),
+    new THREE.MeshStandardMaterial({ color, roughness:0.35, metalness:0.2, emissive:color, emissiveIntensity:0.28 })
+  );
+  body.position.y = 1.5; body.castShadow = true;
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.52, 22, 18),
+    new THREE.MeshStandardMaterial({ color:0xF3E2D0, roughness:0.6 })
+  );
+  head.position.y = 2.75; head.castShadow = true;
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(0.95, 0.06, 8, 40),
+    new THREE.MeshStandardMaterial({ color, emissive:color, emissiveIntensity:1.1 })
+  );
+  ring.rotation.x = Math.PI/2; ring.position.y = 0.12;
+  g.add(body, head, ring);
+  addPick(body, info); addPick(head, info);
+  const lb = makeLabel(name, { size:40, color:'#FFFFFF', bg:'rgba(10,20,32,.7)', scale:0.021 });
+  lb.position.y = 3.9;
+  g.add(lb);
+  g.userData.float = Math.random()*Math.PI*2;
+  g.position.set(x, 0.4, z);
+  dataGroup.add(g);
+  return g;
+}
+
+function render(snap){
+  clearData();
+  const K = snap.kpi || {};
+
+  /* 대표이사실 — 매출 타워 + 결재 더미 */
+  const mRev = K.monthRevenue || 0;
+  const tRev = K.todayRevenue || 0;
+  const rmaxCeo = Math.max(mRev, tRev, 1);
+  bar(-6, -3, barH(mRev, rmaxCeo, 12), 4.4, C.mint,
+      { title:'이번 달 매출', tag:'대표이사실',
+        rows:[['이번 달 매출', won(mRev)], ['주문 건수', (K.monthOrders||0)+'건'],
+              ['객단가', won(K.aov)], ['오늘 매출', won(tRev)]] },
+      shortWon(mRev)+'원');
+  bar(0.4, -3, barH(tRev, rmaxCeo, 12), 3.0, C.blue,
+      { title:'오늘 매출', tag:'대표이사실',
+        rows:[['오늘 매출', won(tRev)], ['기준', snap.stamp||'-']] },
+      shortWon(tRev)+'원');
+
+  const ap = (snap.approvals||{}).pending || 0;
+  const papers = new THREE.Group();
+  for (let i=0;i<Math.min(ap,14);i++){
+    const p = roundedBox(2.6, 0.16, 1.9, 0xE8EEF4);
+    p.position.set(0, 0.5 + i*0.2, 0);
+    p.rotation.y = (Math.random()-0.5)*0.14;
+    papers.add(p); addPick(p, {
+      title:'결재 대기', tag:'대표이사실',
+      rows:[['대기 건수', ap+'건']],
+      note: ap ? '결재를 기다리는 문서가 있습니다.' : '대기 중인 결재가 없습니다.'
+    });
+  }
+  const apl = makeLabel(`결재 대기 ${ap}`, { size:34, color: ap? '#FFD27A':'#9FB6C6', scale:0.019 });
+  apl.position.set(0, 0.6 + Math.min(ap,14)*0.2 + 1.6, 0);
+  papers.add(apl);
+  papers.position.set(8.5, 0.4, -4.5);
+  dataGroup.add(papers);
+
+  const pay = snap.payments || {};
+  bar(8.5, 5.5, barH(pay.month||0, Math.max(pay.month||0, mRev, 1), 7), 3.4,
+      pay.overCnt ? C.dred : C.gold,
+      { title:'지급 예정', tag:'대표이사실',
+        rows:[['오늘', won(pay.today)+` (${pay.todayCnt||0}건)`],
+              ['이번 달', won(pay.month)+` (${pay.monthCnt||0}건)`],
+              ['기한 경과', won(pay.over)+` (${pay.overCnt||0}건)`]],
+        warn: !!pay.overCnt },
+      '지급예정');
+
+  avatar(-9.5, 5.5, 'Tim', C.mint,
+    { title:'Tim · 비서', tag:'AI 직원',
+      rows:[['담당','주문 리포트'],['보고','매일 07:30'],['채널','#대표이사']],
+      note:'ERP 매출·재고·결재를 조회해 답합니다.' });
+
+  /* 국내영업팀 — 지역별 매출 */
+  const R = ROOMS.find(r=>r.id==='sales');
+  const regs = (snap.regions||[]).slice(0,6);
+  const rmax = Math.max(1, ...regs.map(r=>r.rev));
+  regs.forEach((r,i)=>{
+    const col = i%3, row = Math.floor(i/3);
+    bar(R.x - 7 + col*7, R.z - 4 + row*8, barH(r.rev, rmax, 9), 3.6, C.blue,
+      { title:r.name, tag:'국내영업팀',
+        rows:[['매출', won(r.rev)], ['주문', r.cnt+'건']] },
+      shortWon(r.rev));
+  });
+  const ph = snap.pharmacies || {};
+  const phl = makeLabel(`거래 약국 ${ph.total||0}곳 · 재구매 ${ph.repeat||0}곳`,
+    { size:38, color:'#9FD0FF', bg:'rgba(10,20,32,.7)', scale:0.02 });
+  phl.position.set(R.x, 4.6, R.z + R.d/2 - 6.5);
+  dataGroup.add(phl);
+  avatar(R.x + 10, R.z + 6, 'IAN', C.blue,
+    { title:'IAN · 국내영업팀장', tag:'AI 직원',
+      rows:[['담당','바로팜 주문·재고'],['보고','평일 13:00'],['채널','#국내영업팀'],
+            ['거래 약국',(ph.total||0)+'곳'],['재구매',(ph.repeat||0)+'곳']],
+      note:'바로팜 엑셀을 ERP에 자동 입력하고 재고를 차감합니다.' });
+
+  /* 마케팅팀 — 채널별 매출 */
+  const M = ROOMS.find(r=>r.id==='marketing');
+  const chs = (snap.channels||[]).slice(0,6);
+  const cmax = Math.max(1, ...chs.map(c=>c.rev));
+  chs.forEach((c,i)=>{
+    const col = i%3, row = Math.floor(i/3);
+    bar(M.x - 7 + col*7, M.z - 4 + row*8, barH(c.rev, cmax, 9), 3.6, C.purple,
+      { title:c.name, tag:'판매 채널',
+        rows:[['매출', won(c.rev)], ['주문', c.cnt+'건']] },
+      shortWon(c.rev));
+  });
+  avatar(M.x - 10, M.z + 6, 'Greg', C.purple,
+    { title:'Greg · 마케팅팀장', tag:'AI 직원',
+      rows:[['담당','시장·경쟁사 조사'],['보고','매일 08:00'],['채널','#마케팅팀']],
+      note:'퍼포먼스 마케팅 전략 문서를 따라 소재와 브리프를 만듭니다.' });
+
+  /* 창고 — 창고별 재고 */
+  const W = ROOMS.find(r=>r.id==='warehouse');
+  const whs = snap.warehouses || [];
+  let wx = W.x - W.w/2 + 6;
+  whs.forEach(wh=>{
+    const wl = makeLabel(wh.name, { size:38, color:'#E6D5AE', bg:'rgba(10,20,32,.7)', scale:0.02 });
+    wl.position.set(wx + 2.5, 1.8, W.z + W.d/2 - 7.0);
+    dataGroup.add(wl);
+    (wh.items||[]).slice(0,4).forEach((it,i)=>{
+      crateStack(wx + (i%2)*5.0, W.z - 4 + Math.floor(i/2)*5.2, it.qty, it.low,
+        { title:`${it.name}`, tag:wh.name,
+          rows:[['품목코드', it.code||'-'], ['수량', (it.qty||0).toLocaleString('ko-KR')+'개'],
+                ['상태', it.low ? '부족 (20개 이하)' : '정상']],
+          warn: it.low },
+        it.code || it.name.slice(0,6));
+    });
+    wx += 14;
+  });
+
+  /* 디자인팀 — 생산중 + 게시판 */
+  const D = ROOMS.find(r=>r.id==='design');
+  const prods = snap.productions || [];
+  prods.slice(0,4).forEach((p,i)=>{
+    bar(D.x - 6 + i*4.6, D.z - 2, barH(p.qty||0, Math.max(...prods.map(q=>q.qty||1), 1), 7), 3.0, C.dred,
+      { title:p.name, tag:'생산 진행',
+        rows:[['수량', (p.qty||0).toLocaleString('ko-KR')], ['상태', p.status||'-']] },
+      String(p.qty||''));
+  });
+  if (!prods.length){
+    const nl = makeLabel('생산 진행 없음', { size:34, color:'#9FB6C6', scale:0.019 });
+    nl.position.set(D.x, 2.0, D.z - 2);
+    dataGroup.add(nl);
+  }
+  avatar(D.x + 8, D.z + 5, 'Jony', C.dred,
+    { title:'Jony · 디자인팀장', tag:'AI 직원',
+      rows:[['담당','패키지·광고 소재'],['보고','매일 08:30'],['채널','#디자인팀']],
+      note:'브랜드 가이드에 맞춰 디자인을 제안합니다.' });
+}
+
+/* ═══════════════ UI ═══════════════ */
+const panel = document.getElementById('panel');
+function showPanel(info){
+  if (!info){ panel.classList.remove('show'); return; }
+  const rows = (info.rows||[]).map(([k,v])=>
+    `<div class="kv"><span style="color:var(--mut)">${k}</span><b class="${info.warn?'warn':''}">${v}</b></div>`).join('');
+  panel.innerHTML = `<div class="tag">${info.tag||''}</div>
+    <h3>${info.title||''}</h3>
+    ${info.note?`<div class="sub">${info.note}</div>`:'<div class="sub"></div>'}
+    ${rows}`;
+  panel.classList.add('show');
+}
+
+function buildKpi(snap){
+  const K = snap.kpi||{}, P = snap.payments||{};
+  document.getElementById('kpi').innerHTML = [
+    ['이번 달 매출', shortWon(K.monthRevenue)+'원'],
+    ['오늘 매출', shortWon(K.todayRevenue)+'원'],
+    ['주문', (K.monthOrders||0)+'건'],
+    ['객단가', shortWon(K.aov)+'원'],
+    ['결재 대기', ((snap.approvals||{}).pending||0)+'건'],
+    ['기한 경과 지급', (P.overCnt||0)+'건'],
+  ].map(([l,v])=>`<div class="card"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
+
+  const al = (snap.stockAlerts||[]);
+  document.getElementById('alerts').innerHTML = al.length
+    ? al.slice(0,4).map(a=>`<div class="alert">⚠ ${a.wh} · <b>${a.name}</b> 재고 ${a.qty}개 — 발주 필요</div>`).join('')
+    : '';
+  document.getElementById('stamp').textContent = 'ERP 기준 ' + (snap.stamp||'-');
+}
+
+function buildRoomButtons(){
+  const el = document.getElementById('rooms');
+  el.innerHTML = `<button class="btn on" data-cam="all">전체 보기</button>` +
+    ROOMS.map(r=>`<button class="btn" data-cam="${r.id}">${r.name}</button>`).join('');
+  el.addEventListener('click', e=>{
+    const b = e.target.closest('[data-cam]'); if(!b) return;
+    el.querySelectorAll('.btn').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    const id = b.dataset.cam;
+    controls.autoRotate = false;
+    document.getElementById('btn-auto').textContent = '자동회전 켜기';
+    if (id==='all'){ flyTo([0,60,80],[0,-2,-2]); return; }
+    const r = ROOMS.find(x=>x.id===id);
+    flyTo(r.cam, [r.x, 0, r.z]);
+  });
+}
+
+let fly = null;
+function flyTo(pos, target){
+  fly = { p0:camera.position.clone(), p1:new THREE.Vector3(...pos),
+          t0:controls.target.clone(), t1:new THREE.Vector3(...target), t:0 };
+}
+
+/* 클릭 */
+const ray = new THREE.Raycaster(), pt = new THREE.Vector2();
+let downX=0, downY=0;
+renderer.domElement.addEventListener('pointerdown', e=>{ downX=e.clientX; downY=e.clientY; });
+renderer.domElement.addEventListener('pointerup', e=>{
+  if (Math.hypot(e.clientX-downX, e.clientY-downY) > 6) return;
+  pt.x = (e.clientX/innerWidth)*2-1;
+  pt.y = -(e.clientY/innerHeight)*2+1;
+  ray.setFromCamera(pt, camera);
+  const hit = ray.intersectObjects(pickable, false)[0];
+  showPanel(hit ? hit.object.userData.info : null);
+});
+
+document.getElementById('btn-auto').onclick = e=>{
+  controls.autoRotate = !controls.autoRotate;
+  e.target.textContent = controls.autoRotate ? '자동회전 끄기' : '자동회전 켜기';
+};
+document.getElementById('btn-reload').onclick = ()=> loadData(true);
+
+addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+/* ═══════════════ 루프 ═══════════════ */
+const clock = new THREE.Clock();
+let T = 0;
+function tick(){
+  requestAnimationFrame(tick);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  T += dt;
+  const t = T;
+  dataGroup.children.forEach(g=>{
+    if (g.userData.float !== undefined) g.position.y = 0.4 + Math.sin(t*1.6 + g.userData.float)*0.18;
+    g.traverse(o=>{ if (o.userData.blink) o.material.emissiveIntensity = 1.0 + Math.sin(t*5)*0.8; });
+  });
+  if (fly){
+    fly.t = Math.min(1, fly.t + dt*0.9);
+    const e = 1 - Math.pow(1-fly.t, 3);
+    camera.position.lerpVectors(fly.p0, fly.p1, e);
+    controls.target.lerpVectors(fly.t0, fly.t1, e);
+    if (fly.t >= 1) fly = null;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+/* ═══════════════ 데이터 ═══════════════ */
+const DEMO_SNAP = {
+  stamp:'2026-08-14 13:00 (데모)',
+  kpi:{ todayRevenue:142000, monthRevenue:2051774, monthOrders:24, aov:85491 },
+  channels:[{name:'바로팜',rev:1845774,cnt:18},{name:'자사몰',rev:169636,cnt:4},
+            {name:'쿠팡',rev:36364,cnt:2}],
+  regions:[{name:'경기 성남시',rev:213000,cnt:2},{name:'인천 연수구',rev:142000,cnt:1},
+           {name:'부산 해운대구',rev:142000,cnt:1},{name:'경남 창원시',rev:128000,cnt:1},
+           {name:'경남 통영시',rev:71000,cnt:2},{name:'서울 강남구',rev:64000,cnt:1}],
+  warehouses:[
+    {name:'바로팜 창고', items:[
+      {code:'P-GS-01',name:'글로우샷 30ml',qty:118,low:false},
+      {code:'P-3X-03',name:'320 리뉴 크림 60ml',qty:57,low:false}]},
+    {name:'르니브 본창고', items:[
+      {code:'P-GS-01',name:'글로우샷 30ml',qty:5629,low:false},
+      {code:'P-3X-02',name:'320 리뉴 크림 30ml',qty:1760,low:false}]},
+    {name:'쿠팡 창고', items:[
+      {code:'P-3X-02',name:'320 리뉴 크림 30ml',qty:18,low:true}]}],
+  stockAlerts:[{code:'P-3X-02',name:'320 리뉴 크림 30ml',qty:18,wh:'쿠팡 창고'}],
+  approvals:{pending:4},
+  productions:[{name:'320 리뉴 크림 60ml',qty:1000,status:'생산중'},
+               {name:'글로우샷 30ml',qty:2000,status:'생산중'}],
+  payments:{today:704022,todayCnt:1,month:2525939,monthCnt:5,over:587900,overCnt:2},
+  pharmacies:{total:17,repeat:2},
+  feed:[]
+};
+
+let db = null;
+async function loadData(force){
+  try{
+    let snap;
+    if (DEMO || !FB){ snap = DEMO_SNAP; }
+    else {
+      const { getDoc, doc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+      const s = await getDoc(doc(db, 'erp_data', 'vo_snapshot'));
+      if (!s.exists()) throw new Error('vo_snapshot 문서가 없습니다. 서버 스냅샷을 먼저 실행하세요.');
+      snap = JSON.parse(s.data().data);
+    }
+    render(snap);
+    buildKpi(snap);
+  }catch(err){
+    document.getElementById('stamp').textContent = '데이터 오류: ' + (err.message||err);
+    console.error(err);
+  }
+}
+
+async function start(){
+  buildRooms();
+  buildRoomButtons();
+  tick();
+  if (DEMO || !FB){
+    document.getElementById('gate').style.display = 'none';
+    loadData();
+    return;
+  }
+  const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
+  const { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } =
+    await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js');
+  const { getFirestore } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+  const app2 = initializeApp(FB);
+  const auth = getAuth(app2);
+  db = getFirestore(app2);
+  onAuthStateChanged(auth, u=>{
+    if (u){ document.getElementById('gate').style.display='none'; loadData(); }
+    else { document.getElementById('gate').style.display='flex'; }
+  });
+  document.getElementById('btn-login').onclick = async ()=>{
+    try{ await signInWithPopup(auth, new GoogleAuthProvider()); }
+    catch(e){ document.getElementById('err').textContent = e.message || String(e); }
+  };
+}
+start();
+</script>
+</body>
+</html>
