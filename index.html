@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.633';
+const ERP_VERSION = 'v2.3.634';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28844,11 +28844,29 @@ function _stockWhCells(item, isOem){
   const stock = Number(item&&item.stock)||0;
   const eff = _itemWhEffective(item);
   const keys = Object.keys(eff);
+  // v2.3.634: 최근 7일 창고이동 증감 — 르니브 창고는 파생값이라 변화가 안 보이던 문제 해결
+  const delta = {};
+  try {
+    const cut = new Date(Date.now() - 7*24*3600*1000).toISOString().slice(0,10);
+    (DB.stockHistory||[]).forEach(h=>{
+      if (!h || h.type !== 'move' || String(h.itemId) !== String(item.id)) return;
+      if (String(h.date||'') < cut) return;
+      const q = Number(h.qty)||0;
+      if (h.fromWh) delta[h.fromWh] = (delta[h.fromWh]||0) - q;
+      if (h.toWh)   delta[h.toWh]   = (delta[h.toWh]||0)   + q;
+    });
+  } catch(_){}
+  const dHtml = k => {
+    const d = delta[k]||0;
+    if (!d) return '';
+    const up = d > 0;
+    return `<span title="최근 7일 창고이동" style="margin-left:5px;font-size:10.5px;font-weight:700;color:${up?'#16a34a':'#dc2626'}">${up?'▲':'▼'}${fmt(Math.abs(d))}</span>`;
+  };
   const names = [], qtys = [];
   keys.forEach(k=>{
     if (k === '__un__') return;
     names.push({ t:_whEsc(_whName(k)), muted:false });
-    qtys.push({ t:fmt(eff[k]), muted:false });
+    qtys.push({ t:fmt(eff[k]) + dHtml(k), muted:false });
   });
   if (eff['__un__'] != null && eff['__un__'] !== 0) { names.push({ t:'미지정', muted:true }); qtys.push({ t:fmt(eff['__un__']), muted:true }); }
   if (names.length === 0) return `<td style="${tdBase}"><span style="color:var(--gray-300)">-</span></td><td style="${tdBase}"><span style="color:var(--gray-300)">-</span></td>`;
@@ -29134,6 +29152,98 @@ function _wmOnItem(){
 }
 // v2.3.371: 이동 로직 코어 — 검증+whStock 재구성+stockHistory 기록(로컬반영까지). 저장(saveDataNow)은 호출측.
 //   반환 {ok, err?, fromName?, toName?}. 창고 이동 모달과 품목 창고 패널이 공용.
+// ═══ v2.3.634: 창고이동 이력 금고 ═══
+//   재고 수치(items)는 저장됐는데 이동 이력(stockHistory)만 유실되는 사고가 있었다(2026-08-14).
+//   이동 기록을 localStorage 금고에 먼저 남겨두고, 로드 후 서버본에 없으면 되살린다.
+const _WHMOVE_VAULT_KEY = 'reniv_whmove_vault';
+function _whMoveVaultRead(){
+  try { const v = JSON.parse(localStorage.getItem(_WHMOVE_VAULT_KEY) || '[]'); return Array.isArray(v) ? v : []; }
+  catch(_) { return []; }
+}
+function _whMoveVaultAdd(rec){
+  try {
+    const v = _whMoveVaultRead();
+    v.push(rec);
+    // 최근 300건 / 60일만 보관
+    const cut = Date.now() - 60*24*3600*1000;
+    const keep = v.filter(x => x && (Number(x._vts)||0) >= cut).slice(-300);
+    localStorage.setItem(_WHMOVE_VAULT_KEY, JSON.stringify(keep));
+  } catch(_){}
+}
+// 서버본에 없는 금고 기록을 되살린다 (같은 이동이 이미 있으면 건너뜀)
+function _whMoveVaultRestore(){
+  try {
+    const vault = _whMoveVaultRead();
+    if (!vault.length) return 0;
+    DB.stockHistory = DB.stockHistory || [];
+    const sig = h => [h.itemId, h.type, h.qty, h.fromWh||'', h.toWh||'', h.date||''].join('|');
+    const have = {};
+    DB.stockHistory.forEach(h => { if (h) have[sig(h)] = (have[sig(h)]||0) + 1; });
+    const need = {};
+    vault.forEach(r => { if (r) need[sig(r)] = (need[sig(r)]||0) + 1; });
+    let restored = 0;
+    Object.keys(need).forEach(k => {
+      const miss = need[k] - (have[k]||0);
+      if (miss <= 0) return;
+      const src = vault.filter(r => sig(r) === k);
+      for (let i = 0; i < miss && i < src.length; i++) {
+        const rec = Object.assign({}, src[i]);
+        delete rec._vts;
+        rec.id = (typeof nextId === 'function') ? nextId('stock') : (Date.now()+i);
+        rec.note = (rec.note || '') + ' [이력복구]';
+        DB.stockHistory.push(rec);
+        restored++;
+      }
+    });
+    if (restored) console.warn('🔁 [v2.3.634] 유실된 창고이동 이력 ' + restored + '건 복구');
+    return restored;
+  } catch(e) { console.warn('창고이동 이력 복구 실패:', e); return 0; }
+}
+window._whMoveVaultRestore = _whMoveVaultRestore;
+
+// v2.3.634: 위탁 이동 원장(consignment_shipments) 기준으로 빠진 이동 이력을 메꾼다.
+//   재고 수치(whStock)는 절대 건드리지 않는다 — 이미 반영돼 있고, 손대면 중복 적용된다.
+//   같은 (품목·수량·출발·도착) 조합의 '필요 건수 − 기존 건수' 만큼만 추가하므로 여러 번 돌려도 안전.
+window._repairConsignMoveHistory = async function(apply){
+  await _consignLoad(true);
+  const ships = (window._consign && window._consign.shipments) || [];
+  const key = (itemId, from, to, qty) => [itemId, from||'', to||'', qty].join('|');
+  const need = {}, meta = {};
+  ships.forEach(s => {
+    const from = s.whFromId || '__un__', to = s.whToId || '';
+    (s.lines||[]).forEach(l => {
+      if (!l || !(Number(l.qty)>0)) return;
+      const k = key(l.itemId, from, to, Number(l.qty));
+      need[k] = (need[k]||0) + 1;
+      meta[k] = { itemId:l.itemId, from, to, qty:Number(l.qty), date:s.date, name:l.name||'' };
+    });
+  });
+  const have = {};
+  (DB.stockHistory||[]).forEach(h => {
+    if (!h || h.type !== 'move') return;
+    const k = key(h.itemId, h.fromWh, h.toWh, Number(h.qty)||0);
+    have[k] = (have[k]||0) + 1;
+  });
+  const missing = [];
+  Object.keys(need).forEach(k => { const m = need[k] - (have[k]||0); for (let i=0;i<m;i++) missing.push(meta[k]); });
+  if (!missing.length) { console.log('✅ 빠진 창고이동 이력 없음'); return { missing: 0 }; }
+  console.table(missing.map(m => ({ 품목:m.name, 수량:m.qty, 출발:_whName(m.from), 도착:_whName(m.to), 날짜:m.date })));
+  if (!apply) { console.log('※ 실제로 채우려면: _repairConsignMoveHistory(true)'); return { missing: missing.length, applied: 0 }; }
+  DB.stockHistory = DB.stockHistory || [];
+  missing.forEach(m => {
+    const it = (DB.items||[]).find(i => String(i.id)===String(m.itemId));
+    DB.stockHistory.push({
+      id: nextId('stock'), itemId: m.itemId, type:'move', qty: m.qty, price: (it&&it.price)||0,
+      fromWh: m.from, toWh: m.to, date: m.date || new Date().toISOString().slice(0,10),
+      lot: (it&&it.lot)||'', note: `재고이동: ${_whName(m.from)} → ${_whName(m.to)} [이력복구]`
+    });
+  });
+  await saveDataNow();
+  try { if (typeof renderStock==='function') renderStock(); } catch(_){}
+  console.log('✅ ' + missing.length + '건 이력 복구 완료 (재고 수치는 변경 없음)');
+  return { missing: missing.length, applied: missing.length };
+};
+
 function _applyStockMove(it, from, to, qty){
   if(!it) return {ok:false, err:'품목을 선택하세요'};
   if(!from) return {ok:false, err:'출발 창고를 선택하세요'};
@@ -29155,7 +29265,9 @@ function _applyStockMove(it, from, to, qty){
   const fromName = from==='__un__'?'미지정':_whName(from);
   const toName = to==='__un__'?'미지정':_whName(to);
   DB.stockHistory=DB.stockHistory||[];
-  DB.stockHistory.push({ id: nextId('stock'), itemId: it.id, type:'move', qty: qty, price: it.price||0, fromWh: from, toWh: to, date: new Date().toISOString().slice(0,10), lot: it.lot||'', note:`재고이동: ${fromName} → ${toName}` });
+  const _mvRec = { id: nextId('stock'), itemId: it.id, type:'move', qty: qty, price: it.price||0, fromWh: from, toWh: to, date: new Date().toISOString().slice(0,10), lot: it.lot||'', note:`재고이동: ${fromName} → ${toName}` };
+  DB.stockHistory.push(_mvRec);
+  _whMoveVaultAdd(Object.assign({ _vts: Date.now() }, _mvRec));   // v2.3.634: 유실 대비 금고 기록
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(_){}
   return {ok:true, fromName, toName};
 }
@@ -29487,8 +29599,25 @@ async function _consignSubmit(){
   }
   await _consignSaveShipments();
   try { if(typeof renderStock==='function') renderStock(); } catch(_){}
-  try { await saveDataNow(); } catch(_){}
+  // v2.3.634: 실쓰기 여부 판정 — 무음 실패 시 사용자에게 알림(재고 이력 유실 사고 방지)
+  let _wrote = true;
+  try { window._lastFsWriteOk = false; await saveDataNow(); _wrote = (window._lastFsWriteOk !== false); }
+  catch(e) { _wrote = false; console.error('[CONSIGN] 저장 실패', e); }
+  if (!_wrote) {
+    alert('⚠️ 서버 저장이 확인되지 않았습니다.\n\n재고 이동 기록이 이 기기에만 남아 있을 수 있습니다.\n네트워크 확인 후 새로고침하면 자동 복구를 시도합니다.');
+  }
   window._consignEditId=null;
+  // v2.3.634: 창고별 증감을 눈으로 확인할 수 있게 요약 표시
+  try {
+    const _sum = (orig ? (orig.lines||[]) : lines).map(l => {
+      const _it = (DB.items||[]).find(i=>String(i.id)===String(l.itemId));
+      const _eff = _it ? _itemWhEffective(_it) : {};
+      const _f = (orig ? (orig.whFromId||whFromId) : whFromId), _t = (orig ? (orig.whToId||whToId) : whToId);
+      return '· ' + (l.name||'') + '  ' + (_f==='__un__'?'미지정':_whName(_f)) + ' ' + fmt((Number(_eff[_f])||0)+(Number(l.qty)||0)) + ' → ' + fmt(Number(_eff[_f])||0)
+           + '  /  ' + _whName(_t) + ' ' + fmt((Number(_eff[_t])||0)-(Number(l.qty)||0)) + ' → ' + fmt(Number(_eff[_t])||0);
+    }).join('\n');
+    if (!orig && _sum) setTimeout(()=>{ try { alert('✅ 재고이동 완료\n\n' + _sum); } catch(_){} }, 100);
+  } catch(_){}
   showNotif(orig?'✅ 위탁 명세서 수정 저장 — 재고 차이 반영됨':'✅ 위탁 재고이동 완료 — 목록에 추가됨','success');
   // v2.3.500: 저장 후 폼 닫고 페이지 목록 갱신
   try { document.getElementById('consign-overlay')?.remove(); } catch(_){}
@@ -59662,6 +59791,14 @@ function initERPWhenReady() {
       _dbFromDefault = false;  // v1.9.955: Firestore 머지 성공 → 실제 데이터 확보 → 쓰기 차단 해제
       _firestoreDataLoaded = true;  // ✅ Firestore 쓰기 허용
       console.log('✅ Firestore 데이터 로드 완료 — Firestore 쓰기 활성화');
+      // v2.3.634: 창고이동 이력이 서버에 안 남은 경우 로컬 금고에서 되살림 (재고 수치는 건드리지 않음)
+      try {
+        const _rst = (typeof _whMoveVaultRestore === 'function') ? _whMoveVaultRestore() : 0;
+        if (_rst > 0) {
+          try { showNotif('🔁 유실된 창고이동 이력 ' + _rst + '건을 복구했습니다', 'info'); } catch(_){}
+          try { if (typeof saveData === 'function') saveData(); } catch(_){}
+        }
+      } catch(e) { console.warn('창고이동 이력 복구 skip:', e); }
       // v2.3.370: 와디즈 오분류 자동 교정(멱등) — PlusCL 크롤러가 와디즈 출고를 '자사몰'로 잘못
       //   태깅한 주문(ord_comp_name='와디즈_기본양식', 2026-07-03 541건)을 와디즈로 정정.
       //   조건이 정확(자사몰 + plusclOrdCompName 에 '와디즈')해 진짜 자사몰(카페24/르니브)은 안 건드림.
