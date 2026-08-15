@@ -135,7 +135,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
-const VO_VERSION = 'v2026-08-15p';        // 배포 확인용. 코드 고칠 때마다 올릴 것
+const VO_VERSION = 'v2026-08-15q';        // 배포 확인용. 코드 고칠 때마다 올릴 것
 console.log('[RENIV OFFICE]', VO_VERSION);
 const FB = window.__FB__ || null;
 const DEMO = new URLSearchParams(location.search).has('demo');
@@ -851,34 +851,42 @@ const SHELF_SLOT = [
   { y:2.03, dz:-2.2 }, { y:2.03, dz:0 }, { y:2.03, dz:2.2 },
   { y:3.63, dz:-2.2 }, { y:3.63, dz:0 }, { y:3.63, dz:2.2 },
 ];
-/* 선반 위 제품 박스 하나. 앞면(+x, 통로 쪽)에 품목 이미지가 붙는다. */
+/* 선반 한 자리 = 제품 하나. 수량이 많을수록 같은 제품을 여러 개 나열해
+   진열대처럼 보이게 하고, 각 상자 앞면(+x, 통로 쪽)에 품목 사진을 씌운다. */
 function shelfItem(bz, slot, it, info){
   const s = SHELF_SLOT[slot];
   if (!s) return;
   const g = new THREE.Group();
   const low = !!it.low;
-  const body = box(1.5, 1.18, 1.5, low ? 0xF4718B : P.paper);
-  const band = box(1.56, 0.3, 1.56, low ? 0xE95077 : P.gold);
-  band.position.y = -0.36;
-  const lid  = box(1.54, 0.12, 1.54, low ? 0xE95077 : P.wood);
-  lid.position.y = 0.61;
-  g.add(body, band, lid);
-  dPick(body, info);
+  const qty = Number(it.qty) || 0;
+  const n = qty >= 1000 ? 3 : (qty >= 100 ? 2 : 1);   // 진열 개수 = 재고량 눈금
+  const faces = [];
+  for (let i = 0; i < n; i++){
+    const dz = (i - (n - 1) / 2) * 0.72;
+    const b = box(0.9, 1.25, 0.62, low ? 0xF4718B : P.paper);
+    b.position.set(0, 0, dz);
+    const cap = box(0.94, 0.1, 0.66, low ? 0xE95077 : P.gold);
+    cap.position.set(0, 0.68, dz);
+    g.add(b, cap);
+    faces.push(b);
+    dPick(b, info);
+  }
 
-  const t = label(`${it.name || it.code || '품목'} ${it.qty}`,
+  const t = label(`${it.name || it.code || '품목'} ${qty.toLocaleString('ko-KR')}`,
                   { cls: low ? 'small warnc' : 'small' });
-  t.position.y = 1.05;
+  t.position.y = 1.15;
   g.add(t);
   if (low){
-    const bc = box(0.36,0.36,0.36,0xFF8FA0);
-    bc.position.set(0, 1.0, 0); bc.userData.blink = true;
+    const bc = box(0.34,0.34,0.34,0xFF8FA0);
+    bc.position.set(0, 1.05, 0); bc.userData.blink = true;
     g.add(bc);
   }
   g.position.set(WH.x - 6, s.y, bz + s.dz);
   dataGroup.add(g);
 
-  if (it.img) faceCrate(body, it.img);
-  else if (it.id) loadItemImage(it.id).then(src => faceCrate(body, src));
+  const paint = src => { if (src) faces.forEach(m => faceCrate(m, src)); };
+  if (it.img) paint(it.img);
+  else if (it.id) loadItemImage(it.id).then(paint);
 }
 
 /* 창고 선반 — 칸마다 벽쪽에 하나씩 (세로 방향) */
@@ -954,7 +962,7 @@ function drawBig(K){
 /* 품목 이미지: ERP 는 itemImages/item_{품목id} 에 base64 로 보관한다.
    스냅샷이 품목 id(`it.id`)를 실어줄 때만 동작하며, 화면당 IMG_MAX 개까지만 읽는다.
    vo_snapshot 외 컬렉션을 읽는 유일한 예외다. */
-const IMG_MAX = 12;
+const IMG_MAX = 18;
 const _imgCache = new Map();
 let _fsGetDoc = null, _fsDoc = null;
 async function loadItemImage(itemId){
