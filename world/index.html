@@ -135,7 +135,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
-const VO_VERSION = 'v2026-08-15m';        // 배포 확인용. 코드 고칠 때마다 올릴 것
+const VO_VERSION = 'v2026-08-15o';        // 배포 확인용. 코드 고칠 때마다 올릴 것
 console.log('[RENIV OFFICE]', VO_VERSION);
 const FB = window.__FB__ || null;
 const DEMO = new URLSearchParams(location.search).has('demo');
@@ -156,11 +156,19 @@ const ZONES = [
   { id:'sales',     name:'국내영업팀', x:-26, z: 20, w:28, d:22, color:0xADCAF3, cam:[-26,13,3],  tgt:[-26,2,20] },
   { id:'marketing', name:'마케팅팀',   x: 34, z: 20, w:28, d:22, color:0xC8B2F0, cam:[ 34,13,3],  tgt:[ 34,2,20] },
   { id:'meeting',   name:'회의실',     x:  4, z:  0, w:26, d:16, color:0xF2DBAE, cam:[4,15,26],   tgt:[4,1,0] },
-  { id:'warehouse', name:'창고',       x:-58, z:  0, w:18, d:48, color:0xEED7AC, cam:[-36,30,26], tgt:[-59,1,0] },
+  { id:'warehouse', name:'창고',       x:-58, z:  0, w:18, d:48, color:0xEED7AC, cam:[-31,14,31], tgt:[-58,5,0] },
 ];
 
-/* 창고 6칸 — ERP 창고 목록 순서대로 왼쪽에 일렬 배치 */
-const WH = { x:-58, bayZ:[-20, -12, -4, 4, 12, 20] };
+/* 창고 6칸 — ERP 창고 목록 순서대로 왼쪽에 일렬 배치.
+   칸은 '자리'라서 데이터가 없어도 항상 있고, 간판도 항상 걸린다.
+   ERP 에 창고가 추가/개명되면 names 를 같이 고쳐야 한다. */
+const WH = {
+  x: -58,
+  bayZ:  [-20, -12, -4, 4, 12, 20],
+  names: ['르니브 창고', '르니브 본사', '쿠팡 창고',
+          '바로팜 창고', '바이오코스텍 창고', '내추럴솔루션 창고'],
+};
+const whKey = s => String(s||'').replace(/\s+/g, '');
 
 /* ═══════ 씬 ═══════ */
 const app = document.getElementById('app');
@@ -826,12 +834,26 @@ function barH(v, vmax, max=6, min=0.6){
   v = Math.max(0, Number(v)||0); vmax = Math.max(1, Number(vmax)||1);
   return min + (max-min)*Math.sqrt(Math.min(v/vmax,1));
 }
+const _texLoader = new THREE.TextureLoader();
+/* 상자 앞면(+x, 통로 쪽)에만 품목 이미지를 씌운다. 실패하면 기존 색 그대로 둔다. */
+function faceCrate(mesh, src){
+  if (!mesh || !src) return;
+  _texLoader.load(src, tex=>{
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.magFilter = THREE.LinearFilter;
+    const base = mesh.material;
+    const face = new THREE.MeshLambertMaterial({ map:tex });
+    mesh.material = [face, base, base, base, base, base];
+  }, undefined, ()=>{});
+}
 function crate(x, z, qty, low, info, name){
   const g = new THREE.Group();
+  let topMesh = null;
   const per = Math.max(30, Math.ceil(qty/4));
   const n = Math.max(1, Math.min(4, Math.ceil(qty/per)));
   for (let i=0;i<n;i++){
     const c = box(1.7,1.2,1.7, low?0xF4718B:0xF2AE5A);
+    topMesh = c;
     c.position.set((i%2)*0.12, 0.6+i*1.26, (i%2)*0.08);
     const tape = box(1.74,0.28,1.74, low?0xE95077:0xE59230);
     tape.position.copy(c.position);
@@ -849,6 +871,7 @@ function crate(x, z, qty, low, info, name){
   }
   g.position.set(x, 0.14, z);
   dataGroup.add(g);
+  return topMesh;
 }
 
 /* 창고 선반 — 칸마다 벽쪽에 하나씩 (세로 방향) */
@@ -871,6 +894,28 @@ for (let i=1;i<WH.bayZ.length;i++){
   ln.position.set(WH.x, 0.16, mz);
   scene.add(ln);
 }
+/* 창고 간판 — 통로 위 레일에 칸 이름을 높이 매단다 */
+const whRail = box(0.32, 0.32, 46, P.woodDark);
+whRail.position.set(WH.x - 2, 11.3, 0);
+scene.add(whRail);
+WH.bayZ.forEach((bz, i)=>{
+  const nm = WH.names[i];
+  const g = new THREE.Group();
+  [-2.1, 2.1].forEach(dz=>{
+    const hang = box(0.16, 1.9, 0.16, P.woodDark);
+    hang.position.set(0, 10.4, dz); g.add(hang);
+  });
+  const plate = box(0.3, 1.45, 4.6, P.white);   plate.position.set(0, 9.05, 0);
+  const edge  = box(0.38, 0.18, 4.8, P.gold);   edge.position.set(0, 8.28, 0);
+  const edge2 = edge.clone();                    edge2.position.set(0, 9.82, 0);
+  g.add(plate, edge, edge2);
+  g.position.set(WH.x - 2, 0, bz);
+  scene.add(g);
+  addPick(plate, { title:nm, tag:'창고 · ERP 등록', note:'ERP 창고 목록의 칸입니다.' });
+  const t = label(nm, { cls:'big' });
+  t.position.set(WH.x - 2.35, 9.05, bz);
+  scene.add(t);
+});
 
 /* 벽 대형 스크린 (KPI) */
 const bigCanvas = document.createElement('canvas'); bigCanvas.width = 512; bigCanvas.height = 240;
@@ -897,6 +942,25 @@ function drawBig(K){
   g.fillStyle = '#B8F5D8'; g.font = '900 34px monospace';
   g.fillText(String(K.monthOrders||0)+'건', 360, 196);
   bigTex.needsUpdate = true;
+}
+
+/* 품목 이미지: ERP 는 itemImages/item_{품목id} 에 base64 로 보관한다.
+   스냅샷이 품목 id(`it.id`)를 실어줄 때만 동작하며, 화면당 IMG_MAX 개까지만 읽는다.
+   vo_snapshot 외 컬렉션을 읽는 유일한 예외다. */
+const IMG_MAX = 12;
+const _imgCache = new Map();
+let _fsGetDoc = null, _fsDoc = null;
+async function loadItemImage(itemId){
+  if (!itemId || !db || !_fsGetDoc) return null;
+  if (_imgCache.has(itemId)) return _imgCache.get(itemId);
+  if (_imgCache.size >= IMG_MAX) return null;
+  _imgCache.set(itemId, null);
+  try{
+    const s = await _fsGetDoc(_fsDoc(db, 'itemImages', 'item_' + itemId));
+    const d = s.exists() ? (s.data().data || null) : null;
+    _imgCache.set(itemId, d);
+    return d;
+  }catch(e){ console.warn('[품목이미지] 읽기 실패', itemId, e.message); return null; }
 }
 
 function renderData(snap){
@@ -972,37 +1036,45 @@ function renderData(snap){
     dataGroup.add(eg);
   });
 
-  /* 창고: 칸마다 창고명 + 재고 상자 (라벨은 품목 '명칭') */
-  const whs = (snap.warehouses||[]).slice(0, WH.bayZ.length);
-  whs.forEach((wh, bi)=>{
+  /* 창고: 고정 6칸에 스냅샷 창고를 '이름'으로 매칭해 채운다 */
+  const whSrc = snap.warehouses || [];
+  const whUsed = new Set();
+  WH.names.forEach((nm, bi)=>{
     const bz = WH.bayZ[bi];
-    const items = (wh.items||[]).slice(0, 3);
+    const wh = whSrc.find(w => whKey(w.name) === whKey(nm));
+    if (wh) whUsed.add(wh);
+    const items = wh ? (wh.items||[]).slice(0, 3) : [];
     const lowCnt = items.filter(v=>v.low).length;
 
-    const nameTag = label(wh.name, { cls: lowCnt ? 'name warnc' : 'name' });
-    nameTag.position.set(WH.x - 1, 5.7, bz);
-    dataGroup.add(nameTag);
-
-    const plate = box(5.6, 0.85, 0.3, lowCnt ? 0xF4718B : P.wood);
+    const plate = box(5.6, 0.85, 0.3, !wh ? P.gray : (lowCnt ? 0xF4718B : P.wood));
     plate.position.set(WH.x - 6, 4.9, bz);
     dataGroup.add(plate);
-    dPick(plate, { title:wh.name, tag:'창고',
-      rows:[['보관 품목', items.length + '종'],
-            ['총 수량', items.reduce((a,v)=>a+(Number(v.qty)||0),0).toLocaleString('ko-KR')+'개'],
-            ['부족 품목', lowCnt + '종']],
-      warn:!!lowCnt });
+    dPick(plate, { title:nm, tag:'창고',
+      rows: wh
+        ? [['보관 품목', items.length + '종'],
+           ['총 수량', items.reduce((a,v)=>a+(Number(v.qty)||0),0).toLocaleString('ko-KR')+'개'],
+           ['부족 품목', lowCnt + '종']]
+        : [['상태', '스냅샷에 이 창고가 없음']],
+      note: wh ? '' : '서버 vo_snapshot.py 의 WH_NAMES 에 이 창고 ID가 없을 수 있습니다.',
+      warn: !!lowCnt });
 
     items.forEach((it, k)=>{
-      crate(WH.x - 3.4 + k*3.6, bz, it.qty, it.low,
-        { title:it.name, tag:wh.name,
+      const top = crate(WH.x - 3.4 + k*3.6, bz, it.qty, it.low,
+        { title:it.name, tag:nm,
           rows:[['품목명', it.name||'-'],
                 ['품목코드', it.code||'-'],
                 ['수량',(it.qty||0).toLocaleString('ko-KR')+'개'],
                 ['상태', it.low?'⚠ 부족 (20 이하)':'정상']],
           warn:it.low },
         it.name || it.code || '품목');
+      if (it.img) faceCrate(top, it.img);
+      else if (it.id) loadItemImage(it.id).then(src => faceCrate(top, src));
     });
   });
+  const orphan = whSrc.filter(w => !whUsed.has(w));
+  if (orphan.length)
+    console.warn('[창고] 칸에 매칭되지 않은 창고:', orphan.map(w=>w.name),
+                 '— WH.names 또는 서버 WH_NAMES 를 맞춰야 합니다.');
 
   /* 회의판 텍스트 갱신 */
   const feed = (snap.feed||[]);
@@ -1258,6 +1330,7 @@ async function loadData(){
     if (DEMO || !FB){ snap = DEMO_SNAP; }
     else {
       const { getDoc, doc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+      _fsGetDoc = getDoc; _fsDoc = doc;      // 품목 이미지 조회에 재사용
       const s = await getDoc(doc(db, 'erp_data', 'vo_snapshot'));
       if (!s.exists()) throw new Error('vo_snapshot 문서가 없습니다');
       snap = JSON.parse(s.data().data);
