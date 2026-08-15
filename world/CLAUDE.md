@@ -79,6 +79,59 @@ world/vo_snapshot.py                    ← 참고용 사본 (스키마 확인�
 **중요:** 3D 앱은 `vo_snapshot` **하나만** 읽는다. 850KB짜리 `shopOrders`를 직접 읽지 않는다.
 무거워지기도 하고, 샤딩(`shopOrders_arch1..N`) 처리를 클라이언트에서 다시 할 이유가 없다.
 
+### 3-2. 서버의 다른 동기화 스크립트 (2026-08-15 파악)
+
+`/opt/vaultsync/` 에는 `vo_snapshot.py` 말고도 AI 직원용 스크립트가 같이 산다.
+
+| 파일 | 하는 일 | 내려받는 곳 |
+|---|---|---|
+| `baro_sync.py` | 바로팜 주문 엑셀 다운로드 (IAN) | `/srv/reniv-orders` |
+| `baro_clean.py` → `erp_write.py --apply` | 정제 후 ERP 입력 | `/srv/reniv-orders-clean`, `-full` |
+| `vault_sync.py` | AI 학습 볼트(옵시디언) 동기화 | `/srv/reniv-brand` |
+| `baro_check.py` · `baro_stock_alert.py` | 업로드 독촉 · 재고 경고 | — |
+| `/home/ian/ian_render.py` | IAN 렌더 (계정 `ian` 으로 실행) | — |
+
+cron 은 `/etc/cron.d/reniv-vo`(10분마다 vo_snapshot)와 바로팜 파이프라인(10분마다,
+`flock` 로 중복 실행 방지) 두 갈래다. 로그는 전부 `/var/log/baro_sync.log`.
+
+**⚠️ 드라이브 폴더는 반드시 ID로 지정할 것.** 원래 `ROOT_NAME` 으로 이름 **정확일치**
+검색을 했는데(`name='바로팜'`), 드라이브에서 폴더 이름만 바꿔도 **에러 없이 조용히 멈춘다.**
+2026-08-15 실제 사고: `바로팜`→`바로팜 주문수집`, `노트 for Obsidian`→`AI 학습시키기` 로
+개명하자 두 스크립트가 동시에 중단됐고, 알림이 없어 며칠 뒤에나 알 뻔했다.
+게다가 협력사 드라이브에 같은 이름의 폴더가 생기면 **엉뚱한 폴더를 읽을 수도** 있다
+(실제로 같은 날 협력사 계정에 `바로팜` 폴더가 생겼다).
+
+지금은 두 스크립트 모두 `ROOT_ID` 를 우선 쓴다:
+
+```
+ROOT_NAME = "바로팜"                                 # 폴백. 지우지 말 것
+ROOT_ID   = "1uZev4_VtzL2F_VDf_QqZJ0McEbZ8-LZ3"     # 바로팜 주문수집
+                                                     # 학습볼트는 1bU-PPvs4bg2AttbcjjcD-E6rfwEUu2nZ
+def find_root(s):
+    if ROOT_ID:
+        return ROOT_ID        # 아래 기존 이름검색은 그대로 남아 있음
+```
+
+`find_root()` 는 폴더 **id 문자열**을 반환한다(`return fs[0]["id"]`). 백업본은
+`*.py.bak` 로 같은 폴더에 있다. 수정 후엔 `venv/bin/python -m py_compile` 로 문법을 보고,
+`flock -n /var/lock/reniv-baro.lock` 을 걸어 수동 1회 실행해 확인할 것.
+
+### 3-3. 구글 드라이브는 로컬에 마운트돼 있다
+
+작업 PC에 Google Drive for Desktop 이 `G:\` 로 붙어 있어서, 볼트 파일을 **직접 편집**할 수 있다.
+
+```
+G:\내 드라이브\르니브 드라이브\르니브 CREW\AI직원용 폴더\
+├─ AI 학습시키기\      ← 옵시디언 볼트 (.obsidian, _scripts, 퍼포먼스 마케팅 전략 …)
+└─ 바로팜 주문수집\    ← 바로팜_상품별_*.xlsx
+```
+
+Drive MCP 커넥터의 `update_file` 은 **제목·위치만** 바꾸고 본문은 못 고친다. 본문 수정은
+이 G: 경로에서 파일로 직접 하면 되고, 구글 드라이브가 알아서 올려준다.
+편집 전 원본을 스크래치패드에 복사해 둘 것.
+
+---
+
 ### vo_snapshot 스키마
 
 ```jsonc
