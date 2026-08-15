@@ -65,6 +65,21 @@
   .gate p{color:var(--tan);font-size:13px;line-height:1.6;margin:0 0 20px}
   .gate .btn{font-size:14px;padding:12px 22px}
   .err{color:#D6455D;font-size:12px;margin-top:12px;min-height:16px}
+  /* 3D 위에 겹치는 선명한 HTML 라벨 */
+  #tags{position:fixed;inset:0;pointer-events:none;z-index:5;overflow:hidden}
+  .tg{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;
+    font-weight:800;letter-spacing:-.2px;
+    background:rgba(255,252,245,.94);border:2px solid #E3D2B4;border-radius:10px;
+    padding:3px 9px;font-size:13px;color:#5A4634;
+    text-shadow:0 1px 0 rgba(255,255,255,.6);box-shadow:0 2px 0 rgba(90,70,52,.13)}
+  .tg.name{font-size:14px;padding:4px 11px;border-radius:12px}
+  .tg.zone{font-size:17px;padding:6px 15px;border-radius:14px;border-width:3px}
+  .tg.small{font-size:11.5px;padding:2px 7px}
+  .tg.warnc{color:#C4364F;border-color:#F3AAB9;background:rgba(255,240,243,.95)}
+  .tg.bubble{font-size:22px;padding:4px 10px;border-color:#F2B8A0}
+  .tg.scr{background:rgba(38,55,72,.94);border-color:#7FD4E8;color:#EAF9FF;
+    font-size:11.5px;padding:2px 8px;text-shadow:none;box-shadow:0 2px 0 rgba(20,35,50,.35)}
+  .tg.big{font-size:19px;padding:7px 17px;border-width:3px;border-radius:15px}
   @media (max-width:820px){
     .panel{left:12px;right:12px;width:auto;top:auto;bottom:12px;max-height:44vh}
     .kpi{max-width:calc(100vw - 24px);bottom:auto;top:62px}
@@ -79,10 +94,12 @@
   <div class="brand">🏢 RENIV <span>WORLD</span></div>
   <div class="stamp" id="stamp">불러오는 중…</div>
   <div class="grow"></div>
+  <button class="btn" id="btn-q">🖼 화질: 선명</button>
   <button class="btn meet" id="btn-meet">📣 회의 소집</button>
   <button class="btn" id="btn-reload">🔄 새로고침</button>
 </div>
 
+<div id="tags"></div>
 <div class="rooms" id="rooms"></div>
 <div class="panel" id="panel"></div>
 <div class="kpi" id="kpi"></div>
@@ -116,10 +133,13 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
+const VO_VERSION = 'v2026-08-15a';        // 배포 확인용. 코드 고칠 때마다 올릴 것
+console.log('[RENIV WORLD]', VO_VERSION);
 const FB = window.__FB__ || null;
 const DEMO = new URLSearchParams(location.search).has('demo');
-const PIX = 0.38;                      // 픽셀 아트 해상도 (낮을수록 도트 굵음)
+let PIX = 1;                        // 렌더 해상도 (1=선명, 낮을수록 도트 굵음)
 
 /* ═══════ 파스텔 팔레트 ═══════ */
 const P = {
@@ -130,10 +150,10 @@ const P = {
 };
 
 const ZONES = [
-  { id:'ceo',       name:'대표이사실', x:-32, z:-16, w:26, d:20, color:0xBFE8DC, cam:[-32,17,6],  tgt:[-32,1,-16] },
-  { id:'design',    name:'디자인팀',   x: 32, z:-16, w:26, d:20, color:0xF6D3DB, cam:[ 32,17,6],  tgt:[ 32,1,-16] },
-  { id:'sales',     name:'국내영업팀', x:-32, z: 16, w:26, d:20, color:0xCCDCF8, cam:[-32,17,38], tgt:[-32,1,16] },
-  { id:'marketing', name:'마케팅팀',   x: 32, z: 16, w:26, d:20, color:0xE2D7F6, cam:[ 32,17,38], tgt:[ 32,1,16] },
+  { id:'ceo',       name:'대표이사실', x:-32, z:-16, w:26, d:20, color:0xBFE8DC, cam:[-33,13,-1], tgt:[-31,2,-16] },
+  { id:'design',    name:'디자인팀',   x: 32, z:-16, w:26, d:20, color:0xF6D3DB, cam:[ 33,13,-1], tgt:[ 33,2,-16] },
+  { id:'sales',     name:'국내영업팀', x:-32, z: 16, w:26, d:20, color:0xCCDCF8, cam:[-33,13,31], tgt:[-31,2,16] },
+  { id:'marketing', name:'마케팅팀',   x: 32, z: 16, w:26, d:20, color:0xE2D7F6, cam:[ 33,13,31], tgt:[ 33,2,16] },
   { id:'meeting',   name:'회의실',     x:  0, z: -8, w:24, d:18, color:0xFBE7C0, cam:[0,18,14],   tgt:[0,1,-8] },
   { id:'warehouse', name:'창고',       x:  0, z: 25, w:36, d:14, color:0xEFE0BC, cam:[0,18,46],   tgt:[0,1,25] },
 ];
@@ -151,16 +171,24 @@ const renderer = new THREE.WebGLRenderer({ antialias:false });
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 app.appendChild(renderer.domElement);
+const tagRenderer = new CSS2DRenderer({ element: document.getElementById('tags') });
 function resize(){
-  renderer.setPixelRatio(1);
-  renderer.setSize(Math.round(innerWidth*PIX), Math.round(innerHeight*PIX), false);
+  const sharp = PIX > 0.6;
+  renderer.setPixelRatio(sharp ? Math.min(devicePixelRatio||1, 2) : 1);
+  renderer.setSize(Math.round(innerWidth*(sharp?1:PIX)), Math.round(innerHeight*(sharp?1:PIX)), false);
   renderer.domElement.style.width = '100%';
   renderer.domElement.style.height = '100%';
+  tagRenderer.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
 }
 resize();
 addEventListener('resize', resize);
+document.getElementById('btn-q').onclick = e=>{
+  PIX = PIX > 0.6 ? 0.42 : 1;
+  e.target.textContent = PIX > 0.6 ? '🖼 화질: 선명' : '🎮 화질: 도트';
+  resize();
+};
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -217,45 +245,120 @@ function box(w,h,d,color){
   return m;
 }
 function label(text, o={}){
-  const size = o.size||44, pad = 16;
-  const c = document.createElement('canvas');
-  const g0 = c.getContext('2d');
-  g0.font = `800 ${size}px Pretendard,'Malgun Gothic',sans-serif`;
-  c.width = Math.ceil(g0.measureText(text).width)+pad*2; c.height = size+pad*2;
-  const g = c.getContext('2d');
-  g.font = `800 ${size}px Pretendard,'Malgun Gothic',sans-serif`;
-  if (o.bg !== null){
-    g.fillStyle = o.bg||'rgba(255,252,245,.92)';
-    g.beginPath(); g.roundRect(0,0,c.width,c.height,16); g.fill();
-    g.lineWidth = 4; g.strokeStyle = o.border||'#E3D2B4';
-    g.beginPath(); g.roundRect(2,2,c.width-4,c.height-4,14); g.stroke();
-  }
-  g.fillStyle = o.color||'#5A4634';
-  g.textBaseline = 'middle'; g.fillText(text, pad, c.height/2);
-  const tex = new THREE.CanvasTexture(c);
-  tex.magFilter = THREE.NearestFilter;
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, transparent:true, depthWrite:false }));
-  const s = o.scale||0.024;
-  sp.scale.set(c.width*s, c.height*s, 1);
-  return sp;
+  const d = document.createElement('div');
+  const size = o.size || 44;
+  let cls = 'tg';
+  if (o.cls) cls += ' ' + o.cls;
+  else if (size >= 44) cls += ' zone';
+  else if (size <= 32) cls += ' small';
+  else cls += ' name';
+  if (o.color === '#C4364F') cls += ' warnc';
+  d.className = cls;
+  d.textContent = text;
+  if (o.border) d.style.borderColor = o.border;
+  if (o.color && o.color !== '#C4364F') d.style.color = o.color;
+  const ob = new CSS2DObject(d);
+  ob.center.set(0.5, 0.5);
+  return ob;
+}
+/* 그룹을 씬에서 뺄 때 붙어 있던 HTML 라벨도 같이 지운다 */
+function dropTags(obj){
+  obj.traverse(o=>{
+    if (o.isCSS2DObject && o.element && o.element.parentNode)
+      o.element.parentNode.removeChild(o.element);
+  });
 }
 
-/* ═══════ 픽셀 얼굴 ═══════ */
-function faceTexture(mood){
-  const c = document.createElement('canvas'); c.width = 32; c.height = 32;
+/* ═══════ 픽셀 얼굴 (64x64, 직원별 개성) ═══════ */
+function faceTexture(f){
+  f = f || {};
+  const c = document.createElement('canvas'); c.width = 64; c.height = 64;
   const g = c.getContext('2d');
-  g.fillStyle = '#F6D7B8'; g.fillRect(0,0,32,32);
-  g.fillStyle = '#3A2C20';
-  g.fillRect(8,13,4,5); g.fillRect(20,13,4,5);            // 눈
-  g.fillStyle = '#FFFFFF';
-  g.fillRect(9,14,1,1); g.fillRect(21,14,1,1);            // 눈 반짝
-  g.fillStyle = '#F0A093';
-  g.fillRect(4,20,4,3); g.fillRect(24,20,4,3);            // 볼터치
-  g.fillStyle = '#7A4A3A';
-  if (mood === 'smile'){ g.fillRect(13,22,6,2); g.fillRect(12,21,1,1); g.fillRect(19,21,1,1); }
-  else { g.fillRect(13,22,6,2); }
+  const hair = f.hairHex || '#3A2C20';
+  const dark = f.lineHex || '#2E2418';
+
+  g.fillStyle = f.skin || '#F8DCBE'; g.fillRect(0,0,64,64);
+
+  /* 앞머리 */
+  g.fillStyle = hair;
+  const fr = f.fringe || 'flat';
+  if (fr === 'flat'){ g.fillRect(0,0,64,11); }
+  else if (fr === 'split'){ g.fillRect(0,0,64,9); g.fillRect(0,9,24,5); g.fillRect(40,9,24,4); }
+  else if (fr === 'wave'){ g.fillRect(0,0,64,8);
+    for (let x=0;x<64;x+=8) g.fillRect(x,8,6,(x/8)%2?6:3); }
+  else if (fr === 'bob'){ g.fillRect(0,0,64,12);
+    g.fillRect(0,12,8,32); g.fillRect(56,12,8,32); g.fillRect(0,12,20,4); }
+
+  /* 눈썹 */
+  g.fillStyle = f.browHex || hair;
+  const by = f.browY || 20;
+  if (f.brow === 'angled'){ g.fillRect(15,by+2,12,3); g.fillRect(37,by+2,12,3);
+    g.fillRect(15,by,5,3); g.fillRect(44,by,5,3); }
+  else if (f.brow === 'raised'){ g.fillRect(16,by-2,12,3); g.fillRect(36,by-2,12,3); }
+  else { g.fillRect(16,by,12,3); g.fillRect(36,by,12,3); }
+
+  /* 눈 */
+  const ey = f.eyeY || 29;
+  function eye(cx, closed){
+    if (closed){ g.fillStyle = dark; g.fillRect(cx-5,ey+5,12,3);
+      g.fillRect(cx-6,ey+3,2,3); g.fillRect(cx+6,ey+3,2,3); return; }
+    const st = f.eye || 'round';
+    g.fillStyle = '#FFFFFF';
+    if (st !== 'sharp') g.fillRect(cx-5,ey,11,10);
+    g.fillStyle = dark;
+    if (st === 'sharp'){ g.fillRect(cx-5,ey-1,11,2); g.fillRect(cx-4,ey+1,9,9);
+      g.fillStyle='#FFFFFF'; g.fillRect(cx-1,ey+2,3,3); }
+    else if (st === 'calm'){ g.fillRect(cx-5,ey-1,11,3); g.fillRect(cx-3,ey+2,7,7);
+      g.fillStyle='#FFFFFF'; g.fillRect(cx-1,ey+3,3,3); }
+    else { g.fillRect(cx-4,ey+1,9,8);
+      g.fillStyle='#FFFFFF'; g.fillRect(cx-2,ey+2,3,3); }
+  }
+  eye(20, false);
+  eye(44, f.wink === true);
+
+  /* 안경 */
+  if (f.glasses){
+    g.strokeStyle = f.glassHex || '#4C4136'; g.lineWidth = 2;
+    g.strokeRect(11,ey-4,18,17); g.strokeRect(35,ey-4,18,17);
+    g.beginPath(); g.moveTo(29,ey+4); g.lineTo(35,ey+4); g.stroke();
+    g.fillStyle = 'rgba(255,255,255,.30)'; g.fillRect(13,ey-2,7,6); g.fillRect(37,ey-2,7,6);
+  }
+
+  /* 코 */
+  g.fillStyle = f.noseHex || '#E5B792'; g.fillRect(31,38,3,3);
+
+  /* 볼터치 / 주근깨 */
+  if (f.blush !== false){
+    g.fillStyle = f.blushHex || '#F5A79A';
+    const bw = f.blush === 'strong' ? 10 : 8;
+    g.fillRect(10,40,bw,5); g.fillRect(54-bw,40,bw,5);
+  }
+  if (f.freckles){
+    g.fillStyle = '#D79A72';
+    [[16,38],[21,41],[26,38],[38,38],[43,41],[48,38]].forEach(q=>g.fillRect(q[0],q[1],2,2));
+  }
+
+  /* 입 */
+  const my = f.mouthY || 47;
+  g.fillStyle = f.mouthHex || '#8A4A3C';
+  const m = f.mouth || 'smile';
+  if (m === 'grin'){
+    g.fillRect(23,my,18,8); g.fillRect(21,my-2,3,3); g.fillRect(40,my-2,3,3);
+    g.fillStyle = '#FFFFFF'; g.fillRect(24,my+1,16,3);
+    g.fillStyle = '#E86A80'; g.fillRect(26,my+5,12,2);
+  } else if (m === 'smirk'){
+    g.fillRect(28,my+2,12,3); g.fillRect(39,my-1,3,3);
+  } else if (m === 'calm'){
+    g.fillRect(28,my+2,9,3);
+  } else {
+    g.fillRect(25,my+1,14,3); g.fillRect(23,my-1,3,3); g.fillRect(38,my-1,3,3);
+  }
+
   const t = new THREE.CanvasTexture(c);
   t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.anisotropy = 4;
+  t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 
@@ -263,7 +366,7 @@ function faceTexture(mood){
 const chars = [];
 function makeChar(cfg){
   const g = new THREE.Group();
-  const pants = 0x4A5568;
+  const pants = cfg.pants || 0x4A5568;
 
   const legL = box(0.34,0.8,0.36,pants); legL.position.set(-0.22,0.4,0);
   const legR = box(0.34,0.8,0.36,pants); legR.position.set( 0.22,0.4,0);
@@ -281,19 +384,59 @@ function makeChar(cfg){
   const armR = new THREE.Mesh(armGeo(), armMat.clone()); armR.castShadow = true;
   armR.position.set( 0.76,1.78,0);
 
-  const skinMat = new THREE.MeshLambertMaterial({ color:P.skin });
-  const faceMat = new THREE.MeshLambertMaterial({ map:faceTexture('smile') });
-  const head = new THREE.Mesh(new THREE.BoxGeometry(1.15,1.1,1.05),
+  const F = cfg.face || {};
+  const skinMat = new THREE.MeshLambertMaterial({ color: cfg.skin || P.skin });
+  const faceMat = new THREE.MeshLambertMaterial({ map:faceTexture(F) });
+  const head = new THREE.Mesh(new THREE.BoxGeometry(1.24,1.18,1.1),
     [skinMat,skinMat,skinMat,skinMat,faceMat,skinMat]);
-  head.position.y = 2.45; head.castShadow = true;
+  head.position.y = 2.48; head.castShadow = true;
 
-  const hairTop = box(1.25,0.36,1.15,cfg.hair); hairTop.position.y = 3.1;
-  const hairBack = box(1.25,0.7,0.3,cfg.hair); hairBack.position.set(0,2.6,-0.45);
+  const hairTop = box(1.34, cfg.acc==='beret'?0.22:0.34, 1.2, cfg.hair);
+  hairTop.position.y = cfg.acc==='beret' ? 3.08 : 3.14;
+  const hairBack = box(1.32, cfg.hairLong?1.2:0.72, 0.32, cfg.hair);
+  hairBack.position.set(0, cfg.hairLong?2.35:2.62, -0.48);
 
-  const tag = label(cfg.name, { size:40, scale:0.02, border:cfg.tagColor });
-  tag.position.y = 4.0;
+  /* 머리 모양 · 액세서리 (성격) */
+  const extra = [];
+  if (cfg.hairSide){
+    const sL = box(0.24,0.95,1.05,cfg.hair); sL.position.set(-0.66,2.35,-0.12);
+    const sR = sL.clone(); sR.position.x = 0.66; extra.push(sL,sR);
+  }
+  if (cfg.hairTuft){
+    const tf = box(0.34,0.38,0.34,cfg.hair); tf.position.set(0.44,3.4,0.16);
+    tf.rotation.z = -0.3; extra.push(tf);
+  }
+  if (cfg.acc === 'vest'){
+    const v = box(1.18,0.82,0.75,cfg.accColor); v.position.y = 1.2;
+    const pk = box(0.24,0.82,0.77,0xFFFDF6); pk.position.y = 1.2;
+    const col = box(0.74,0.15,0.1,0xFFFDF6); col.position.set(0,1.79,0.37);
+    extra.push(v,pk,col);
+  }
+  if (cfg.acc === 'tie'){
+    const col = box(0.76,0.16,0.1,0xFFFDF6); col.position.set(0,1.79,0.37);
+    const kn = box(0.24,0.2,0.09,cfg.accColor); kn.position.set(0,1.66,0.38);
+    const ti = box(0.22,0.66,0.07,cfg.accColor); ti.position.set(0,1.24,0.38);
+    extra.push(col,kn,ti);
+  }
+  if (cfg.acc === 'headphones'){
+    const band = box(1.5,0.18,0.26,0x2E3440); band.position.set(0,3.2,0);
+    const eL = box(0.24,0.54,0.54,0x2E3440); eL.position.set(-0.72,2.72,0);
+    const eR = eL.clone(); eR.position.x = 0.72;
+    const dot = box(0.1,0.14,0.14,0x7BE3C8); dot.position.set(-0.85,2.72,0.2);
+    extra.push(band,eL,eR,dot);
+  }
+  if (cfg.acc === 'beret'){
+    const b1 = box(1.42,0.26,1.2,cfg.accColor); b1.position.set(0,3.3,-0.12); b1.rotation.z = 0.1;
+    const b2 = box(0.16,0.18,0.16,cfg.accColor); b2.position.set(0.22,3.5,-0.12);
+    const sc = box(1.2,0.22,0.8,0xF6C7D4); sc.position.set(0,1.92,0);
+    extra.push(b1,b2,sc);
+  }
+
+  const tag = label(cfg.name, { cls:'name', border:cfg.tagColor });
+  tag.position.y = 4.7;
 
   g.add(legL,legR,body,armL,armR,head,hairTop,hairBack,tag);
+  extra.forEach(m=>g.add(m));
   [body,head].forEach(m=>addPick(m, cfg.info));
 
   g.position.set(cfg.desk.x, 0, cfg.desk.z);
@@ -323,10 +466,11 @@ function makeDesk(x, z, ry, screenText, screenColor, info){
   const face = new THREE.Mesh(new THREE.PlaneGeometry(1.8,1.05),
     new THREE.MeshBasicMaterial({ color:screenColor }));
   face.position.set(0,2.7,-0.47);
-  const st = label(screenText, { size:34, scale:0.014, bg:null, color:'#FFFFFF' });
+  const st = label(screenText, { cls:'scr' });
   st.position.set(0,2.72,-0.40);
 
-  g.add(top,l1,l2,l3,l4,kb,stand,scr,face,st);
+  const face2 = face.clone(); face2.position.z = -0.64; face2.rotation.y = Math.PI;
+  g.add(top,l1,l2,l3,l4,kb,stand,scr,face,face2,st);
   g.position.set(x,0,z); g.rotation.y = ry;
   [top,scr].forEach(m=>addPick(m, info));
   scene.add(g);
@@ -365,7 +509,7 @@ const MEET_SEATS = [
 ];
 MEET_SEATS.forEach(s=> makeChair(s.x, s.z, s.z>MEET.z ? Math.PI : 0, 0xF2B8A0));
 const board = box(7.5,4,0.3,P.white); board.position.set(MEET.x, 3.4, MEET.z-8.2); scene.add(board);
-const boardTxt = label('📋 주간 회의', { size:46, scale:0.02 });
+const boardTxt = label('📋 주간 회의', { cls:'big' });
 boardTxt.position.set(MEET.x, 5.9, MEET.z-8.0); scene.add(boardTxt);
 addPick(mTable, { title:'회의실', tag:'RENIV WORLD',
   rows:[['용도','AI 직원 주간 회의'],['참석','Tim · IAN · Greg · Jony']],
@@ -385,19 +529,43 @@ makePlant(-14, -8); makePlant(14, -8);
 
 /* ═══════ 직원 + 책상 ═══════ */
 const EMP = [
-  { id:'tim',  name:'Tim',  zone:'ceo',       shirt:0x2FA98C, hair:0x4A3628, tagColor:'#2FA98C',
+  /* Tim · 비서 — 차분하고 단정. 안경, 니트 조끼, 온화한 미소 */
+  { id:'tim',  name:'Tim',  zone:'ceo',
+    shirt:0x2FA98C, hair:0x4A3628, pants:0x3D4A5C, skin:0xFAE0C4,
+    acc:'vest', accColor:0x33455E, tagColor:'#2FA98C',
+    face:{ hairHex:'#4A3628', skin:'#FAE0C4', fringe:'split', brow:'flat',
+           eye:'calm', mouth:'calm', glasses:true, glassHex:'#4C4136', blush:true },
     info:{ title:'Tim · 비서', tag:'AI 직원',
       rows:[['담당','주문 리포트'],['보고','매일 07:30'],['채널','#대표이사']],
       note:'ERP 매출·재고·결재를 조회해 답합니다.' } },
-  { id:'ian',  name:'IAN',  zone:'sales',     shirt:0x5B8DEF, hair:0x2E2E38, tagColor:'#5B8DEF',
+
+  /* IAN · 국내영업 — 활발하고 붙임성 좋음. 활짝 웃는 얼굴, 넥타이 */
+  { id:'ian',  name:'IAN',  zone:'sales',
+    shirt:0x5B8DEF, hair:0x241F2B, pants:0x2C3A52, skin:0xF3CDA4,
+    acc:'tie', accColor:0xD94F5C, tagColor:'#5B8DEF',
+    face:{ hairHex:'#241F2B', skin:'#F3CDA4', fringe:'flat', brow:'raised',
+           eye:'round', mouth:'grin', blush:'strong', browY:19 },
     info:{ title:'IAN · 국내영업팀장', tag:'AI 직원',
       rows:[['담당','바로팜 주문·재고'],['보고','평일 13:00'],['채널','#국내영업팀']],
       note:'바로팜 주문을 ERP에 자동 입력하고 재고를 차감합니다.' } },
-  { id:'greg', name:'Greg', zone:'marketing', shirt:0x9B7EDE, hair:0x6B4A2E, tagColor:'#9B7EDE',
+
+  /* Greg · 마케팅 — 장난기 있고 아이디어형. 윙크, 헤드폰, 곱슬머리 */
+  { id:'greg', name:'Greg', zone:'marketing',
+    shirt:0x9B7EDE, hair:0x7A5230, pants:0x4A4160, skin:0xF6D3B0,
+    acc:'headphones', tagColor:'#9B7EDE', hairTuft:true,
+    face:{ hairHex:'#7A5230', skin:'#F6D3B0', fringe:'wave', brow:'raised',
+           eye:'round', mouth:'smirk', wink:true, freckles:true, blush:true },
     info:{ title:'Greg · 마케팅팀장', tag:'AI 직원',
       rows:[['담당','시장·경쟁사 조사'],['보고','매일 08:00'],['채널','#마케팅팀']],
       note:'퍼포먼스 마케팅 전략 문서로 브리프와 소재를 만듭니다.' } },
-  { id:'jony', name:'Jony', zone:'design',    shirt:0xE8768F, hair:0x1F1F28, tagColor:'#E8768F',
+
+  /* Jony · 디자인 — 진지하고 감각적. 단발+베레모, 또렷한 눈매 */
+  { id:'jony', name:'Jony', zone:'design',
+    shirt:0xE8768F, hair:0x1F1F28, pants:0x2B2B36, skin:0xFCE3CC,
+    acc:'beret', accColor:0xD8A24A, tagColor:'#E8768F',
+    hairLong:true, hairSide:true,
+    face:{ hairHex:'#1F1F28', skin:'#FCE3CC', fringe:'bob', brow:'angled',
+           eye:'sharp', mouth:'calm', blush:false, mouthHex:'#C0576A' },
     info:{ title:'Jony · 디자인팀장', tag:'AI 직원',
       rows:[['담당','패키지·광고 소재'],['보고','매일 08:30'],['채널','#디자인팀']],
       note:'브랜드 가이드에 맞춰 디자인을 제안합니다.' } },
@@ -406,26 +574,20 @@ const deskScreens = {};  // zone → 모니터 문구 업데이트용
 
 EMP.forEach((e,i)=>{
   const z = ZONES.find(v=>v.id===e.zone);
-  const dz = z.z < 0 ? z.z - 2 : z.z + 2;
-  const deskRy = z.z < 0 ? 0 : Math.PI;                 // 모니터가 방 안쪽을 보게
-  const standZ = z.z < 0 ? dz + 1.7 : dz - 1.7;
-  makeDesk(z.x, dz, deskRy, '…', 0x9FE8FF, e.info);
-  makeChair(z.x, standZ + (z.z<0? 0.9 : -0.9), z.z<0 ? Math.PI : 0, 0xF2B8A0);
-  makeChar({ ...e,
-    desk:{ x:z.x, z:standZ, ry: z.z<0 ? Math.PI : 0 },
-    seat: MEET_SEATS[i] });
+  const dz = z.z + 2;                                   // 책상은 방 앞쪽
+  const standZ = dz - 1.7;                              // 직원은 책상 뒤에서 정면을 봄
+  const cx = z.x + 1.7;                                 // 모니터 옆에 서게
+  makeDesk(z.x, dz, Math.PI, '…', 0x9FE8FF, e.info);
+  makeChair(cx, standZ - 1.0, 0, 0xF2B8A0);
+  makeChar({ ...e, desk:{ x:cx, z:standZ, ry:0 }, seat: MEET_SEATS[i] });
 });
 
 /* ═══════ 데이터 시각화 ═══════ */
-function clearData(){
-  while(dataGroup.children.length) dataGroup.remove(dataGroup.children[0]);
-  pickable.length = pickable.findIndex(m=>m.userData._static===undefined) < 0 ? 0 : pickable.length;
-}
 let dataPicks = [];
 function clearDataPicks(){
   dataPicks.forEach(m=>{ const i = pickable.indexOf(m); if (i>=0) pickable.splice(i,1); });
   dataPicks = [];
-  while(dataGroup.children.length) dataGroup.remove(dataGroup.children[0]);
+  while(dataGroup.children.length){ const c0 = dataGroup.children[0]; dropTags(c0); dataGroup.remove(c0); }
 }
 function dPick(m, info){ m.userData.info = info; pickable.push(m); dataPicks.push(m); }
 
@@ -655,7 +817,8 @@ function buildKpi(snap){
   const al = snap.stockAlerts||[];
   document.getElementById('alerts').innerHTML =
     al.slice(0,4).map(a=>`<div class="alert">⚠ ${a.wh} · ${a.name} ${a.qty}개 — 발주 필요</div>`).join('');
-  document.getElementById('stamp').textContent = 'ERP 기준 '+(snap.stamp||'-');
+  document.getElementById('stamp').textContent =
+    'ERP 기준 '+(snap.stamp||'-')+'  ·  '+VO_VERSION;
 }
 function buildRooms(){
   const el = document.getElementById('rooms');
@@ -691,10 +854,28 @@ document.getElementById('btn-reload').onclick = ()=> loadData();
 /* ═══════ 애니메이션 ═══════ */
 const clock = new THREE.Clock();
 let T = 0, emoTimer = 0;
+const _tv = new THREE.Vector3();
+let _fadeN = 0;
+function fadeTags(){
+  scene.traverse(o=>{
+    if (!o.isCSS2DObject) return;
+    o.getWorldPosition(_tv);
+    const d = _tv.distanceTo(camera.position);
+    const cl = o.element.classList;
+    const far = cl.contains('small') ? 104 : (cl.contains('scr') ? 58 : 175);
+    let op = 1;
+    if (d > far) op = 0;
+    else if (d > far - 20) op = (far - d) / 20;
+    o.visible = op > 0.03;
+    if (o.visible) o.element.style.opacity = op.toFixed(2);
+  });
+}
+
 function tick(){
   requestAnimationFrame(tick);
   const dt = Math.min(clock.getDelta(), 0.05);
   T += dt;
+  if ((_fadeN++ % 3) === 0) fadeTags();
 
   chars.forEach((ch,i)=>{
     if (ch.target){
@@ -747,8 +928,7 @@ function tick(){
     const ch = chars[Math.floor(Math.random()*chars.length)];
     if (ch && !ch.target){
       if (ch.bubble) ch.g.remove(ch.bubble);
-      const b = label(EMOJIS[Math.floor(Math.random()*EMOJIS.length)],
-        { size:52, scale:0.02, bg:'rgba(255,255,255,.96)', border:'#F2B8A0' });
+      const b = label(EMOJIS[Math.floor(Math.random()*EMOJIS.length)], { cls:'bubble' });
       b.position.y = 4.9;
       ch.g.add(b); ch.bubble = b;
       setTimeout(()=>{ if (ch.bubble===b){ ch.g.remove(b); ch.bubble=null; } }, 1400);
@@ -769,6 +949,7 @@ function tick(){
   }
   controls.update();
   renderer.render(scene, camera);
+  tagRenderer.render(scene, camera);
 }
 
 /* ═══════ 데이터 ═══════ */
