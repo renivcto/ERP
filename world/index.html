@@ -135,7 +135,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
-const VO_VERSION = 'v2026-08-15b';        // 배포 확인용. 코드 고칠 때마다 올릴 것
+const VO_VERSION = 'v2026-08-15c';        // 배포 확인용. 코드 고칠 때마다 올릴 것
 console.log('[RENIV WORLD]', VO_VERSION);
 const FB = window.__FB__ || null;
 const DEMO = new URLSearchParams(location.search).has('demo');
@@ -244,19 +244,14 @@ function box(w,h,d,color){
   m.castShadow = true; m.receiveShadow = true;
   return m;
 }
+/* 크기·색은 cls 로만 지정한다: zone / name / small / scr / bubble / big / warnc
+   (여러 개는 공백으로 — 예: cls:'small warnc') */
 function label(text, o={}){
   const d = document.createElement('div');
-  const size = o.size || 44;
-  let cls = 'tg';
-  if (o.cls) cls += ' ' + o.cls;
-  else if (size >= 44) cls += ' zone';
-  else if (size <= 32) cls += ' small';
-  else cls += ' name';
-  if (o.color === '#C4364F') cls += ' warnc';
-  d.className = cls;
+  d.className = o.cls ? 'tg ' + o.cls : 'tg';
   d.textContent = text;
   if (o.border) d.style.borderColor = o.border;
-  if (o.color && o.color !== '#C4364F') d.style.color = o.color;
+  if (o.color) d.style.color = o.color;
   const ob = new CSS2DObject(d);
   ob.center.set(0.5, 0.5);
   return ob;
@@ -518,12 +513,12 @@ addPick(mTable, { title:'회의실', tag:'RENIV WORLD',
 /* 존 이름표 + 화분 */
 ZONES.forEach(z=>{
   if (z.id === 'meeting' || z.id === 'warehouse') return;
-  const t = label(z.name, { size:46, scale:0.023 });
+  const t = label(z.name, { cls:'zone' });
   t.position.set(z.x, 4.6, z.z + z.d/2 - 1.4);
   scene.add(t);
 });
-const wt = label('📦 창고', { size:46, scale:0.023 }); wt.position.set(0, 5.2, 31); scene.add(wt);
-const mt2 = label('회의실', { size:46, scale:0.023 }); mt2.position.set(0, 4.6, 0.6); scene.add(mt2);
+const wt = label('📦 창고', { cls:'zone' }); wt.position.set(0, 5.2, 31); scene.add(wt);
+const mt2 = label('회의실', { cls:'zone' }); mt2.position.set(0, 4.6, 0.6); scene.add(mt2);
 makePlant(-46, -30); makePlant(46, -30); makePlant(-46, 30); makePlant(46, 30);
 makePlant(-14, -8); makePlant(14, -8);
 
@@ -599,7 +594,7 @@ function cuteBar(x, z, h, w, color, info, text){
   g.add(b, cap);
   dPick(b, info);
   if (text){
-    const t = label(text, { size:32, scale:0.016 });
+    const t = label(text, { cls:'small' });
     t.position.y = h + 1.0;
     g.add(t);
   }
@@ -622,8 +617,7 @@ function crate(x, z, qty, low, info, name){
     g.add(c, tape);
     dPick(c, info);
   }
-  const t = label(`${name} ${qty}`, { size:30, scale:0.015,
-    color: low?'#C4364F':'#6E5946' });
+  const t = label(`${name} ${qty}`, { cls: low ? 'small warnc' : 'small' });
   t.position.y = 0.6 + n*1.26 + 0.8;
   g.add(t);
   if (low){
@@ -692,7 +686,7 @@ function renderData(snap){
     dPick(p, { title:'결재 대기', tag:'대표이사실',
       rows:[['대기 건수', ap+'건']], note:'결재를 기다리는 문서입니다.' });
   }
-  const pt = label(`결재 ${ap}건`, { size:30, scale:0.015, color: ap?'#B4761B':'#8A715A' });
+  const pt = label(`결재 ${ap}건`, { cls:'small', color: ap?'#B4761B':'#8A715A' });
   pt.position.y = 0.2 + Math.min(ap,10)*0.14 + 0.8;
   pg.add(pt);
   pg.position.set(-30.4, 1.66, -18.45);   // Tim 책상 위
@@ -708,7 +702,7 @@ function renderData(snap){
           ['이번 달', won(pay.month)+` (${pay.monthCnt||0}건)`],
           ['기한 경과', won(pay.over)+` (${pay.overCnt||0}건)`]],
     warn:!!pay.overCnt });
-  const st2 = label('💰 지급예정', { size:30, scale:0.015 });
+  const st2 = label('💰 지급예정', { cls:'small' });
   st2.position.set(-24, 3.4, -22); dataGroup.add(st2);
 
   /* 국내영업팀: 지역 블록 */
@@ -721,7 +715,7 @@ function renderData(snap){
       r.name.split(' ').pop());
   });
   const ph = snap.pharmacies||{};
-  const pl = label(`💊 약국 ${ph.total||0}곳 · 재구매 ${ph.repeat||0}곳`, { size:34, scale:0.017 });
+  const pl = label(`💊 약국 ${ph.total||0}곳 · 재구매 ${ph.repeat||0}곳`, { cls:'name' });
   pl.position.set(-30, 4.2, 12.5); dataGroup.add(pl);
 
   /* 마케팅팀: 채널 블록 */
@@ -743,7 +737,7 @@ function renderData(snap){
     eg.add(a1,a2,cv);
     dPick(cv, { title:p.name, tag:'생산 진행',
       rows:[['수량',(p.qty||0).toLocaleString('ko-KR')],['상태',p.status||'-']] });
-    const t = label(`🏭 ${p.qty||0}`, { size:30, scale:0.015 });
+    const t = label(`🏭 ${p.qty||0}`, { cls:'small' });
     t.position.set(0,4.0,0); eg.add(t);
     eg.position.set(36 + i*4.2, 0.14, -22);
     dataGroup.add(eg);

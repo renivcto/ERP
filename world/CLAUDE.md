@@ -174,7 +174,10 @@ label('창고', { cls:'zone' })   // → CSS2DObject, div.tg.zone
 
 - 클래스: `.tg` 기본 / `.zone` 방 이름 / `.name` 직원 이름표 / `.small` 데이터 수치 /
   `.scr` 모니터 화면 / `.bubble` 회의 말풍선 / `.warnc` 재고 부족(빨강)
-- `cls` 를 안 주면 `o.size` 로 자동 판단한다 (44↑ zone, 32↓ small).
+- **크기·색은 반드시 `cls` 로 지정한다.** 여러 개는 공백으로 (`cls:'small warnc'`).
+  예전엔 `{ size, scale }` 로 클래스를 자동 판단하는 폴백과, `color:'#C4364F'` 를 주면
+  `warnc` 가 붙는 매직 컬러 분기가 있었으나 **v2026-08-15c 에서 둘 다 제거**했다.
+  `cls` 를 빼면 기본 `.tg` 만 붙는다. `color` 는 클래스에 없는 커스텀 색에만 쓴다.
 - 렌더는 **두 번** 돈다:
   ```js
   renderer.render(scene, camera);
