@@ -1,4 +1,4 @@
-# RENIV WORLD — 3D 가상 오피스 (작업 인계 문서)
+# RENIV OFFICE — 3D 가상 오피스 (작업 인계 문서)
 
 이 폴더(`ERP/world/`)는 르니브 ERP 데이터를 픽셀 아트 3D 오피스로 시각화하는 단일 HTML 앱이다.
 Claude Code에서 이어서 작업할 때 **이 문서를 먼저 읽을 것.**
@@ -38,6 +38,9 @@ ERP/
 | `C:\Users\heeka\OneDrive\0.RENIV\ERP\` | ❌ 낡은 사본. `world/` 자체가 없음 |
 
 C 쪽을 고치면 작업이 통째로 날아간다. 작업 시작 전에 `pwd` 로 E 드라이브인지 확인할 것.
+
+표기명은 **RENIV OFFICE** 지만 **폴더명·URL·`vo_snapshot`·`VO_VERSION`·`__VO__` 는 `world`/`vo` 그대로**다.
+(2026-08-15 개명. 경로까지 바꾸면 배포 URL 과 서버 cron 이 깨진다.)
 
 배포: `https://renivcto.github.io/ERP/world/index.html`
 로그인 없이 보기: `https://renivcto.github.io/ERP/world/index.html?demo=1`
@@ -273,7 +276,7 @@ chromium.launch({ args:['--use-gl=swiftshader','--enable-unsafe-swiftshader','--
 const VO_VERSION = 'v2026-08-15a';   // 코드를 고칠 때마다 올릴 것
 ```
 
-- 상단바 오른쪽 시각 옆에 같이 표시되고, 브라우저 콘솔에도 `[RENIV WORLD] v...` 로 찍힌다.
+- 상단바 오른쪽 시각 옆에 같이 표시되고, 브라우저 콘솔에도 `[RENIV OFFICE] v...` 로 찍힌다.
 - 배포 후 이 값이 안 바뀌면 **아직 반영이 안 된 것**이다. Ctrl+Shift+R 후 다시 확인.
 - 코드를 고치면 커밋 전에 이 값을 반드시 올릴 것. (a → b → c, 날짜가 바뀌면 날짜부터)
 
