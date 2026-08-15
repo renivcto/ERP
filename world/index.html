@@ -135,7 +135,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
-const VO_VERSION = 'v2026-08-15g';        // 배포 확인용. 코드 고칠 때마다 올릴 것
+const VO_VERSION = 'v2026-08-15h';        // 배포 확인용. 코드 고칠 때마다 올릴 것
 console.log('[RENIV OFFICE]', VO_VERSION);
 const FB = window.__FB__ || null;
 const DEMO = new URLSearchParams(location.search).has('demo');
@@ -147,13 +147,14 @@ const P = {
   mint:0x4EE4B8, blue:0x5F98F2, pink:0xF3728C, gold:0xF3BB5E, purple:0x9D78ED,
   wood:0xE8B273, woodDark:0xD98C45, white:0xFFFFFC, gray:0xC5D2DD,
   screen:0x8DABC4, paper:0xFFFDF6, skin:0xF8E5D3,
+  wall:0xF7EFDF, wallTop:0xE9D9BE, glass:0xBEE4F6, metal:0xCBDAE6,
 };
 
 const ZONES = [
   { id:'ceo',       name:'대표이사실', x:-32, z:-16, w:26, d:20, color:0xA8F0DA, cam:[-33,13,-1], tgt:[-31,2,-16] },
   { id:'design',    name:'디자인팀',   x: 32, z:-16, w:26, d:20, color:0xF2AEC3, cam:[ 33,13,-1], tgt:[ 33,2,-16] },
-  { id:'sales',     name:'국내영업팀', x:-32, z: 16, w:26, d:20, color:0xADCAF3, cam:[-33,13,31], tgt:[-31,2,16] },
-  { id:'marketing', name:'마케팅팀',   x: 32, z: 16, w:26, d:20, color:0xC8B2F0, cam:[ 33,13,31], tgt:[ 33,2,16] },
+  { id:'sales',     name:'국내영업팀', x:-32, z: 16, w:26, d:20, color:0xADCAF3, cam:[-33,13,1], tgt:[-31,2,16] },
+  { id:'marketing', name:'마케팅팀',   x: 32, z: 16, w:26, d:20, color:0xC8B2F0, cam:[ 33,13,1], tgt:[ 33,2,16] },
   { id:'meeting',   name:'회의실',     x:  0, z: -8, w:24, d:18, color:0xF2DBAE, cam:[0,18,14],   tgt:[0,1,-8] },
   { id:'warehouse', name:'창고',       x:  0, z: 25, w:36, d:14, color:0xEED7AC, cam:[0,18,46],   tgt:[0,1,25] },
 ];
@@ -165,7 +166,7 @@ scene.background = new THREE.Color(0xBADFF2);
 scene.fog = new THREE.Fog(0xBADFF2, 130, 260);
 
 const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 400);
-camera.position.set(0, 54, 66);
+camera.position.set(0, 44, 68);
 
 const renderer = new THREE.WebGLRenderer({ antialias:false });
 renderer.shadowMap.enabled = true;
@@ -195,7 +196,7 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.maxPolarAngle = Math.PI/2 - 0.1;
 controls.minDistance = 10;
-controls.maxDistance = 140;
+controls.maxDistance = 150;
 
 scene.add(new THREE.AmbientLight(0xFFFDF8, 1.24));
 scene.add(new THREE.HemisphereLight(0xF2FAFF, 0xFFF8EC, 0.94));
@@ -308,8 +309,8 @@ function faceTexture(f){
     else { g.fillRect(cx-4,ey+1,9,8);
       g.fillStyle='#FFFFFF'; g.fillRect(cx-2,ey+2,3,3); }
   }
-  eye(20, false);
-  eye(44, f.wink === true);
+  eye(20, f.blinkAll === true);
+  eye(44, f.blinkAll === true || f.wink === true);
 
   /* 안경 */
   if (f.glasses){
@@ -366,7 +367,8 @@ function makeChar(cfg){
   const legL = box(0.34,0.8,0.36,pants); legL.position.set(-0.22,0.4,0);
   const legR = box(0.34,0.8,0.36,pants); legR.position.set( 0.22,0.4,0);
 
-  const body = box(1.15,1.05,0.72,cfg.shirt); body.position.y = 1.32;
+  const body = box(1.04,1.02,0.7,cfg.shirt); body.position.y = 1.32;
+  const shoulder = box(1.22,0.2,0.74,cfg.shirt); shoulder.position.y = 1.76;
 
   const armGeo = ()=> {
     const geo = new THREE.BoxGeometry(0.3,0.85,0.34);
@@ -375,21 +377,33 @@ function makeChar(cfg){
   };
   const armMat = new THREE.MeshLambertMaterial({ color:cfg.shirt });
   const armL = new THREE.Mesh(armGeo(), armMat); armL.castShadow = true;
-  armL.position.set(-0.76,1.78,0);
+  armL.position.set(-0.72,1.76,0);
   const armR = new THREE.Mesh(armGeo(), armMat.clone()); armR.castShadow = true;
-  armR.position.set( 0.76,1.78,0);
+  armR.position.set( 0.72,1.76,0);
 
   const F = cfg.face || {};
   const skinMat = new THREE.MeshLambertMaterial({ color: cfg.skin || P.skin });
-  const faceMat = new THREE.MeshLambertMaterial({ map:faceTexture(F) });
-  const head = new THREE.Mesh(new THREE.BoxGeometry(1.24,1.18,1.1),
+  const texOpen = faceTexture(F);
+  const texBlink = faceTexture(Object.assign({}, F, { blinkAll:true }));
+  const faceMat = new THREE.MeshLambertMaterial({ map:texOpen });
+  const head = new THREE.Mesh(new THREE.BoxGeometry(1.32,1.24,1.16),
     [skinMat,skinMat,skinMat,skinMat,faceMat,skinMat]);
-  head.position.y = 2.48; head.castShadow = true;
+  head.position.y = 2.54; head.castShadow = true;
 
-  const hairTop = box(1.34, cfg.acc==='beret'?0.22:0.34, 1.2, cfg.hair);
-  hairTop.position.y = cfg.acc==='beret' ? 3.08 : 3.14;
-  const hairBack = box(1.32, cfg.hairLong?1.2:0.72, 0.32, cfg.hair);
-  hairBack.position.set(0, cfg.hairLong?2.35:2.62, -0.48);
+  const neck = box(0.46,0.32,0.46, cfg.skin || P.skin); neck.position.y = 1.88;
+
+  /* 손 · 신발 (팔·다리에 붙여 같이 움직인다) */
+  const handGeo = ()=> box(0.34,0.3,0.38, cfg.skin || P.skin);
+  const hL = handGeo(); hL.position.set(0,-0.9,0.02); armL.add(hL);
+  const hR = handGeo(); hR.position.set(0,-0.9,0.02); armR.add(hR);
+  const shoeC = cfg.shoe || 0x6B87B3;
+  const sL = box(0.42,0.26,0.56, shoeC); sL.position.set(0,-0.33,0.1); legL.add(sL);
+  const sR = box(0.42,0.26,0.56, shoeC); sR.position.set(0,-0.33,0.1); legR.add(sR);
+
+  const hairTop = box(1.4, cfg.acc==='beret'?0.24:0.36, 1.26, cfg.hair);
+  hairTop.position.y = cfg.acc==='beret' ? 3.16 : 3.22;
+  const hairBack = box(1.38, cfg.hairLong?1.26:0.76, 0.34, cfg.hair);
+  hairBack.position.set(0, cfg.hairLong?2.4:2.68, -0.5);
 
   /* 머리 모양 · 액세서리 (성격) */
   const extra = [];
@@ -430,16 +444,19 @@ function makeChar(cfg){
   const tag = label(cfg.name, { cls:'name', border:cfg.tagColor });
   tag.position.y = 4.7;
 
-  g.add(legL,legR,body,armL,armR,head,hairTop,hairBack,tag);
-  extra.forEach(m=>g.add(m));
+  const upper = new THREE.Group();
+  upper.add(body, shoulder, neck, armL, armR, head, hairTop, hairBack);
+  extra.forEach(m=>upper.add(m));
+  g.add(legL, legR, upper, tag);
   [body,head].forEach(m=>addPick(m, cfg.info));
 
   g.position.set(cfg.desk.x, 0, cfg.desk.z);
   g.rotation.y = cfg.desk.ry;
   scene.add(g);
 
-  const ch = { g, legL, legR, armL, armR, head,
-    deskPos:{...cfg.desk}, seatPos:{...cfg.seat},
+  const ch = { g, legL, legR, armL, armR, head, upper,
+    faceMat, texOpen, texBlink, blinkAt: 1.5 + Math.random()*4,
+    deskPos:{...cfg.desk}, seatPos:{...cfg.seat}, doorZ: cfg.doorZ || 0, queue:[],
     pos:new THREE.Vector2(cfg.desk.x, cfg.desk.z),
     target:null, targetRy:cfg.desk.ry, phase:Math.random()*6.28, bubble:null };
   chars.push(ch);
@@ -514,18 +531,208 @@ addPick(mTable, { title:'회의실', tag:'RENIV OFFICE',
 ZONES.forEach(z=>{
   if (z.id === 'meeting' || z.id === 'warehouse') return;
   const t = label(z.name, { cls:'zone' });
-  t.position.set(z.x, 4.6, z.z + z.d/2 - 1.4);
+  const sg = z.z > 0 ? -1 : 1;
+  t.position.set(z.x, 4.6, z.z + sg*(z.d/2 - 1.4));
   scene.add(t);
 });
 const wt = label('📦 창고', { cls:'zone' }); wt.position.set(0, 5.2, 31); scene.add(wt);
 const mt2 = label('회의실', { cls:'zone' }); mt2.position.set(0, 4.6, 0.6); scene.add(mt2);
+/* ═══════ 벽 · 칸막이 ═══════ */
+function wallSeg(x, z, w, h, d, color){
+  const m = box(w, h, d, color || P.wall);
+  m.position.set(x, h/2 + 0.14, z);
+  scene.add(m);
+  return m;
+}
+/* 방 하나에 뒷벽 + 양옆 칸막이. +z 쪽은 트여 있다 (카메라가 들어오는 방향) */
+function makeRoom(z0, opt){
+  opt = opt || {};
+  const hx = z0.w/2, hz = z0.d/2;
+  const back = opt.backH || 5.2;
+  const side = opt.sideH || 3.0;
+  const T = 0.5;
+  const sg = opt.flip ? -1 : 1;          // sg=1 → 뒷벽이 -z / sg=-1 → 뒷벽이 +z
+  const backZ = z0.z - sg*hz;
+
+  wallSeg(z0.x, backZ, z0.w + T, back, T);                           // 뒷벽
+  wallSeg(z0.x, backZ, z0.w + T, 0.3, T + 0.16, P.wallTop).position.y = back + 0.15;
+
+  if (opt.window !== false){                                          // 창문
+    const ww = z0.w * 0.46, wh = 2.3, wy = back * 0.6;
+    const zf = backZ + sg*(T/2 + 0.05);
+    const glass = new THREE.Mesh(new THREE.BoxGeometry(ww, wh, 0.1),
+      new THREE.MeshBasicMaterial({ color:0xAEDCF2 }));
+    glass.position.set(z0.x, wy, zf);
+    const sky = new THREE.Mesh(new THREE.BoxGeometry(ww * 0.98, wh * 0.42, 0.06),
+      new THREE.MeshBasicMaterial({ color:0xCFEEFB }));
+    sky.position.set(z0.x, wy + wh * 0.26, zf + sg*0.03);          // 위쪽이 더 밝게
+    const fT = box(ww + 0.6, 0.3, 0.26, P.white); fT.position.set(z0.x, wy + wh/2 + 0.14, zf);
+    const sill = box(ww + 0.8, 0.3, 0.5, P.white); sill.position.set(z0.x, wy - wh/2 - 0.14, zf + sg*0.14);
+    const fL = box(0.26, wh + 0.6, 0.26, P.white); fL.position.set(z0.x - ww/2 - 0.13, wy, zf);
+    const fR = fL.clone(); fR.position.x = z0.x + ww/2 + 0.13;
+    const mV = box(0.2, wh, 0.22, P.white); mV.position.set(z0.x, wy, zf + sg*0.04);
+    const mH = box(ww, 0.18, 0.22, P.white); mH.position.set(z0.x, wy, zf + sg*0.04);
+    scene.add(glass, sky, fT, sill, fL, fR, mV, mH);
+  }
+  [-1, 1].forEach(sgn=>{                                              // 옆 칸막이
+    wallSeg(z0.x + sgn*hx, z0.z - sg*1.2, T, side, z0.d - 2.4);
+    const cap = box(T + 0.16, 0.28, z0.d - 2.4, P.wallTop);
+    cap.position.set(z0.x + sgn*hx, side + 0.28, z0.z - sg*1.2);
+    scene.add(cap);
+  });
+}
+
+/* ═══════ 사무 소품 ═══════ */
+function makeShelf(x, z, ry, books){
+  const g = new THREE.Group();
+  const bodyM = box(3.4, 4.2, 0.9, P.wood); bodyM.position.y = 2.1;
+  const backM = box(3.3, 4.0, 0.1, P.woodDark); backM.position.set(0, 2.1, -0.42);
+  g.add(bodyM, backM);
+  const BK = [0xF3728C, 0x5F98F2, 0x4EE4B8, 0xF3BB5E, 0x9D78ED, 0xF2AE5A];
+  [1.1, 2.2, 3.3].forEach((h, si)=>{
+    const sh = box(3.3, 0.12, 0.86, P.white); sh.position.y = h + 0.5; g.add(sh);
+    if (books === false) return;
+    for (let i = 0; i < 6; i++){
+      const bk = box(0.32, 0.72 + (i % 3) * 0.16, 0.6, BK[(i + si * 2) % BK.length]);
+      bk.position.set(-1.35 + i * 0.5, h + 0.94 + ((i % 3) * 0.08), 0.06);
+      g.add(bk);
+    }
+  });
+  g.position.set(x, 0.14, z); g.rotation.y = ry || 0; scene.add(g);
+}
+function makeSofa(x, z, ry, color){
+  const g = new THREE.Group();
+  const seat = box(4.2, 0.7, 1.8, color); seat.position.y = 0.85;
+  const back = box(4.2, 1.3, 0.5, color); back.position.set(0, 1.55, -0.65);
+  const aL = box(0.5, 1.0, 1.8, color); aL.position.set(-1.85, 1.2, 0);
+  const aR = aL.clone(); aR.position.x = 1.85;
+  [[-1.8, -0.7], [1.8, -0.7], [-1.8, 0.7], [1.8, 0.7]].forEach(([lx, lz])=>{
+    const lg = box(0.22, 0.5, 0.22, P.woodDark); lg.position.set(lx, 0.25, lz); g.add(lg);
+  });
+  g.add(seat, back, aL, aR);
+  g.position.set(x, 0.14, z); g.rotation.y = ry || 0; scene.add(g);
+}
+function makeLowTable(x, z){
+  const g = new THREE.Group();
+  const top = box(2.2, 0.18, 1.4, P.wood); top.position.y = 1.0;
+  [[-0.85, -0.5], [0.85, -0.5], [-0.85, 0.5], [0.85, 0.5]].forEach(([lx, lz])=>{
+    const lg = box(0.16, 1.0, 0.16, P.woodDark); lg.position.set(lx, 0.5, lz); g.add(lg);
+  });
+  const cup = box(0.28, 0.3, 0.28, P.white); cup.position.set(0.4, 1.24, 0);
+  g.add(top, cup);
+  g.position.set(x, 0.14, z); scene.add(g);
+}
+function makeWhiteboard(x, z, ry, w){
+  const g = new THREE.Group();
+  const bd = box(w || 5.0, 3.0, 0.18, P.white); bd.position.y = 3.2;
+  const tray = box((w || 5.0) * 0.9, 0.16, 0.4, P.wallTop); tray.position.set(0, 1.6, 0.2);
+  [[-((w || 5.0) / 2 - 0.4)], [((w || 5.0) / 2 - 0.4)]].forEach(([lx])=>{
+    const lg = box(0.16, 1.7, 0.16, P.metal); lg.position.set(lx, 0.85, 0); g.add(lg);
+  });
+  [0xF3728C, 0x5F98F2, 0x4EE4B8].forEach((c, i)=>{
+    const mk = box(0.5, 0.14, 0.14, c); mk.position.set(-1.0 + i * 0.7, 1.74, 0.32); g.add(mk);
+  });
+  g.add(bd, tray);
+  g.position.set(x, 0.14, z); g.rotation.y = ry || 0; scene.add(g);
+}
+function makeCabinet(x, z, ry){
+  const g = new THREE.Group();
+  const b = box(2.2, 2.6, 1.1, P.metal); b.position.y = 1.3;
+  g.add(b);
+  [0.7, 1.5, 2.3].forEach(h=>{
+    const dr = box(2.0, 0.62, 0.1, P.white); dr.position.set(0, h, 0.56); g.add(dr);
+    const hd = box(0.6, 0.12, 0.1, 0xBCCBD6); hd.position.set(0, h, 0.62); g.add(hd);
+  });
+  g.position.set(x, 0.14, z); g.rotation.y = ry || 0; scene.add(g);
+}
+function makeWaterCooler(x, z){
+  const g = new THREE.Group();
+  const b = box(1.0, 2.2, 1.0, P.white); b.position.y = 1.1;
+  const tank = box(0.86, 1.1, 0.86, P.glass); tank.position.y = 2.75;
+  const cap = box(0.4, 0.24, 0.4, 0x5F98F2); cap.position.y = 3.4;
+  const tap = box(0.24, 0.2, 0.3, 0x5F98F2); tap.position.set(0, 1.5, 0.56);
+  g.add(b, tank, cap, tap);
+  g.position.set(x, 0.14, z); scene.add(g);
+}
+function makeCoffee(x, z){
+  const g = new THREE.Group();
+  const counter = box(2.6, 1.5, 1.2, P.wood); counter.position.y = 0.75;
+  const mach = box(1.2, 1.3, 0.9, 0xAABCCB); mach.position.set(-0.5, 2.15, 0);
+  const scr2 = box(0.5, 0.3, 0.06, 0x84EBCE); scr2.position.set(-0.5, 2.5, 0.48);
+  const pot = box(0.6, 0.5, 0.5, 0xB06A58); pot.position.set(0.75, 1.75, 0);
+  [[0.7, 0.42], [1.05, 0.42]].forEach(([cx, cz])=>{
+    const cu = box(0.24, 0.26, 0.24, P.white); cu.position.set(cx, 1.63, cz); g.add(cu);
+  });
+  g.add(counter, mach, scr2, pot);
+  g.position.set(x, 0.14, z); scene.add(g);
+}
+function makePrinter(x, z){
+  const g = new THREE.Group();
+  const b = box(1.8, 1.5, 1.4, P.metal); b.position.y = 0.75;
+  const top = box(1.9, 0.24, 1.5, 0xCBD9E4); top.position.y = 1.62;
+  const tray = box(1.5, 0.12, 0.7, P.white); tray.position.set(0, 1.12, 0.75);
+  const led = box(0.16, 0.1, 0.06, 0x60DC77); led.position.set(0.6, 1.4, 0.71);
+  g.add(b, top, tray, led);
+  g.position.set(x, 0.14, z); scene.add(g);
+}
+function makeClock(x, y, z){
+  const g = new THREE.Group();
+  const r = box(1.5, 1.5, 0.18, P.white);
+  const rim = box(1.7, 1.7, 0.12, P.wallTop); rim.position.z = -0.05;
+  const h1 = box(0.1, 0.5, 0.06, 0x6E5946); h1.position.set(0, 0.22, 0.12);
+  const h2 = box(0.4, 0.1, 0.06, 0x6E5946); h2.position.set(0.16, 0, 0.12);
+  g.add(rim, r, h1, h2);
+  g.position.set(x, y, z); scene.add(g);
+}
+
+/* ── 방 만들기 ─────────────────────────────────────────── */
+ZONES.forEach(z=>{
+  if (z.id === 'warehouse') { makeRoom(z, { backH:4.4, sideH:3.4, window:false }); return; }
+  if (z.id === 'meeting')   { makeRoom(z, { backH:5.6, sideH:2.8, window:false }); return; }
+  makeRoom(z, { flip: z.z > 0 });
+});
+
+/* ── 방별 소품 ─────────────────────────────────────────── */
+/* 대표이사실 */
+makeShelf(-42.5, -22, 0);
+makeSofa(-24, -12.5, Math.PI, 0xB79BF3);
+makeLowTable(-24, -10.2);
+makeClock(-41, 3.9, -25.6);
+makePlant(-42, -9);
+
+/* 디자인팀 */
+makeShelf(43, -22, 0);
+makeWhiteboard(22.5, -20, Math.PI/2, 4.4);
+makeSofa(24, -12.5, Math.PI, 0xF1AE90);
+makeClock(41, 3.9, -25.6);
+makePlant(42, -9);
+
+/* 국내영업팀 */
+makeWhiteboard(-32, 25.4, Math.PI, 5.6);
+makeCabinet(-43, 23.5, 0);
+makeWaterCooler(-22.5, 23.5);
+makeClock(-41, 3.9, 25.6);
+makePlant(-42, 9.5);
+
+/* 마케팅팀 */
+makeSofa(24, 21, Math.PI/2, 0x84EBCE);
+makeLowTable(26.6, 21);
+makeCoffee(43, 23.5);
+makePrinter(38, 25.5);
+makeClock(41, 3.9, 25.6);
+makePlant(42, 9.5);
+
+/* 회의실 주변 */
+makeWaterCooler(9.5, -1.5);
+makePrinter(-9.5, -1.5);
+
 makePlant(-46, -30); makePlant(46, -30); makePlant(-46, 30); makePlant(46, 30);
 makePlant(-14, -8); makePlant(14, -8);
 
 /* ═══════ 직원 + 책상 ═══════ */
 const EMP = [
   /* Tim · 비서 — 차분하고 단정. 안경, 니트 조끼, 온화한 미소 */
-  { id:'tim',  name:'Tim',  zone:'ceo',
+  { id:'tim', shoe:0x6B87B3,  name:'Tim',  zone:'ceo',
     shirt:0x4EE4B8, hair:0x91603B, pants:0x698BB5, skin:0xF8E5D3,
     acc:'vest', accColor:0x668AB7, tagColor:'#2FA98C',
     face:{ hairHex:'#91603B', skin:'#F8E5D3', fringe:'split', brow:'flat',
@@ -535,7 +742,7 @@ const EMP = [
       note:'ERP 매출·재고·결재를 조회해 답합니다.' } },
 
   /* IAN · 국내영업 — 활발하고 붙임성 좋음. 활짝 웃는 얼굴, 넥타이 */
-  { id:'ian',  name:'IAN',  zone:'sales',
+  { id:'ian', shoe:0x3F5A86,  name:'IAN',  zone:'sales',
     shirt:0x5F98F2, hair:0x5C4783, pants:0x5F83B7, skin:0xF5DCBF,
     acc:'tie', accColor:0xF06A7F, tagColor:'#5B8DEF',
     face:{ hairHex:'#5C4783', skin:'#F5DCBF', fringe:'flat', brow:'raised',
@@ -545,7 +752,7 @@ const EMP = [
       note:'바로팜 주문을 ERP에 자동 입력하고 재고를 차감합니다.' } },
 
   /* Greg · 마케팅 — 장난기 있고 아이디어형. 윙크, 헤드폰, 곱슬머리 */
-  { id:'greg', name:'Greg', zone:'marketing',
+  { id:'greg', shoe:0x5F55A0, name:'Greg', zone:'marketing',
     shirt:0x9D78ED, hair:0xB57C40, pants:0x7566B7, skin:0xF6E1C8,
     acc:'headphones', tagColor:'#9B7EDE', hairTuft:true,
     face:{ hairHex:'#B57C40', skin:'#F6E1C8', fringe:'wave', brow:'raised',
@@ -555,7 +762,7 @@ const EMP = [
       note:'퍼포먼스 마케팅 전략 문서로 브리프와 소재를 만듭니다.' } },
 
   /* Jony · 디자인 — 진지하고 감각적. 단발+베레모, 또렷한 눈매 */
-  { id:'jony', name:'Jony', zone:'design',
+  { id:'jony', shoe:0x474778, name:'Jony', zone:'design',
     shirt:0xF3728C, hair:0x404059, pants:0x474778, skin:0xF8E8D8,
     acc:'beret', accColor:0xF1C674, tagColor:'#E8768F',
     hairLong:true, hairSide:true,
@@ -569,12 +776,15 @@ const deskScreens = {};  // zone → 모니터 문구 업데이트용
 
 EMP.forEach((e,i)=>{
   const z = ZONES.find(v=>v.id===e.zone);
-  const dz = z.z + 2;                                   // 책상은 방 앞쪽
-  const standZ = dz - 1.7;                              // 직원은 책상 뒤에서 정면을 봄
+  const sg = z.z > 0 ? -1 : 1;                          // 남쪽 방은 좌우 대칭
+  const dz = z.z + sg*2;                                // 책상은 출입구 쪽
+  const standZ = dz - sg*1.7;                           // 직원은 책상 뒤에서 정면을 봄
   const cx = z.x + 1.7;                                 // 모니터 옆에 서게
-  makeDesk(z.x, dz, Math.PI, '…', 0xB2E9FA, e.info);
-  makeChair(cx, standZ - 1.0, 0, 0xF1AE90);
-  makeChar({ ...e, desk:{ x:cx, z:standZ, ry:0 }, seat: MEET_SEATS[i] });
+  const doorZ = z.z + sg*(z.d/2 + 1.6);                 // 방 출입구 바깥
+  const charRy = sg > 0 ? 0 : Math.PI;
+  makeDesk(z.x, dz, sg > 0 ? Math.PI : 0, '…', 0xB2E9FA, e.info);
+  makeChair(cx, standZ - sg*1.0, charRy, 0xF1AE90);
+  makeChar({ ...e, desk:{ x:cx, z:standZ, ry:charRy }, seat: MEET_SEATS[i], doorZ });
 });
 
 /* ═══════ 데이터 시각화 ═══════ */
@@ -689,13 +899,13 @@ function renderData(snap){
   const pt = label(`결재 ${ap}건`, { cls:'small', color: ap?'#B4761B':'#8A715A' });
   pt.position.y = 0.2 + Math.min(ap,10)*0.14 + 0.8;
   pg.add(pt);
-  pg.position.set(-30.4, 1.66, -18.45);   // Tim 책상 위
+  pg.position.set(-33.6, 1.64, -14.2);    // Tim 책상 위
   dataGroup.add(pg);
 
   const pay = snap.payments||{};
   const safe = box(2.2,2.2,2.2, pay.overCnt?0xF4718B:0xA6B9C9);
-  safe.position.set(-24, 1.24, -22);
-  const dial = box(0.5,0.5,0.2,0xFFFDF6); dial.position.set(-24,1.4,-20.85);
+  safe.position.set(-22.5, 1.24, -18);
+  const dial = box(0.5,0.5,0.2,0xFFFDF6); dial.position.set(-22.5,1.4,-16.85);
   dataGroup.add(safe, dial);
   dPick(safe, { title:'지급 예정', tag:'대표이사실',
     rows:[['오늘', won(pay.today)+` (${pay.todayCnt||0}건)`],
@@ -703,26 +913,26 @@ function renderData(snap){
           ['기한 경과', won(pay.over)+` (${pay.overCnt||0}건)`]],
     warn:!!pay.overCnt });
   const st2 = label('💰 지급예정', { cls:'small' });
-  st2.position.set(-24, 3.4, -22); dataGroup.add(st2);
+  st2.position.set(-22.5, 3.4, -18); dataGroup.add(st2);
 
   /* 국내영업팀: 지역 블록 */
   const regs = (snap.regions||[]).slice(0,6);
   const rmax = Math.max(1, ...regs.map(r=>r.rev));
   regs.forEach((r,i)=>{
-    cuteBar(-43.5 + (i%2)*5, 9.5 + Math.floor(i/2)*5.2, barH(r.rev,rmax), 2.6, 0x5F98F2,
+    cuteBar(-41.5 + (i%2)*5, 10.5 + Math.floor(i/2)*5.0, barH(r.rev,rmax), 2.6, 0x5F98F2,
       { title:r.name, tag:'국내영업팀 · 지역별',
         rows:[['매출',won(r.rev)],['주문',r.cnt+'건']] },
       r.name.split(' ').pop());
   });
   const ph = snap.pharmacies||{};
   const pl = label(`💊 약국 ${ph.total||0}곳 · 재구매 ${ph.repeat||0}곳`, { cls:'name' });
-  pl.position.set(-30, 4.2, 12.5); dataGroup.add(pl);
+  pl.position.set(-33, 5.8, 21); dataGroup.add(pl);
 
   /* 마케팅팀: 채널 블록 */
   const chs = (snap.channels||[]).slice(0,6);
   const cmax = Math.max(1, ...chs.map(c=>c.rev));
   chs.forEach((c,i)=>{
-    cuteBar(38.5 + (i%2)*5, 9.5 + Math.floor(i/2)*5.2, barH(c.rev,cmax), 2.6, 0x9D78ED,
+    cuteBar(36.5 + (i%2)*5, 10.5 + Math.floor(i/2)*5.0, barH(c.rev,cmax), 2.6, 0x9D78ED,
       { title:c.name, tag:'판매 채널', rows:[['매출',won(c.rev)],['주문',c.cnt+'건']] },
       c.name);
   });
@@ -778,7 +988,19 @@ function setMeeting(on, manual){
   document.getElementById('btn-meet').textContent = on ? '💼 업무 복귀' : '📣 회의 소집';
   chars.forEach((ch,i)=>{
     const dst = on ? ch.seatPos : ch.deskPos;
-    ch.target = new THREE.Vector2(dst.x, dst.z);
+    ch.queue = [];
+    const CORR = 3.2;                                             // 회의실 앞 복도
+    if (on){
+      ch.queue.push(new THREE.Vector2(ch.deskPos.x, ch.doorZ));   // 방 밖으로
+      ch.queue.push(new THREE.Vector2(ch.deskPos.x, CORR));       // 복도까지
+      ch.queue.push(new THREE.Vector2(dst.x, CORR));              // 복도를 따라
+    } else {
+      ch.queue.push(new THREE.Vector2(ch.pos.x, CORR));
+      ch.queue.push(new THREE.Vector2(ch.deskPos.x, CORR));
+      ch.queue.push(new THREE.Vector2(ch.deskPos.x, ch.doorZ));
+    }
+    ch.queue.push(new THREE.Vector2(dst.x, dst.z));
+    ch.target = ch.queue.shift();
     if (!on && ch.bubble){ ch.g.remove(ch.bubble); ch.bubble = null; }
   });
 }
@@ -823,7 +1045,7 @@ function buildRooms(){
     el.querySelectorAll('.btn').forEach(x=>x.classList.remove('on'));
     b.classList.add('on');
     const id = b.dataset.cam;
-    if (id === 'all'){ flyTo([0,54,66],[0,0,0]); return; }
+    if (id === 'all'){ flyTo([0,44,68],[0,1,-2]); return; }
     const z = ZONES.find(v=>v.id===id);
     flyTo(z.cam, z.tgt);
   });
@@ -877,7 +1099,9 @@ function tick(){
       const d = dstV.clone().sub(cur);
       const dist = d.length();
       if (dist < 0.08){
-        ch.pos.copy(dstV); ch.target = null;
+        ch.pos.copy(dstV);
+        ch.target = (ch.queue && ch.queue.length) ? ch.queue.shift() : null;
+        if (ch.target) { ch.g.position.set(ch.pos.x, 0, ch.pos.y); return; }
         ch.targetRy = meeting
           ? Math.atan2(MEET.x-ch.pos.x, MEET.z-ch.pos.y)
           : ch.deskPos.ry;
@@ -890,23 +1114,46 @@ function tick(){
         const s = Math.sin(T*11 + i);
         ch.legL.rotation.x = s*0.7; ch.legR.rotation.x = -s*0.7;
         ch.armL.rotation.x = -s*0.55; ch.armR.rotation.x = s*0.55;
+        ch.armL.rotation.z = 0.06; ch.armR.rotation.z = -0.06;
+        ch.upper.position.y = Math.abs(s)*0.1;              // 걸을 때 위아래 반동
+        ch.upper.rotation.x = 0.06;                          // 살짝 앞으로
+        ch.upper.rotation.z = -s*0.05;                       // 어깨 흔들림
+        ch.head.rotation.y = Math.sin(T*3.2 + i)*0.08;
       }
       ch.g.position.set(ch.pos.x, 0, ch.pos.y);
     } else {
       if (!meeting){ ch.legL.rotation.x *= 0.8; ch.legR.rotation.x *= 0.8; }
+      const breathe = Math.sin(T*1.7 + ch.phase)*0.035;
+      ch.upper.rotation.x *= 0.85;
+      ch.upper.rotation.z *= 0.85;
+      ch.armL.rotation.z *= 0.85; ch.armR.rotation.z *= 0.85;
       if (meeting){
         ch.g.position.y = 0.46;                       // 의자에 앉기
         ch.legL.rotation.x = -1.45; ch.legR.rotation.x = -1.45;
         ch.armL.rotation.x = -0.5;
         ch.armR.rotation.x = -0.5 + Math.sin(T*2.2 + i)*0.3;
         ch.head.rotation.y = Math.sin(T*1.1 + i*1.7)*0.3;
+        ch.head.rotation.z = Math.sin(T*0.8 + i)*0.05;
+        ch.upper.position.y = breathe;
         ch.targetRy = Math.atan2(MEET.x - ch.pos.x, MEET.z - ch.pos.y);
       } else {
         const typ = Math.sin(T*9 + ch.phase);
-        ch.armL.rotation.x = -0.85 + typ*0.1;
-        ch.armR.rotation.x = -0.85 - typ*0.1;
+        ch.armL.rotation.x = -0.85 + typ*0.12;
+        ch.armR.rotation.x = -0.85 - typ*0.12;
         ch.head.rotation.y = Math.sin(T*0.5 + i)*0.1;
+        ch.head.rotation.x = 0.12 + typ*0.02;          // 모니터를 살짝 내려다봄
         ch.g.position.y = 0;
+        ch.upper.position.y = breathe + Math.abs(typ)*0.015;
+      }
+
+      /* 눈 깜빡임 */
+      if (T > ch.blinkAt){
+        if (T > ch.blinkAt + 0.14){
+          ch.faceMat.map = ch.texOpen; ch.faceMat.needsUpdate = true;
+          ch.blinkAt = T + 2.2 + Math.random()*3.6;
+        } else if (ch.faceMat.map !== ch.texBlink){
+          ch.faceMat.map = ch.texBlink; ch.faceMat.needsUpdate = true;
+        }
       }
     }
     let dr = ch.targetRy - ch.g.rotation.y;
