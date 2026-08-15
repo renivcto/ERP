@@ -135,7 +135,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
-const VO_VERSION = 'v2026-08-15h';        // 배포 확인용. 코드 고칠 때마다 올릴 것
+const VO_VERSION = 'v2026-08-15m';        // 배포 확인용. 코드 고칠 때마다 올릴 것
 console.log('[RENIV OFFICE]', VO_VERSION);
 const FB = window.__FB__ || null;
 const DEMO = new URLSearchParams(location.search).has('demo');
@@ -151,13 +151,16 @@ const P = {
 };
 
 const ZONES = [
-  { id:'ceo',       name:'대표이사실', x:-32, z:-16, w:26, d:20, color:0xA8F0DA, cam:[-33,13,-1], tgt:[-31,2,-16] },
-  { id:'design',    name:'디자인팀',   x: 32, z:-16, w:26, d:20, color:0xF2AEC3, cam:[ 33,13,-1], tgt:[ 33,2,-16] },
-  { id:'sales',     name:'국내영업팀', x:-32, z: 16, w:26, d:20, color:0xADCAF3, cam:[-33,13,1], tgt:[-31,2,16] },
-  { id:'marketing', name:'마케팅팀',   x: 32, z: 16, w:26, d:20, color:0xC8B2F0, cam:[ 33,13,1], tgt:[ 33,2,16] },
-  { id:'meeting',   name:'회의실',     x:  0, z: -8, w:24, d:18, color:0xF2DBAE, cam:[0,18,14],   tgt:[0,1,-8] },
-  { id:'warehouse', name:'창고',       x:  0, z: 25, w:36, d:14, color:0xEED7AC, cam:[0,18,46],   tgt:[0,1,25] },
+  { id:'ceo',       name:'대표이사실', x:-26, z:-20, w:28, d:22, color:0xA8F0DA, cam:[-26,13,-3], tgt:[-26,2,-20] },
+  { id:'design',    name:'디자인팀',   x: 34, z:-20, w:28, d:22, color:0xF2AEC3, cam:[ 34,13,-3], tgt:[ 34,2,-20] },
+  { id:'sales',     name:'국내영업팀', x:-26, z: 20, w:28, d:22, color:0xADCAF3, cam:[-26,13,3],  tgt:[-26,2,20] },
+  { id:'marketing', name:'마케팅팀',   x: 34, z: 20, w:28, d:22, color:0xC8B2F0, cam:[ 34,13,3],  tgt:[ 34,2,20] },
+  { id:'meeting',   name:'회의실',     x:  4, z:  0, w:26, d:16, color:0xF2DBAE, cam:[4,15,26],   tgt:[4,1,0] },
+  { id:'warehouse', name:'창고',       x:-58, z:  0, w:18, d:48, color:0xEED7AC, cam:[-36,30,26], tgt:[-59,1,0] },
 ];
+
+/* 창고 6칸 — ERP 창고 목록 순서대로 왼쪽에 일렬 배치 */
+const WH = { x:-58, bayZ:[-20, -12, -4, 4, 12, 20] };
 
 /* ═══════ 씬 ═══════ */
 const app = document.getElementById('app');
@@ -166,7 +169,7 @@ scene.background = new THREE.Color(0xBADFF2);
 scene.fog = new THREE.Fog(0xBADFF2, 130, 260);
 
 const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 400);
-camera.position.set(0, 44, 68);
+camera.position.set(-9, 58, 94);
 
 const renderer = new THREE.WebGLRenderer({ antialias:false });
 renderer.shadowMap.enabled = true;
@@ -195,8 +198,9 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.maxPolarAngle = Math.PI/2 - 0.1;
+controls.target.set(-9, 2, -2);
 controls.minDistance = 10;
-controls.maxDistance = 150;
+controls.maxDistance = 200;
 
 scene.add(new THREE.AmbientLight(0xFFFDF8, 1.24));
 scene.add(new THREE.HemisphereLight(0xF2FAFF, 0xFFF8EC, 0.94));
@@ -214,10 +218,16 @@ const grass = new THREE.Mesh(new THREE.PlaneGeometry(400,400),
 grass.rotation.x = -Math.PI/2; grass.position.y = -0.3; grass.receiveShadow = true;
 scene.add(grass);
 
-const floor = new THREE.Mesh(new THREE.BoxGeometry(104, 0.6, 70),
-  new THREE.MeshLambertMaterial({ color:P.floor }));
-floor.position.y = -0.3; floor.receiveShadow = true;
+const floorMat = new THREE.MeshLambertMaterial({ color:P.floor });
+const floor = new THREE.Mesh(new THREE.BoxGeometry(96, 0.6, 70), floorMat);   // 사무동
+floor.position.set(4, -0.3, 0); floor.receiveShadow = true;
 scene.add(floor);
+const whFloor = new THREE.Mesh(new THREE.BoxGeometry(24, 0.6, 54), floorMat); // 창고동
+whFloor.position.set(-58, -0.3, 0); whFloor.receiveShadow = true;
+scene.add(whFloor);
+const walkway = new THREE.Mesh(new THREE.BoxGeometry(10, 0.6, 12), floorMat); // 연결 통로
+walkway.position.set(-45.5, -0.3, 0); walkway.receiveShadow = true;
+scene.add(walkway);
 
 /* 존 러그 */
 ZONES.forEach(z=>{
@@ -508,7 +518,7 @@ function makePlant(x,z){
 }
 
 /* 회의실 */
-const MEET = { x:0, z:-8 };
+const MEET = { x:4, z:0 };
 const mTable = box(9.5,0.4,4.2,P.wood); mTable.position.set(MEET.x,1.5,MEET.z); scene.add(mTable);
 [[-3.4,-1.6],[3.4,-1.6],[-3.4,1.6],[3.4,1.6]].forEach(([dx,dz])=>{
   const leg = box(0.3,1.5,0.3,P.woodDark);
@@ -520,9 +530,9 @@ const MEET_SEATS = [
   { x:MEET.x-3.0, z:MEET.z-3.6 }, { x:MEET.x+3.0, z:MEET.z-3.6 },
 ];
 MEET_SEATS.forEach(s=> makeChair(s.x, s.z, s.z>MEET.z ? Math.PI : 0, 0xF1AE90));
-const board = box(7.5,4,0.3,P.white); board.position.set(MEET.x, 3.4, MEET.z-8.2); scene.add(board);
+const board = box(7.5,4,0.3,P.white); board.position.set(MEET.x, 3.4, MEET.z-7.4); scene.add(board);
 const boardTxt = label('📋 주간 회의', { cls:'big' });
-boardTxt.position.set(MEET.x, 5.9, MEET.z-8.0); scene.add(boardTxt);
+boardTxt.position.set(MEET.x, 5.9, MEET.z-7.2); scene.add(boardTxt);
 addPick(mTable, { title:'회의실', tag:'RENIV OFFICE',
   rows:[['용도','AI 직원 주간 회의'],['참석','Tim · IAN · Greg · Jony']],
   note:'상단 [회의 소집] 버튼을 누르면 모두 모입니다.' });
@@ -535,8 +545,8 @@ ZONES.forEach(z=>{
   t.position.set(z.x, 4.6, z.z + sg*(z.d/2 - 1.4));
   scene.add(t);
 });
-const wt = label('📦 창고', { cls:'zone' }); wt.position.set(0, 5.2, 31); scene.add(wt);
-const mt2 = label('회의실', { cls:'zone' }); mt2.position.set(0, 4.6, 0.6); scene.add(mt2);
+const wt = label('📦 창고', { cls:'zone' }); wt.position.set(WH.x, 7.6, 0); scene.add(wt);
+const mt2 = label('회의실', { cls:'zone' }); mt2.position.set(MEET.x, 4.8, MEET.z + 7.6); scene.add(mt2);
 /* ═══════ 벽 · 칸막이 ═══════ */
 function wallSeg(x, z, w, h, d, color){
   const m = box(w, h, d, color || P.wall);
@@ -694,40 +704,41 @@ ZONES.forEach(z=>{
 
 /* ── 방별 소품 ─────────────────────────────────────────── */
 /* 대표이사실 */
-makeShelf(-42.5, -22, 0);
-makeSofa(-24, -12.5, Math.PI, 0xB79BF3);
-makeLowTable(-24, -10.2);
-makeClock(-41, 3.9, -25.6);
-makePlant(-42, -9);
+makeShelf(-36.5, -26.5, 0);
+makeSofa(-17, -15, Math.PI, 0xB79BF3);
+makeLowTable(-17, -12.7);
+makeClock(-33, 3.9, -30.6);
+makePlant(-37, -12);
 
 /* 디자인팀 */
-makeShelf(43, -22, 0);
-makeWhiteboard(22.5, -20, Math.PI/2, 4.4);
-makeSofa(24, -12.5, Math.PI, 0xF1AE90);
-makeClock(41, 3.9, -25.6);
-makePlant(42, -9);
+makeShelf(44.5, -26.5, 0);
+makeWhiteboard(21.5, -24, Math.PI/2, 4.4);
+makeSofa(26, -15, Math.PI, 0xF1AE90);
+makeClock(43, 3.9, -30.6);
+makePlant(45, -12);
 
 /* 국내영업팀 */
-makeWhiteboard(-32, 25.4, Math.PI, 5.6);
-makeCabinet(-43, 23.5, 0);
-makeWaterCooler(-22.5, 23.5);
-makeClock(-41, 3.9, 25.6);
-makePlant(-42, 9.5);
+makeWhiteboard(-26, 29.4, Math.PI, 5.6);
+makeCabinet(-37, 27.5, 0);
+makeWaterCooler(-16.5, 27.5);
+makeClock(-33, 3.9, 29.6);
+makePlant(-37, 12.5);
 
 /* 마케팅팀 */
-makeSofa(24, 21, Math.PI/2, 0x84EBCE);
-makeLowTable(26.6, 21);
-makeCoffee(43, 23.5);
-makePrinter(38, 25.5);
-makeClock(41, 3.9, 25.6);
-makePlant(42, 9.5);
+makeSofa(26, 25, Math.PI/2, 0x84EBCE);
+makeLowTable(28.6, 25);
+makeCoffee(45, 27.5);
+makePrinter(40, 29.5);
+makeClock(43, 3.9, 29.6);
+makePlant(45, 12.5);
 
-/* 회의실 주변 */
-makeWaterCooler(9.5, -1.5);
-makePrinter(-9.5, -1.5);
+/* 회의실 주변 — 중앙 복도 */
+makeWaterCooler(19, -5);
+makePrinter(-11, -5);
 
-makePlant(-46, -30); makePlant(46, -30); makePlant(-46, 30); makePlant(46, 30);
-makePlant(-14, -8); makePlant(14, -8);
+makePlant(-42, -32); makePlant(50, -32); makePlant(-42, 32); makePlant(50, 32);
+makePlant(-11.5, 0); makePlant(19.5, 0);
+makePlant(-45.5, -7); makePlant(-45.5, 7);   /* 연결 통로 양옆 */
 
 /* ═══════ 직원 + 책상 ═══════ */
 const EMP = [
@@ -840,29 +851,37 @@ function crate(x, z, qty, low, info, name){
   dataGroup.add(g);
 }
 
-/* 창고 선반 (고정) */
-[[-11,25],[11,25]].forEach(([sx,sz])=>{
+/* 창고 선반 — 칸마다 벽쪽에 하나씩 (세로 방향) */
+WH.bayZ.forEach(bz=>{
   const g = new THREE.Group();
-  [[-4.5,0],[4.5,0]].forEach(([px])=>{
-    const post = box(0.3,4.6,0.3,P.woodDark); post.position.set(px,2.3,0); g.add(post);
+  [-3.2, 3.2].forEach(pz=>{
+    const post = box(0.3,4.4,0.3,P.woodDark); post.position.set(0,2.2,pz); g.add(post);
   });
-  [1.4,3.4].forEach(h=>{
-    const b = box(9.6,0.22,2.4,P.wood); b.position.set(0,h,0); g.add(b);
+  [1.3, 2.9].forEach(h=>{
+    const b = box(2.2,0.22,6.8,P.wood); b.position.set(0,h,0); g.add(b);
   });
-  g.position.set(sx,0,sz);
+  const bk = box(0.14,4.0,6.8,P.woodDark); bk.position.set(-1.05,2.0,0); g.add(bk);
+  g.position.set(WH.x - 6, 0, bz);
   scene.add(g);
 });
+/* 칸 구분선 */
+for (let i=1;i<WH.bayZ.length;i++){
+  const mz = (WH.bayZ[i-1] + WH.bayZ[i]) / 2;
+  const ln = box(17, 0.06, 0.3, P.wallLine);
+  ln.position.set(WH.x, 0.16, mz);
+  scene.add(ln);
+}
 
 /* 벽 대형 스크린 (KPI) */
 const bigCanvas = document.createElement('canvas'); bigCanvas.width = 512; bigCanvas.height = 240;
 const bigTex = new THREE.CanvasTexture(bigCanvas); bigTex.magFilter = THREE.NearestFilter;
 const bigScr = new THREE.Mesh(new THREE.PlaneGeometry(20, 9.4),
   new THREE.MeshBasicMaterial({ map:bigTex }));
-bigScr.position.set(0, 7.4, -33.4);
+bigScr.position.set(4, 7.4, -34.4);
 scene.add(bigScr);
-const bigFrame = box(21,10.4,0.5,0xA5B8C8); bigFrame.position.set(0,7.4,-33.8); scene.add(bigFrame);
+const bigFrame = box(21,10.4,0.5,0xA5B8C8); bigFrame.position.set(4,7.4,-34.8); scene.add(bigFrame);
 [[-9.5],[9.5]].forEach(([px])=>{
-  const leg = box(0.5,3,0.5,0xA5B8C8); leg.position.set(px,1.5,-33.8); scene.add(leg);
+  const leg = box(0.5,3,0.5,0xA5B8C8); leg.position.set(4+px,1.5,-34.8); scene.add(leg);
 });
 function drawBig(K){
   const g = bigCanvas.getContext('2d');
@@ -899,13 +918,13 @@ function renderData(snap){
   const pt = label(`결재 ${ap}건`, { cls:'small', color: ap?'#B4761B':'#8A715A' });
   pt.position.y = 0.2 + Math.min(ap,10)*0.14 + 0.8;
   pg.add(pt);
-  pg.position.set(-33.6, 1.64, -14.2);    // Tim 책상 위
+  pg.position.set(-27.6, 1.64, -18.2);    // Tim 책상 위
   dataGroup.add(pg);
 
   const pay = snap.payments||{};
   const safe = box(2.2,2.2,2.2, pay.overCnt?0xF4718B:0xA6B9C9);
-  safe.position.set(-22.5, 1.24, -18);
-  const dial = box(0.5,0.5,0.2,0xFFFDF6); dial.position.set(-22.5,1.4,-16.85);
+  safe.position.set(-16.5, 1.24, -26);
+  const dial = box(0.5,0.5,0.2,0xFFFDF6); dial.position.set(-16.5,1.4,-24.85);
   dataGroup.add(safe, dial);
   dPick(safe, { title:'지급 예정', tag:'대표이사실',
     rows:[['오늘', won(pay.today)+` (${pay.todayCnt||0}건)`],
@@ -913,26 +932,26 @@ function renderData(snap){
           ['기한 경과', won(pay.over)+` (${pay.overCnt||0}건)`]],
     warn:!!pay.overCnt });
   const st2 = label('💰 지급예정', { cls:'small' });
-  st2.position.set(-22.5, 3.4, -18); dataGroup.add(st2);
+  st2.position.set(-16.5, 3.4, -26); dataGroup.add(st2);
 
   /* 국내영업팀: 지역 블록 */
   const regs = (snap.regions||[]).slice(0,6);
   const rmax = Math.max(1, ...regs.map(r=>r.rev));
   regs.forEach((r,i)=>{
-    cuteBar(-41.5 + (i%2)*5, 10.5 + Math.floor(i/2)*5.0, barH(r.rev,rmax), 2.6, 0x5F98F2,
+    cuteBar(-36.5 + (i%2)*5, 13.5 + Math.floor(i/2)*5.0, barH(r.rev,rmax), 2.6, 0x5F98F2,
       { title:r.name, tag:'국내영업팀 · 지역별',
         rows:[['매출',won(r.rev)],['주문',r.cnt+'건']] },
       r.name.split(' ').pop());
   });
   const ph = snap.pharmacies||{};
   const pl = label(`💊 약국 ${ph.total||0}곳 · 재구매 ${ph.repeat||0}곳`, { cls:'name' });
-  pl.position.set(-33, 5.8, 21); dataGroup.add(pl);
+  pl.position.set(-26, 5.8, 25); dataGroup.add(pl);
 
   /* 마케팅팀: 채널 블록 */
   const chs = (snap.channels||[]).slice(0,6);
   const cmax = Math.max(1, ...chs.map(c=>c.rev));
   chs.forEach((c,i)=>{
-    cuteBar(36.5 + (i%2)*5, 10.5 + Math.floor(i/2)*5.0, barH(c.rev,cmax), 2.6, 0x9D78ED,
+    cuteBar(40.5 + (i%2)*5, 13.5 + Math.floor(i/2)*5.0, barH(c.rev,cmax), 2.6, 0x9D78ED,
       { title:c.name, tag:'판매 채널', rows:[['매출',won(c.rev)],['주문',c.cnt+'건']] },
       c.name);
   });
@@ -949,24 +968,39 @@ function renderData(snap){
       rows:[['수량',(p.qty||0).toLocaleString('ko-KR')],['상태',p.status||'-']] });
     const t = label(`🏭 ${p.qty||0}`, { cls:'small' });
     t.position.set(0,4.0,0); eg.add(t);
-    eg.position.set(36 + i*4.2, 0.14, -22);
+    eg.position.set(28 + i*4.6, 0.14, -26);
     dataGroup.add(eg);
   });
 
-  /* 창고: 상자 */
-  const whs = snap.warehouses||[];
-  const spots = [[-13.5,25],[-9,25],[-13.5,22],[-9,22],[8.5,25],[13,25],[8.5,22],[13,22],[-2,25],[2,25]];
-  let si = 0;
-  whs.forEach(wh=>{
-    (wh.items||[]).slice(0,3).forEach(it=>{
-      if (si >= spots.length) return;
-      const [cx,cz] = spots[si++];
-      crate(cx, cz, it.qty, it.low,
+  /* 창고: 칸마다 창고명 + 재고 상자 (라벨은 품목 '명칭') */
+  const whs = (snap.warehouses||[]).slice(0, WH.bayZ.length);
+  whs.forEach((wh, bi)=>{
+    const bz = WH.bayZ[bi];
+    const items = (wh.items||[]).slice(0, 3);
+    const lowCnt = items.filter(v=>v.low).length;
+
+    const nameTag = label(wh.name, { cls: lowCnt ? 'name warnc' : 'name' });
+    nameTag.position.set(WH.x - 1, 5.7, bz);
+    dataGroup.add(nameTag);
+
+    const plate = box(5.6, 0.85, 0.3, lowCnt ? 0xF4718B : P.wood);
+    plate.position.set(WH.x - 6, 4.9, bz);
+    dataGroup.add(plate);
+    dPick(plate, { title:wh.name, tag:'창고',
+      rows:[['보관 품목', items.length + '종'],
+            ['총 수량', items.reduce((a,v)=>a+(Number(v.qty)||0),0).toLocaleString('ko-KR')+'개'],
+            ['부족 품목', lowCnt + '종']],
+      warn:!!lowCnt });
+
+    items.forEach((it, k)=>{
+      crate(WH.x - 3.4 + k*3.6, bz, it.qty, it.low,
         { title:it.name, tag:wh.name,
-          rows:[['품목코드',it.code||'-'],['수량',(it.qty||0).toLocaleString('ko-KR')+'개'],
+          rows:[['품목명', it.name||'-'],
+                ['품목코드', it.code||'-'],
+                ['수량',(it.qty||0).toLocaleString('ko-KR')+'개'],
                 ['상태', it.low?'⚠ 부족 (20 이하)':'정상']],
           warn:it.low },
-        it.code||it.name.slice(0,5));
+        it.name || it.code || '품목');
     });
   });
 
@@ -1045,7 +1079,7 @@ function buildRooms(){
     el.querySelectorAll('.btn').forEach(x=>x.classList.remove('on'));
     b.classList.add('on');
     const id = b.dataset.cam;
-    if (id === 'all'){ flyTo([0,44,68],[0,1,-2]); return; }
+    if (id === 'all'){ flyTo([-9,58,94],[-9,2,-2]); return; }
     const z = ZONES.find(v=>v.id===id);
     flyTo(z.cam, z.tgt);
   });
