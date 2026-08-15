@@ -135,7 +135,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
-const VO_VERSION = 'v2026-08-15o';        // 배포 확인용. 코드 고칠 때마다 올릴 것
+const VO_VERSION = 'v2026-08-15p';        // 배포 확인용. 코드 고칠 때마다 올릴 것
 console.log('[RENIV OFFICE]', VO_VERSION);
 const FB = window.__FB__ || null;
 const DEMO = new URLSearchParams(location.search).has('demo');
@@ -846,32 +846,39 @@ function faceCrate(mesh, src){
     mesh.material = [face, base, base, base, base, base];
   }, undefined, ()=>{});
 }
-function crate(x, z, qty, low, info, name){
+/* 선반 자리 — 아래·위 2단 × 3칸. 선반판 윗면이 y 1.41 / 3.01 이다. */
+const SHELF_SLOT = [
+  { y:2.03, dz:-2.2 }, { y:2.03, dz:0 }, { y:2.03, dz:2.2 },
+  { y:3.63, dz:-2.2 }, { y:3.63, dz:0 }, { y:3.63, dz:2.2 },
+];
+/* 선반 위 제품 박스 하나. 앞면(+x, 통로 쪽)에 품목 이미지가 붙는다. */
+function shelfItem(bz, slot, it, info){
+  const s = SHELF_SLOT[slot];
+  if (!s) return;
   const g = new THREE.Group();
-  let topMesh = null;
-  const per = Math.max(30, Math.ceil(qty/4));
-  const n = Math.max(1, Math.min(4, Math.ceil(qty/per)));
-  for (let i=0;i<n;i++){
-    const c = box(1.7,1.2,1.7, low?0xF4718B:0xF2AE5A);
-    topMesh = c;
-    c.position.set((i%2)*0.12, 0.6+i*1.26, (i%2)*0.08);
-    const tape = box(1.74,0.28,1.74, low?0xE95077:0xE59230);
-    tape.position.copy(c.position);
-    g.add(c, tape);
-    dPick(c, info);
-  }
-  const t = label(`${name} ${qty}`, { cls: low ? 'small warnc' : 'small' });
-  t.position.y = 0.6 + n*1.26 + 0.8;
+  const low = !!it.low;
+  const body = box(1.5, 1.18, 1.5, low ? 0xF4718B : P.paper);
+  const band = box(1.56, 0.3, 1.56, low ? 0xE95077 : P.gold);
+  band.position.y = -0.36;
+  const lid  = box(1.54, 0.12, 1.54, low ? 0xE95077 : P.wood);
+  lid.position.y = 0.61;
+  g.add(body, band, lid);
+  dPick(body, info);
+
+  const t = label(`${it.name || it.code || '품목'} ${it.qty}`,
+                  { cls: low ? 'small warnc' : 'small' });
+  t.position.y = 1.05;
   g.add(t);
   if (low){
-    const bc = box(0.5,0.5,0.5,0xFF8FA0);
-    bc.position.y = 0.6 + n*1.26 + 0.1;
-    bc.userData.blink = true;
+    const bc = box(0.36,0.36,0.36,0xFF8FA0);
+    bc.position.set(0, 1.0, 0); bc.userData.blink = true;
     g.add(bc);
   }
-  g.position.set(x, 0.14, z);
+  g.position.set(WH.x - 6, s.y, bz + s.dz);
   dataGroup.add(g);
-  return topMesh;
+
+  if (it.img) faceCrate(body, it.img);
+  else if (it.id) loadItemImage(it.id).then(src => faceCrate(body, src));
 }
 
 /* 창고 선반 — 칸마다 벽쪽에 하나씩 (세로 방향) */
@@ -1043,7 +1050,7 @@ function renderData(snap){
     const bz = WH.bayZ[bi];
     const wh = whSrc.find(w => whKey(w.name) === whKey(nm));
     if (wh) whUsed.add(wh);
-    const items = wh ? (wh.items||[]).slice(0, 3) : [];
+    const items = wh ? (wh.items||[]).slice(0, SHELF_SLOT.length) : [];
     const lowCnt = items.filter(v=>v.low).length;
 
     const plate = box(5.6, 0.85, 0.3, !wh ? P.gray : (lowCnt ? 0xF4718B : P.wood));
@@ -1059,16 +1066,14 @@ function renderData(snap){
       warn: !!lowCnt });
 
     items.forEach((it, k)=>{
-      const top = crate(WH.x - 3.4 + k*3.6, bz, it.qty, it.low,
+      shelfItem(bz, k, it,
         { title:it.name, tag:nm,
           rows:[['품목명', it.name||'-'],
                 ['품목코드', it.code||'-'],
                 ['수량',(it.qty||0).toLocaleString('ko-KR')+'개'],
+                ['보관 창고', nm],
                 ['상태', it.low?'⚠ 부족 (20 이하)':'정상']],
-          warn:it.low },
-        it.name || it.code || '품목');
-      if (it.img) faceCrate(top, it.img);
-      else if (it.id) loadItemImage(it.id).then(src => faceCrate(top, src));
+          warn:it.low });
     });
   });
   const orphan = whSrc.filter(w => !whUsed.has(w));
