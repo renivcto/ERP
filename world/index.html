@@ -135,7 +135,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
-const VO_VERSION = 'v2026-08-16a';        // 배포 확인용. 코드 고칠 때마다 올릴 것
+const VO_VERSION = 'v2026-08-16b';        // 배포 확인용. 코드 고칠 때마다 올릴 것
 console.log('[RENIV OFFICE]', VO_VERSION);
 const FB = window.__FB__ || null;
 const DEMO = new URLSearchParams(location.search).has('demo');
@@ -173,7 +173,17 @@ const WH = {
 /* 일부러 화면에서 뺀 창고 — 경고를 띄우지 않는다(설정 실수와 구분하려고).
    다시 보이게 하려면 여기서 지우고 WH.names·WH.bayZ 에 추가할 것. */
 const WH_HIDDEN = ['바이오코스텍 창고', '내추럴솔루션 창고'];
+/* 스냅샷이 다른 이름으로 담아 보내는 창고 — { 스냅샷 이름 : 칸 이름 }.
+   칸 매칭은 이름 정확일치라, 서버 라벨이 하나만 달라도 칸이 조용히 빈다.
+   서버 vo_snapshot.py 의 옛 WH_NAMES 가 르니브 창고를 '르니브 본창고' 로 부른다. */
+const WH_ALIAS = { '르니브 본창고': '르니브 창고', '본창고': '르니브 창고' };
 const whKey = s => String(s||'').replace(/\s+/g, '');
+/* 스냅샷 창고명 → 칸 이름 키. 별칭이 있으면 칸 이름 쪽으로 옮겨 준다. */
+function whCanon(s){
+  const k = whKey(s);
+  for (const from in WH_ALIAS) if (whKey(from) === k) return whKey(WH_ALIAS[from]);
+  return k;
+}
 
 /* ═══════ 씬 ═══════ */
 const app = document.getElementById('app');
@@ -1057,12 +1067,12 @@ function renderData(snap){
     dataGroup.add(eg);
   });
 
-  /* 창고: 고정 6칸에 스냅샷 창고를 '이름'으로 매칭해 채운다 */
+  /* 창고: 고정 칸에 스냅샷 창고를 '이름'으로 매칭해 채운다 (별칭 허용) */
   const whSrc = snap.warehouses || [];
   const whUsed = new Set();
   WH.names.forEach((nm, bi)=>{
     const bz = WH.bayZ[bi];
-    const wh = whSrc.find(w => whKey(w.name) === whKey(nm));
+    const wh = whSrc.find(w => whCanon(w.name) === whKey(nm));
     if (wh) whUsed.add(wh);
     const items = wh ? (wh.items||[]).slice(0, SHELF_SLOT.length) : [];
     const lowCnt = items.filter(v=>v.low).length;
@@ -1087,8 +1097,16 @@ function renderData(snap){
             : '',
           warn: !!lowCnt }
       : { title: nm, tag: '창고',
-          rows: [['상태', '스냅샷에 이 창고가 없음']],
-          note: '서버 vo_snapshot.py 의 WH_NAMES 에 이 창고 ID가 없을 수 있습니다.' };
+          rows: [
+            ['상태', '스냅샷에 이 창고가 없음'],
+            ...(whSrc.length
+                ? whSrc.map(w => ['스냅샷에 있는 이름', String(w.name || '(이름 없음)')])
+                : [['스냅샷', '창고가 하나도 없음']]),
+          ],
+          note: whSrc.length
+            ? '위 이름 중 이 칸에 해당하는 것이 있으면 WH_ALIAS 에 연결하면 됩니다. '
+              + '아예 없으면 서버 vo_snapshot.py 가 이 창고를 담지 않는 것입니다.'
+            : '서버 vo_snapshot.py 가 창고를 하나도 담지 않았습니다. cron 실행을 확인하세요.' };
 
     if (WH_SIGN_PICK[bi]) WH_SIGN_PICK[bi].userData.info = whInfo;   // 간판도 같은 내용
 
@@ -1108,6 +1126,7 @@ function renderData(snap){
           warn:it.low });
     });
   });
+  console.info('[창고] 스냅샷 창고:', whSrc.map(w => w.name + '(' + (w.items||[]).length + '종)'));
   const orphan = whSrc.filter(w => !whUsed.has(w));
   const hidden = orphan.filter(w => WH_HIDDEN.some(h => whKey(h) === whKey(w.name)));
   const missing = orphan.filter(w => !hidden.includes(w));
