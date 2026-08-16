@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.642';
+const ERP_VERSION = 'v2.3.643';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -17517,6 +17517,19 @@ window.dedupPoApprovals = async function(opts) {
       _seen.add(k); return true;
     });
   }
+  // v2.3.643: 전용 localStorage 백업에도 기록 — meta 머지로 DB 쪽 tombstone 이
+  //   사라져도 v1.9.945 복원 경로(reniv_deleted_approval_ids)가 되살려 준다.
+  try {
+    const _stash = JSON.parse(localStorage.getItem('reniv_deleted_approval_ids') || '[]') || [];
+    losers.forEach(a => { if (a && a.id != null) _stash.push({ id: String(a.id), ts: _tombTs }); });
+    const _sseen = new Set();
+    const _uniq = _stash.filter(x => {
+      const k = String(x && typeof x === 'object' ? x.id : x);
+      if (!k || k === 'undefined' || _sseen.has(k)) return false;
+      _sseen.add(k); return true;
+    });
+    localStorage.setItem('reniv_deleted_approval_ids', JSON.stringify(_uniq.slice(-3000)));
+  } catch(_) {}
   console.log('🪦 tombstone 등록: ' + losers.length + '건 (누적 ' + DB._deletedApprovalIds.length + '건)');
 
   const remapMap = new Map(remap.map(([from, to]) => [String(from), to]));
@@ -25223,14 +25236,16 @@ function _dedupApprovals() {
     removeIds.forEach(rid => {
       DB._deletedApprovalIds.push({ id: String(rid), ts: _now });
     });
-    if (DB._deletedApprovalIds.length > 500) {
-      DB._deletedApprovalIds = DB._deletedApprovalIds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 500);
+    // v2.3.643: 500 → 3000. 대량 정리(916건) 때 잘려나간 tombstone 이 COUNT-GUARD 로
+    //   되살아나는 사고가 있었다. 항목당 ~30바이트라 3000개여도 90KB 미만.
+    if (DB._deletedApprovalIds.length > 3000) {
+      DB._deletedApprovalIds = DB._deletedApprovalIds.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0, 3000);
     }
     // v1.9.945: 전용 localStorage 백업에도 기록
     try {
       const _apStash = JSON.parse(localStorage.getItem('reniv_deleted_approval_ids')||'[]');
       removeIds.forEach(rid => { _apStash.push({ id: String(rid), ts: _now }); });
-      localStorage.setItem('reniv_deleted_approval_ids', JSON.stringify(_apStash.slice(-500)));
+      localStorage.setItem('reniv_deleted_approval_ids', JSON.stringify(_apStash.slice(-3000)));  // v2.3.643
     } catch(_){}
     const removeSet = new Set(removeIds.map(String));
     DB.approvals = DB.approvals.filter(a => a && !removeSet.has(String(a.id)));
