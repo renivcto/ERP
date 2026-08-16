@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.638';
+const ERP_VERSION = 'v2.3.639';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -38883,12 +38883,22 @@ function renderApprovalPoTable() {
   }).join('');
 }
 
+// v2.3.639: 날인 증거를 최우선으로 본다.
+//   기존에는 approvals 의 status 만 믿었는데, approvals 는 다른 기기/세션의 옛 사본이
+//   머지로 되돌아오면 approved → pending 으로 뒤집힌다. 실제로 결재완료·슬랙알림까지
+//   나간 발주서가 며칠 뒤 '결재 요청'으로 되살아나는 사고가 있었다.
+//   날인(도장/사인/날인PDF)은 되돌릴 수 없는 사실이므로 이걸 먼저 본다.
+//   판정 필드는 결재대기 카운트(v2.1.6)와 동일하게 맞춰 목록과 카운트가 어긋나지 않게 한다.
+function _orderHasStampProof(o) {
+  return !!(o && (o.stampData || o.stampName || o.stampedAt
+                  || o.stampNotRequired || o.approvalStampImage));
+}
 function getOrderApprovalStatus(o) {
+  if (!o) return 'pending';
+  if (_orderHasStampProof(o)) return 'approved';
   // v2.3.233: 타입 무관 비교(다른 매칭과 통일) — id 가 문자열/숫자 섞여도 결재상태 오판 방지
   const ap = DB.approvals.find(a => a.type === 'po_approval' && String(a.refId) === String(o.id));
   if (ap) return ap.status;
-  // 레거시 발주서(기존 것) — stampData 있거나 stampNotRequired면 완료로 간주
-  if (o.stampData || o.stampNotRequired) return 'approved';
   return 'pending';
 }
 
