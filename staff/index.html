@@ -181,8 +181,22 @@ tr:last-child td { border-bottom:none; }
 </head>
 <body>
 
+<!-- ═══════ 로딩 스플래시 — 인증 확인이 끝날 때까지 로그인 화면 대신 표시 ═══════
+     이미 로그인된 사용자가 로그인 화면을 1~2초 보다가 넘어가는 문제 방지 (v0.1.1) -->
+<div class="gate" id="scr-splash">
+  <div style="text-align:center">
+    <div class="gate-logo" style="font-size:26px">RENIV <em>직원 ERP</em></div>
+    <div style="margin-top:14px;display:flex;justify-content:center;gap:5px">
+      <span style="width:8px;height:8px;border-radius:50%;background:var(--brand);animation:blink 1s infinite"></span>
+      <span style="width:8px;height:8px;border-radius:50%;background:var(--brand);animation:blink 1s .2s infinite"></span>
+      <span style="width:8px;height:8px;border-radius:50%;background:var(--brand);animation:blink 1s .4s infinite"></span>
+    </div>
+  </div>
+</div>
+<style>@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}</style>
+
 <!-- ═══════ 로그인 ═══════ -->
-<div class="gate" id="scr-login">
+<div class="gate" id="scr-login" style="display:none">
   <div class="gate-card">
     <div class="gate-logo">RENIV <em>직원 ERP</em></div>
     <div class="gate-sub">르니브 임직원 전용 업무 공간입니다</div>
@@ -326,7 +340,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.1.0';
+const STAFF_VERSION = 'v0.1.1';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -393,7 +407,7 @@ $('btn-logout').onclick = () => signOut(auth);
 $('btn-pending-out').onclick = () => signOut(auth);
 
 function show(scr) {
-  ['scr-login', 'scr-register', 'scr-pending'].forEach(id => $(id).style.display = (id === scr) ? 'flex' : 'none');
+  ['scr-splash', 'scr-login', 'scr-register', 'scr-pending'].forEach(id => $(id).style.display = (id === scr) ? 'flex' : 'none');
   $('app').classList.toggle('on', scr === 'app');
 }
 
@@ -438,19 +452,22 @@ onAuthStateChanged(auth, async user => {
   ME = null;
   if (!user) { show('scr-login'); return; }
 
+  // v0.1.1: 임원·직원 확인을 병렬로 — 순차 두 번 조회하던 왕복 지연 제거.
+  //   직원 계정은 users/{uid} 읽기가 권한 오류로 떨어지므로 catch → null 이 정상 경로다.
+  const [ex, st] = await Promise.all([
+    getDoc(doc(db, 'users', user.uid)).catch(() => null),
+    getDoc(doc(db, 'staff_users', user.uid)).catch(() => null),
+  ]);
+
   // ① 임원용 ERP 계정이면 → 관리자 모드 (기획서 p3)
-  try {
-    const ex = await getDoc(doc(db, 'users', user.uid));
-    if (ex.exists() && ex.data().status === '활성') {
-      ME = { uid: user.uid, mode: 'admin', name: ex.data().name || user.displayName || '관리자',
-             title: '관리자', avatar: '👑', profile: ex.data() };
-      startApp();
-      return;
-    }
-  } catch (_) { /* 임원 아님 — 직원 확인으로 */ }
+  if (ex && ex.exists() && ex.data().status === '활성') {
+    ME = { uid: user.uid, mode: 'admin', name: ex.data().name || user.displayName || '관리자',
+           title: '관리자', avatar: '👑', profile: ex.data() };
+    startApp();
+    return;
+  }
 
   // ② 직원 계정
-  const st = await getDoc(doc(db, 'staff_users', user.uid)).catch(() => null);
   if (st && st.exists()) {
     const p = st.data();
     if (p.active === true) {
