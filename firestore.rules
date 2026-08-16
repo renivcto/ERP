@@ -130,6 +130,45 @@ service cloud.firestore {
     match /itemImages/{docId}          { allow read: if isActive(); allow write: if canWrite(); }
 
     // ─────────────────────────────────────────────────────────────
+    // 직원용 ERP (staff/) — v2.4 추가 (2026-08-16)
+    //   임원용 데이터(erp_data 등)와 완전 분리. 직원 계정은 아래 두
+    //   컬렉션만 접근 가능하고, erp_data/shared/settings 는 규칙 수준에서
+    //   읽을 수 없다 (기획서: "민감한 정보는 직원용 ERP에 공개하지 않는다").
+    //   임원(users 활성 계정)은 직원용 ERP의 관리자다 (기획서 p3).
+    // ─────────────────────────────────────────────────────────────
+    function isStaff() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/staff_users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/staff_users/$(request.auth.uid)).data.active == true;
+    }
+
+    // staff_users/{uid} — 직원 프로필 (이름·전화·직책·아바타·입사일)
+    match /staff_users/{uid} {
+      // 임원(관리자)과 활성 직원은 명단 열람 가능 (담당자 배정·아바타 표시용)
+      allow get, list: if isActive() || isStaff();
+      // 자가 등록 — 반드시 승인대기(active:false)·직원(role:staff) 상태로만 생성 가능
+      allow create: if isSignedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.active == false
+        && request.resource.data.role == 'staff';
+      // 본인: active/role 을 못 바꾸는 조건으로 프로필 수정 가능
+      // 임원: 승인(active)·직책 등 모든 필드 변경 가능
+      allow update: if
+        (isSignedIn() && request.auth.uid == uid
+          && request.resource.data.active == resource.data.active
+          && request.resource.data.role == resource.data.role)
+        || isActive();
+      allow delete: if isAdmin();
+    }
+
+    // staff_data/{doc} — 직원용 데이터 (teams·leaves·leave_policy·library 등)
+    //   erp_data 와 같은 {data: JSON, ts} 규약. 활성 직원과 임원만 접근.
+    match /staff_data/{docId} {
+      allow read, write: if isActive() || isStaff();
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // 그 외 모든 경로 — 명시적 거부 (안전장치)
     // ─────────────────────────────────────────────────────────────
     match /{document=**} {
