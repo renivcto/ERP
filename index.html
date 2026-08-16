@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.649';
+const ERP_VERSION = 'v2.3.650';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -18285,16 +18285,13 @@ function renderShopOrderTable() {
   }
   if (statusF) list = list.filter(o => o.status === statusF);
   if (shopF) list = list.filter(o => o.shopId === shopF);
-  // 요약 카드 — v1.9.379/382: 기간 필터에 따라 갱신 + 점/슬래시 형식 호환
-  let summaryBase = DB.shopOrders || [];
-  if (period.start || period.end) {
-    summaryBase = summaryBase.filter(o => {
-      const d = _periodNormDate(o.orderDate || o.date || '');
-      if (period.start && d < period.start) return false;
-      if (period.end   && d > period.end)   return false;
-      return true;
-    });
-  }
+  // 요약 카드 — v2.3.650: 아래 표와 '완전히 같은' 목록(list)을 쓴다.
+  //   기존엔 기간 필터만 반영해서, 채널 탭·쇼핑몰·상태·검색을 아무리 바꿔도 카드는 늘 전체 합계였다
+  //   (쿠팡 로켓그로스 탭에서 표는 1건인데 카드는 371건 / ₩26,289,029 로 표시되던 문제).
+  //   채널 탭은 filterOrderShop() 이 shop-order-shop-filter 값을 바꿔 list 에 반영되므로,
+  //   list 를 그대로 쓰면 카드가 항상 화면과 일치한다.
+  //   ⚠️ 이 아래에서 list 를 또 거르면 카드와 표가 다시 어긋난다. 정렬(sorted)만 할 것.
+  const summaryBase = list;
   if ($('so-total-count')) $('so-total-count').textContent = summaryBase.length;
   if ($('so-total-revenue')) $('so-total-revenue').textContent = '₩' + summaryBase.filter(o => o.status !== '취소' && o.status !== '반품').reduce((s,o) => s + (o.paymentAmount||o.totalPrice||0), 0).toLocaleString();
   // v1.9.530: '배송 전' → '평균 객단가' (총매출/총주문건)
