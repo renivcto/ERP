@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.644';
+const ERP_VERSION = 'v2.3.645';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6802,6 +6802,29 @@ window.lsReport = function(top) {
   return { totalKB: Math.round(total / 1024), keys: rows.length };
 };
 
+// v2.3.645: 컬렉션별 Firestore 문서 크기 진단 — 1MB 한도에 얼마나 가까운지 본다.
+//   샤딩되는 컬렉션(_SHARDED_COLS)은 한도를 넘어도 자동으로 나뉘므로 '샤딩' 으로 표시.
+window.dbSizeReport = function() {
+  const LIMIT = 1048487;   // Firestore 문서 data 필드 실질 한도
+  const rows = Object.keys(DB || {}).filter(k => Array.isArray(DB[k])).map(k => {
+    let bytes = 0;
+    try { bytes = new TextEncoder().encode(JSON.stringify(DB[k])).length; } catch(_){}
+    const sharded = (typeof _SHARDED_COLS !== 'undefined') && _SHARDED_COLS.indexOf(k) >= 0;
+    return {
+      컬렉션: k, 건수: DB[k].length, KB: Math.round(bytes / 102.4) / 10,
+      '한도대비': Math.round(bytes / LIMIT * 100) + '%',
+      상태: sharded ? '샤딩됨(안전)' : (bytes > LIMIT * 0.8 ? '⚠ 위험' : (bytes > LIMIT * 0.5 ? '주의' : '정상')),
+    };
+  }).sort((a, b) => b.KB - a.KB);
+  console.log('%c=== Firestore 컬렉션 크기 (문서 한도 1,024KB) ===',
+              'background:#0ea5e9;color:#fff;padding:4px 8px;font-weight:700');
+  console.table(rows);
+  const risky = rows.filter(r => r.상태 === '⚠ 위험');
+  if (risky.length) console.warn('한도 80% 초과:', risky.map(r => r.컬렉션).join(', '),
+                                 '— _SHARDED_COLS 에 추가를 검토할 것');
+  return rows;
+};
+
 // v2.3.644: localStorage 선제 정리.
 //   지금까지 정리는 QuotaExceededError 가 나야만 돌았다(_freeLS / v2.3.172 슬림).
 //   그 시점엔 이미 저장이 한 번 실패한 뒤라, 실패한 저장 건이 유실될 수 있다.
@@ -7010,35 +7033,43 @@ function _soShardArr(arr){
   return shards;
 }
 // getFn: (docRef)=>Promise<snap>. 라이브+아카이브 전체 배열 반환.
-async function _soReadSharded(getFn){
+// v2.3.645: 컬렉션 파라미터화 — stockHistory 도 같은 규약으로 샤딩한다.
+//   문서 이름 규약(<col> / <col>_arch1..N)과 shopOrders 동작은 그대로 유지.
+//   ⚠️ 여기에 컬렉션을 추가하면 로드(아카이브 병합)·COUNT-GUARD·저장 세 곳이
+//   모두 _SHARDED_COLS 를 보게 되어 있어야 한다. 로드만 빠지면 로컬이 서버보다
+//   적어 보이고, COUNT-GUARD 가 덮어쓰기로 넘어가며 아카이브가 날아간다.
+const _SHARDED_COLS = ['shopOrders', 'stockHistory'];
+async function _shardRead(col, getFn){
   const db = window._firebaseDb, dref = window._firestoreDoc;
   if (!db || !dref || !getFn) return { exists:false, orders:[], archN:0 };
-  const live = await getFn(dref(db,'erp_data','shopOrders'));
+  const live = await getFn(dref(db,'erp_data',col));
   if (!(live && live.exists && live.exists())) return { exists:false, orders:[], archN:0 };
   const d = live.data() || {}; const archN = Number(d.arch) || 0;
   let all = _soParseData(d.data);
   for (let i=1;i<=archN;i++){
-    try { const s = await getFn(dref(db,'erp_data','shopOrders_arch'+i)); if (s && s.exists && s.exists()) all = all.concat(_soParseData(s.data().data)); } catch(_){}
+    try { const s = await getFn(dref(db,'erp_data',col+'_arch'+i)); if (s && s.exists && s.exists()) all = all.concat(_soParseData(s.data().data)); } catch(_){}
   }
   return { exists:true, orders:all, archN };
 }
+async function _soReadSharded(getFn){ return _shardRead('shopOrders', getFn); }
 // 전체 배열을 라이브+아카이브 샤드로 나눠 원자적(batch) 저장.
-async function _soWriteSharded(arr){
+async function _shardWrite(col, arr){
   const db = window._firebaseDb, dref = window._firestoreDoc, setD = window._firestoreSetDoc, mkBatch = window._firestoreWriteBatch;
   const shards = _soShardArr(arr); const archN = shards.length - 1; const ts = Date.now();
   if (mkBatch){
     const b = mkBatch(db);
-    b.set(dref(db,'erp_data','shopOrders'), { data: JSON.stringify(shards[0]||[]), ts, arch: archN });
-    for (let i=1;i<=archN;i++) b.set(dref(db,'erp_data','shopOrders_arch'+i), { data: JSON.stringify(shards[i]), ts });
+    b.set(dref(db,'erp_data',col), { data: JSON.stringify(shards[0]||[]), ts, arch: archN });
+    for (let i=1;i<=archN;i++) b.set(dref(db,'erp_data',col+'_arch'+i), { data: JSON.stringify(shards[i]), ts });
     await b.commit();
   } else {
     // 폴백(비원자): 아카이브 먼저, 라이브(arch 메타) 마지막
-    for (let i=1;i<=archN;i++) await setD(dref(db,'erp_data','shopOrders_arch'+i), { data: JSON.stringify(shards[i]), ts });
-    await setD(dref(db,'erp_data','shopOrders'), { data: JSON.stringify(shards[0]||[]), ts, arch: archN });
+    for (let i=1;i<=archN;i++) await setD(dref(db,'erp_data',col+'_arch'+i), { data: JSON.stringify(shards[i]), ts });
+    await setD(dref(db,'erp_data',col), { data: JSON.stringify(shards[0]||[]), ts, arch: archN });
   }
-  console.log('💾 [shopOrders 샤딩] 저장:', (arr||[]).length, '건 →', shards.length, '샤드(아카이브', archN, ')');
+  console.log('💾 [' + col + ' 샤딩] 저장:', (arr||[]).length, '건 →', shards.length, '샤드(아카이브', archN, ')');
   return { archN, shards: shards.length };
 }
+async function _soWriteSharded(arr){ return _shardWrite('shopOrders', arr); }
 
 // ═══ RENIV 패치 — 서버(자동화) 변경 덮어쓰기 방지 ═══
 //   서버 스크립트(바로팜 자동입력 등)가 이 페이지를 연 뒤에 추가/변경한 내용을
@@ -8006,8 +8037,8 @@ async function _doSaveDataInner() {
       try {
         const serverGet3 = window._firestoreGetDocFromServer || window._firestoreGetDoc;
         let _srvExists, srvArr;
-        if (key === 'shopOrders') {
-          const _sr = await _soReadSharded(serverGet3);   // v2.3.402: 라이브+아카이브 합본으로 가드 비교
+        if (_SHARDED_COLS.indexOf(key) >= 0) {
+          const _sr = await _shardRead(key, serverGet3);  // v2.3.402/645: 라이브+아카이브 합본으로 가드 비교
           _srvExists = _sr.exists; srvArr = _sr.orders;
         } else {
           const srvSnap = await serverGet3(docRef(db, 'erp_data', key));
@@ -8242,7 +8273,10 @@ async function _doSaveDataInner() {
       }
     }
     try {
-      if (key === 'shopOrders') { await _soWriteSharded(JSON.parse(payload.data)); _shopOrdersSaved = true; }  // v2.3.402: 라이브+아카이브 샤딩(1MB 초과 방지)
+      if (_SHARDED_COLS.indexOf(key) >= 0) {   // v2.3.402/645: 라이브+아카이브 샤딩(1MB 초과 방지)
+        await _shardWrite(key, JSON.parse(payload.data));
+        if (key === 'shopOrders') _shopOrdersSaved = true;
+      }
       else { await setDoc(docRef(db, 'erp_data', key), payload); }
       if (key === 'accounts') console.log('✅ [FIRESTORE SAVE] accounts 저장 성공:', (val||[]).length, '건');
       // v1.9.150 — items 저장 성공 시 stale 플래그 해제
@@ -8463,20 +8497,26 @@ async function loadDataFromFirestore() {
         }
       }
     });
-    // v2.3.402: shopOrders 아카이브 샤드 병합 — 라이브 doc 의 arch 개수만큼 읽어 concat(순서 보존)
-    try {
-      const _soLive = snaps[soIdx];
-      const _archN = (_soLive && _soLive.exists()) ? (Number(_soLive.data().arch) || 0) : 0;
-      if (_archN > 0 && Array.isArray(result.shopOrders)) {
-        for (let i = 1; i <= _archN; i++) {
-          try {
-            const _as = await cacheGetDoc(docRef(db, 'erp_data', 'shopOrders_arch' + i));
-            if (_as && _as.exists()) result.shopOrders = result.shopOrders.concat(_soParseData(_as.data().data));
-          } catch(_){}
+    // v2.3.402/645: 아카이브 샤드 병합 — 라이브 doc 의 arch 개수만큼 읽어 concat(순서 보존).
+    //   ⚠️ 이 블록이 빠지면 로컬이 서버보다 적어 보이고, COUNT-GUARD 가 덮어쓰기로
+    //   넘어가면서 아카이브가 통째로 사라진다. _SHARDED_COLS 와 반드시 같이 움직일 것.
+    for (const _sc of _SHARDED_COLS) {
+      try {
+        const _si = keys.indexOf(_sc);
+        if (_si < 0) continue;
+        const _live = snaps[_si];
+        const _archN = (_live && _live.exists()) ? (Number(_live.data().arch) || 0) : 0;
+        if (_archN > 0 && Array.isArray(result[_sc])) {
+          for (let i = 1; i <= _archN; i++) {
+            try {
+              const _as = await cacheGetDoc(docRef(db, 'erp_data', _sc + '_arch' + i));
+              if (_as && _as.exists()) result[_sc] = result[_sc].concat(_soParseData(_as.data().data));
+            } catch(_){}
+          }
+          console.log('🔍 [FIRESTORE READ] ' + _sc + ' 아카이브', _archN, '샤드 병합 → 전체', result[_sc].length, '건');
         }
-        console.log('🔍 [FIRESTORE READ] shopOrders 아카이브', _archN, '샤드 병합 → 전체', result.shopOrders.length, '건');
-      }
-    } catch(_){}
+      } catch(_){}
+    }
     // meta
     const meta = JSON.parse(snaps[metaIdx].data().data);
     Object.assign(result, meta);
