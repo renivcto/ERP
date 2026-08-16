@@ -135,7 +135,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
-const VO_VERSION = 'v2026-08-15s';        // 배포 확인용. 코드 고칠 때마다 올릴 것
+const VO_VERSION = 'v2026-08-16a';        // 배포 확인용. 코드 고칠 때마다 올릴 것
 console.log('[RENIV OFFICE]', VO_VERSION);
 const FB = window.__FB__ || null;
 const DEMO = new URLSearchParams(location.search).has('demo');
@@ -159,15 +159,20 @@ const ZONES = [
   { id:'warehouse', name:'창고',       x:-58, z:  0, w:18, d:58, color:0xEED7AC, cam:[-30,17,38], tgt:[-59,6,0] },
 ];
 
-/* 창고 6칸 — ERP 창고 목록 순서대로 왼쪽에 일렬 배치.
+/* 창고 4칸 — 르니브가 직접 쓰는 창고만 왼쪽에 일렬 배치.
    칸은 '자리'라서 데이터가 없어도 항상 있고, 간판도 항상 걸린다.
-   ERP 에 창고가 추가/개명되면 names 를 같이 고쳐야 한다. */
+   ERP 에 창고가 추가/개명되면 names 를 같이 고쳐야 한다.
+   (2026-08-16: 바이오코스텍·내추럴솔루션 창고는 외주처라 제외 — 6칸 → 4칸.
+    그만큼 칸을 넓혀 선반·간판이 잘 보이게 했다. 다시 넣으려면 names 에 추가만 하면
+    bayZ 를 같은 개수로 맞춰줘야 한다.) */
 const WH = {
   x: -58,
-  bayZ:  [-23.75, -14.25, -4.75, 4.75, 14.25, 23.75],
-  names: ['르니브 창고', '르니브 본사', '쿠팡 창고',
-          '바로팜 창고', '바이오코스텍 창고', '내추럴솔루션 창고'],
+  bayZ:  [-19.5, -6.5, 6.5, 19.5],
+  names: ['르니브 창고', '르니브 본사', '쿠팡 창고', '바로팜 창고'],
 };
+/* 일부러 화면에서 뺀 창고 — 경고를 띄우지 않는다(설정 실수와 구분하려고).
+   다시 보이게 하려면 여기서 지우고 WH.names·WH.bayZ 에 추가할 것. */
+const WH_HIDDEN = ['바이오코스텍 창고', '내추럴솔루션 창고'];
 const whKey = s => String(s||'').replace(/\s+/g, '');
 
 /* ═══════ 씬 ═══════ */
@@ -847,8 +852,8 @@ function faceCrate(mesh, src){
 }
 /* 선반 자리 — 아래·위 2단 × 3칸. 선반판 윗면이 y 1.41 / 3.01 이다. */
 const SHELF_SLOT = [
-  { y:2.25, dz:-2.7 }, { y:2.25, dz:0 }, { y:2.25, dz:2.7 },
-  { y:4.25, dz:-2.7 }, { y:4.25, dz:0 }, { y:4.25, dz:2.7 },
+  { y:2.25, dz:-3.6 }, { y:2.25, dz:0 }, { y:2.25, dz:3.6 },
+  { y:4.25, dz:-3.6 }, { y:4.25, dz:0 }, { y:4.25, dz:3.6 },
 ];
 /* 선반 한 자리 = 제품 하나. 수량이 많을수록 같은 제품을 여러 개 나열해
    진열대처럼 보이게 하고, 각 상자 앞면(+x, 통로 쪽)에 품목 사진을 씌운다. */
@@ -891,13 +896,13 @@ function shelfItem(bz, slot, it, info){
 /* 창고 선반 — 칸마다 벽쪽에 하나씩 (세로 방향) */
 WH.bayZ.forEach(bz=>{
   const g = new THREE.Group();
-  [-3.9, 3.9].forEach(pz=>{
+  [-5.2, 5.2].forEach(pz=>{
     const post = box(0.3,5.6,0.3,P.woodDark); post.position.set(0,2.8,pz); g.add(post);
   });
   [1.5, 3.5].forEach(h=>{                       // 2단 간격 1.6 → 2.0 (제품이 여유있게)
-    const b = box(2.3,0.24,8.2,P.wood); b.position.set(0,h,0); g.add(b);
+    const b = box(2.3,0.24,10.8,P.wood); b.position.set(0,h,0); g.add(b);
   });
-  const bk = box(0.14,5.0,8.2,P.woodDark); bk.position.set(-1.1,2.6,0); g.add(bk);
+  const bk = box(0.14,5.0,10.8,P.woodDark); bk.position.set(-1.1,2.6,0); g.add(bk);
   g.position.set(WH.x - 6, 0, bz);
   scene.add(g);
 });
@@ -909,7 +914,8 @@ for (let i=1;i<WH.bayZ.length;i++){
   scene.add(ln);
 }
 /* 창고 간판 — 통로 위 레일에 칸 이름을 높이 매단다 */
-const whRail = box(0.32, 0.32, 56, P.woodDark);
+const WH_SIGN_PICK = [];        // 간판 판때기 참조 — renderData 가 재고 목록을 채운다
+const whRail = box(0.32, 0.32, 52, P.woodDark);
 whRail.position.set(WH.x - 6, 12.4, 0);
 scene.add(whRail);
 WH.bayZ.forEach((bz, i)=>{
@@ -919,13 +925,14 @@ WH.bayZ.forEach((bz, i)=>{
     const hang = box(0.16, 1.9, 0.16, P.woodDark);
     hang.position.set(0, 11.5, dz); g.add(hang);
   });
-  const plate = box(0.3, 1.3, 5.0, P.white);   plate.position.set(0, 10.1, 0);
-  const edge  = box(0.38, 0.16, 5.2, P.gold);  edge.position.set(0, 9.41, 0);
+  const plate = box(0.3, 1.45, 7.2, P.white);   plate.position.set(0, 10.1, 0);
+  const edge  = box(0.38, 0.18, 7.4, P.gold);  edge.position.set(0, 9.41, 0);
   const edge2 = edge.clone();                   edge2.position.set(0, 10.79, 0);
   g.add(plate, edge, edge2);
   g.position.set(WH.x - 6, 0, bz);              // 선반 바로 위 (정렬 어긋남 방지)
   scene.add(g);
-  addPick(plate, { title:nm, tag:'창고 · ERP 등록', note:'ERP 창고 목록의 칸입니다.' });
+  addPick(plate, { title:nm, tag:'창고 · ERP 등록', note:'재고를 불러오는 중입니다…' });
+  WH_SIGN_PICK[i] = plate;      // 데이터가 오면 여기에 재고 목록을 채운다
   const t = label(nm, { cls:'name' });          // big → name (글씨 축소)
   t.position.set(WH.x - 6.35, 10.1, bz);
   scene.add(t);
@@ -1060,17 +1067,35 @@ function renderData(snap){
     const items = wh ? (wh.items||[]).slice(0, SHELF_SLOT.length) : [];
     const lowCnt = items.filter(v=>v.low).length;
 
-    const plate = box(5.6, 0.85, 0.3, !wh ? P.gray : (lowCnt ? 0xF4718B : P.wood));
+    /* 클릭 패널 내용 — 품목별 수량을 그대로 나열한다.
+       간판과 명패 둘 다 같은 내용을 쓴다(어느 쪽을 눌러도 재고가 보이게). */
+    const allItems = wh ? (wh.items || []) : [];
+    const totQty = allItems.reduce((a,v)=>a+(Number(v.qty)||0), 0);
+    const whInfo = wh
+      ? { title: nm, tag: '창고 재고',
+          rows: [
+            ['보관 품목', allItems.length + '종'],
+            ['총 수량', totQty.toLocaleString('ko-KR') + '개'],
+            ['부족 품목', lowCnt ? lowCnt + '종' : '없음'],
+            ...allItems.map(v => [
+              (v.low ? '⚠ ' : '') + (v.name || v.code || '-'),
+              (Number(v.qty)||0).toLocaleString('ko-KR') + '개',
+            ]),
+          ],
+          note: allItems.length > items.length
+            ? '선반에는 ' + items.length + '종까지만 놓입니다. 목록은 전부입니다.'
+            : '',
+          warn: !!lowCnt }
+      : { title: nm, tag: '창고',
+          rows: [['상태', '스냅샷에 이 창고가 없음']],
+          note: '서버 vo_snapshot.py 의 WH_NAMES 에 이 창고 ID가 없을 수 있습니다.' };
+
+    if (WH_SIGN_PICK[bi]) WH_SIGN_PICK[bi].userData.info = whInfo;   // 간판도 같은 내용
+
+    const plate = box(7.2, 0.9, 0.3, !wh ? P.gray : (lowCnt ? 0xF4718B : P.wood));
     plate.position.set(WH.x - 6, 4.9, bz);
     dataGroup.add(plate);
-    dPick(plate, { title:nm, tag:'창고',
-      rows: wh
-        ? [['보관 품목', items.length + '종'],
-           ['총 수량', items.reduce((a,v)=>a+(Number(v.qty)||0),0).toLocaleString('ko-KR')+'개'],
-           ['부족 품목', lowCnt + '종']]
-        : [['상태', '스냅샷에 이 창고가 없음']],
-      note: wh ? '' : '서버 vo_snapshot.py 의 WH_NAMES 에 이 창고 ID가 없을 수 있습니다.',
-      warn: !!lowCnt });
+    dPick(plate, whInfo);
 
     items.forEach((it, k)=>{
       shelfItem(bz, k, it,
@@ -1084,8 +1109,12 @@ function renderData(snap){
     });
   });
   const orphan = whSrc.filter(w => !whUsed.has(w));
-  if (orphan.length)
-    console.warn('[창고] 칸에 매칭되지 않은 창고:', orphan.map(w=>w.name),
+  const hidden = orphan.filter(w => WH_HIDDEN.some(h => whKey(h) === whKey(w.name)));
+  const missing = orphan.filter(w => !hidden.includes(w));
+  if (hidden.length)
+    console.info('[창고] 일부러 제외한 창고:', hidden.map(w=>w.name));
+  if (missing.length)
+    console.warn('[창고] 칸에 매칭되지 않은 창고:', missing.map(w=>w.name),
                  '— WH.names 또는 서버 WH_NAMES 를 맞춰야 합니다.');
 
   /* 회의판 텍스트 갱신 */
