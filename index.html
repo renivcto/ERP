@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.643';
+const ERP_VERSION = 'v2.3.644';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6775,6 +6775,88 @@ window._freeLS = function() {
   return { freedKB: freedKB };
 };
 
+// v2.3.644: localStorage 진단 — 어떤 키가 자리를 먹는지 크기순으로 본다. 읽기 전용.
+window.lsReport = function(top) {
+  top = top || 15;
+  const rows = [];
+  let total = 0;
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    let n = 0;
+    try { n = (localStorage.getItem(k) || '').length; } catch(_){}
+    total += n;
+    rows.push({ 키: k, KB: Math.round(n / 102.4) / 10 });
+  }
+  rows.sort((a, b) => b.KB - a.KB);
+  console.log('%c=== localStorage ' + (total / 1024).toFixed(0) + 'KB (브라우저 한도 보통 5,120KB) ===',
+              'background:#0ea5e9;color:#fff;padding:4px 8px;font-weight:700');
+  console.table(rows.slice(0, top));
+  const grp = {};
+  rows.forEach(r => {
+    const g = String(r.키 || '').replace(/[0-9T:\-]+$/, '');   // 시간별 스냅샷을 한 묶음으로
+    grp[g] = (grp[g] || 0) + r.KB;
+  });
+  console.log('%c--- 접두어별 합계 ---', 'font-weight:700');
+  console.table(Object.keys(grp).map(g => ({ 그룹: g, KB: Math.round(grp[g] * 10) / 10 }))
+                      .sort((a, b) => b.KB - a.KB).slice(0, top));
+  return { totalKB: Math.round(total / 1024), keys: rows.length };
+};
+
+// v2.3.644: localStorage 선제 정리.
+//   지금까지 정리는 QuotaExceededError 가 나야만 돌았다(_freeLS / v2.3.172 슬림).
+//   그 시점엔 이미 저장이 한 번 실패한 뒤라, 실패한 저장 건이 유실될 수 있다.
+//   임계치를 넘으면 '복구용 시간별 스냅샷'만 규정 개수로 줄인다.
+//   ⚠️ 메모리 DB / Firestore / 단독 백업(reniv_*_backup)은 건드리지 않는다.
+//   스냅샷은 Firestore 사본이 있는 복구용 여벌이라 지워도 데이터가 사라지지 않는다.
+const _LS_SOFT_LIMIT = 700 * 1024;
+const _LS_SNAP_GROUPS = [
+  { prefix: 'reniv_orders_snap_',     list: 'reniv_orders_snapshots_list', keep: 4 },
+  { prefix: 'reniv_items_snap_',      list: 'reniv_items_snaps_list',      keep: 8 },
+  { prefix: 'reniv_shopOrders_snap_', list: '',                            keep: 2 },
+];
+window._lsAutoTidy = function(opts) {
+  opts = opts || {};
+  const sum = () => {
+    let s = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      try { s += (localStorage.getItem(localStorage.key(i)) || '').length; } catch(_){}
+    }
+    return s;
+  };
+  let before;
+  try { before = sum(); } catch(_) { return { error: true }; }
+  if (!opts.force && before < _LS_SOFT_LIMIT) return { skipped: true, KB: Math.round(before / 1024) };
+  let removed = 0;
+  _LS_SNAP_GROUPS.forEach(g => {
+    try {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {          // 먼저 모으고 나중에 지운다
+        const k = localStorage.key(i);
+        if (k && k.indexOf(g.prefix) === 0) keys.push(k);
+      }
+      keys.sort().reverse();          // hourKey 가 ISO(YYYY-MM-DDTHH) 라 사전순 = 시간순
+      keys.slice(g.keep).forEach(k => { try { localStorage.removeItem(k); removed++; } catch(_){} });
+      // 목록에서도 사라진 스냅샷을 빼 준다(유령 항목 방지).
+      // 원래 없던 목록 키를 새로 만들지는 않는다 — 자리를 만들려고 부른 함수가 키를 늘리면 안 된다.
+      const _rawList = g.list ? localStorage.getItem(g.list) : null;
+      if (_rawList !== null) {
+        const alive = {};
+        keys.slice(0, g.keep).forEach(k => { alive[k] = 1; });
+        let list = [];
+        try { list = JSON.parse(_rawList || '[]') || []; } catch(_){}
+        list = list.filter(s => s && alive[g.prefix + s.k]);
+        localStorage.setItem(g.list, JSON.stringify(list));
+      }
+    } catch(_){}
+  });
+  const after = sum();
+  if (removed) {
+    console.log('🧹 [LS] 선제 정리 — 옛 스냅샷 ' + removed + '건 제거, '
+                + (before / 1024).toFixed(0) + 'KB → ' + (after / 1024).toFixed(0) + 'KB');
+  }
+  return { removed: removed, KB: Math.round(after / 1024) };
+};
+
 // v2.3.466: 샘플 tombstone 판정 — id 만 비교하면 안 된다.
 //   sample id 는 기기별 카운터(nextId = max+1)라, 삭제된 id 가 새 샘플에 그대로 재발급된다.
 //   그러면 옛 묘비가 신규 품의서를 태어나자마자 죽이는 자기영속 루프가 된다
@@ -7157,12 +7239,14 @@ function _backupItemsNow() {
     // 시점 스냅샷 (시간별 1개)
     const hourKey = new Date().toISOString().slice(0,13);  // YYYY-MM-DDTHH
     localStorage.setItem('reniv_items_snap_' + hourKey, payload);
-    // 스냅샷 목록 관리 (최대 24개 = 24시간)
+    // 스냅샷 목록 관리 — v2.3.644: 24개(24시간) → 8개.
+    //   발주 스냅샷은 4개인데 품목만 24시간치를 들고 있어 localStorage 를 크게 먹었다.
+    //   품목은 Firestore/IDB 백업이 따로 있고, 이건 되돌리기용 여벌이라 8시간이면 충분하다.
     try {
       let list = JSON.parse(localStorage.getItem('reniv_items_snaps_list')||'[]') || [];
       list = list.filter(s => s.k !== hourKey);
       list.unshift({ k: hourKey, ts: Date.now(), count: items.length });
-      list = list.slice(0, 24);
+      list = list.slice(0, 8);
       localStorage.setItem('reniv_items_snaps_list', JSON.stringify(list));
       // 24개 초과한 옛 스냅샷 제거
       Object.keys(localStorage).forEach(k => {
@@ -7762,6 +7846,9 @@ async function _doSaveDataInner() {
   } catch(_) {
     _lsJson = JSON.stringify(dbToSave);
   }
+
+  // v2.3.644: 저장 전에 미리 자리를 만든다. quota 에러가 난 뒤에 치우면 그 저장 건이 날아간다.
+  try { if (typeof _lsAutoTidy === 'function') _lsAutoTidy(); } catch(_){}
 
   let _mainQuotaHit = false;
   try {
