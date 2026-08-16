@@ -30,14 +30,17 @@ ERP/
 
 ### ⚠️ 저장소 경로 — 반드시 E 드라이브
 
-이 PC에는 OneDrive 폴더가 **두 개** 있고, 둘 다 `0.RENIV\ERP` 를 갖고 있다.
+**2026-08-15부터 저장소는 `E:\ERP` 다.** OneDrive 밖으로 옮겼다.
 
 | 경로 | 상태 |
 |---|---|
-| `E:\OneDrive\0.RENIV\ERP\ERP\` | ✅ **진짜.** git 저장소이자 배포본 |
-| `C:\Users\heeka\OneDrive\0.RENIV\ERP\` | ❌ 낡은 사본. `world/` 자체가 없음 |
+| `E:\ERP\` | ✅ **유일한 저장소** |
+| `E:\OneDrive\0.RENIV\ERP\ERP\` | ❌ 옛 위치. 쓰지 않는다 |
+| `C:\Users\heeka\OneDrive\0.RENIV\ERP\` | ❌ 더 낡은 사본 |
 
-C 쪽을 고치면 작업이 통째로 날아간다. 작업 시작 전에 `pwd` 로 E 드라이브인지 확인할 것.
+OneDrive 안에 있을 때 `.git` 동기화 충돌로 `refs/heads/main` 사본이 **가짜 브랜치**로 생기고
+커밋 중 `fsync error` 가 났다. `main` 이 옛 커밋으로 되돌아갈 수 있는 상태였다.
+**git 저장소를 OneDrive 안에 두지 말 것.** 작업 시작 전에 `pwd` 로 `E:\ERP` 인지 확인할 것.
 
 표기명은 **RENIV OFFICE** 지만 **폴더명·URL·`vo_snapshot`·`VO_VERSION`·`__VO__` 는 `world`/`vo` 그대로**다.
 (2026-08-15 개명. 경로까지 바꾸면 배포 URL 과 서버 cron 이 깨진다.)
@@ -439,7 +442,7 @@ GitHub Pages가 1~3분 뒤 반영한다. 안 바뀌면 브라우저 강력 새�
 - **PowerShell에서 출력이 멈춤** → 콘솔 "빠른 편집 모드" 때문. 창을 클릭하지 말 것.
   또는 `git push origin main *> push.log; Get-Content push.log` 로 로그를 파일로 받는다.
 - **GitHub Desktop이 저장소를 못 찾음** → 리포지토리가 C드라이브에서
-  `E:\OneDrive\0.RENIV\ERP\ERP` 로 옮겨졌다. GitHub Desktop에서 기존 항목을 제거하고
+  `E:\ERP` 로 옮겨졌다. GitHub Desktop에서 기존 항목을 제거하고
   `File → Add local repository` 로 E드라이브 경로를 다시 등록할 것.
 - 저장소가 OneDrive 안에 있어서 `.git` 동기화 충돌이 날 수 있다. 푸시 전에 OneDrive
   동기화가 끝났는지 확인하면 안전하다.
