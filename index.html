@@ -2749,6 +2749,23 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
           </table>
         </div>
       </div>
+
+      <!-- v2.3.652: 직원용 ERP 직원 관리 (기획서 p21 — 사용자 관리는 임원용 ERP에서) -->
+      <div id="staff-user-section">
+        <div style="display:flex;align-items:center;gap:10px;margin:26px 0 10px">
+          <span style="font-weight:700;font-size:15px">👥 직원용 ERP 직원</span>
+          <span style="font-size:12px;color:var(--gray-400)">르니브 직원 ERP 가입자 — 승인·비활성화 관리 (승인은 관리자만)</span>
+          <a href="./staff/" target="_blank" rel="noopener" style="margin-left:auto;font-size:12px;color:var(--sky-600);text-decoration:none">직원 ERP 열기 ↗</a>
+        </div>
+        <div class="card">
+          <div class="card-body p0 tbl-wrap">
+            <table>
+              <thead><tr><th style="text-align:center">이름</th><th style="text-align:center">이메일</th><th style="text-align:center">전화번호</th><th style="text-align:center">직책</th><th style="text-align:center">집주소</th><th style="text-align:center">입사일</th><th style="text-align:center">상태</th><th style="text-align:center">관리</th></tr></thead>
+              <tbody id="staff-user-table"><tr><td colspan="8" style="padding:26px;text-align:center;color:var(--gray-400);font-size:13px">직원 목록 불러오는 중…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ══════════════ QC ══════════════ -->
@@ -6212,7 +6229,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.651';
+const ERP_VERSION = 'v2.3.652';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -48276,6 +48293,7 @@ function renderUserTable() {
     return;
   }
   { const _uHead = document.getElementById('user-table-head'); if (_uHead) _uHead.style.display = ''; }
+  try { _loadStaffUsersTable(); } catch(_){}   // v2.3.652: 직원용 ERP 직원 섹션 동시 갱신
   // v1.9.921: Firestore 사용자 목록을 한 번이라도 불러왔으면 그 캐시를 사용.
   //   (로컬 DB.users 로 덮어써서 현재 관리자 본인 행이 사라지던 깜빡임 버그 수정)
   if (window._cachedFirestoreUsers && window._cachedFirestoreUsers.length && typeof _renderUserTableFromList === 'function') {
@@ -48313,6 +48331,60 @@ function renderUserTable() {
     </tr>
   `).join('');
 }
+
+// ═══ v2.3.652: 직원용 ERP 직원 관리 (기획서 p21) ═══
+//   staff/index.html 이 쓰는 staff_users 컬렉션을 임원용에서 승인·비활성화한다.
+//   ⚠️ 규칙상 승인(active 변경)은 관리자(isAdmin)만 — 비관리자는 저장 시 권한 오류.
+async function _loadStaffUsersTable() {
+  const tb = document.getElementById('staff-user-table');
+  if (!tb) return;
+  try {
+    const snap = await window._firestoreGetDocs(window._firestoreCollection(window._firebaseDb, 'staff_users'));
+    const list = snap.docs.map(d => d.data());
+    if (!list.length) {
+      tb.innerHTML = '<tr><td colspan="8" style="padding:26px;text-align:center;color:var(--gray-400);font-size:13px">아직 가입한 직원이 없습니다 — 직원 ERP에서 구글 로그인으로 가입하면 여기에 나타납니다</td></tr>';
+      return;
+    }
+    const esc0 = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    // 사진 아바타(base64)는 이미지로, 이모지는 텍스트로 — 형식 검증 통과분만 img 로 (주입 방지)
+    const ava = a => /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/.test(String(a || ''))
+      ? `<img src="${a}" style="width:22px;height:22px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:4px">`
+      : (esc0(a || '') + ' ');
+    // 승인대기 먼저, 그다음 최신 가입순
+    list.sort((a, b) => ((a.active === true ? 1 : 0) - (b.active === true ? 1 : 0)) || ((b.createdAt || 0) - (a.createdAt || 0)));
+    tb.innerHTML = list.map(u => `
+      <tr>
+        <td style="text-align:center">${ava(u.avatar)}<b>${esc0(u.name || '-')}</b></td>
+        <td style="text-align:center">${esc0(u.email || '-')}</td>
+        <td style="text-align:center">${esc0(u.phone || '-')}</td>
+        <td style="text-align:center">${esc0(u.title || '-')}</td>
+        <td style="text-align:center;font-size:12px;max-width:190px">${esc0(u.address || '-')}</td>
+        <td style="text-align:center">${esc0(String(u.joinDate || '').slice(0, 10) || '-')}</td>
+        <td style="text-align:center">${statusBadge(u.active === true ? '활성' : '승인대기')}</td>
+        <td style="text-align:center;white-space:nowrap">
+          ${u.active === true
+            ? `<button class="btn btn-outline btn-xs" onclick="staffUserSetActive('${esc0(u.uid)}', false)">비활성화</button>`
+            : `<button class="btn btn-success btn-xs" onclick="staffUserSetActive('${esc0(u.uid)}', true)">✅ 승인</button>`}
+        </td>
+      </tr>`).join('');
+  } catch (e) {
+    tb.innerHTML = '<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--gray-400);font-size:13px">직원 목록을 불러오지 못했습니다: ' + (e && e.message) + '</td></tr>';
+  }
+}
+window.staffUserSetActive = async function(uid, active) {
+  if (!confirm(active ? '이 직원 계정을 승인할까요? 승인 즉시 직원 ERP를 이용할 수 있습니다.'
+                      : '이 직원 계정을 비활성화할까요? 즉시 접속이 차단됩니다.')) return;
+  try {
+    await window._firestoreSetDoc(
+      window._firestoreDoc(window._firebaseDb, 'staff_users', uid),
+      { active: active, approvedAt: Date.now(), approvedBy: (window._currentUser && window._currentUser.name) || '' },
+      { merge: true });
+    showNotif(active ? '✅ 승인했습니다' : '비활성화했습니다');
+    _loadStaffUsersTable();
+  } catch (e) {
+    showNotif('처리 실패: ' + (e && e.message) + ' — 승인은 관리자 계정만 가능합니다', 'error');
+  }
+};
 
 function editUser(id) {
   const u = DB.users.find(x => x.id === id);
