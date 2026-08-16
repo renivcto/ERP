@@ -4,6 +4,10 @@
 ERP 데이터를 읽어 3D 앱이 가볍게 쓸 수 있는 요약 문서
 erp_data/vo_snapshot 를 만든다. (읽기 전용 계산 + 이 문서 하나만 쓰기)
 
+v2.1 (2026-08-16)
+  - 창고 수량을 ERP 의 _itemWhEffective 와 동일하게 계산(미배정 잔여를 기본 창고에 귀속).
+    v2 는 whStock 만 봐서 '르니브 창고'가 스냅샷에서 통째로 빠져 있었다.
+
 v2 (2026-08-15)
   - 창고 이름 하드코딩(WH_NAMES) 제거. shared/warehouse_list 를 읽어 id→이름 자동 매핑.
     ERP 에서 창고를 추가·개명해도 따라간다.
@@ -100,12 +104,7 @@ def is_final(it):
 
 
 def wh_assigned(it, wh_ids):
-    """ERP 재고관리 화면의 '재고 위치 / 재고 수량' 열과 동일한 값.
-    = item.whStock 중 실존 창고·0 아닌 것만. (ERP _itemWhAssigned)
-
-    미배정 잔여(item.stock - 배정합계)는 일부러 넣지 않는다.
-    ERP 화면도 그 값을 창고 칸에 표시하지 않기 때문에, 넣으면 3D 숫자가
-    화면과 어긋난다. (v2026-08-15: 실제로 어긋나서 되돌린 이력)"""
+    """명시 배정분만. item.whStock 중 실존 창고·0 아닌 것. (ERP _itemWhAssigned)"""
     raw = it.get("whStock") or {}
     out = {}
     if isinstance(raw, dict):
@@ -117,6 +116,26 @@ def wh_assigned(it, wh_ids):
             if q != 0:
                 out[wid] = out.get(wid, 0) + q
     return out
+
+
+def wh_effective(it, wh_ids):
+    """ERP 재고관리 화면의 '재고 위치 / 재고 수량' 열과 동일한 값.
+    = 명시 배정(whStock) + 미배정 잔여(stock - 배정합)를 기본 창고(defaultWh)에 귀속.
+    ERP index.html 의 _itemWhEffective() 를 그대로 옮긴 것. 그 함수를 고치면 여기도 고칠 것.
+
+    ⚠️ v2 초판은 whStock 만 봤다가 **르니브 창고가 스냅샷에서 통째로 빠졌다.**
+    이 창고에 걸린 수량(1,760 / 3,286 / 5,629)은 전부 미배정 잔여였고 whStock 에는
+    키조차 없었기 때문이다. ERP 쪽 주석도 '르니브 창고는 파생값' 이라고 적고 있다.
+    기본 창고가 없으면 ERP 는 '미지정'으로 두므로, 여기서도 어느 칸에도 넣지 않는다."""
+    eff = wh_assigned(it, wh_ids)
+    remainder = round(num(it.get("stock")) - sum(eff.values()), 4)
+    if remainder:
+        dw = str(it.get("defaultWh") or "")
+        if dw and dw in wh_ids:
+            eff[dw] = round(eff.get(dw, 0) + remainder, 4)
+            if eff[dw] == 0:
+                del eff[dw]
+    return eff
 
 
 def main():
@@ -172,7 +191,7 @@ def main():
         name = str(it.get("name") or "")
         iid = str(it.get("id") or "")
         final = is_final(it)
-        for wid, q in wh_assigned(it, wh_ids).items():
+        for wid, q in wh_effective(it, wh_ids).items():
             if q <= 0:
                 continue
             wn = wh_name[wid]
