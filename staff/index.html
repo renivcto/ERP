@@ -340,7 +340,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.1.1';
+const STAFF_VERSION = 'v0.2.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -524,7 +524,7 @@ function startApp() {
   $('me-title').textContent = ME.mode === 'admin' ? '관리자 (임원 계정)' : (ME.title || '직원');
   subscribeData();
   renderMenu();
-  go(ME.mode === 'admin' ? 'admin' : 'my');
+  go('home');   // v0.2.0: 임원용과 같은 '업무 현황' 홈이 첫 화면
 }
 
 function subscribeData() {
@@ -563,6 +563,7 @@ function pol() { return POLICY || DEFAULT_POLICY; }
    기획서의 메뉴 구성. ⓘ = 임원용 ERP 연동 (p2).
    연동 데이터는 다음 단계에서 항목별로 붙인다 (p5). */
 const MENUS = [
+  { id: 'home', ico: '📋', name: () => '업무 현황' },
   { id: 'my', ico: '🙋', name: () => ME.mode === 'staff' ? `${ME.name} ${ME.title || ''}`.trim() : '직원 페이지 미리보기', staffOnly: false },
   { id: 'admin', ico: '👥', name: () => '직원 업무 관리', adminOnly: true },
   { sect: '업무' },
@@ -616,11 +617,124 @@ function rerender() { if (ME) { renderMenu(); renderPage(); } }
 function renderPage() {
   const m = $('main');
   switch (CUR_PAGE) {
+    case 'home':     m.innerHTML = pageHome(); wireHome(); break;
     case 'admin':    m.innerHTML = pageAdmin(); wireAdmin(); break;
     case 'my':       m.innerHTML = pageMy(); wireMy(); break;
     case 'library':  m.innerHTML = pageLibrary(); wireLibrary(); break;
     default:         m.innerHTML = pagePlaceholder(CUR_PAGE);
   }
+}
+
+/* ═══════ 업무 현황 (홈) — 임원용 '오늘의 운영 현황' 과 같은 구성 (v0.2.0)
+   단, 직원용에서 안 되는 것은 화면에서 제외한다:
+   - 이번 달 지급 예정(재무) · 매출 분석 Gross/Net(수익성) · 임원 결재함 · 고객정보
+   피드 자리는 자료실(직원 직접 등록)이, 결재 대기는 근태 결재가 맡는다. */
+function pageHome() {
+  const d = new Date();
+  const days = ['일', '월', '화', '수', '목', '금', '토'];
+  const dateStr = `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 · ${days[d.getDay()]}요일`;
+  const isAdmin = ME.mode === 'admin';
+  const lib = LIBRARY.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const latest = lib[0];
+
+  // 상단 칩 — 임원용의 '결재 대기 N건 · 지출 결의 대기 N건' 자리
+  const chips = isAdmin
+    ? [['계정 승인 대기', USERS.filter(u => u.active !== true).length, 'admin'],
+       ['근태 결재 대기', LEAVES.filter(l => l.status === '대기').length, 'admin']]
+    : [['내 업무', myTasks().length, 'my'],
+       ['근태 결재 대기', LEAVES.filter(l => l.uid === ME.uid && l.status === '대기').length, 'my']];
+  const chipHtml = chips.map(([label, n, pg]) =>
+    `<span data-go="${pg}" style="cursor:pointer;display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-size:12.5px;font-weight:600;color:var(--ink-soft)">
+       ${label} <b style="font-size:16px;color:${n > 0 ? 'var(--brand-deep)' : 'var(--ink-mute)'}">${n}</b> 건</span>`).join('');
+
+  // 왼쪽 큰 카드 — 자료실 최신 글 (임원용의 업무 공유 피드 자리)
+  const feedCard = latest ? `
+    <div class="card"><div class="card-b">
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px">
+        <div class="ava" style="width:30px;height:30px;font-size:15px">${esc(latest.avatar || '📚')}</div>
+        <b style="font-size:13px">${esc(latest.by || '-')}</b>
+        <span style="font-size:12px;color:var(--ink-mute)">· ${fmtD(new Date(latest.createdAt || 0).toISOString())}</span>
+        <button class="btn btn-sm btn-p" data-go="library" style="margin-left:auto">📚 자료실</button>
+      </div>
+      <div style="font-size:16px;font-weight:800;margin-bottom:8px">${esc(latest.title)}</div>
+      <div style="font-size:13px;color:var(--ink-soft);line-height:1.7;max-height:150px;overflow:hidden;word-break:break-all">${linkify(latest.content)}</div>
+      ${lib.length > 1 ? `<div style="margin-top:12px;border-top:1px solid var(--line-soft);padding-top:10px;font-size:12px;color:var(--ink-mute)">지난 자료 (${lib.length - 1})
+        ${lib.slice(1, 4).map(x => `<div style="margin-top:6px;color:var(--ink-soft)">${esc(x.avatar || '')} <b>${esc(x.title)}</b> <span style="color:var(--ink-mute)">· ${fmtD(new Date(x.createdAt || 0).toISOString())}</span></div>`).join('')}</div>` : ''}
+    </div></div>`
+    : `<div class="card"><div class="card-b" style="text-align:center;padding:34px 20px;color:var(--ink-mute)">
+        <div style="font-size:30px;margin-bottom:8px">📚</div>아직 등록된 자료가 없습니다
+        <div style="margin-top:12px"><button class="btn btn-p btn-sm" data-go="library">첫 자료 등록하기</button></div></div></div>`;
+
+  // 왼쪽 아래 — (직원) 내 업무 / (관리자) 팀 요약
+  let workCard;
+  if (isAdmin) {
+    workCard = `<div class="card"><div class="card-h">👥 팀 현황 <span class="sub">클릭해서 관리</span></div>
+      <div class="card-b" style="padding:0 18px"><table><thead><tr><th>팀</th><th>책임자</th><th>AI직원</th><th>업무</th><th>담당자 배정</th></tr></thead><tbody>
+      ${TEAMS.map(t => {
+        const total = (t.tasks || []).length;
+        const assigned = (t.tasks || []).filter(k => k.assignee).length;
+        return `<tr style="cursor:pointer" data-go="admin"><td style="font-weight:700">${esc(t.name)}</td>
+          <td>${esc(t.lead || '-')}</td><td>${esc(t.ai || '-')}</td><td>${total}건</td>
+          <td>${assigned}/${total || 0}</td></tr>`;
+      }).join('')}</tbody></table></div></div>`;
+  } else {
+    const tasks = myTasks();
+    workCard = `<div class="card"><div class="card-h">🗂️ 내 업무 <span class="sub">${tasks.length}건</span></div>
+      <div class="card-b">${tasks.length
+        ? `<div class="mytasks">${tasks.slice(0, 6).map(x => `
+            <div class="mytask" data-my-open="${esc(x.team.id)}|${esc(x.task.id)}">
+              <span class="team-tag">${esc(x.team.name)}</span>
+              <div class="t">${esc(x.task.title)}</div></div>`).join('')}</div>`
+        : '<div class="empty">배정된 업무가 없습니다 — 관리자가 배정하면 여기에 나타납니다</div>'}</div></div>`;
+  }
+
+  // 오른쪽 레일 — KPI (임원용의 재무·매출 카드 자리를 근태·인원 지표로 대체)
+  let kpiHtml;
+  if (isAdmin) {
+    const act = USERS.filter(u => u.active === true).length;
+    const taskN = TEAMS.reduce((s, t) => s + (t.tasks || []).length, 0);
+    kpiHtml = `
+      <div class="kpi"><div class="k">활성 직원</div><div class="v">${act}<small>명</small></div></div>
+      <div class="kpi"><div class="k">팀 / 업무</div><div class="v">${TEAMS.length}<small>팀</small> · ${taskN}<small>건</small></div></div>`;
+  } else {
+    const s = myLeaveStats();
+    kpiHtml = `
+      <div class="kpi"><div class="k">남은 월차 (이번 달)</div><div class="v">${s.monthLeft}<small> / ${s.monthly}일</small></div></div>
+      <div class="kpi"><div class="k">남은 연차 (올해 · ${s.years}년차)</div><div class="v">${s.yearLeft}<small> / ${s.grant}일</small></div></div>`;
+  }
+
+  // 최근 근태 — 관리자: 전체 / 직원: 본인
+  const recent = (isAdmin ? LEAVES : LEAVES.filter(l => l.uid === ME.uid))
+    .slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 5);
+  const chip = st => st === '승인' ? '<span class="chip ok">승인</span>'
+              : st === '반려' ? '<span class="chip bad">반려</span>' : '<span class="chip wait">대기</span>';
+  const leaveCard = `<div class="card"><div class="card-h">🕐 최근 근태</div>
+    <div class="card-b" style="padding:${recent.length ? '0 16px' : '16px'}">
+    ${recent.length ? `<table>${recent.map(l => `<tr>
+        ${isAdmin ? `<td style="font-weight:700;white-space:nowrap">${esc(staffName(l.uid))}</td>` : ''}
+        <td>${esc(l.type)}</td><td style="white-space:nowrap">${fmtD(l.date)}</td><td>${chip(l.status)}</td></tr>`).join('')}</table>`
+      : '<div class="empty" style="padding:10px">근태 내역이 없습니다</div>'}
+    </div></div>`;
+
+  return `
+  <div class="pg on">
+    <div style="font-size:13px;color:var(--ink-mute);margin-bottom:2px">${dateStr}</div>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:20px">
+      <h1 style="font-size:23px;font-weight:800;letter-spacing:-.4px">오늘의 업무 현황</h1>
+      <div style="display:flex;gap:8px">${chipHtml}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(240px,1fr);gap:16px;align-items:start">
+      <div>${feedCard}${workCard}</div>
+      <div><div class="kpis" style="grid-template-columns:1fr;margin-bottom:14px">${kpiHtml}</div>${leaveCard}</div>
+    </div>
+  </div>`;
+}
+function wireHome() {
+  document.querySelectorAll('[data-go]').forEach(el => el.onclick = () => go(el.dataset.go));
+  document.querySelectorAll('[data-my-open]').forEach(el => el.onclick = () => {
+    const [tid, kid] = el.dataset.myOpen.split('|');
+    openTaskModal(tid, kid, ME.mode === 'admin');
+  });
 }
 
 /* ── 담당자 표시 헬퍼 ── */
