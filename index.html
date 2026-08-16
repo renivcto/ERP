@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.648';
+const ERP_VERSION = 'v2.3.649';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7151,6 +7151,82 @@ async function _saveColDoc(col, arr){
 //   사용자가 의도적으로 지운 예전 행은 _srvTs 가 오래되어 되살아나지 않는다.
 const _SRV_SESSION_START = Date.now();
 function _srvTsOf(o) { const t = o && (o._srvTs || o.srvTs); return Number(t) || 0; }
+// v2.3.649: 서버(IAN 자동화)가 채워 주는 고객정보 필드.
+//   약국 리스트의 '연락처' 열과 고객카드의 이메일·배송지가 여기서 나온다
+//   (_aggregateCustomers 가 이 필드들을 읽는다).
+const _SRV_FILL_FIELDS = ['customerPhone', 'recipientPhone', 'phone',
+                          'email', 'customerEmail',
+                          'address', 'addressDetail', 'zipCode',
+                          'customerName', 'recipientName'];
+
+// v2.3.649: 이미 지워진 고객정보 되채우기 — 서버·localStorage 백업·IDB 를 모두 뒤진다.
+//   기본은 모의실행. 실제 반영은 recoverCustomerContacts({apply:true}).
+//   빈 칸만 채우므로 여러 번 돌려도 안전하다(멱등).
+window.recoverCustomerContacts = async function(opts) {
+  opts = opts || {};
+  const apply = opts.apply === true;
+  const orders = Array.isArray(DB.shopOrders) ? DB.shopOrders : [];
+  if (!orders.length) { console.warn('[복구] shopOrders 가 비어 있습니다'); return null; }
+  const byId = new Map(orders.map(o => [o && o.id, o]));
+
+  const sources = [];
+  try {
+    const g = window._firestoreGetDocFromServer || window._firestoreGetDoc;
+    if (g) { const r = await _shardRead('shopOrders', g); if (r.exists) sources.push(['Firestore 서버', r.orders]); }
+  } catch(e) { console.warn('[복구] 서버 읽기 실패:', e && e.message); }
+  try {
+    const raw = localStorage.getItem('reniv_shopOrders_backup');
+    if (raw) sources.push(['localStorage 백업', JSON.parse(raw)]);
+  } catch(_){}
+  try {
+    if (typeof idbGet === 'function') {
+      const raw = await idbGet('reniv_shopOrders_backup');
+      if (raw) sources.push(['IDB 백업', JSON.parse(raw)]);
+    }
+  } catch(_){}
+
+  const stat = [];
+  let recs = 0, flds = 0;
+  const touched = new Set();
+  sources.forEach(([label, arr]) => {
+    if (!Array.isArray(arr)) return;
+    let r = 0, f = 0;
+    arr.forEach(so => {
+      if (!so) return;
+      const lo = byId.get(so.id);
+      if (!lo) return;
+      let hit = 0;
+      _SRV_FILL_FIELDS.forEach(fd => {
+        const sv = so[fd];
+        if (sv == null || String(sv).trim() === '') return;
+        const lv = lo[fd];
+        if (lv != null && String(lv).trim() !== '') return;
+        if (apply) lo[fd] = sv;
+        hit++;
+      });
+      if (hit) { r++; f += hit; touched.add(so.id); }
+    });
+    stat.push({ 출처: label, 레코드: arr.length, '채울건': r, '채울필드': f });
+    recs += r; flds += f;
+  });
+
+  console.log('%c=== 고객정보 복구 ' + (apply ? '(실행)' : '(모의실행)') + ' ===',
+              'background:#0ea5e9;color:#fff;padding:4px 8px;font-weight:700');
+  if (!sources.length) console.warn('읽을 수 있는 백업이 없습니다');
+  console.table(stat);
+  console.log('채울 수 있는 주문 ' + touched.size + '건 / 필드 ' + flds + '개');
+  if (!apply) {
+    console.warn('모의실행입니다. 실제로 채우려면: recoverCustomerContacts({apply:true})');
+    return { dryRun: true, orders: touched.size, fields: flds };
+  }
+  if (touched.size) {
+    await saveDataNow();
+    try { if (typeof renderPharmaciesList === 'function') renderPharmaciesList(); } catch(_){}
+    console.log('✅ 저장 완료 — 약국 리스트를 다시 확인하세요');
+  }
+  return { dryRun: false, orders: touched.size, fields: flds };
+};
+
 function _mergeServerSideChanges(key, val, srvArr, payload) {
   if (!Array.isArray(val) || !Array.isArray(srvArr)) return;
   let changed = false;
@@ -7178,6 +7254,29 @@ function _mergeServerSideChanges(key, val, srvArr, payload) {
       if (_srvTsOf(so) > _SRV_SESSION_START) { val.push(so); ids.add(so.id); added++; changed = true; }
     });
     if (added) console.warn('🔄 [SRV-MERGE] ' + key + ' 서버 추가분 ' + added + '건 병합');
+    // v2.3.649: 서버가 '기존 레코드의 빈 칸을 채우는' 보강을 해도 건수·id 가 그대로라
+    //   위 분기에 걸리지 않고, 보강 전에 로드한 브라우저가 저장하며 조용히 지워버렸다
+    //   (2026-08-16: IAN 이 채운 약국 연락처·이메일·주소가 전부 '-' 가 된 사고).
+    //   ⚠️ 채우기만 한다 — 로컬에 값이 있으면 절대 덮지 않는다(사람이 고친 값 보호).
+    if (key === 'shopOrders') {
+      const locById = new Map(val.map(o => [o && o.id, o]));
+      let recs = 0, flds = 0;
+      srvArr.forEach(so => {
+        if (!so) return;
+        const lo = locById.get(so.id);
+        if (!lo) return;
+        let hit = 0;
+        _SRV_FILL_FIELDS.forEach(f => {
+          const sv = so[f];
+          if (sv == null || String(sv).trim() === '') return;
+          const lv = lo[f];
+          if (lv != null && String(lv).trim() !== '') return;   // 로컬에 값이 있으면 그대로 둔다
+          lo[f] = sv; hit++;
+        });
+        if (hit) { recs++; flds += hit; changed = true; }
+      });
+      if (recs) console.warn('🛟 [SRV-FILL] 서버가 채운 고객정보 복원 — ' + recs + '건 / ' + flds + '개 필드');
+    }
   }
   if (changed && payload) {
     payload.data = JSON.stringify(val);
