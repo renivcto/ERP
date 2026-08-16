@@ -220,6 +220,7 @@ tr:last-child td { border-bottom:none; }
     <div class="fld"><label>전화번호</label><input class="fi" id="reg-phone" placeholder="010-0000-0000"></div>
     <div class="fld"><label>이메일 (구글 계정)</label><input class="fi" id="reg-email" readonly style="background:var(--line-soft);color:var(--ink-soft)">
       <div class="hint">로그인한 구글 계정입니다. 이 계정으로 계속 로그인하게 됩니다.</div></div>
+    <div class="fld"><label>집주소</label><input class="fi" id="reg-addr" placeholder="예: 경기도 성남시 분당구 ○○로 12, 101동 202호"></div>
     <div class="fld"><label>직책</label><input class="fi" id="reg-title" placeholder="예: MD, 매니저, 사원"></div>
     <div class="fld"><label>입사일 <span style="font-weight:500;color:var(--ink-mute)">(연차 계산에 사용됩니다)</span></label><input class="fi" type="date" id="reg-join"></div>
     <div class="fld"><label>아바타</label><div class="avagrid" id="reg-ava"></div>
@@ -265,6 +266,7 @@ tr:last-child td { border-bottom:none; }
       <div class="fld"><label>이름</label><input class="fi" id="me-f-name"></div>
       <div class="fld"><label>전화번호</label><input class="fi" id="me-f-phone"></div>
       <div class="fld"><label>직책</label><input class="fi" id="me-f-title"></div>
+      <div class="fld"><label>집주소</label><input class="fi" id="me-f-addr" placeholder="예: 경기도 성남시 분당구 ○○로 12, 101동 202호"></div>
       <div class="fld"><label>입사일</label><input class="fi" type="date" id="me-f-join"></div>
       <div class="fld"><label>아바타</label><div class="avagrid" id="me-f-ava"></div></div>
     </div>
@@ -345,7 +347,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.4.0';
+const STAFF_VERSION = 'v0.4.1';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -559,6 +561,7 @@ $('btn-register').onclick = async () => {
       uid: user.uid, email: user.email || '',
       name, phone,
       title: $('reg-title').value.trim(),
+      address: $('reg-addr').value.trim(),
       joinDate: $('reg-join').value || today(),
       avatar: $('reg-ava').dataset.sel || '🙂',
       role: 'staff', active: false, createdAt: Date.now(),
@@ -812,10 +815,11 @@ function pageAdmin() {
 
     ${pend.length ? `
     <div class="card"><div class="card-h">🔔 계정 승인 대기 <span class="sub">${pend.length}건 — 승인은 임원용 ERP 관리자만 가능합니다</span></div>
-      <div class="card-b" style="padding:0 18px"><table><thead><tr><th>이름</th><th>전화번호</th><th>이메일</th><th>직책</th><th>입사일</th><th></th></tr></thead><tbody>
+      <div class="card-b" style="padding:0 18px"><table><thead><tr><th>이름</th><th>전화번호</th><th>이메일</th><th>집주소</th><th>직책</th><th>입사일</th><th></th></tr></thead><tbody>
         ${pend.map(u => `<tr>
           <td>${avaHtml(u.avatar || '', 22)} <b>${esc(u.name)}</b></td><td>${esc(u.phone || '-')}</td>
           <td style="font-size:12px">${esc(u.email || '-')}</td>
+          <td style="font-size:12px;max-width:180px">${esc(u.address || '-')}</td>
           <td>${esc(u.title || '-')}</td><td>${fmtD(u.joinDate)}</td>
           <td style="text-align:right;white-space:nowrap">${(ME.profile && ME.profile.isAdmin === true)
             ? `<button class="btn btn-sm btn-ok" data-approve="${esc(u.uid)}">승인</button>
@@ -1217,6 +1221,7 @@ $('sb-me').onclick = () => {
   $('me-f-name').value = p.name || '';
   $('me-f-phone').value = p.phone || '';
   $('me-f-title').value = p.title || '';
+  $('me-f-addr').value = p.address || '';
   $('me-f-join').value = p.joinDate || '';
   renderAvatarGrid('me-f-ava', p.avatar || AVATARS[0]);
   $('ovl-me').classList.add('on');
@@ -1229,6 +1234,7 @@ $('btn-me-save').onclick = async () => {
     // active/role 은 건드리지 않는다 — rules 가 본인 변경을 금지한다
     await updateDoc(doc(db, 'staff_users', ME.uid), {
       name, phone: $('me-f-phone').value.trim(), title: $('me-f-title').value.trim(),
+      address: $('me-f-addr').value.trim(),
       joinDate: $('me-f-join').value || today(), avatar: $('me-f-ava').dataset.sel || '🙂',
       updatedAt: Date.now(),
     });
