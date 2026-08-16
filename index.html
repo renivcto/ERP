@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.640';
+const ERP_VERSION = 'v2.3.641';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -17417,6 +17417,108 @@ window.listPending = function() {
     });
     console.log('  → 해결: 발주서 결재 페이지에서 날인 또는 날인불필요 처리');
   }
+};
+
+// v2.3.641: 발주서 결재 중복 정리 — 콘솔 전용. 기본은 모의실행.
+//   dedupPoApprovals()              → 무엇이 지워질지 보고만 함
+//   dedupPoApprovals({apply:true})  → 실제 정리 + 저장
+//   dedupPoApprovals({apply:true, orphans:true}) → 연결 발주서 없는 건까지 제거
+window.dedupPoApprovals = async function(opts) {
+  opts = opts || {};
+  const apply = opts.apply === true;
+  const dropOrphans = opts.orphans === true;
+  const A = Array.isArray(DB.approvals) ? DB.approvals : [];
+  const orderIds = new Set((DB.orders || []).map(o => String(o && o.id)));
+
+  // 의견 보유 수 — 지울 때 의견이 딸린 쪽을 우선 살린다
+  const cmtCount = new Map();
+  (DB.approvalComments || []).forEach(c => {
+    if (!c || c.approvalId == null) return;
+    const k = String(c.approvalId);
+    cmtCount.set(k, (cmtCount.get(k) || 0) + 1);
+  });
+  const cn = a => cmtCount.get(String(a && a.id)) || 0;
+
+  const groups = new Map();
+  A.forEach(a => {
+    if (!a || !(a.type === 'po_approval' || a.type === 'po') || a.refId == null) return;
+    const key = String(a.refId);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(a);
+  });
+
+  const better = (x, y) => {
+    if ((x.status === 'approved') !== (y.status === 'approved')) return x.status === 'approved' ? x : y;
+    if (cn(x) !== cn(y)) return cn(x) > cn(y) ? x : y;
+    if (!!x.manualApprove !== !!y.manualApprove) return x.manualApprove ? x : y;
+    return ((x.createdAt || 0) <= (y.createdAt || 0)) ? x : y;
+  };
+
+  const losers = [];          // 지울 결재
+  const remap = [];           // [지워지는 id, 남는 id] — 의견 재연결용
+  const shrink = [];          // 보고용 [refId, 전, 후]
+  let orphanKept = 0;
+
+  groups.forEach((list, refId) => {
+    let winner = list[0];
+    for (let i = 1; i < list.length; i++) winner = better(winner, list[i]);
+    const isOrphan = !orderIds.has(String(refId));
+    if (isOrphan && dropOrphans) {
+      list.forEach(a => { losers.push(a); });
+      shrink.push([refId, list.length, 0]);
+      return;
+    }
+    if (isOrphan) orphanKept++;
+    list.forEach(a => {
+      if (a === winner) return;
+      losers.push(a);
+      if (cn(a) > 0) remap.push([a.id, winner.id]);
+    });
+    if (list.length > 1) shrink.push([refId, list.length, 1]);
+  });
+
+  shrink.sort((a, b) => b[1] - a[1]);
+  const line = '─'.repeat(52);
+  console.log('%c■ 발주서 결재 중복 정리 ' + (apply ? '[실행]' : '[모의실행 — 아무것도 바꾸지 않음]'),
+              'background:#1e293b;color:#fff;padding:4px 10px;font-weight:700');
+  console.log(line);
+  console.log('  전체 approvals      ', A.length + '건');
+  console.log('  발주서 결재(po)     ', (A.length - A.filter(a => a && a.type === 'non_po_approval').length) + '건');
+  console.log('  refId 그룹          ', groups.size + '개  (실제 발주서 ' + orderIds.size + '건)');
+  console.log('  ── 제거 대상        ', losers.length + '건');
+  console.log('  ── 정리 후 남는 수  ', (A.length - losers.length) + '건');
+  console.log('  의견 재연결         ', remap.length + '건  (유실 없음)');
+  console.log('  고아(발주서 없음)   ', dropOrphans ? '제거함' : (orphanKept + '개 그룹 보존'));
+  console.log(line);
+  console.log('  상위 축소: ' + shrink.slice(0, 12).map(s => 'refId ' + s[0] + ' ' + s[1] + '→' + s[2]).join(' / '));
+
+  if (!apply) {
+    console.log('%c실행하려면:  dedupPoApprovals({apply:true})', 'color:#b45309;font-weight:700');
+    console.log('고아까지 지우려면:  dedupPoApprovals({apply:true, orphans:true})');
+    return { removable: losers.length, remaining: A.length - losers.length, remapComments: remap.length };
+  }
+
+  if (!losers.length) { console.log('정리할 것이 없습니다.'); return { removed: 0 }; }
+  if (!confirm('발주서 결재 ' + losers.length + '건을 정리합니다.\n의견 ' + remap.length + '건은 남는 결재로 옮겨집니다.\n\n계속할까요?')) {
+    console.log('취소했습니다.'); return { cancelled: true };
+  }
+
+  const remapMap = new Map(remap.map(([from, to]) => [String(from), to]));
+  (DB.approvalComments || []).forEach(c => {
+    if (!c || c.approvalId == null) return;
+    const to = remapMap.get(String(c.approvalId));
+    if (to != null) c.approvalId = to;
+  });
+  const kill = new Set(losers);
+  DB.approvals = A.filter(a => !kill.has(a));
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_) {}
+  try { if (typeof saveDataNow === 'function') await saveDataNow(); } catch(e) { console.warn('저장 실패:', e); }
+  try { renderApprovalPage && renderApprovalPage(); } catch(_) {}
+  try { updateApprovalBadges && updateApprovalBadges(); } catch(_) {}
+  console.log('%c✅ ' + losers.length + '건 정리 완료 — 남은 approvals ' + DB.approvals.length + '건',
+              'background:#10b981;color:#fff;padding:3px 8px');
+  alert('✅ ' + losers.length + '건 정리 완료.\n남은 결재 ' + DB.approvals.length + '건.');
+  return { removed: losers.length, remaining: DB.approvals.length };
 };
 
 // v2.2.99 — 자동 fix: po_approval 인데 연결 order 에 stamp/stampNotRequired 있으면 → approved 처리
