@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.645';
+const ERP_VERSION = 'v2.3.646';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7028,8 +7028,19 @@ function _soByteLen(s){ try { return new TextEncoder().encode(s).length; } catch
 function _soShardArr(arr){
   arr = Array.isArray(arr) ? arr : [];
   const shards = []; let cur = [], len = 2; // '[]'
-  for (const o of arr){ const s = _soByteLen(JSON.stringify(o)) + 1; if (cur.length>0 && len+s>_SO_SHARD_MAX){ shards.push(cur); cur=[]; len=2; } cur.push(o); len+=s; }
+  // v2.3.646: 레코드 '하나' 가 한도를 넘으면 샤딩으로도 못 나눈다(그 샤드가 그대로 초과).
+  //   이건 base64 이미지를 인라인으로 넣었다는 뜻이라, 조용히 실패시키지 말고 지목해 준다.
+  const _huge = [];
+  for (const o of arr){
+    const s = _soByteLen(JSON.stringify(o)) + 1;
+    if (s > _SO_SHARD_MAX) _huge.push((o && o.id != null ? 'id=' + o.id : '?') + '(' + Math.round(s/1024) + 'KB)');
+    if (cur.length>0 && len+s>_SO_SHARD_MAX){ shards.push(cur); cur=[]; len=2; }
+    cur.push(o); len+=s;
+  }
   if (cur.length || shards.length===0) shards.push(cur);
+  if (_huge.length) console.error('🛑 [샤딩] 레코드 하나가 ' + Math.round(_SO_SHARD_MAX/1024)
+    + 'KB 를 넘어 쪼갤 수 없습니다 — 저장이 실패할 수 있습니다:', _huge.join(', '),
+    '→ base64 이미지를 별도 컬렉션(itemImages/feedImages 등)으로 오프로드해야 합니다');
   return shards;
 }
 // getFn: (docRef)=>Promise<snap>. 라이브+아카이브 전체 배열 반환.
@@ -7038,7 +7049,10 @@ function _soShardArr(arr){
 //   ⚠️ 여기에 컬렉션을 추가하면 로드(아카이브 병합)·COUNT-GUARD·저장 세 곳이
 //   모두 _SHARDED_COLS 를 보게 되어 있어야 한다. 로드만 빠지면 로컬이 서버보다
 //   적어 보이고, COUNT-GUARD 가 덮어쓰기로 넘어가며 아카이브가 날아간다.
-const _SHARDED_COLS = ['shopOrders', 'stockHistory'];
+//   v2.3.646: dbSizeReport() 에서 한도 80% 를 넘긴 5개를 추가.
+//   (base64 이미지·첨부가 인라인으로 쌓이는 컬렉션들이다)
+const _SHARDED_COLS = ['shopOrders', 'stockHistory', 'feedPosts', 'items',
+                       'samples', 'approvalComments', 'newProducts'];
 async function _shardRead(col, getFn){
   const db = window._firebaseDb, dref = window._firestoreDoc;
   if (!db || !dref || !getFn) return { exists:false, orders:[], archN:0 };
@@ -7070,6 +7084,15 @@ async function _shardWrite(col, arr){
   return { archN, shards: shards.length };
 }
 async function _soWriteSharded(arr){ return _shardWrite('shopOrders', arr); }
+// v2.3.646: 컬렉션 문서 저장 단일 창구 — 샤딩 대상이면 샤딩으로, 아니면 통짜로.
+//   개별 저장 경로가 샤딩을 우회해 arch 필드를 지워버리면 아카이브가 고아가 된다.
+//   앞으로 erp_data/<col> 을 직접 setDoc 하지 말고 이 함수를 쓸 것.
+async function _saveColDoc(col, arr){
+  if (_SHARDED_COLS.indexOf(col) >= 0) return _shardWrite(col, arr);
+  const db = window._firebaseDb, dref = window._firestoreDoc, setD = window._firestoreSetDoc;
+  await setD(dref(db, 'erp_data', col), { data: JSON.stringify(arr || []), ts: Date.now() });
+  return { archN: 0, shards: 1 };
+}
 
 // ═══ RENIV 패치 — 서버(자동화) 변경 덮어쓰기 방지 ═══
 //   서버 스크립트(바로팜 자동입력 등)가 이 페이지를 연 뒤에 추가/변경한 내용을
@@ -44298,9 +44321,9 @@ async function _digestFreshSrc() {
     if (!_get || !window._firestoreDoc || !window._firebaseDb) return src;
     for (const c of COLLS) {
       try {
-        const snap = await _get(window._firestoreDoc(window._firebaseDb, 'erp_data', c));
-        if (snap && snap.exists()) {
-          const arr = JSON.parse(snap.data().data || '[]');
+        const _sr = await _shardRead(c, _get);       // v2.3.646: 아카이브까지 합쳐 읽는다
+        if (_sr.exists) {
+          const arr = _sr.orders;
           if (Array.isArray(arr) && arr.length) src[c] = arr;
         }
       } catch(_){}
@@ -55670,12 +55693,10 @@ async function _resyncNewProducts(force){
     if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return;
     try { if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) return; } catch(_){}  // 초기 로드 전 차단
     _npResyncBusy = true; _npResyncLast = nowMs;
-    const ref = window._firestoreDoc(window._firebaseDb, 'erp_data', 'newProducts');
-    const snap = await window._firestoreGetDoc(ref);
-    if (!snap || !snap.exists || !snap.exists()) { _npResyncBusy = false; return; }
-    let arr = [];
-    try { arr = JSON.parse((snap.data() || {}).data || '[]'); } catch(_){ arr = []; }
-    if (!Array.isArray(arr)) arr = [];
+    // v2.3.646: newProducts 도 샤딩 대상 — 라이브 문서만 읽으면 아카이브를 놓친다.
+    const _sr = await _shardRead('newProducts', window._firestoreGetDoc);
+    if (!_sr.exists) { _npResyncBusy = false; return; }
+    const arr = Array.isArray(_sr.orders) ? _sr.orders : [];
     const byId = new Map();
     (Array.isArray(DB.newProducts)?DB.newProducts:[]).forEach(r => { if (r && r.id != null) byId.set(String(r.id), r); });
     let changed = false;
@@ -57811,23 +57832,25 @@ async function resetToDefaultAndUpload() {
     const setDoc = window._firestoreSetDoc;
     const docRef = window._firestoreDoc;
 
+    // v2.3.646: _saveColDoc 경유 — 예전엔 setDoc 통짜라 items/stockHistory 의 arch 필드를
+    //   지워 아카이브를 고아로 만들었다(저장한 것보다 적게 읽히는 형태의 유실).
     prog.textContent = '⏳ 1/7 업체 저장 중...';
-    await setDoc(docRef(db, 'erp_data', 'vendors'), { data: JSON.stringify(DB.vendors||[]), ts: Date.now() });
+    await _saveColDoc('vendors', DB.vendors||[]);
 
     prog.textContent = '⏳ 2/7 품목 저장 중...';
-    await setDoc(docRef(db, 'erp_data', 'items'), { data: JSON.stringify(DB.items||[]), ts: Date.now() });
+    await _saveColDoc('items', DB.items||[]);
 
     prog.textContent = '⏳ 3/7 발주서 저장 중...';
-    await setDoc(docRef(db, 'erp_data', 'orders'), { data: JSON.stringify(DB.orders||[]), ts: Date.now() });
+    await _saveColDoc('orders', DB.orders||[]);
 
     prog.textContent = '⏳ 4/7 생산관리 저장 중...';
-    await setDoc(docRef(db, 'erp_data', 'productions'), { data: JSON.stringify(DB.productions||[]), ts: Date.now() });
+    await _saveColDoc('productions', DB.productions||[]);
 
     prog.textContent = '⏳ 5/7 재고내역 저장 중...';
-    await setDoc(docRef(db, 'erp_data', 'stockHistory'), { data: JSON.stringify(DB.stockHistory||[]), ts: Date.now() });
+    await _saveColDoc('stockHistory', DB.stockHistory||[]);
 
     prog.textContent = '⏳ 6/7 견적서 저장 중...';
-    await setDoc(docRef(db, 'erp_data', 'quotes'), { data: JSON.stringify(DB.quotes||[]), ts: Date.now() });
+    await _saveColDoc('quotes', DB.quotes||[]);
 
     prog.textContent = '⏳ 7/7 설정 저장 중...';
     await setDoc(docRef(db, 'erp_data', 'meta'), {
@@ -57902,8 +57925,8 @@ async function _reconcileToServer() {
   let addedTotal = 0;
   for (const key of cols) {
     try {
-      const snap = await gd(docFn(db, 'erp_data', key));
-      const srv = snap.exists() ? (JSON.parse(snap.data().data || '[]') || []) : [];
+      const _sr = await _shardRead(key, gd);         // v2.3.646: 아카이브까지 합쳐 읽는다
+      const srv = _sr.exists ? _sr.orders : [];
       const local = Array.isArray(DB[key]) ? DB[key] : [];
       const localIds = new Set(local.map(r => String(r && r.id)));
       let tomb = new Set();
