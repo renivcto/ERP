@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.639';
+const ERP_VERSION = 'v2.3.640';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -9623,6 +9623,21 @@ if (DB == null) {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
     if (fixedCount > 0) console.log('✅ v1.9.206 날인된 발주서 ' + fixedCount + '건 결재 완료 처리');
   } catch (e) { console.warn('stamp reapprove backfill skipped:', e); }
+})();
+
+// v2.3.640: 결재완료 override 로드 → 저장된 approvals 상태까지 복원
+(async function _bootPoApprovalOverrides() {
+  try {
+    await _loadPoApprovalOverrides();
+    const n = _applyPoApprovalOverrides();
+    if (n > 0) {
+      console.log('✅ [결재 override] ' + n + '건 결재완료 복원');
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+      try { renderApprovalPage && renderApprovalPage(); } catch(_){}
+      try { updateApprovalBadges && updateApprovalBadges(); } catch(_){}
+      try { renderOrderTable && renderOrderTable(); } catch(_){}
+    }
+  } catch(e) { console.warn('[결재 override] 초기화 실패:', e); }
 })();
 
 // v1.9.311 — M-3X-01~05 + M-3X-07~08 (르니브 3중 장벽 20층 리뉴 크림 부자재 + 스파츌러) 강제 아카이브
@@ -38893,9 +38908,122 @@ function _orderHasStampProof(o) {
   return !!(o && (o.stampData || o.stampName || o.stampedAt
                   || o.stampNotRequired || o.approvalStampImage));
 }
+/* ══ v2.3.640: 발주서 결재완료 override ══════════════════════════════════════
+   approvals 의 status 는 다른 기기·세션의 옛 사본이 머지되면 approved → pending
+   으로 뒤집힌다. 날인이 있는 건은 v2.3.639 가 지켜주지만, 날인 없이 결재 버튼만
+   누른 건은 방법이 없었다. 그래서 지출결의서 지급완료(v2.3.171)와 똑같이
+   전용 shared 문서(po_approval_overrides)에 기록하고 표시 시점에 강제 적용한다.
+
+   키는 id 와 콘텐츠 sig 를 함께 기록한다 — 머지 중 발주서 id 가 재할당돼도
+   sig 로 살아남는다(지출결의서에서 id-키만 썼다가 실제로 어긋났던 이력). */
+function _poApvSig(o) {
+  if (!o) return '';
+  let amt = 0;
+  try { amt = Math.round(Number(typeof orderTotalVat === 'function' ? orderTotalVat(o) : (o.totalAmount || 0)) || 0); } catch(_) {}
+  return [String(o.orderNo || ''), String(o.vendorId || ''),
+          String(o.orderDate || '').slice(0, 10), amt].join('|');
+}
+function _poApvKeys(o) {
+  const keys = [];
+  if (o && o.id != null) keys.push('id:' + String(o.id));
+  const sig = _poApvSig(o);
+  if (sig && sig !== '|||0') keys.push('sig:' + sig);
+  return keys;
+}
+async function _loadPoApprovalOverrides(force) {
+  if (window._poApprovalOverrides && !force) return window._poApprovalOverrides;
+  let map = null;
+  try { map = (typeof loadSharedSetting === 'function') ? await loadSharedSetting('po_approval_overrides') : null; } catch(_) {}
+  window._poApprovalOverrides = (map && typeof map === 'object' && !Array.isArray(map)) ? map : {};
+  return window._poApprovalOverrides;
+}
+async function _setPoApprovalOverride(o, approved) {
+  try {
+    const keys = _poApvKeys(o);
+    if (!keys.length) return;
+    const map = await _loadPoApprovalOverrides();
+    const rec = { approved: !!approved, ts: Date.now(), sig: _poApvSig(o) || '' };
+    keys.forEach(k => { map[k] = rec; });
+    if (typeof saveSharedSetting === 'function') await saveSharedSetting('po_approval_overrides', map);
+    console.log('💾 [결재 override] ' + (approved ? '결재완료' : '해제') + ' 기록: ' + keys.join('  '));
+  } catch(err) { console.warn('[결재 override] 저장 실패:', err); }
+}
+/* 표시용 조회 — 렌더 루프에서 자주 불리므로 동기·가볍게 */
+function _poApvOverrideOf(o) {
+  const map = window._poApprovalOverrides;
+  if (!map || typeof map !== 'object' || !o) return null;
+  const keys = _poApvKeys(o);
+  for (let i = 0; i < keys.length; i++) {
+    const rec = map[keys[i]];
+    if (rec && typeof rec === 'object') return rec;
+  }
+  return null;
+}
+/* 저장된 approvals 의 status 까지 맞춰 카운트·슬랙이 어긋나지 않게 한다 */
+function _applyPoApprovalOverrides() {
+  let applied = 0;
+  try {
+    if (!window._poApprovalOverrides || !Array.isArray(DB.orders)) return 0;
+    DB.orders.forEach(o => {
+      const rec = _poApvOverrideOf(o);
+      if (!rec || !rec.approved) return;
+      const ap = (DB.approvals || []).find(a => a && a.type === 'po_approval' && String(a.refId) === String(o.id));
+      if (ap && ap.status !== 'approved' && ap.status !== 'rejected') {
+        ap.status = 'approved';
+        ap.approvedAt = ap.approvedAt || rec.ts || Date.now();
+        ap.updatedAt = Date.now();
+        ap.manualApprove = true;
+        applied++;
+      }
+    });
+  } catch(e) { console.warn('[결재 override] 적용 실패:', e); }
+  return applied;
+}
+/* 콘솔 복구용: forceApproveOrder('Fengwangjiang') 처럼 품목·업체 일부로 찾아 결재완료 처리 */
+window.forceApproveOrder = async function(query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) { console.log('사용법: forceApproveOrder("품목이나 업체 일부")'); return; }
+  const hay = o => {
+    let s = '';
+    try { s = [(typeof vendorName === 'function' ? vendorName(o.vendorId) : ''), o.orderNo || '',
+               o.orderDate || '', JSON.stringify(o.items || o.itemList || [])].join(' '); } catch(_) {}
+    return s.toLowerCase();
+  };
+  let list = (DB.orders || []).filter(o => hay(o).includes(q));
+  if (!list.length) list = (DB.orders || []).filter(o => { try { return JSON.stringify(o).toLowerCase().includes(q); } catch(_) { return false; } });
+  if (!list.length) { console.log('❌ 발주서를 찾지 못했습니다:', query); return; }
+  if (list.length > 1) {
+    console.log('⚠️ 여러 건이 매칭됩니다. 더 구체적으로 입력하세요:',
+      list.map(o => ({ id: o.id, date: o.orderDate, vendor: (typeof vendorName === 'function' ? vendorName(o.vendorId) : '') })));
+    return;
+  }
+  const o = list[0];
+  let ap = (DB.approvals || []).find(a => a && a.type === 'po_approval' && String(a.refId) === String(o.id));
+  if (!ap) {
+    ap = { id: (typeof _freshApprovalId === 'function' ? _freshApprovalId() : Date.now()),
+           type: 'po_approval', refId: o.id,
+           title: '[발주서] ' + (typeof vendorName === 'function' ? vendorName(o.vendorId) : ''),
+           amount: (typeof orderTotalVat === 'function' ? orderTotalVat(o) : 0),
+           status: 'pending', priority: 'normal', createdAt: Date.now(), approvedAt: 0 };
+    DB.approvals.push(ap);
+  }
+  ap.status = 'approved'; ap.approvedAt = Date.now(); ap.updatedAt = Date.now(); ap.manualApprove = true;
+  await _setPoApprovalOverride(o, true);
+  try { if (typeof saveDataNow === 'function') await saveDataNow(); } catch(_) {}
+  try { renderApprovalPage(); } catch(_) {}
+  try { updateApprovalBadges(); } catch(_) {}
+  try { renderOrderTable && renderOrderTable(); } catch(_) {}
+  console.log('✅ 결재완료 처리 + override 기록:', { id: o.id, sig: _poApvSig(o) });
+  alert('✅ 결재완료로 처리했습니다. 새로고침해도 유지됩니다.');
+};
+
 function getOrderApprovalStatus(o) {
   if (!o) return 'pending';
   if (_orderHasStampProof(o)) return 'approved';
+  const _apRef = DB.approvals.find(a => a.type === 'po_approval' && String(a.refId) === String(o.id));
+  if (_apRef && _apRef.status === 'rejected') return 'rejected';   // 반려는 override 보다 우선
+  const _ov = _poApvOverrideOf(o);
+  if (_ov && _ov.approved) return 'approved';                      // 머지가 되돌려도 유지
   // v2.3.233: 타입 무관 비교(다른 매칭과 통일) — id 가 문자열/숫자 섞여도 결재상태 오판 방지
   const ap = DB.approvals.find(a => a.type === 'po_approval' && String(a.refId) === String(o.id));
   if (ap) return ap.status;
@@ -38930,7 +39058,7 @@ function uploadStampAndApprove(orderId, inputEl) {
   reader.readAsDataURL(file);
 }
 
-function approveOrderFromTable(orderId) {
+async function approveOrderFromTable(orderId) {
   if (typeof requireWrite==='function' && !requireWrite()) return;  // v2.3.233: 쓰기권한자만
   const o = DB.orders.find(x => x.id === orderId);
   if (!o) return;
@@ -38944,7 +39072,9 @@ function approveOrderFromTable(orderId) {
   ap.approvedAt = Date.now();
   ap.updatedAt = Date.now();  // v1.9.772
   ap.manualApprove = true; // v1.9.203: 수동 승인 플래그 — 날인 상태 변경 시 자동 되돌림 방지
-  try { saveData(); } catch(_){}
+  // v2.3.640: 머지가 status 를 되돌려도 살아남도록 override 기록 후 저장 → 슬랙
+  try { await _setPoApprovalOverride(o, true); } catch(_){}
+  try { if (typeof saveDataNow === 'function') await saveDataNow(); else saveData(); } catch(_){}
   slackNotify('approval_done', ap);
   renderApprovalPage();
   updateApprovalBadges();
@@ -57675,6 +57805,7 @@ function _sharedSettingCollection(key) {
   //   본인 브라우저에서 키를 읽어 직접 호출해야 함(백엔드 없음). settings/(관리자 read 전용)면 직원은 키를
   //   못 읽어 'API Key가 없습니다' 오류. 쓰기권한자에게 키가 노출되는 트레이드오프는 client-side 호출의 불가피한 특성(수용).
   if (/^finance_/.test(k) || /^budget_/.test(k) || k === 'expense_paid_overrides' || k === 'company_info'
+      || k === 'po_approval_overrides'   // v2.3.640: 발주서 결재완료 override — 전 직원이 읽어야 함
       || k === 'trello_config' || k === 'trello_automation' || k === 'trello_auto_cards'
       || k === 'gemini_api_key' || k === 'claude_api_key' || k === 'warehouse_list'
       || k === 'pluscl_stock' || k === 'pluscl_item_map' || k === 'ad_refunds'
