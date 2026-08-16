@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.647';
+const ERP_VERSION = 'v2.3.648';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6856,6 +6856,35 @@ const _LS_SNAP_GROUPS = [
   { prefix: 'reniv_items_snap_',      list: 'reniv_items_snaps_list',      keep: 8 },
   { prefix: 'reniv_shopOrders_snap_', list: '',                            keep: 2 },
 ];
+// v2.3.648: 이미 localStorage 에 들어 있는 무거운 백업을 제자리에서 lite 로 줄인다.
+//   writer 만 고치면 '그 writer 가 다음에 돌 때까지' 낡은 값이 그대로 남는다.
+//   실제로 v2.3.647 배포 후에도 newProducts_backup 1,027KB / nonpo_backup 664KB 가
+//   그대로였다. 읽는 쪽은 계속 sync 로 읽으면 되므로 안전망은 유지된다.
+const _LS_SLIM_KEYS = ['reniv_newProducts_backup', 'reniv_nonpo_backup',
+                       'reniv_shopOrders_backup', 'reniv_expenses_backup',
+                       'reniv_insights_backup', 'reniv_approvals_backup'];
+const _LS_SLIM_MIN = 50 * 1024;      // 50KB 미만은 건드리지 않는다
+function _lsSlimHeavyBackups() {
+  let freed = 0;
+  const done = [];
+  _LS_SLIM_KEYS.forEach(k => {
+    try {
+      const raw = localStorage.getItem(k);
+      if (!raw || raw.length < _LS_SLIM_MIN) return;
+      let val;
+      try { val = JSON.parse(raw); } catch(_) { return; }   // JSON 이 아니면 손대지 않는다
+      const lite = _lsLiteJson(val);
+      if (typeof lite === 'string' && lite.length < raw.length) {
+        localStorage.setItem(k, lite);
+        freed += raw.length - lite.length;
+        done.push(k + ' ' + Math.round(raw.length/1024) + '→' + Math.round(lite.length/1024) + 'KB');
+      }
+    } catch(_){}
+  });
+  if (done.length) console.log('🧹 [LS] 백업 lite 화 — ' + Math.round(freed/1024) + 'KB 확보:', done.join(', '));
+  return freed;
+}
+
 window._lsAutoTidy = function(opts) {
   opts = opts || {};
   const sum = () => {
@@ -6868,6 +6897,7 @@ window._lsAutoTidy = function(opts) {
   let before;
   try { before = sum(); } catch(_) { return { error: true }; }
   if (!opts.force && before < _LS_SOFT_LIMIT) return { skipped: true, KB: Math.round(before / 1024) };
+  try { _lsSlimHeavyBackups(); } catch(_){}   // v2.3.648: 스냅샷보다 백업이 훨씬 무거웠다
   let removed = 0;
   _LS_SNAP_GROUPS.forEach(g => {
     try {
@@ -40243,10 +40273,11 @@ function _backupNonPoApprovals() {
         const merged = Array.from(byId.values()).filter(a => !_isApprovalTombstoned(a, tombMap));  // 진짜 삭제건만 제외
         const payload = JSON.stringify({ ts: Date.now(), list: merged });
         try { if (typeof idbSet === 'function') idbSet('reniv_nonpo_backup', payload); } catch(_){}
-        // v2.3.647: localStorage 사본 폐지(실측 664KB). 복구 함수가 localStorage → IDB 를
-        //   둘 다 읽어 합치므로(_restoreNonPoApprovalsFromBackup) 안전망은 그대로다.
-        //   removeItem 으로 옛 값까지 치운다 — 안 지우면 낡은 664KB 가 계속 남는다.
-        try { localStorage.removeItem('reniv_nonpo_backup'); } catch(_){}
+        // v2.3.648: localStorage 사본은 base64 를 벗긴 lite 판으로(실측 664KB → 크게 감소).
+        //   지워버리지 않는 이유: 복구 경로가 localStorage(sync) → IDB(async) 순인데,
+        //   sync 쪽을 없애면 초기 복구가 async 에만 의존하게 된다. lite 로 남기면 둘 다 산다.
+        //   원본 첨부는 위 IDB 사본과 Firestore 에 있다.
+        try { localStorage.setItem('reniv_nonpo_backup', _lsLiteJson(JSON.parse(payload))); } catch(_){}
       } catch(e) { console.warn('_backupNonPoApprovals write:', e); }
     };
     // 기존 IDB 백업을 읽어 union — 레이스로 DB.approvals 가 비어도 백업이 줄지 않음
