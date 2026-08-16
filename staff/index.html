@@ -167,6 +167,8 @@ tr:last-child td { border-bottom:none; }
 .avagrid { display:grid; grid-template-columns:repeat(8,1fr); gap:6px; }
 .avagrid button { font-size:20px; padding:6px 0; border:2px solid transparent; border-radius:9px; background:var(--line-soft); }
 .avagrid button.on { border-color:var(--brand); background:var(--brand-soft); }
+.avaphoto { font-size:20px; width:46px; height:42px; flex-shrink:0; border:2px solid transparent; border-radius:9px; background:var(--line-soft); display:flex; align-items:center; justify-content:center; }
+.avaphoto.on { border-color:var(--brand); background:var(--brand-soft); }
 .modal-f { display:flex; gap:8px; justify-content:flex-end; padding:14px 20px; border-top:1px solid var(--line-soft); }
 
 /* ── 토스트 ── */
@@ -223,8 +225,7 @@ tr:last-child td { border-bottom:none; }
     <div class="fld"><label>집주소</label><input class="fi" id="reg-addr"></div>
     <div class="fld"><label>직책</label><input class="fi" id="reg-title"></div>
     <div class="fld"><label>입사일 <span style="font-weight:500;color:var(--ink-mute)">(연차 계산에 사용됩니다)</span></label><input class="fi" type="date" id="reg-join"></div>
-    <div class="fld"><label>아바타</label><div class="avagrid" id="reg-ava"></div>
-      <div class="hint">담당자 표시에 아바타로 나타납니다. 📷 로 사진도 등록할 수 있습니다.</div></div>
+    <div class="fld"><label>아바타</label><div id="reg-ava"></div></div>
     <button class="btn btn-p" style="width:100%;padding:12px" id="btn-register">등록하기</button>
     <div class="hint" style="text-align:center;margin-top:12px;font-size:12px;color:var(--ink-mute)">
       저장하면 <b>관리자 승인 후</b> 정상적으로 이용할 수 있습니다.</div>
@@ -268,7 +269,7 @@ tr:last-child td { border-bottom:none; }
       <div class="fld"><label>직책</label><input class="fi" id="me-f-title"></div>
       <div class="fld"><label>집주소</label><input class="fi" id="me-f-addr"></div>
       <div class="fld"><label>입사일</label><input class="fi" type="date" id="me-f-join"></div>
-      <div class="fld"><label>아바타</label><div class="avagrid" id="me-f-ava"></div></div>
+      <div class="fld"><label>아바타</label><div id="me-f-ava"></div></div>
     </div>
     <div class="modal-f"><button class="btn" data-close="ovl-me">취소</button><button class="btn btn-p" id="btn-me-save">저장</button></div>
   </div>
@@ -347,7 +348,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.4.2';
+const STAFF_VERSION = 'v0.4.3';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -511,14 +512,21 @@ function avaHtml(a, px) {
 function avaChar(a) { return _isImgAvatar(a) ? '' : String(a || ''); }   // 텍스트 자리용 (표·드롭다운)
 
 function renderAvatarGrid(elId, selected) {
+  // 1행: 카메라(사진 등록) + 안내문 / 2·3행: 이모지 (v0.4.3 재배치)
   const el = $(elId);
   el.dataset.sel = selected;
   const isImg = _isImgAvatar(selected);
-  el.innerHTML = AVATARS.map(a =>
-    `<button type="button" class="${(!isImg && a === selected) ? 'on' : ''}" data-a="${a}">${a}</button>`).join('')
-    + `<button type="button" class="${isImg ? 'on' : ''}" data-photo="1" title="사진 등록" style="display:flex;align-items:center;justify-content:center">`
-    + (isImg ? `<img src="${selected}" style="width:26px;height:26px;border-radius:50%;object-fit:cover">` : '📷')
-    + `</button>`;
+  el.innerHTML =
+    `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+       <button type="button" class="avaphoto ${isImg ? 'on' : ''}" data-photo="1" title="사진/이미지 등록">`
+    + (isImg ? `<img src="${selected}" style="width:30px;height:30px;border-radius:50%;object-fit:cover">` : '📷')
+    + `</button>
+       <span style="font-size:12px;color:var(--ink-mute);line-height:1.55">담당자 표시에 아바타로 나타납니다.<br>사진 또는 이미지를 등록하세요.</span>
+     </div>
+     <div class="avagrid">`
+    + AVATARS.map(a =>
+      `<button type="button" class="${(!isImg && a === selected) ? 'on' : ''}" data-a="${a}">${a}</button>`).join('')
+    + `</div>`;
   el.querySelectorAll('button[data-a]').forEach(b => b.onclick = () => renderAvatarGrid(elId, b.dataset.a));
   el.querySelector('[data-photo]').onclick = () => pickAvatarPhoto(elId);
 }
