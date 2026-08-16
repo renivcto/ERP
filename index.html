@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.646';
+const ERP_VERSION = 'v2.3.647';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6463,13 +6463,32 @@ window._autoMigrateAttachmentsOnce = async function() {
 // v1.9.936: 신제품(newProducts)·인사이트(insights) 전용 백업.
 //   메인 DB 손상/머지 사고로 사라지지 않도록 별도 키에 보관(localStorage + IDB).
 //   비어있지 않을 때만 기록 → 빈 상태가 좋은 백업을 덮어쓰지 않음.
+// v2.3.647: localStorage 백업 전용 직렬화 — base64 data URL 을 마커로 바꿔 부피를 없앤다.
+//   구조와 건수는 그대로라 '0건일 때 복구' 안전망 역할은 유지된다.
+//   원본은 IDB 사본과 Firestore 에 있다. (마커 규칙은 기존 __stripped__ 와 동일)
+const _LS_LITE_STR_MAX = 512;
+function _lsLiteJson(arr) {
+  try {
+    const s = JSON.stringify(arr, function(k, v) {
+      if (typeof v === 'string' && v.length > _LS_LITE_STR_MAX && v.slice(0, 5) === 'data:') return '__stripped__';
+      return v;
+    });
+    // JSON.stringify(undefined) 는 예외가 아니라 undefined 를 돌려준다 —
+    // 그대로 setItem 하면 문자열 'undefined' 가 저장돼 다음 JSON.parse 가 터진다.
+    return (typeof s === 'string') ? s : '[]';
+  } catch(_) { return '[]'; }
+}
+
 function _backupNpIns() {
   try {
     if (typeof DB === 'undefined' || !DB) return;
     if (Array.isArray(DB.newProducts) && DB.newProducts.length) {
       const _p = JSON.stringify(DB.newProducts);
-      try { localStorage.setItem('reniv_newProducts_backup', _p); } catch(_){}
-      try { if (typeof idbSet === 'function') idbSet('reniv_newProducts_backup', _p); } catch(_){}
+      try { if (typeof idbSet === 'function') idbSet('reniv_newProducts_backup', _p); } catch(_){}   // 원본
+      // v2.3.647: localStorage 사본은 base64 를 벗긴 lite 판만 — insights(v2.3.196) 와 같은 방침.
+      //   실측 1,027KB 로 localStorage 최대 항목이었고(메인 DB보다 컸다), 그 압박 때문에
+      //   items_backup 이 quota 로 밀려나고 있었다. 원본은 위 IDB + Firestore 샤딩(v2.3.646).
+      try { localStorage.setItem('reniv_newProducts_backup', _lsLiteJson(DB.newProducts)); } catch(_){}
     }
     if (Array.isArray(DB.insights) && DB.insights.length) {
       // v2.3.196: 썸네일 base64 제거 — 백업은 메타 복구용(원본은 Firestore/IDB 오프로드).
@@ -40224,7 +40243,10 @@ function _backupNonPoApprovals() {
         const merged = Array.from(byId.values()).filter(a => !_isApprovalTombstoned(a, tombMap));  // 진짜 삭제건만 제외
         const payload = JSON.stringify({ ts: Date.now(), list: merged });
         try { if (typeof idbSet === 'function') idbSet('reniv_nonpo_backup', payload); } catch(_){}
-        try { localStorage.setItem('reniv_nonpo_backup', payload); } catch(_){}
+        // v2.3.647: localStorage 사본 폐지(실측 664KB). 복구 함수가 localStorage → IDB 를
+        //   둘 다 읽어 합치므로(_restoreNonPoApprovalsFromBackup) 안전망은 그대로다.
+        //   removeItem 으로 옛 값까지 치운다 — 안 지우면 낡은 664KB 가 계속 남는다.
+        try { localStorage.removeItem('reniv_nonpo_backup'); } catch(_){}
       } catch(e) { console.warn('_backupNonPoApprovals write:', e); }
     };
     // 기존 IDB 백업을 읽어 union — 레이스로 DB.approvals 가 비어도 백업이 줄지 않음
