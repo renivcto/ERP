@@ -6207,7 +6207,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.641';
+const ERP_VERSION = 'v2.3.642';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -17489,6 +17489,7 @@ window.dedupPoApprovals = async function(opts) {
   console.log('  ── 정리 후 남는 수  ', (A.length - losers.length) + '건');
   console.log('  의견 재연결         ', remap.length + '건  (유실 없음)');
   console.log('  고아(발주서 없음)   ', dropOrphans ? '제거함' : (orphanKept + '개 그룹 보존'));
+  console.log('  삭제 기록(tombstone) ', '등록함 — COUNT-GUARD 가 서버 사본으로 되살리지 못하게');
   console.log(line);
   console.log('  상위 축소: ' + shrink.slice(0, 12).map(s => 'refId ' + s[0] + ' ' + s[1] + '→' + s[2]).join(' / '));
 
@@ -17502,6 +17503,21 @@ window.dedupPoApprovals = async function(opts) {
   if (!confirm('발주서 결재 ' + losers.length + '건을 정리합니다.\n의견 ' + remap.length + '건은 남는 결재로 옮겨집니다.\n\n계속할까요?')) {
     console.log('취소했습니다.'); return { cancelled: true };
   }
+
+  // v2.3.642: tombstone 등록 — 이게 없으면 COUNT-GUARD 가 서버 사본으로 전부 되살린다.
+  //   (v2.3.641 에서 916건을 지웠는데 다음 저장 때 974건으로 복원된 사고)
+  if (!Array.isArray(DB._deletedApprovalIds)) DB._deletedApprovalIds = [];
+  const _tombTs = Date.now();
+  losers.forEach(a => { if (a && a.id != null) DB._deletedApprovalIds.push({ id: a.id, ts: _tombTs }); });
+  {   // 중복 실행 시 tombstone 이 무한히 늘지 않도록 id 기준 정리
+    const _seen = new Set();
+    DB._deletedApprovalIds = DB._deletedApprovalIds.filter(x => {
+      const k = String(x && typeof x === 'object' ? x.id : x);
+      if (!k || k === 'undefined' || _seen.has(k)) return false;
+      _seen.add(k); return true;
+    });
+  }
+  console.log('🪦 tombstone 등록: ' + losers.length + '건 (누적 ' + DB._deletedApprovalIds.length + '건)');
 
   const remapMap = new Map(remap.map(([from, to]) => [String(from), to]));
   (DB.approvalComments || []).forEach(c => {
@@ -17517,7 +17533,9 @@ window.dedupPoApprovals = async function(opts) {
   try { updateApprovalBadges && updateApprovalBadges(); } catch(_) {}
   console.log('%c✅ ' + losers.length + '건 정리 완료 — 남은 approvals ' + DB.approvals.length + '건',
               'background:#10b981;color:#fff;padding:3px 8px');
-  alert('✅ ' + losers.length + '건 정리 완료.\n남은 결재 ' + DB.approvals.length + '건.');
+  console.log('%c새로고침 후 DB.approvals.length 가 ' + DB.approvals.length + ' 로 유지되는지 확인하세요',
+              'color:#b45309;font-weight:700');
+  alert('✅ ' + losers.length + '건 정리 완료.\n남은 결재 ' + DB.approvals.length + '건.\n\n새로고침 후에도 유지되는지 확인해 주세요.');
   return { removed: losers.length, remaining: DB.approvals.length };
 };
 
