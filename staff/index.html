@@ -608,7 +608,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.23.2';
+const STAFF_VERSION = 'v0.24.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -961,6 +961,7 @@ function startApp() {
     }
   }
   subscribeData();
+  _openOnly(ME.mode === 'admin' ? '직원 업무 관리' : '내 페이지');   // 첫 진입은 자기 그룹만
   renderMenu();
   go('home');   // v0.2.0: 임원용과 같은 '업무 현황' 홈이 첫 화면
 }
@@ -1768,7 +1769,19 @@ const MENUS = [
     { id: 'newproduct', ico: '🌱', name: () => '신제품 개발', sync: '임원용과 읽기·쓰기 모두 연동됩니다 (수익성 탭 제외)' },
   ]},
 ];
-const _navOpen = { '내 페이지': true, '직원 업무 관리': true, '업무현황': true, '영업 관리': true, '제품 관리': true };   // 세션 내 접기 상태
+/* 세션 내 접기 상태 — 아코디언(한 번에 하나만 열린다). 없는 키 = 닫힘 */
+const _navOpen = {};
+function _groupOf(pg) {
+  for (let i = 0; i < MENUS.length; i++) {
+    const m = MENUS[i];
+    if (m.group && (m.items || []).some(it => it.id === pg)) return m.group;
+  }
+  return null;
+}
+function _openOnly(group) {
+  Object.keys(_navOpen).forEach(k => { delete _navOpen[k]; });
+  if (group) _navOpen[group] = true;
+}
 
 function renderMenu() {
   const el = $('sb-menu');
@@ -1785,7 +1798,7 @@ function renderMenu() {
     if (m.group) {
       if (m.adminOnly && ME.mode !== 'admin') return;
       if (m.staffOnly && ME.mode !== 'staff') return;
-      const open = _navOpen[m.group] !== false;
+      const open = _navOpen[m.group] === true;
       const gLabel = m.groupName ? m.groupName() : m.group;
       html += `<div class="mi mi-group ${open ? '' : 'closed'}" data-group="${esc(m.group)}">`
             + `<span class="ico">${m.ico}</span><span>${esc(gLabel)}</span><span class="arrow">▾</span></div>`
@@ -1799,7 +1812,8 @@ function renderMenu() {
   el.innerHTML = html;
   el.querySelectorAll('.mi[data-pg]').forEach(mi => mi.onclick = () => go(mi.dataset.pg));
   el.querySelectorAll('.mi-group').forEach(g => g.onclick = () => {
-    _navOpen[g.dataset.group] = !(_navOpen[g.dataset.group] !== false);
+    const k = g.dataset.group;
+    _openOnly(_navOpen[k] === true ? null : k);   // 열려 있으면 닫고, 아니면 그것만 연다
     renderMenu();
   });
   markActive();
@@ -1814,6 +1828,9 @@ function markActive() {
 }
 function go(pg) {
   CUR_PAGE = pg;
+  // 다른 화면에서 넘어와도 그 항목이 속한 그룹은 열어 준다 (활성 메뉴가 접힌 채 숨지 않게)
+  const g = _groupOf(pg);
+  if (g && _navOpen[g] !== true) { _openOnly(g); renderMenu(); }
   markActive();
   renderPage();
 }
