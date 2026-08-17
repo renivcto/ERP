@@ -313,6 +313,22 @@ tr:last-child td { border-bottom:none; }
 .ap-line { font-size:11.5px; color:var(--ink-soft); white-space:nowrap; }
 .ap-line b { color:var(--ink); }
 .ap-amt { text-align:right; font-weight:800; white-space:nowrap; }
+/* 신제품 개발 (v0.31.0) */
+.np-cols { display:grid; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); gap:14px; align-items:start; }
+.np-col { border:1px solid var(--line); border-top:3px solid; border-radius:12px; background:var(--panel); padding:12px; }
+.np-col .h { display:flex; align-items:center; gap:7px; font-size:13.5px; font-weight:800; margin-bottom:10px; }
+.np-col .h .n { margin-left:auto; background:var(--line-soft); border-radius:99px; padding:1px 9px; font-size:11px; }
+.np-card { border:1px solid var(--line-soft); border-radius:9px; background:#fff; padding:11px 12px; margin-bottom:8px; cursor:pointer; transition:all .15s; }
+.np-card:hover { border-color:var(--brand); box-shadow:var(--shadow); }
+.np-card .t { font-size:13.5px; font-weight:700; line-height:1.4; }
+.np-card .m { display:flex; align-items:center; gap:6px; margin-top:7px; font-size:11px; color:var(--ink-mute); }
+.np-bar { flex:1; height:5px; background:var(--line-soft); border-radius:99px; overflow:hidden; }
+.np-bar i { display:block; height:100%; background:var(--brand); }
+.np-tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:14px; }
+.np-tabs button { border:0; background:none; padding:8px 14px; font-size:13px; font-weight:700; color:var(--ink-mute); border-bottom:2px solid transparent; }
+.np-tabs button.on { color:var(--brand-deep); border-bottom-color:var(--brand); }
+.np-fld { margin-bottom:12px; }
+.np-fld label { display:block; font-size:12px; font-weight:700; color:var(--ink-soft); margin-bottom:4px; }
 /* 르니브 업무 일정 (v0.18.0) */
 .cal-nav { display:flex; align-items:center; gap:8px; margin-left:auto; }
 .cal-nav .btn-sm { padding:4px 10px; }
@@ -636,6 +652,19 @@ tr:last-child td { border-bottom:none; }
   </div>
 </div>
 
+<!-- 신제품 개발 상세/수정 (v0.31.0) -->
+<div class="ovl" id="ovl-np">
+  <div class="modal" style="max-width:680px">
+    <div class="modal-h"><span class="t" id="np-m-t">🌱 신제품</span><button class="modal-x" data-close="ovl-np">✕</button></div>
+    <div class="modal-b">
+      <div class="np-tabs" id="np-m-tabs"></div>
+      <div id="np-m-body"></div>
+    </div>
+    <div class="modal-f"><button class="btn btn-bad" id="btn-np-del" style="margin-right:auto;display:none">삭제</button>
+      <button class="btn" data-close="ovl-np">취소</button><button class="btn btn-p" id="btn-np-save">저장</button></div>
+  </div>
+</div>
+
 <!-- 약사 CS 작성/수정 (v0.30.0) -->
 <div class="ovl" id="ovl-cs">
   <div class="modal" style="max-width:560px">
@@ -794,7 +823,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.30.0';
+const STAFF_VERSION = 'v0.31.1';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -849,6 +878,9 @@ let CSP = [];               // staff_data/cs_pharm   — 약사 CS 미러
 let CSI = [];               // staff_data/inbox_cs   — 직원이 쓴 약사 CS
 let PH_TAB = 'cs';          // 약국 관리 탭: cs | list
 let PH_Q = '', CS_EDIT = null;
+let NP = [];                // staff_data/newproducts    — 신제품 미러 (수익성 없음)
+let NPI = [];               // staff_data/inbox_newproducts — 직원이 쓴 신제품
+let NP_EDIT = null, NP_TAB = 'over';
 let GDOCS = [];             // staff_data/gdocs       — 자료실 문서 공유 (직원 등록)
 let DRIVE = [];             // staff_data/drive       — 자료실 드라이브 폴더 (직원 등록)
 let DF_CAT = null;          // 드라이브 카테고리 필터
@@ -1015,6 +1047,18 @@ if (DEMO) {
     { key: 'homeshop', name: '홈쇼핑 준비', icon: '🏠', color: '#b91c1c', owner: '', url: '',
       lists: [{ id: 'H1', name: '준비' }],
       cards: [{ id: 'h1', idList: 'H1', name: '방송 대본 검토', url: '', due: '', done: false, labels: [], cover: '' }] },
+  ];
+  NP = [
+    { id: 'np1', name: '나드 엑소좀 광채 크림', stage: '아이디어', status: 'DOING', progress: 20,
+      launchDate: '2026-11-01', productNames: '나드 엑소좀 광채 크림', usp: '엑소좀 고함량',
+      target: '30~40대 여성', mainIngredients: '엑소좀, 나이아신아마이드', formulation: '크림',
+      marketAnalysis: '더마 코스메틱 성장세', comments: [] },
+    { id: 'np2', name: '블러드라임 클렌징오일', stage: '아이디어 발전시키기', status: 'DOING', progress: 45,
+      launchDate: '2026-10-15', productNames: '블러드라임 클렌징오일', usp: '모공 딥클렌징',
+      target: '20대', mainIngredients: '블러드오렌지, 라임', formulation: '오일', comments: [] },
+    { id: 'np3', name: '홈쇼핑 글로우샷', stage: '제품개발 중', status: 'DOING', progress: 80,
+      launchDate: '2026-09-20', productNames: '홈쇼핑 글로우샷', usp: '앰플 세트 구성',
+      target: '전연령', mainIngredients: '나이아신아마이드', formulation: '앰플', comments: [] },
   ];
   PHARM = [
     { key: 'p1', name: '온누리약국 김약사', phone: '02-555-1234', email: 'onnuri@example.com',
@@ -1277,6 +1321,10 @@ function subscribeData() {
     e => console.warn('[calendar]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'workflow'), s => { WF = parseCol(s, []); rerender(); },
     e => console.warn('[workflow]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'newproducts'), s => { NP = parseCol(s, []); rerender(); },
+    e => console.warn('[newproducts]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_newproducts'), s => { NPI = parseCol(s, []); rerender(); },
+    e => console.warn('[inbox_newproducts]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'pharmacies'), s => { PHARM = parseCol(s, []); rerender(); },
     e => console.warn('[pharmacies]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'cs_pharm'), s => { CSP = parseCol(s, []); rerender(); },
@@ -2151,6 +2199,7 @@ function renderPage() {
     case 'adm-journal': m.innerHTML = pageAdmJournal(); wireAdmJournal(); break;
     case 'partners': m.innerHTML = pagePartners(); wirePt('pt'); break;
     case 'accounts': m.innerHTML = pageAccounts(); wireAccounts(); break;
+    case 'newproduct': m.innerHTML = pageNewProduct(); wireNewProduct(); break;
     case 'pharmacy': m.innerHTML = pagePharmacy(); wirePharmacy(); break;
     case 'approval': m.innerHTML = pageApproval(); wireApproval(); break;
     case 'items':    m.innerHTML = pageItems(); wireDataPage(); break;
@@ -3599,6 +3648,154 @@ $('btn-board-save').onclick = async () => {
   catch (e) { BOARD_S = keep; toast('저장 실패: ' + e.message, true); }
 };
 
+/* ═══════════ 신제품 개발 (v0.31.0 · 기획서(2) 슬라이드 7) ═══════════
+   임원용과 읽기·쓰기 양방향. ⚠️ 수익성 탭은 없다 — 원가는 미러에 아예 넘어오지 않는다.
+   직원이 추가·수정한 것은 inbox_newproducts 로 올라가고 임원용이 열 때 합쳐진다. */
+const NP_STAGES = ['아이디어', '아이디어 발전시키기', '제품개발 중'];
+const NP_STAGE_COLOR = { '아이디어': '#22c55e', '아이디어 발전시키기': '#3b82f6', '제품개발 중': '#8b5cf6' };
+const NP_STAGE_ICON = { '아이디어': '🌱', '아이디어 발전시키기': '🌳', '제품개발 중': '🍇' };
+/* 수익성(원가) 항목은 여기에 아예 없다 */
+const NP_TABS = [
+  { key: 'over', label: '📋 개요', fields: [['productNames', '제품명'], ['usp', 'USP / 강점'], ['target', '타겟']] },
+  { key: 'form', label: '🧪 제형/성분', fields: [['formulation', '제형'], ['packaging', '용기·패키지'],
+      ['mainIngredients', '주요 성분'], ['subIngredients', '부성분']] },
+  { key: 'mkt', label: '📊 시장성', fields: [['marketAnalysis', '시장 분석']] },
+];
+function npAll() {
+  // 아직 전달되지 않은 직원 수정본은 미러 위에 덮어서 보여준다.
+  // (신제품은 직원이 임원용 프로젝트도 고칠 수 있어서, 안 덮으면 저장이 안 된 것처럼 보인다)
+  const inbox = {};
+  (NPI || []).forEach(p => { if (p && p.id != null) inbox[String(p.id)] = p; });
+  const out = (NP || []).map(p => {
+    const ov = inbox[String(p.id)];
+    if (!ov) return Object.assign({}, p, { src: 'erp' });
+    delete inbox[String(p.id)];
+    if (ov.applied) return Object.assign({}, p, { src: 'erp' });      // 임원용이 받아감 → 미러가 원본
+    return Object.assign({}, p, ov, { src: 'staff', _edited: true }); // 전달 대기 중인 수정본
+  });
+  return out.concat(Object.keys(inbox).map(k => Object.assign({}, inbox[k], { src: 'staff' })));
+}
+function npFind(id) { return npAll().find(p => String(p.id) === String(id)); }
+function pageNewProduct() {
+  const all = npAll();
+  const stages = NP_STAGES.concat(
+    Array.from(new Set(all.map(p => p.stage).filter(s => s && NP_STAGES.indexOf(s) < 0))));
+  return `<div class="pg on">
+    <div class="pg-h"><h1>신제품 개발<sup class="sync" style="font-size:13px" title="임원용과 읽기·쓰기 모두 연동됩니다"> ⓘ</sup></h1>
+      <button class="btn btn-p" id="btn-np-new" style="margin-left:auto">＋ 신제품 추가</button></div>
+    <div class="pg-sub">${all.length}개 프로젝트 · 임원용 ERP와 양방향 연동 · <b>수익성(원가) 정보는 표시되지 않습니다</b></div>
+    ${all.length ? `<div class="np-cols">${stages.map(st => {
+      const cards = all.filter(p => (p.stage || NP_STAGES[0]) === st);
+      const c = NP_STAGE_COLOR[st] || '#94a3b8';
+      return `<div class="np-col" style="border-top-color:${c}">
+        <div class="h" style="color:${c}">${NP_STAGE_ICON[st] || '📦'} ${esc(st)}<span class="n">${cards.length}</span></div>
+        ${cards.map(p => `<div class="np-card" data-np-open="${esc(p.id)}">
+          <div class="t">${esc(p.name || '(이름 없음)')}</div>
+          <div class="m">
+            <span class="chip ${p.status === 'DONE' ? 'ok' : 'wait'}">${esc(p.status || 'DOING')}</span>
+            <span class="np-bar"><i style="width:${Math.max(0, Math.min(100, Number(p.progress) || 0))}%"></i></span>
+            <span>${Number(p.progress) || 0}%</span>
+            ${p.src === 'staff' && !p.applied
+              ? `<span class="chip wait">${p._edited ? '수정 대기' : '전달 대기'}</span>` : ''}
+          </div>
+          ${p.launchDate ? `<div class="m">🚀 출시 ${esc(p.launchDate)}</div>` : ''}
+        </div>`).join('') || '<div style="font-size:12px;color:var(--ink-mute);padding:6px 2px">비어 있음</div>'}
+      </div>`;
+    }).join('')}</div>`
+      : dpEmpty('신제품')}
+  </div>`;
+}
+function npRenderTabs() {
+  $('np-m-tabs').innerHTML = NP_TABS.map(t =>
+    `<button type="button" class="${NP_TAB === t.key ? 'on' : ''}" data-np-tab="${t.key}">${t.label}</button>`).join('');
+  $('np-m-tabs').querySelectorAll('[data-np-tab]').forEach(b => b.onclick = () => {
+    npStash(); NP_TAB = b.dataset.npTab; npRenderTabs(); npRenderBody();
+  });
+}
+let _npDraft = {};
+function npStash() {   // 탭을 옮겨도 입력값이 날아가지 않게 임시 보관
+  document.querySelectorAll('#np-m-body [data-np-f]').forEach(el => { _npDraft[el.dataset.npF] = el.value; });
+}
+function npRenderBody() {
+  const tab = NP_TABS.find(t => t.key === NP_TAB) || NP_TABS[0];
+  const v = k => esc(_npDraft[k] == null ? '' : _npDraft[k]);
+  let html = '';
+  if (NP_TAB === 'over') {
+    html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="np-fld"><label>프로젝트명 *</label><input class="fi" data-np-f="name" value="${v('name')}"></div>
+      <div class="np-fld"><label>단계</label><select class="fi" data-np-f="stage">${
+        NP_STAGES.map(s => `<option${_npDraft.stage === s ? ' selected' : ''}>${esc(s)}</option>`).join('')}</select></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div class="np-fld"><label>상태</label><select class="fi" data-np-f="status">${
+        ['DOING', 'HOLD', 'DONE'].map(s => `<option${_npDraft.status === s ? ' selected' : ''}>${s}</option>`).join('')}</select></div>
+      <div class="np-fld"><label>진행률 (%)</label><input class="fi" type="number" min="0" max="100" data-np-f="progress" value="${v('progress')}"></div>
+      <div class="np-fld"><label>출시 예정일</label><input class="fi" type="date" data-np-f="launchDate" value="${v('launchDate')}"></div>
+    </div>`;
+  }
+  html += tab.fields.map(([k, label]) =>
+    `<div class="np-fld"><label>${label}</label><textarea class="fi" rows="${k === 'marketAnalysis' ? 8 : 3}"
+       style="resize:vertical" data-np-f="${k}">${v(k)}</textarea></div>`).join('');
+  $('np-m-body').innerHTML = html;
+}
+function openNpModal(id) {
+  const p = id ? npFind(id) : null;
+  NP_EDIT = p ? p.id : null;
+  NP_TAB = 'over';
+  _npDraft = {};
+  if (p) {
+    ['name', 'stage', 'status', 'progress', 'launchDate'].forEach(k => _npDraft[k] = p[k] == null ? '' : p[k]);
+    NP_TABS.forEach(t => t.fields.forEach(([k]) => _npDraft[k] = p[k] == null ? '' : p[k]));
+  } else {
+    _npDraft.stage = NP_STAGES[0]; _npDraft.status = 'DOING'; _npDraft.progress = 0;
+  }
+  $('np-m-t').textContent = p ? ('🌱 ' + (p.name || '신제품')) : '🌱 신제품 추가';
+  // 임원용 프로젝트를 고친 것이면 '삭제' 가 아니라 '수정 취소' 다 — 원본을 지우는 게 아니다
+  const del = $('btn-np-del');
+  del.style.display = (p && p.src === 'staff' && !p.applied) ? '' : 'none';
+  del.textContent = (p && p._edited) ? '수정 취소' : '삭제';
+  npRenderTabs(); npRenderBody();
+  $('ovl-np').classList.add('on');
+}
+$('btn-np-save').onclick = async () => {
+  npStash();
+  const name = String(_npDraft.name || '').trim();
+  if (!name) { toast('프로젝트명을 입력해 주세요', true); return; }
+  const data = { name, stage: _npDraft.stage || NP_STAGES[0], status: _npDraft.status || 'DOING',
+    progress: Math.max(0, Math.min(100, Number(_npDraft.progress) || 0)),
+    launchDate: _npDraft.launchDate || '', updatedAt: Date.now() };
+  NP_TABS.forEach(t => t.fields.forEach(([k]) => { data[k] = String(_npDraft[k] == null ? '' : _npDraft[k]); }));
+  const arr = (NPI || []).slice();
+  const i = arr.findIndex(x => String(x.id) === String(NP_EDIT));
+  if (i >= 0) arr[i] = Object.assign({}, arr[i], data);
+  else if (NP_EDIT) {
+    // 임원용에서 온 프로젝트를 고쳤다 — 같은 id 로 인박스에 올려 임원용에서 합쳐지게 한다
+    arr.push(Object.assign({ id: NP_EDIT, createdAt: Date.now(), _by: ME.name, _byUid: ME.uid, _from: '직원용 ERP' }, data));
+  } else {
+    arr.push(Object.assign({ id: 'SP' + Date.now(), createdAt: Date.now(),
+      _by: ME.name, _byUid: ME.uid, _from: '직원용 ERP' }, data));
+  }
+  try { await saveCol('inbox_newproducts', arr); NPI = arr; $('ovl-np').classList.remove('on');
+    toast('저장했습니다 — 임원용 ERP를 열면 신제품 개발에 반영됩니다'); rerender(); }
+  catch (e) { toast('저장 실패: ' + e.message, true); }
+};
+$('btn-np-del').onclick = async () => {
+  if (!NP_EDIT) return;
+  const cur = npFind(NP_EDIT);
+  const edited = !!(cur && cur._edited);
+  if (!confirm(edited
+    ? '전달 전인 수정 내용을 버리고 임원용 원본으로 되돌릴까요?'
+    : '이 신제품 항목을 삭제할까요? (아직 임원용으로 전달되지 않은 것만 지울 수 있습니다)')) return;
+  const arr = (NPI || []).filter(x => String(x.id) !== String(NP_EDIT));
+  try { await saveCol('inbox_newproducts', arr); NPI = arr; $('ovl-np').classList.remove('on');
+    toast(edited ? '수정을 취소했습니다' : '삭제했습니다'); rerender(); }
+  catch (e) { toast('실패: ' + e.message, true); }
+};
+function wireNewProduct() {
+  const nb = $('btn-np-new'); if (nb) nb.onclick = () => openNpModal(null);
+  document.querySelectorAll('[data-np-open]').forEach(b => b.onclick = () => openNpModal(b.dataset.npOpen));
+}
+
 /* ═══════════ 약국 관리 (v0.30.0 · 기획서(2) 슬라이드 5) ═══════════
    약사 CS  : 임원용 미러(cs_pharm) + 직원이 쓴 것(inbox_cs) 을 합쳐 본다. 직원 작성분만 수정·삭제.
    약국 리스트 : 읽기 전용 (주문에서 자동 집계되는 목록이라 손으로 고칠 대상이 아니다)
@@ -4178,7 +4375,6 @@ function wireCalendar() { wireCalCommon(); }
 
 /* ═══════ 플레이스홀더 — 기획서 p5 "우선 메뉴만" ═══════ */
 const PH = {
-  newproduct:{ ico: '🌱', t: '신제품 개발', d: '임원용과 읽기·쓰기 모두 연동됩니다. 수익성 탭은 표시되지 않습니다.', sync: true },
 };
 function pagePlaceholder(id) {
   const p = PH[id] || { ico: '🚧', t: id, d: '' };

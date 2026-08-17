@@ -6338,7 +6338,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.669';
+const ERP_VERSION = 'v2.3.670';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58704,6 +58704,29 @@ function _staffCsPayload() {
 }
 async function _staffMirrorCs() { return _staffPush('cs_pharm', _staffCsPayload()); }
 window._staffMirrorPharm = _staffMirrorPharm;
+
+/* v2.3.670 — 신제품 개발 미러 (기획서(2) 슬라이드 7).
+   ⚠️ 수익성 = 원가다. 아래 필드는 직원용으로 넘기지 않는다. */
+const _STAFF_NP_DENY = ['price', 'bomCost', 'roas', 'adCost', 'mktCost', 'otherCost', 'logiCost'];
+function _staffNpPayload() {
+  return (DB.newProducts || []).map(p => {
+    const out = {};
+    Object.keys(p || {}).forEach(k => {
+      if (_STAFF_NP_DENY.indexOf(k) >= 0) return;
+      if (k.charAt(0) === '_') return;
+      let v = p[k];
+      // base64 이미지는 문서를 터뜨린다 — 공개 URL 만 넘긴다
+      if (/img/i.test(k)) {
+        if (Array.isArray(v)) v = v.filter(x => typeof x === 'string' && x.indexOf('http') === 0);
+        else if (typeof v === 'string' && v.indexOf('http') !== 0) v = '';
+      }
+      out[k] = v;
+    });
+    return out;
+  });
+}
+async function _staffMirrorNp() { return _staffPush('newproducts', _staffNpPayload()); }
+window._staffMirrorNp = _staffMirrorNp;
 window._staffMirrorCs = _staffMirrorCs;
 
 /* ══════════ v2.3.667 — 직원용 받은편지함 (직원 → 임원 단방향) ══════════
@@ -58716,6 +58739,9 @@ const _STAFF_INBOX = [
   { doc: 'inbox_approvals', arr: 'approvals', label: '일반결재' },
   // upsert: 같은 id 가 이미 있으면 '직원이 더 나중에 고쳤을 때만' 덮어쓴다 (임원 수정본 보호)
   { doc: 'inbox_cs',        arr: 'cs',        label: '약사 CS', upsert: true },
+  // 신제품: 직원도 쓰기 가능(기획서 슬라이드 7). 수익성 필드는 직원 사본에 없지만
+  // Object.assign 이 '없는 키' 를 지우지 않으므로 임원용 원가는 보존된다.
+  { doc: 'inbox_newproducts', arr: 'newProducts', label: '신제품', upsert: true },
 ];
 async function _staffInboxDrain(verbose) {
   if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) {
@@ -58827,6 +58853,7 @@ function _staffMirrorCalendarThrottled() {
       _staffMirrorOrders().catch(() => {});
       _staffMirrorPharm().catch(() => {});     // v2.3.669
       _staffMirrorCs().catch(() => {});
+      _staffMirrorNp().catch(() => {});         // v2.3.670
     }, 4000);
   } catch(_) {}
 }
@@ -58885,9 +58912,10 @@ window.staffMirrorNow = async function() {
   const orders = await _staffMirrorOrders();
   const pharmacies = await _staffMirrorPharm();
   const cs = await _staffMirrorCs();
+  const newproducts = await _staffMirrorNp();
   try { localStorage.setItem('reniv_staff_cal_push', String(Date.now())); } catch(_) {}
-  console.log('👥 직원용 미러 재동기:', { board, calendar, accounts, workflow, items, warehouses, orders, pharmacies, cs });
-  return { board, calendar, accounts, workflow, items, warehouses, orders, pharmacies, cs };
+  console.log('👥 직원용 미러 재동기:', { board, calendar, accounts, workflow, items, warehouses, orders, pharmacies, cs, newproducts });
+  return { board, calendar, accounts, workflow, items, warehouses, orders, pharmacies, cs, newproducts };
 };
 
 // v2.3.601: 공용 API Key 전용 저장 — 서버에 실제로 반영됐는지 되읽어 확인한다.
