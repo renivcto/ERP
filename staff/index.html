@@ -354,7 +354,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.7.1';
+const STAFF_VERSION = 'v0.7.2';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -748,7 +748,7 @@ const MENUS = [
   { group: '직원 업무 관리', ico: '👥', adminOnly: true, items: [
     { id: 'adm-att',    ico: '🕘', name: () => '출퇴근 관리' },
     { id: 'adm-teams',  ico: '🗂️', name: () => '업무 배정' },
-    { id: 'adm-policy', ico: '⚙️', name: () => '근태 정책' },
+    { id: 'adm-policy', ico: '🗓️', name: () => '근태 관리' },
   ]},
   { group: '업무현황', ico: '📋', items: [
     { id: 'workflow', ico: '🧩', name: () => '워크플로우', sync: '임원용 ERP와 메뉴·데이터가 동일하게 연동됩니다' },
@@ -1063,11 +1063,16 @@ function pageAdmin(sec) {
   const H = {
     'adm-att':    ['🕘 출퇴근 관리', '오늘의 출퇴근 현황을 확인하고 신규 계정을 승인합니다.'],
     'adm-teams':  ['🗂️ 업무 배정', '팀별로 업무를 나누고 담당자를 배정합니다.'],
-    'adm-policy': ['⚙️ 근태 정책', '월차·연차 기준과 결재라인을 설정하고 근태 결재를 처리합니다.'],
+    'adm-policy': ['🗓️ 근태 관리', '근태 결재를 처리하고 월차·연차 기준과 결재라인을 설정합니다.'],
   }[sec] || ['직원 업무 관리', ''];
+  const admLeaveTabs = `
+    <div class="tabs">
+      <button class="tab ${ADM_LEAVE_TAB === 'list' ? 'on' : ''}" data-admtab="list">전체 근태 내역</button>
+      <button class="tab ${ADM_LEAVE_TAB === 'policy' ? 'on' : ''}" data-admtab="policy">근태 정책</button>
+    </div>`;
   const body = sec === 'adm-att' ? (pendCard + attAdminCard())
              : sec === 'adm-teams' ? teamsBoard
-             : (waitCard + policyCard + leaveAll);
+             : (admLeaveTabs + (ADM_LEAVE_TAB === 'list' ? (waitCard + leaveAll) : policyCard));
   return `
   <div class="pg on">
     <div class="pg-h"><h1>${H[0]}</h1></div>
@@ -1077,6 +1082,8 @@ function pageAdmin(sec) {
 }
 
 function wireAdmin() {
+  // 근태 관리 탭 전환
+  document.querySelectorAll('[data-admtab]').forEach(b => b.onclick = () => { ADM_LEAVE_TAB = b.dataset.admtab; renderPage(); });
   // 계정 승인/거절
   document.querySelectorAll('[data-approve]').forEach(b => b.onclick = async () => {
     if (DEMO) { toast('데모 모드 — 저장되지 않습니다'); return; }
@@ -1215,6 +1222,7 @@ $('btn-task-del').onclick = async () => {
 
 /* ═══════ (직원) 이름+직책 페이지 — 기획서 p8·p9 ═══════ */
 let MY_TAB = 'tasks';
+let ADM_LEAVE_TAB = 'list';   // 근태 관리 탭: list(전체 내역) / policy(정책)
 function myLeaveStats() {
   // 대기+승인 을 사용으로 집계 (반려 제외) — 올려놓고 또 쓰는 것 방지
   const mine = LEAVES.filter(l => l.uid === ME.uid && l.status !== '반려');
