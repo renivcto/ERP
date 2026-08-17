@@ -6338,7 +6338,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.670';
+const ERP_VERSION = 'v2.3.671';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58727,6 +58727,102 @@ function _staffNpPayload() {
 }
 async function _staffMirrorNp() { return _staffPush('newproducts', _staffNpPayload()); }
 window._staffMirrorNp = _staffMirrorNp;
+
+/* ══════════ v2.3.671 — 직원 재고 요청 처리 (기획서(2) 슬라이드 8) ══════════
+   직원은 상태를 직접 고치지 않고 '요청' 을 올린다. 여기서만 적용한다.
+   이동은 _applyStockMove() 를 그대로 쓰고, 입·출고는 같은 규칙으로 처리한다
+   (defaultWh 는 잔여로 남기고 실제 창고만 whStock 에 명시). */
+function _staffApplyInOut(it, kind, wh, qty, by) {
+  if (!it) return { ok: false, err: '품목을 찾을 수 없습니다' };
+  if (!wh) return { ok: false, err: '창고를 선택하세요' };
+  if (!(qty > 0)) return { ok: false, err: '수량을 입력하세요' };
+  const eff = _itemWhEffective(it);
+  if (kind === 'out' && qty > (Number(eff[wh]) || 0)) {
+    return { ok: false, err: '가용 수량(' + (Number(eff[wh]) || 0) + ') 초과' };
+  }
+  const delta = (kind === 'in') ? qty : -qty;
+  eff[wh] = (Number(eff[wh]) || 0) + delta;
+  it.stock = (Number(it.stock) || 0) + delta;
+  const dw = (it.defaultWh && _whById(it.defaultWh)) ? String(it.defaultWh) : null;
+  const newWh = {};
+  Object.keys(eff).forEach(k => {
+    if (k === '__un__') return; if (dw && k === dw) return;
+    const q = Number(eff[k]) || 0; if (q !== 0) newWh[k] = q;
+  });
+  it.whStock = newWh;
+  it.updatedAt = Date.now();
+  DB.stockHistory = DB.stockHistory || [];
+  const rec = { id: nextId('stock'), itemId: it.id, type: kind, qty: qty, price: it.price || 0,
+    fromWh: kind === 'out' ? wh : '', toWh: kind === 'in' ? wh : '',
+    date: new Date().toISOString().slice(0, 10), lot: it.lot || '',
+    note: (kind === 'in' ? '입고' : '출고') + ' (직원용 ERP · ' + (by || '') + ')' };
+  DB.stockHistory.push(rec);
+  try { if (typeof _whMoveVaultAdd === 'function') _whMoveVaultAdd(Object.assign({ _vts: Date.now() }, rec)); } catch(_){}
+  return { ok: true };
+}
+async function _staffInboxStock(verbose) {
+  if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return 0;
+  let done = 0, failed = 0;
+  // ── 재고 요청 ──
+  try {
+    const ref = window._firestoreDoc(window._firebaseDb, 'staff_data', 'inbox_stockmoves');
+    const snap = await window._firestoreGetDoc(ref);
+    if (snap && snap.exists()) {
+      const list = JSON.parse(snap.data().data || '[]') || [];
+      let touched = false;
+      list.forEach(r => {
+        if (!r || r.applied) return;
+        const it = (DB.items || []).find(x => x && String(x.id) === String(r.itemId));
+        let res;
+        if (!it) res = { ok: false, err: '품목을 찾을 수 없습니다' };
+        else if (r.kind === 'move') res = _applyStockMove(it, r.fromWh, r.toWh, Number(r.qty) || 0);
+        else res = _staffApplyInOut(it, r.kind, r.kind === 'in' ? r.toWh : r.fromWh, Number(r.qty) || 0, r._by);
+        r.applied = true; r.appliedAt = Date.now();
+        r.result = res.ok ? 'ok' : 'fail';
+        if (!res.ok) { r.error = res.err; failed++; } else { delete r.error; done++; }
+        touched = true;
+      });
+      if (touched) await window._firestoreSetDoc(ref, { data: JSON.stringify(list), ts: Date.now() });
+    }
+  } catch (e) { console.warn('📥 [직원 재고요청] 실패:', e && e.message); }
+  // ── 창고 추가·수정 ──
+  let whN = 0;
+  try {
+    if (typeof _whEnsureLoaded === 'function') await _whEnsureLoaded();
+    const ref = window._firestoreDoc(window._firebaseDb, 'staff_data', 'inbox_warehouses');
+    const snap = await window._firestoreGetDoc(ref);
+    if (snap && snap.exists()) {
+      const list = JSON.parse(snap.data().data || '[]') || [];
+      let touched = false;
+      window._WH = window._WH || { list: [] };
+      window._WH.list = window._WH.list || [];
+      list.forEach(r => {
+        if (!r || r.applied) return;
+        const cur = window._WH.list.find(w => w && String(w.id) === String(r.id));
+        if (cur) Object.assign(cur, { name: r.name, address: r.address || cur.address, manager: r.manager || cur.manager, phone: r.phone || cur.phone });
+        else window._WH.list.push({ id: r.id, name: r.name, address: r.address || '', manager: r.manager || '', phone: r.phone || '' });
+        r.applied = true; r.appliedAt = Date.now(); whN++; touched = true;
+      });
+      if (touched) {
+        await window._firestoreSetDoc(ref, { data: JSON.stringify(list), ts: Date.now() });
+        if (typeof _whSaveList === 'function') await _whSaveList();
+      }
+    }
+  } catch (e) { console.warn('📥 [직원 창고요청] 실패:', e && e.message); }
+
+  if (done || failed || whN) {
+    try { if (typeof saveDataNow === 'function') await saveDataNow(); else saveData(); } catch(_){}
+    try { if (typeof renderStock === 'function') renderStock(); } catch(_){}
+    try { showNotif('📥 직원용 재고 요청 ' + done + '건 반영'
+      + (failed ? ' · ' + failed + '건 실패' : '') + (whN ? ' · 창고 ' + whN + '건' : ''),
+      failed ? 'warning' : 'info'); } catch(_){}
+    try { _staffMirrorItems(); _staffMirrorWarehouses(); } catch(_){}   // 결과를 바로 되돌려준다
+  } else if (verbose) {
+    console.log('📥 [직원 재고요청] 처리할 요청이 없습니다');
+  }
+  return done;
+}
+window.staffStockNow = function() { return _staffInboxStock(true); };
 window._staffMirrorCs = _staffMirrorCs;
 
 /* ══════════ v2.3.667 — 직원용 받은편지함 (직원 → 임원 단방향) ══════════
@@ -58802,7 +58898,10 @@ function _staffInboxThrottled() {
     const last = Number(sessionStorage.getItem('reniv_staff_inbox') || 0);
     if (Date.now() - last < 10 * 60 * 1000) return;      // 세션 내 10분
     sessionStorage.setItem('reniv_staff_inbox', String(Date.now()));
-    setTimeout(() => { _staffInboxDrain().catch(() => {}); }, 6000);
+    setTimeout(() => {
+      _staffInboxDrain().catch(() => {});
+      _staffInboxStock().catch(() => {});   // v2.3.671
+    }, 6000);
   } catch(_) {}
 }
 window._staffMirrorOrders = _staffMirrorOrders;

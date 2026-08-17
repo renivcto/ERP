@@ -652,6 +652,48 @@ tr:last-child td { border-bottom:none; }
   </div>
 </div>
 
+<!-- 재고 요청 (v0.32.0) -->
+<div class="ovl" id="ovl-sm">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-h"><span class="t" id="sm-m-t">🔁 재고 이동 요청</span><button class="modal-x" data-close="ovl-sm">✕</button></div>
+    <div class="modal-b">
+      <div class="fld"><label>품목 (완제품)</label><select class="fi" id="sm-f-item"></select></div>
+      <div id="sm-f-cur" style="font-size:12px;color:var(--ink-soft);background:var(--line-soft);border-radius:8px;padding:9px 11px;margin-bottom:13px;text-align:left"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fld" data-sm-from><label>출발 창고</label><select class="fi" id="sm-f-from"></select></div>
+        <div class="fld" data-sm-to><label>도착 창고</label><select class="fi" id="sm-f-to"></select></div>
+      </div>
+      <div class="fld"><label>수량</label><input class="fi" id="sm-f-qty" type="number" min="1" placeholder="0"></div>
+      <div class="fld"><label>메모</label><input class="fi" id="sm-f-note" placeholder="예: 바로팜 출고분"></div>
+      <div class="hint" style="background:#f4f8ff;border:1px solid #bfdbfe;border-radius:9px;padding:10px 12px;color:#1d4ed8;line-height:1.7">
+        요청을 올리면 임원용 ERP에서 실제 재고에 반영됩니다. 반영 전까지는 재고 수치가 바뀌지 않습니다.</div>
+    </div>
+    <div class="modal-f"><button class="btn" data-close="ovl-sm">취소</button><button class="btn btn-p" id="btn-sm-save">요청 올리기</button></div>
+  </div>
+</div>
+
+<!-- 창고 관리 (v0.32.0) -->
+<div class="ovl" id="ovl-wh">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-h"><span class="t">🏭 창고 관리</span><button class="modal-x" data-close="ovl-wh">✕</button></div>
+    <div class="modal-b">
+      <div id="wh-m-list" style="margin-bottom:14px"></div>
+      <div style="border-top:1px solid var(--line-soft);padding-top:13px">
+        <div class="fld"><label id="wh-m-label">＋ 새 창고 추가</label><input class="fi" id="wh-f-name" placeholder="예: 쿠팡 창고"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="fld"><label>담당자</label><input class="fi" id="wh-f-manager"></div>
+          <div class="fld"><label>연락처</label><input class="fi" id="wh-f-phone"></div>
+        </div>
+        <div class="fld"><label>주소</label><input class="fi" id="wh-f-address"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn" id="btn-wh-cancel" style="display:none">새로 입력</button>
+          <button class="btn btn-p" id="btn-wh-save">요청 올리기</button></div>
+      </div>
+    </div>
+    <div class="modal-f"><button class="btn" data-close="ovl-wh">닫기</button></div>
+  </div>
+</div>
+
 <!-- 신제품 개발 상세/수정 (v0.31.0) -->
 <div class="ovl" id="ovl-np">
   <div class="modal" style="max-width:680px">
@@ -823,7 +865,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.31.1';
+const STAFF_VERSION = 'v0.32.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -881,6 +923,10 @@ let PH_Q = '', CS_EDIT = null;
 let NP = [];                // staff_data/newproducts    — 신제품 미러 (수익성 없음)
 let NPI = [];               // staff_data/inbox_newproducts — 직원이 쓴 신제품
 let NP_EDIT = null, NP_TAB = 'over';
+let SMV = [];               // staff_data/inbox_stockmoves — 직원이 올린 재고 요청
+let WHI = [];               // staff_data/inbox_warehouses — 직원이 올린 창고 추가·수정
+let SM_KIND = 'move';       // 요청 모달 종류: in | out | move
+let WH_EDIT = null;
 let GDOCS = [];             // staff_data/gdocs       — 자료실 문서 공유 (직원 등록)
 let DRIVE = [];             // staff_data/drive       — 자료실 드라이브 폴더 (직원 등록)
 let DF_CAT = null;          // 드라이브 카테고리 필터
@@ -1047,6 +1093,13 @@ if (DEMO) {
     { key: 'homeshop', name: '홈쇼핑 준비', icon: '🏠', color: '#b91c1c', owner: '', url: '',
       lists: [{ id: 'H1', name: '준비' }],
       cards: [{ id: 'h1', idList: 'H1', name: '방송 대본 검토', url: '', due: '', done: false, labels: [], cover: '' }] },
+  ];
+  SMV = [
+    { id: 'M1', kind: 'move', itemId: 'i2', itemName: '3중 장벽 20층 리뉴 크림 60ml', qty: 100,
+      fromWh: 'w1', toWh: 'w3', note: '바로팜 출고분', _by: '김서연', _byUid: 'd1',
+      createdAt: Date.now() - 86400e3, applied: true, result: 'ok' },
+    { id: 'M2', kind: 'in', itemId: 'i1', itemName: '3중 장벽 20층 리뉴 크림 30ml', qty: 500,
+      toWh: 'w1', note: '생산 입고', _by: '김서연', _byUid: 'd1', createdAt: Date.now() - 3600e3 },
   ];
   NP = [
     { id: 'np1', name: '나드 엑소좀 광채 크림', stage: '아이디어', status: 'DOING', progress: 20,
@@ -1321,6 +1374,10 @@ function subscribeData() {
     e => console.warn('[calendar]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'workflow'), s => { WF = parseCol(s, []); rerender(); },
     e => console.warn('[workflow]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_stockmoves'), s => { SMV = parseCol(s, []); rerender(); },
+    e => console.warn('[inbox_stockmoves]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_warehouses'), s => { WHI = parseCol(s, []); rerender(); },
+    e => console.warn('[inbox_warehouses]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'newproducts'), s => { NP = parseCol(s, []); rerender(); },
     e => console.warn('[newproducts]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_newproducts'), s => { NPI = parseCol(s, []); rerender(); },
@@ -4140,11 +4197,140 @@ function pageStock() {
           <td style="font-size:12px;color:var(--ink-mute)">${i.minStock ? Number(i.minStock).toLocaleString() : '-'}</td></tr>`;
       }).join('')}</tbody></table></div></div>`
       : ((ITEMS || []).length ? '<div class="empty">검색 결과가 없습니다</div>' : dpEmpty('재고'))}
-    <div class="ph" style="margin-top:16px;padding:22px"><div class="big">🚧</div>
-      <h3>위탁 재고이동 · 창고 관리 · 입출고 처리는 다음 단계입니다</h3>
-      <p>이 기능들은 직원이 <b>쓰기</b>를 하므로, 직원이 쓴 내용을 임원용으로 되돌리는 구조가 함께 필요합니다.</p></div>
+    ${smCardHtml()}
   </div>`;
 }
+
+/* ── 재고 요청 (입고·출고·이동) + 창고 관리 (v0.32.0) ──
+   ⚠️ 직원이 재고 수치를 직접 고치지 않는다. 요청을 올리고 임원용이 적용한다.
+      두 곳에서 각자 계산하면 재고가 갈라지고, 직원용에는 원가가 없어 이력을 온전히 만들 수 없다. */
+const SM_KINDS = { in: ['📥 입고 요청', '도착 창고'], out: ['📤 출고 요청', '출발 창고'], move: ['🔁 재고 이동 요청', ''] };
+function smMine() {
+  return (SMV || []).filter(r => ME.mode === 'admin' || r._byUid === ME.uid)
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+}
+function smStatus(r) {
+  if (!r.applied) return '<span class="chip wait">반영 대기</span>';
+  if (r.result === 'fail') return `<span class="chip bad" title="${esc(r.error || '')}">실패</span>`;
+  return '<span class="chip ok">반영됨</span>';
+}
+function smCardHtml() {
+  const list = smMine();
+  const wait = list.filter(r => !r.applied).length;
+  return `<div class="card" style="margin-top:18px"><div class="card-h">🔁 재고 요청
+      <span class="sub">${list.length}건${wait ? ` · 반영 대기 ${wait}건` : ''}</span>
+      <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-sm btn-p" data-sm-new="in">📥 입고</button>
+        <button class="btn btn-sm btn-p" data-sm-new="out">📤 출고</button>
+        <button class="btn btn-sm btn-p" data-sm-new="move">🔁 재고 이동</button>
+        <button class="btn btn-sm" id="btn-wh-open">🏭 창고 관리</button></span></div>
+    <div class="card-b" style="padding:${list.length ? '0 18px' : '16px'}">
+    ${list.length ? `<table class="dp-tb" style="min-width:820px">
+      <thead><tr><th>요청일</th><th>종류</th><th>품목</th><th>출발</th><th>도착</th><th>수량</th><th>메모</th><th>요청자</th><th>상태</th></tr></thead><tbody>
+      ${list.map(r => `<tr>
+        <td style="white-space:nowrap">${apWhen(r.createdAt)}</td>
+        <td><span class="dp-chip">${r.kind === 'in' ? '입고' : r.kind === 'out' ? '출고' : '이동'}</span></td>
+        <td class="nm">${esc(r.itemName || '-')}</td>
+        <td style="font-size:12px">${esc(whName(r.fromWh) || '-')}</td>
+        <td style="font-size:12px">${esc(whName(r.toWh) || '-')}</td>
+        <td style="text-align:right;font-weight:700">${Number(r.qty || 0).toLocaleString()}</td>
+        <td class="pt-note">${esc(r.note || '')}</td>
+        <td style="white-space:nowrap">${esc(r._by || '-')}</td>
+        <td>${smStatus(r)}${r.result === 'fail' ? `<div style="font-size:11px;color:var(--bad);margin-top:3px">${esc(r.error || '')}</div>` : ''}</td>
+      </tr>`).join('')}</tbody></table>`
+      : '<div class="empty">아직 올린 요청이 없습니다 — 위 버튼으로 입고·출고·이동을 요청하세요</div>'}
+    </div></div>`;
+}
+function smWhOptions(sel) {
+  return '<option value="">— 선택 —</option>'
+    + (WHS || []).map(w => `<option value="${esc(w.id)}"${String(sel) === String(w.id) ? ' selected' : ''}>${esc(w.name)}</option>`).join('');
+}
+function smRefreshCur() {
+  const it = (ITEMS || []).find(i => String(i.id) === String($('sm-f-item').value));
+  const rows = it ? itemWhRows(it) : [];
+  $('sm-f-cur').innerHTML = it
+    ? `현재 재고 — 합계 <b>${Number(it.stock || 0).toLocaleString()}</b>`
+      + (rows.length ? ' · ' + rows.map(w => `${esc(w.name)} <b>${w.qty.toLocaleString()}</b>`).join(' · ') : '')
+    : '품목을 선택하세요';
+}
+function openSmModal(kind) {
+  SM_KIND = kind || 'move';
+  const k = SM_KINDS[SM_KIND];
+  $('sm-m-t').textContent = k[0];
+  $('sm-f-item').innerHTML = '<option value="">— 완제품 선택 —</option>'
+    + (ITEMS || []).map(i => `<option value="${esc(i.id)}">${esc(i.name)}</option>`).join('');
+  $('sm-f-from').innerHTML = smWhOptions('');
+  $('sm-f-to').innerHTML = smWhOptions('');
+  $('sm-f-qty').value = ''; $('sm-f-note').value = '';
+  document.querySelector('[data-sm-from]').style.display = (SM_KIND === 'in') ? 'none' : '';
+  document.querySelector('[data-sm-to]').style.display = (SM_KIND === 'out') ? 'none' : '';
+  $('sm-f-item').onchange = smRefreshCur;
+  smRefreshCur();
+  $('ovl-sm').classList.add('on');
+}
+$('btn-sm-save').onclick = async () => {
+  const it = (ITEMS || []).find(i => String(i.id) === String($('sm-f-item').value));
+  if (!it) { toast('품목을 선택해 주세요', true); return; }
+  const qty = Number($('sm-f-qty').value) || 0;
+  if (qty <= 0) { toast('수량을 입력해 주세요', true); return; }
+  const from = $('sm-f-from').value, to = $('sm-f-to').value;
+  if (SM_KIND !== 'in' && !from) { toast('출발 창고를 선택해 주세요', true); return; }
+  if (SM_KIND !== 'out' && !to) { toast('도착 창고를 선택해 주세요', true); return; }
+  if (SM_KIND === 'move' && from === to) { toast('출발과 도착 창고가 같습니다', true); return; }
+  if (SM_KIND !== 'in') {   // 가용 수량 미리 확인 — 임원용에서 실패로 되돌아오기 전에 잡는다
+    const have = (itemWhRows(it).find(w => w.name === whName(from)) || {}).qty || 0;
+    if (qty > have) { toast(`${whName(from)} 가용 수량(${have.toLocaleString()})을 초과했습니다`, true); return; }
+  }
+  const arr = (SMV || []).slice();
+  arr.push({ id: 'M' + Date.now(), kind: SM_KIND, itemId: it.id, itemName: it.name, qty,
+    fromWh: SM_KIND === 'in' ? '' : from, toWh: SM_KIND === 'out' ? '' : to,
+    note: $('sm-f-note').value.trim(), _by: ME.name, _byUid: ME.uid, createdAt: Date.now() });
+  try { await saveCol('inbox_stockmoves', arr); SMV = arr; $('ovl-sm').classList.remove('on');
+    toast('요청을 올렸습니다 — 임원용 ERP에서 반영됩니다'); rerender(); }
+  catch (e) { toast('실패: ' + e.message, true); }
+};
+function renderWhModal() {
+  const pend = (WHI || []).filter(w => !w.applied);
+  $('wh-m-list').innerHTML = `<div style="font-size:12px;font-weight:700;color:var(--ink-soft);margin-bottom:7px">등록된 창고 ${(WHS || []).length}곳</div>`
+    + ((WHS || []).map(w => `<div class="bd-item" data-wh-edit="${esc(w.id)}" style="cursor:pointer">
+         <div class="t">🏭 ${esc(w.name)}</div></div>`).join('') || '<div class="empty" style="padding:12px">등록된 창고가 없습니다</div>')
+    + (pend.length ? `<div style="margin-top:10px;font-size:12px;color:var(--warn);font-weight:700">반영 대기 ${pend.length}건
+         ${pend.map(w => `<div style="font-weight:500;color:var(--ink-soft);margin-top:3px">· ${esc(w.name)}</div>`).join('')}</div>` : '');
+  $('wh-m-list').querySelectorAll('[data-wh-edit]').forEach(b => b.onclick = () => {
+    const w = (WHS || []).find(x => String(x.id) === String(b.dataset.whEdit));
+    if (!w) return;
+    WH_EDIT = w.id;
+    $('wh-m-label').textContent = '✏️ ' + w.name + ' 수정';
+    $('wh-f-name').value = w.name || '';
+    $('btn-wh-cancel').style.display = '';
+  });
+}
+function openWhModal() {
+  WH_EDIT = null;
+  $('wh-m-label').textContent = '＋ 새 창고 추가';
+  ['wh-f-name', 'wh-f-manager', 'wh-f-phone', 'wh-f-address'].forEach(id => $(id).value = '');
+  $('btn-wh-cancel').style.display = 'none';
+  renderWhModal();
+  $('ovl-wh').classList.add('on');
+}
+$('btn-wh-cancel').onclick = () => {
+  WH_EDIT = null; $('wh-m-label').textContent = '＋ 새 창고 추가';
+  ['wh-f-name', 'wh-f-manager', 'wh-f-phone', 'wh-f-address'].forEach(id => $(id).value = '');
+  $('btn-wh-cancel').style.display = 'none';
+};
+$('btn-wh-save').onclick = async () => {
+  const name = $('wh-f-name').value.trim();
+  if (!name) { toast('창고 이름을 입력해 주세요', true); return; }
+  if (!WH_EDIT && (WHS || []).some(w => w.name === name)) { toast('같은 이름의 창고가 이미 있습니다', true); return; }
+  const arr = (WHI || []).slice();
+  arr.push({ id: WH_EDIT || ('wh_s' + Date.now()), name,
+    manager: $('wh-f-manager').value.trim(), phone: $('wh-f-phone').value.trim(),
+    address: $('wh-f-address').value.trim(), _by: ME.name, _byUid: ME.uid, createdAt: Date.now() });
+  try { await saveCol('inbox_warehouses', arr); WHI = arr;
+    toast(WH_EDIT ? '수정을 요청했습니다' : '창고 추가를 요청했습니다');
+    $('btn-wh-cancel').onclick(); renderWhModal(); rerender(); }
+  catch (e) { toast('실패: ' + e.message, true); }
+};
 
 /* ── 판매 관리 — 주문 관리 (고객정보 없음, 읽기 전용) ── */
 function pageSales() {
@@ -4177,6 +4363,8 @@ function pageSales() {
 /* 검색은 그 페이지만 다시 그리면 되지만, 표가 통째로 바뀌므로 renderPage 로 충분하다.
    대신 입력값을 상태에 담아 두어 다시 그린 뒤 포커스를 복원한다. */
 function wireDataPage() {
+  document.querySelectorAll('[data-sm-new]').forEach(b => b.onclick = () => openSmModal(b.dataset.smNew));
+  const wo = $('btn-wh-open'); if (wo) wo.onclick = openWhModal;
   [['dp-q-item', v => ITEM_Q = v], ['dp-q-stock', v => STOCK_Q = v], ['dp-q-ord', v => ORD_Q = v]].forEach(([id, set]) => {
     const el = $(id);
     if (!el) return;
