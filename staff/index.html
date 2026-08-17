@@ -299,6 +299,24 @@ tr:last-child td { border-bottom:none; }
   </div>
 </div>
 
+<!-- ═══════ 모달: 팀 수정 (v0.8.0 — prompt 대체) ═══════ -->
+<div class="ovl" id="ovl-team">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-h"><span class="t" id="team-m-title">팀 수정</span><button class="modal-x" data-close="ovl-team">✕</button></div>
+    <div class="modal-b">
+      <div class="fld"><label>팀명</label><input class="fi" id="team-m-name"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fld"><label>책임자</label><input class="fi" id="team-m-lead" placeholder="예: 권다빈 이사"></div>
+        <div class="fld"><label>AI직원</label><input class="fi" id="team-m-ai" placeholder="예: IAN"></div>
+      </div>
+      <div class="fld"><label>업무 목록 <span style="font-weight:500;color:var(--ink-mute)">— 업무명과 담당자</span></label>
+        <div id="team-m-tasks"></div>
+        <button class="btn btn-sm" id="team-m-addtask" style="margin-top:8px">+ 업무 추가</button></div>
+    </div>
+    <div class="modal-f"><button class="btn" data-close="ovl-team">취소</button><button class="btn btn-p" id="btn-team-save">저장</button></div>
+  </div>
+</div>
+
 <!-- ═══════ 모달: 근태 품의서 (기획서 p8) ═══════ -->
 <div class="ovl" id="ovl-leave">
   <div class="modal">
@@ -354,7 +372,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.7.2';
+const STAFF_VERSION = 'v0.8.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1014,7 +1032,7 @@ function pageAdmin(sec) {
       <div class="team" data-team="${esc(t.id)}">
         <div class="team-h">
           <div class="row1"><span class="tname">${esc(t.name)}</span>
-            <button class="iconbtn" data-team-edit="${esc(t.id)}" title="팀 이름·책임자·AI직원 수정">✏️</button>
+            <button class="iconbtn" data-team-edit="${esc(t.id)}" title="팀 수정 — 팀명·책임자·AI직원·업무">✏️</button>
             <button class="iconbtn" data-team-del="${esc(t.id)}" title="팀 삭제">🗑️</button></div>
           <div class="team-meta">
             <span>책임자 : <b>${esc(t.lead || '미지정')}</b></span>
@@ -1023,12 +1041,9 @@ function pageAdmin(sec) {
         <div>
           ${(t.tasks || []).map(k => `
           <div class="task">
-            <span class="tt" data-task-open="${esc(t.id)}|${esc(k.id)}">${esc(k.title)}</span>
-            <select data-task-assign="${esc(t.id)}|${esc(k.id)}">${staffOptions(k.assignee)}</select>
-          </div>`).join('') || '<div class="empty" style="padding:14px">등록된 업무가 없습니다</div>'}
-        </div>
-        <div class="team-add">
-          <input class="fi" placeholder="+ 업무 추가 (엔터)" data-task-add="${esc(t.id)}">
+            <span class="tt" data-task-open="${esc(t.id)}|${esc(k.id)}" title="클릭하면 상세 보기">${esc(k.title)}</span>
+            <span style="font-size:12.5px;color:var(--ink-soft);white-space:nowrap">${esc(staffName(k.assignee))}</span>
+          </div>`).join('') || '<div class="empty" style="padding:14px">등록된 업무가 없습니다 — ✏️ 에서 추가하세요</div>'}
         </div>
       </div>`).join('')}
       <div class="team-ghost" id="btn-team-add">+ 팀 추가</div>
@@ -1100,44 +1115,15 @@ function wireAdmin() {
   document.querySelectorAll('[data-lv-ok]').forEach(b => b.onclick = () => decideLeave(b.dataset.lvOk, '승인'));
   document.querySelectorAll('[data-lv-no]').forEach(b => b.onclick = () => decideLeave(b.dataset.lvNo, '반려'));
   // 팀
-  if ($('btn-team-add')) $('btn-team-add').onclick = async () => {
-    const name = prompt('새 팀 이름');
-    if (!name || !name.trim()) return;
-    TEAMS.push({ id: 'T' + Date.now(), name: name.trim(), lead: '', ai: '', tasks: [] });
-    await saveTeams();
-  };
-  document.querySelectorAll('[data-team-edit]').forEach(b => b.onclick = async () => {
-    const t = TEAMS.find(x => x.id === b.dataset.teamEdit); if (!t) return;
-    const name = prompt('팀 이름', t.name); if (name === null) return;
-    const lead = prompt('책임자 (예: 권다빈 이사)', t.lead || ''); if (lead === null) return;
-    const ai = prompt('AI직원 (예: IAN)', t.ai || ''); if (ai === null) return;
-    t.name = name.trim() || t.name; t.lead = lead.trim(); t.ai = ai.trim();
-    await saveTeams();
-  });
+  if ($('btn-team-add')) $('btn-team-add').onclick = () => openTeamModal(null);   // 생성 모드
+  document.querySelectorAll('[data-team-edit]').forEach(b => b.onclick = () => openTeamModal(b.dataset.teamEdit));
   document.querySelectorAll('[data-team-del]').forEach(b => b.onclick = async () => {
     const t = TEAMS.find(x => x.id === b.dataset.teamDel); if (!t) return;
     if (!confirm(`'${t.name}' 팀을 삭제할까요? 팀의 업무 ${t.tasks.length}건도 함께 삭제됩니다.`)) return;
     TEAMS = TEAMS.filter(x => x.id !== t.id);
     await saveTeams();
   });
-  // 업무 추가/배정/상세
-  document.querySelectorAll('[data-task-add]').forEach(inp => inp.onkeydown = async e => {
-    if (e.key !== 'Enter') return;
-    const title = inp.value.trim(); if (!title) return;
-    const t = TEAMS.find(x => x.id === inp.dataset.taskAdd); if (!t) return;
-    t.tasks = t.tasks || [];
-    t.tasks.push({ id: 'K' + Date.now(), title, assignee: '', desc: '', createdAt: Date.now() });
-    inp.value = '';
-    await saveTeams();
-  });
-  document.querySelectorAll('[data-task-assign]').forEach(sel => sel.onchange = async () => {
-    const [tid, kid] = sel.dataset.taskAssign.split('|');
-    const t = TEAMS.find(x => x.id === tid); const k = t && (t.tasks || []).find(x => x.id === kid);
-    if (!k) return;
-    k.assignee = sel.value;
-    await saveTeams();
-    toast('담당자를 배정했습니다');
-  });
+  // 업무 상세 (보드는 보기 전용 — 추가·배정은 팀 수정 모달에서)
   document.querySelectorAll('[data-task-open]').forEach(el => el.onclick = () => {
     const [tid, kid] = el.dataset.taskOpen.split('|');
     openTaskModal(tid, kid, true);
@@ -1184,6 +1170,61 @@ async function decideLeave(id, status) {
   try { await saveCol('leaves', LEAVES); toast(status === '승인' ? '승인했습니다' : '반려했습니다'); }
   catch (e) { toast('실패: ' + e.message, true); }
 }
+
+/* ── 팀 수정 모달 (v0.8.0) — 팀명·책임자·AI직원·업무 목록을 한 화면에서 ── */
+let _teamEditId = null;         // null 이면 생성 모드
+function _teamTaskRow(k) {
+  return `<div style="display:flex;gap:6px;margin-bottom:6px" data-trow="${esc(k.id)}">
+    <input class="fi" value="${esc(k.title)}" data-tt placeholder="업무명" style="flex:1">
+    <select class="fi" data-ta style="width:140px">${staffOptions(k.assignee)}</select>
+    <button type="button" class="iconbtn" data-tdel title="업무 삭제">✕</button>
+  </div>`;
+}
+function _wireTeamTaskRows() {
+  $('team-m-tasks').querySelectorAll('[data-tdel]').forEach(b =>
+    b.onclick = () => b.closest('[data-trow]').remove());
+}
+function openTeamModal(tid) {
+  _teamEditId = tid;
+  const t = tid ? TEAMS.find(x => x.id === tid) : null;
+  if (tid && !t) return;
+  $('team-m-title').textContent = t ? `${t.name} — 팀 수정` : '새 팀 만들기';
+  $('team-m-name').value = t ? t.name : '';
+  $('team-m-lead').value = t ? (t.lead || '') : '';
+  $('team-m-ai').value = t ? (t.ai || '') : '';
+  $('team-m-tasks').innerHTML = (t && (t.tasks || []).length)
+    ? t.tasks.map(_teamTaskRow).join('')
+    : '';
+  _wireTeamTaskRows();
+  $('ovl-team').classList.add('on');
+}
+$('team-m-addtask').onclick = () => {
+  $('team-m-tasks').insertAdjacentHTML('beforeend',
+    _teamTaskRow({ id: 'K' + Date.now() + Math.floor(Math.random() * 1000), title: '', assignee: '' }));
+  _wireTeamTaskRows();
+  const rows = $('team-m-tasks').querySelectorAll('[data-tt]');
+  rows[rows.length - 1].focus();
+};
+$('btn-team-save').onclick = async () => {
+  const name = $('team-m-name').value.trim();
+  if (!name) { toast('팀명을 입력해 주세요', true); return; }
+  let t = _teamEditId ? TEAMS.find(x => x.id === _teamEditId) : null;
+  if (_teamEditId && !t) return;
+  if (!t) { t = { id: 'T' + Date.now(), tasks: [] }; TEAMS.push(t); }
+  t.name = name;
+  t.lead = $('team-m-lead').value.trim();
+  t.ai = $('team-m-ai').value.trim();
+  const prev = new Map((t.tasks || []).map(k => [k.id, k]));
+  t.tasks = [...$('team-m-tasks').querySelectorAll('[data-trow]')].map(r => {
+    const title = r.querySelector('[data-tt]').value.trim();
+    if (!title) return null;                                  // 빈 업무명은 버린다
+    const old = prev.get(r.dataset.trow) || { id: r.dataset.trow, desc: '', createdAt: Date.now() };
+    return Object.assign({}, old, { title, assignee: r.querySelector('[data-ta]').value });
+  }).filter(Boolean);
+  await saveTeams();
+  $('ovl-team').classList.remove('on');
+  toast(_teamEditId ? '팀을 저장했습니다' : '팀을 만들었습니다');
+};
 
 /* ── 업무 상세 모달 (관리자: 수정 가능 / 직원: 열람) ── */
 let _taskRef = null;
