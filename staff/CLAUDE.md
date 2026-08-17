@@ -66,7 +66,16 @@ Google 로그인
 | `leaves` | `[{id, uid, type(월차/연차/반차/반반차), pool(차감대상), days, date, reason(HTML), approver, status(대기/승인/반려), decidedBy, rejectNote}]` |
 | `leave_policy` | `{monthly, annual:{년차:일수}, approvers:[결재자명]}` — 기본값 `DEFAULT_POLICY` |
 | `library` | `[{id, title, content(HTML), uid, by, avatar, createdAt}]` |
-| `attendance_YYYY-MM` | 출퇴근 (월별 문서 — 비대화 방지). `{id, uid, type(in/out), date, time(HH:MM:SS), ts, ip, ua}` |
+| `attendance_YYYY-MM` | 출퇴근 (월별 문서 — 비대화 방지). `{id, uid, type(in/out), date, time(HH:MM:SS), ts, ip, ua, lunch(used/none)}` |
+| `journal_YYYY-MM` | 업무 일지 (월별 문서). `{id, uid, date, items:{taskId:{done,pct,memo}}, note(HTML), fb:{by,at,react,comment(HTML)}}` |
+
+- **업무 일지(v0.15)**: 직원이 매일 작성 — 팀(큰 분류)별로 배정 업무를 나열하고
+  완료 체크·진행 Bar(0~100)·한 줄 메모 + 하단 서식 노트. 지난 일지는 일별·주별·월별.
+  관리자는 `adm-journal` 에서 직원별 조회 후 **감정 버튼 + 의견(서식)** 을 `fb` 에 남긴다.
+  진행 Bar 를 100 으로 올리면 완료 체크가 자동으로 켜진다(반대도 동일).
+- ⚠️ **동적으로 만든 편집기는 `buildRtToolbars()` 가 있어야 툴바가 붙는다.**
+  초기 1회 배선만 하던 시절, 페이지 렌더로 생긴 편집기의 툴바가 비어 있었다(v0.15.1).
+  `renderPage()` 뒤와 모달 열 때 호출한다. 이미 배선된 툴바는 `data-rt-ready` 로 건너뛴다.
 
 - **출퇴근 규칙**: 출근 하루 1회 / 퇴근 재클릭 시 갱신 / 출근 없이 퇴근 불가.
   IP 는 api.ipify.org 외부 조회(4초 타임아웃). 최근 접속은 `staff_users.lastSeen`(5분 스로틀).
@@ -103,7 +112,8 @@ Google 로그인
 ## 6-1. 메뉴 구조 (v0.7 확정)
 
 접이식 그룹(`_navOpen`). 홈(업무 현황)은 메뉴에 없고 첫 진입·로고 클릭으로만 연다.
-- 직원 업무 관리(관리자, 배지) > 출퇴근 관리(+계정 승인) / 업무 배정 / 근태 관리(내역·정책 탭)
+- 직원 업무 관리(관리자, 배지) > 출퇴근 관리(+계정 승인) / 업무 배정 / 업무 일지 / 휴가 관리(내역·정책 탭)
+- 내 페이지(직원 전용, 그룹명 = 이름+직책) > 내 업무 / 업무 일지 / 휴가 관리 / 출퇴근 기록
 - 업무현황 > 워크플로우·캘린더·자료실·외부 계정 / 결재 관리(상위) /
   영업 관리 > 판매·약국·거래처 / 제품 관리 > 품목 정보·재고·신제품
 - 표는 전역 가운데 정렬(th/td). 편집기 안 표만 좌측 정렬 예외.
