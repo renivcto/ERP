@@ -354,7 +354,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.5.2';
+const STAFF_VERSION = 'v0.6.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -382,6 +382,7 @@ let TEAMS = [];             // staff_data/teams
 let LEAVES = [];            // staff_data/leaves
 let LIBRARY = [];           // staff_data/library
 let POLICY = null;          // staff_data/leave_policy
+let ATT = [];               // staff_data/attendance_YYYY-MM (이번 달 출퇴근)
 let CUR_PAGE = '';
 let _unsubs = [];
 
@@ -454,6 +455,13 @@ if (DEMO) {
   ];
   LIBRARY = [ { id: 'b1', title: '신입 온보딩 가이드', content: '온보딩 자료 링크: https://drive.google.com/…',
                 uid: 'd2', by: '박지훈', avatar: '🐻', createdAt: Date.now() - 86400000 } ];
+  ATT = [
+    { id: 'a1', uid: 'd1', type: 'in',  date: today(), time: '09:02:11', ts: Date.now() - 4 * 3600e3, ip: '121.140.22.10', ua: 'demo' },
+    { id: 'a2', uid: 'd2', type: 'in',  date: today(), time: '08:55:47', ts: Date.now() - 4.2 * 3600e3, ip: '175.223.10.4', ua: 'demo' },
+    { id: 'a3', uid: 'd2', type: 'out', date: today(), time: '18:01:09', ts: Date.now() - 600e3, ip: '175.223.10.4', ua: 'demo' },
+  ];
+  demoStaff[0].lastSeen = Date.now() - 300e3;
+  demoStaff[1].lastSeen = Date.now() - 3600e3;
   POLICY = JSON.parse(JSON.stringify(DEFAULT_POLICY));
   ME = DEMO === 'admin'
     ? { uid: 'demo-admin', mode: 'admin', name: '데모 관리자', title: '관리자', avatar: '👑', profile: {} }
@@ -600,6 +608,13 @@ function startApp() {
   $('me-ava').innerHTML = avaHtml(ME.avatar, 34);
   $('me-name').textContent = ME.name;
   $('me-title').textContent = ME.mode === 'admin' ? '관리자 (임원 계정)' : (ME.title || '직원');
+  // v0.6.0: 최근 접속 시간 기록 (5분 스로틀 — 새로고침마다 쓰지 않는다)
+  if (!DEMO && ME.mode === 'staff') {
+    const last = Number(ME.profile && ME.profile.lastSeen) || 0;
+    if (Date.now() - last > 5 * 60 * 1000) {
+      updateDoc(doc(db, 'staff_users', ME.uid), { lastSeen: Date.now() }).catch(() => {});
+    }
+  }
   subscribeData();
   renderMenu();
   go('home');   // v0.2.0: 임원용과 같은 '업무 현황' 홈이 첫 화면
@@ -626,6 +641,8 @@ function subscribeData() {
     e => console.warn('[policy]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'library'), s => { LIBRARY = parseCol(s, []); rerender(); },
     e => console.warn('[library]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', _attDocId()), s => { ATT = parseCol(s, []); rerender(); },
+    e => console.warn('[attendance]', e.message)));
 }
 function defaultTeams() {
   // 기획서 p7 의 기본 3팀. 저장 전까지는 로컬 기본값으로 표시.
@@ -636,6 +653,90 @@ function defaultTeams() {
   ];
 }
 function pol() { return POLICY || DEFAULT_POLICY; }
+
+/* ═══════ 출퇴근 (v0.6.0) ═══════
+   월별 문서로 저장한다 — 매일 쌓이는 데이터를 한 문서에 계속 넣으면
+   임원용 ERP 에서 반복된 '단일 문서 비대화' 사고를 다시 만든다. */
+const _attDocId = () => 'attendance_' + today().slice(0, 7);
+function nowClock() { return new Date().toLocaleTimeString('ko-KR', { hour12: false }); }
+async function fetchIp() {
+  try {
+    const c = new AbortController(); const t = setTimeout(() => c.abort(), 4000);
+    const r = await fetch('https://api.ipify.org?format=json', { signal: c.signal });
+    clearTimeout(t);
+    const j = await r.json();
+    return j.ip || '확인 안 됨';
+  } catch (_) { return '확인 안 됨'; }
+}
+function attToday(uid) {
+  const d = today();
+  const mine = ATT.filter(a => a && a.uid === uid && a.date === d);
+  return { inRec: mine.find(a => a.type === 'in'), outRec: mine.filter(a => a.type === 'out').slice(-1)[0] };
+}
+function fmtDur(ms) {
+  if (!(ms > 0)) return '-';
+  const m = Math.floor(ms / 60000);
+  return Math.floor(m / 60) + '시간 ' + (m % 60) + '분';
+}
+function _fmtSeen(ts) {
+  if (!ts) return '-';
+  const d = new Date(Number(ts));
+  return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + d.toLocaleTimeString('ko-KR', { hour12: false });
+}
+let _clockBusy = false;
+async function clock(type) {
+  if (ME.mode !== 'staff') { toast('직원 계정만 사용할 수 있습니다', true); return; }
+  if (_clockBusy) return;
+  const { inRec, outRec } = attToday(ME.uid);
+  if (type === 'in' && inRec) { toast('오늘은 이미 출근 처리되었습니다 (' + inRec.time + ')', true); return; }
+  if (type === 'out' && !inRec) { toast('출근 기록이 없습니다 — 먼저 출근을 눌러주세요', true); return; }
+  _clockBusy = true;
+  toast(type === 'in' ? '출근 처리 중…' : '퇴근 처리 중…');
+  const ip = await fetchIp();     // 정적 앱이라 공인 IP 는 외부 조회로 가져온다
+  const rec = { id: 'A' + Date.now(), uid: ME.uid, type, date: today(), time: nowClock(),
+                ts: Date.now(), ip, ua: String(navigator.userAgent || '').slice(0, 120) };
+  if (type === 'out' && outRec) Object.assign(outRec, { time: rec.time, ts: rec.ts, ip: rec.ip, ua: rec.ua });
+  else ATT.push(rec);
+  try {
+    await saveCol(_attDocId(), ATT);
+    toast(type === 'in' ? '✅ 출근 완료 — ' + rec.time : '✅ 퇴근 완료 — ' + rec.time);
+  } catch (e) { toast('저장 실패: ' + e.message, true); }
+  _clockBusy = false;
+}
+function attMyTable() {
+  const byDate = {};
+  ATT.filter(a => a && a.uid === ME.uid).forEach(a => { (byDate[a.date] = byDate[a.date] || []).push(a); });
+  const dates = Object.keys(byDate).sort().reverse();
+  if (!dates.length) return '<div class="empty">이번 달 출퇴근 기록이 없습니다</div>';
+  return `<table><thead><tr><th>날짜</th><th>출근</th><th>퇴근</th><th>근무</th><th>출근 IP</th><th>퇴근 IP</th></tr></thead><tbody>
+    ${dates.map(d => {
+      const rs = byDate[d];
+      const i = rs.find(a => a.type === 'in'), o = rs.filter(a => a.type === 'out').slice(-1)[0];
+      return `<tr><td>${d}</td><td>${i ? i.time : '-'}</td><td>${o ? o.time : '-'}</td>
+        <td>${i && o ? fmtDur(o.ts - i.ts) : '-'}</td>
+        <td style="font-size:12px" title="${esc(i && i.ua || '')}">${esc(i && i.ip || '-')}</td>
+        <td style="font-size:12px" title="${esc(o && o.ua || '')}">${esc(o && o.ip || '-')}</td></tr>`;
+    }).join('')}</tbody></table>`;
+}
+function attAdminCard() {
+  const act = USERS.filter(u => u.active === true);
+  const rows = act.map(u => {
+    const { inRec, outRec } = attToday(u.uid);
+    const dur = inRec ? fmtDur((outRec ? outRec.ts : Date.now()) - inRec.ts) : '-';
+    const st = !inRec ? '<span class="chip gray">미출근</span>'
+             : outRec ? '<span class="chip ok">퇴근</span>' : '<span class="chip wait">근무 중</span>';
+    return `<tr><td style="white-space:nowrap"><b>${esc(staffName(u.uid))}</b> ${st}</td>
+      <td>${inRec ? inRec.time : '-'}</td><td style="font-size:12px" title="${esc(inRec && inRec.ua || '')}">${esc(inRec && inRec.ip || '-')}</td>
+      <td>${outRec ? outRec.time : '-'}</td><td style="font-size:12px" title="${esc(outRec && outRec.ua || '')}">${esc(outRec && outRec.ip || '-')}</td>
+      <td>${dur}</td><td style="font-size:12px">${_fmtSeen(u.lastSeen)}</td></tr>`;
+  }).join('');
+  return `<div class="card"><div class="card-h">🕘 오늘 출퇴근 현황 <span class="sub">${today()} · IP 에 마우스를 올리면 기기 정보</span></div>
+    <div class="card-b" style="padding:${act.length ? '0 18px' : '16px'}">
+    ${act.length
+      ? `<table><thead><tr><th>직원</th><th>출근</th><th>출근 IP</th><th>퇴근</th><th>퇴근 IP</th><th>근무</th><th>최근 접속</th></tr></thead><tbody>${rows}</tbody></table>`
+      : '<div class="empty">활성 직원이 없습니다</div>'}
+    </div></div>`;
+}
 
 /* ═══════ 메뉴 ═══════
    기획서의 메뉴 구성. ⓘ = 임원용 ERP 연동 (p2).
@@ -742,6 +843,27 @@ function pageHome() {
     `<span data-go="${pg}" style="cursor:pointer;display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-size:12.5px;font-weight:600;color:var(--ink-soft)">
        ${label} <b style="font-size:16px;color:${n > 0 ? 'var(--brand-deep)' : 'var(--ink-mute)'}">${n}</b> 건</span>`).join('');
 
+  // 출퇴근 카드 (직원 전용) — 매일 누르는 것이라 홈 맨 위 (v0.6.0)
+  let attCard = '';
+  if (!isAdmin) {
+    const { inRec, outRec } = attToday(ME.uid);
+    const dur = inRec ? fmtDur((outRec ? outRec.ts : Date.now()) - inRec.ts) : '-';
+    const state = !inRec ? ['미출근', 'gray'] : (outRec ? ['퇴근 완료', 'ok'] : ['근무 중', 'wait']);
+    attCard = `<div class="card"><div class="card-b" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+      <div style="flex:1;min-width:220px">
+        <div style="font-size:13.5px;color:var(--ink-mute);font-weight:700">오늘 출퇴근
+          <span class="chip ${state[1]}" style="margin-left:7px">${state[0]}</span></div>
+        <div style="margin-top:9px;font-size:14.5px;display:flex;gap:20px;flex-wrap:wrap">
+          <span>출근 <b>${inRec ? inRec.time : '-'}</b></span>
+          <span>퇴근 <b>${outRec ? outRec.time : '-'}</b></span>
+          <span>근무 <b>${dur}</b></span></div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-p" id="btn-clock-in" ${inRec ? 'disabled' : ''} style="padding:11px 20px">🌅 출근</button>
+        <button class="btn" id="btn-clock-out" ${!inRec ? 'disabled' : ''} style="padding:11px 20px">🌆 퇴근</button>
+      </div></div></div>`;
+  }
+
   // 왼쪽 큰 카드 — 자료실 최신 글 (임원용의 업무 공유 피드 자리)
   const feedCard = latest ? `
     <div class="card"><div class="card-b">
@@ -788,7 +910,9 @@ function pageHome() {
   if (isAdmin) {
     const act = USERS.filter(u => u.active === true).length;
     const taskN = TEAMS.reduce((s, t) => s + (t.tasks || []).length, 0);
+    const todayIn = new Set(ATT.filter(a => a && a.type === 'in' && a.date === today()).map(a => a.uid)).size;
     kpiHtml = `
+      <div class="kpi"><div class="k">오늘 출근</div><div class="v">${todayIn}<small> / ${act}명</small></div></div>
       <div class="kpi"><div class="k">활성 직원</div><div class="v">${act}<small>명</small></div></div>
       <div class="kpi"><div class="k">팀 / 업무</div><div class="v">${TEAMS.length}<small>팀</small> · ${taskN}<small>건</small></div></div>`;
   } else {
@@ -819,12 +943,14 @@ function pageHome() {
       <div style="display:flex;gap:8px">${chipHtml}</div>
     </div>
     <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(240px,1fr);gap:16px;align-items:start">
-      <div>${feedCard}${workCard}</div>
+      <div>${attCard}${feedCard}${workCard}</div>
       <div><div class="kpis" style="grid-template-columns:1fr;margin-bottom:14px">${kpiHtml}</div>${leaveCard}</div>
     </div>
   </div>`;
 }
 function wireHome() {
+  const ci = $('btn-clock-in');  if (ci) ci.onclick = () => clock('in');
+  const co = $('btn-clock-out'); if (co) co.onclick = () => clock('out');
   document.querySelectorAll('[data-go]').forEach(el => el.onclick = () => go(el.dataset.go));
   document.querySelectorAll('[data-my-open]').forEach(el => el.onclick = () => {
     const [tid, kid] = el.dataset.myOpen.split('|');
@@ -877,6 +1003,8 @@ function pageAdmin() {
             <button class="btn btn-sm btn-ok" data-lv-ok="${esc(l.id)}">승인</button>
             <button class="btn btn-sm btn-bad" data-lv-no="${esc(l.id)}">반려</button></td></tr>`).join('')}
       </tbody></table></div></div>` : ''}
+
+    ${attAdminCard()}
 
     <div class="card-h" style="border:none;padding:6px 2px 10px;font-size:15px">팀 보드</div>
     <div class="teams">
@@ -1107,6 +1235,7 @@ function pageMy() {
     <div class="tabs">
       <button class="tab ${MY_TAB === 'tasks' ? 'on' : ''}" data-mytab="tasks">내 업무</button>
       <button class="tab ${MY_TAB === 'leave' ? 'on' : ''}" data-mytab="leave">근태 관리</button>
+      <button class="tab ${MY_TAB === 'att' ? 'on' : ''}" data-mytab="att">출퇴근 기록</button>
     </div>
 
     <div style="display:${MY_TAB === 'tasks' ? 'block' : 'none'}">
@@ -1128,6 +1257,11 @@ function pageMy() {
       ${isPreview ? '' : `<div style="margin-bottom:14px"><button class="btn btn-p" id="btn-lv-open">📝 품의서 작성</button></div>`}
       <div class="card"><div class="card-h">내 신청 내역</div>
         <div class="card-b" style="padding:0 18px">${leaveTable(mine, false)}</div></div>
+    </div>
+
+    <div style="display:${MY_TAB === 'att' ? 'block' : 'none'}">
+      <div class="card"><div class="card-h">🕘 이번 달 출퇴근 기록 <span class="sub">기록은 월별로 보관됩니다 · IP 에 마우스를 올리면 기기 정보</span></div>
+        <div class="card-b" style="padding:0 18px">${attMyTable()}</div></div>
     </div>
   </div>`;
 }
