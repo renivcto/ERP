@@ -181,9 +181,10 @@ tr:last-child td { border-bottom:none; }
 .rt-toolbar .sep { width:1px; background:var(--line); margin:2px 4px; }
 .rt-editor { min-height:280px; max-height:48vh; overflow-y:auto; border-radius:0 0 9px 9px; line-height:1.75; font-size:14px; }
 .rt-editor.ro { background:var(--line-soft); border-radius:9px; }
-.rt-editor table { border-collapse:collapse; width:100%; margin:8px 0; }
-.rt-editor td, .rt-editor th { border:1px solid #c9d2e0; padding:6px 9px; min-width:44px; text-align:left; }
-.rt-editor ul, .rt-editor ol { padding-left:22px; }
+.rt-editor table, .rt-view table { border-collapse:collapse; width:100%; margin:8px 0; }
+.rt-editor td, .rt-editor th, .rt-view td, .rt-view th { border:1px solid #c9d2e0; padding:6px 9px; min-width:44px; text-align:left; }
+.rt-editor ul, .rt-editor ol, .rt-view ul, .rt-view ol { padding-left:22px; }
+.rt-view { line-height:1.65; }
 .modal-f { display:flex; gap:8px; justify-content:flex-end; padding:14px 20px; border-top:1px solid var(--line-soft); }
 
 /* ── 토스트 ── */
@@ -301,18 +302,7 @@ tr:last-child td { border-bottom:none; }
         <div class="fld"><label>담당자</label><select class="fi" id="task-m-assignee"></select></div>
       </div>
       <div class="fld"><label>상세 내용</label>
-        <div class="rt-toolbar" id="task-m-tools">
-          <button type="button" data-cmd="bold" title="굵게"><b>B</b></button>
-          <button type="button" data-cmd="italic" title="기울임"><i>I</i></button>
-          <button type="button" data-cmd="underline" title="밑줄"><u>U</u></button>
-          <button type="button" data-cmd="strikeThrough" title="취소선"><s>S</s></button>
-          <span class="sep"></span>
-          <button type="button" data-cmd="insertUnorderedList" title="글머리 목록">• 목록</button>
-          <button type="button" data-cmd="insertOrderedList" title="번호 목록">1. 목록</button>
-          <span class="sep"></span>
-          <button type="button" data-table title="표 삽입">⊞ 표</button>
-          <button type="button" data-cmd="removeFormat" title="서식 지우기">지우기</button>
-        </div>
+        <div class="rt-toolbar" id="task-m-tools" data-for="task-m-desc"></div>
         <div class="rt-editor fi" id="task-m-desc" contenteditable="true"></div>
       </div>
       <div class="hint" id="task-m-meta" style="font-size:12px;color:var(--ink-mute)"></div>
@@ -358,7 +348,9 @@ tr:last-child td { border-bottom:none; }
       <div class="fld" id="lv-pool-wrap" style="display:none"><label>차감 대상</label>
         <select class="fi" id="lv-pool"><option value="월차">월차에서 차감</option><option value="연차">연차에서 차감</option></select></div>
       <div class="fld"><label>날짜</label><input class="fi" type="date" id="lv-date"></div>
-      <div class="fld"><label>사유</label><textarea class="fi" id="lv-reason" rows="3" placeholder="사유를 입력하세요"></textarea></div>
+      <div class="fld"><label>사유</label>
+        <div class="rt-toolbar" data-for="lv-reason"></div>
+        <div class="rt-editor fi" id="lv-reason" contenteditable="true" style="min-height:110px"></div></div>
       <div class="fld"><label>결재라인</label><select class="fi" id="lv-approver"></select>
         <div class="hint">지정한 결재라인에서 결재가 완료되면 목록에 표시됩니다.</div></div>
     </div>
@@ -372,7 +364,9 @@ tr:last-child td { border-bottom:none; }
     <div class="modal-h"><span class="t">📚 자료 등록</span><button class="modal-x" data-close="ovl-lib">✕</button></div>
     <div class="modal-b">
       <div class="fld"><label>제목</label><input class="fi" id="lib-title"></div>
-      <div class="fld"><label>내용 / 링크</label><textarea class="fi" id="lib-content" rows="5" placeholder="내용을 적거나 구글 드라이브 링크 등을 붙여넣으세요"></textarea></div>
+      <div class="fld"><label>내용 / 링크</label>
+        <div class="rt-toolbar" data-for="lib-content"></div>
+        <div class="rt-editor fi" id="lib-content" contenteditable="true" style="min-height:180px"></div></div>
     </div>
     <div class="modal-f"><button class="btn" data-close="ovl-lib">취소</button><button class="btn btn-p" id="btn-lib-save">등록</button></div>
   </div>
@@ -398,7 +392,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.9.0';
+const STAFF_VERSION = 'v0.10.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -928,7 +922,7 @@ function pageHome() {
         <button class="btn btn-sm btn-p" data-go="library" style="margin-left:auto">📚 자료실</button>
       </div>
       <div style="font-size:16px;font-weight:800;margin-bottom:8px">${esc(latest.title)}</div>
-      <div style="font-size:13px;color:var(--ink-soft);line-height:1.7;max-height:150px;overflow:hidden;word-break:break-all">${linkify(latest.content)}</div>
+      <div class="rt-view" style="font-size:13px;color:var(--ink-soft);max-height:150px;overflow:hidden;word-break:break-all">${linkify(latest.content)}</div>
       ${lib.length > 1 ? `<div style="margin-top:12px;border-top:1px solid var(--line-soft);padding-top:10px;font-size:12px;color:var(--ink-mute)">지난 자료 (${lib.length - 1})
         ${lib.slice(1, 4).map(x => `<div style="margin-top:6px;color:var(--ink-soft)">${avaHtml(x.avatar || '', 16)} <b>${esc(x.title)}</b> <span style="color:var(--ink-mute)">· ${fmtD(new Date(x.createdAt || 0).toISOString())}</span></div>`).join('')}</div>` : ''}
     </div></div>`
@@ -1047,7 +1041,7 @@ function pageAdmin(sec) {
       <div class="card-b" style="padding:0 18px"><table><thead><tr><th>신청자</th><th>종류</th><th>날짜</th><th>사유</th><th>결재라인</th><th></th></tr></thead><tbody>
         ${wait.map(l => `<tr>
           <td><b>${esc(staffName(l.uid))}</b></td><td>${esc(l.type)} (${l.days}일)</td><td>${fmtD(l.date)}</td>
-          <td style="max-width:220px">${esc(l.reason || '-')}</td><td>${esc(l.approver)}</td>
+          <td class="rt-view" style="max-width:220px;font-size:12.5px">${_rtHtml(l.reason)}</td><td>${esc(l.approver)}</td>
           <td style="white-space:nowrap">
             <button class="btn btn-sm btn-ok" data-lv-ok="${esc(l.id)}">승인</button>
             <button class="btn btn-sm btn-bad" data-lv-no="${esc(l.id)}">반려</button></td></tr>`).join('')}
@@ -1266,21 +1260,41 @@ function _rtSanitize(html) {
   });
   return t.innerHTML;
 }
-// 툴바 — mousedown 에서 선택영역이 풀리지 않게 preventDefault
-document.querySelectorAll('#task-m-tools button').forEach(b => b.onmousedown = e => e.preventDefault());
-document.querySelectorAll('#task-m-tools [data-cmd]').forEach(b => b.onclick = () => {
-  $('task-m-desc').focus();
-  document.execCommand(b.dataset.cmd, false, null);
+// 서식 표시 헬퍼 — HTML 이면 정화 렌더, 일반 텍스트면 이스케이프
+function _rtHtml(s) {
+  if (!s) return '-';
+  return /[<>]/.test(s) ? _rtSanitize(s) : esc(s);
+}
+// 공용 툴바 — .rt-toolbar[data-for] 를 전부 같은 버튼으로 채우고 배선한다 (v0.10.0)
+const RT_BTNS = `
+  <button type="button" data-cmd="bold" title="굵게"><b>B</b></button>
+  <button type="button" data-cmd="italic" title="기울임"><i>I</i></button>
+  <button type="button" data-cmd="underline" title="밑줄"><u>U</u></button>
+  <button type="button" data-cmd="strikeThrough" title="취소선"><s>S</s></button>
+  <span class="sep"></span>
+  <button type="button" data-cmd="insertUnorderedList" title="글머리 목록">• 목록</button>
+  <button type="button" data-cmd="insertOrderedList" title="번호 목록">1. 목록</button>
+  <span class="sep"></span>
+  <button type="button" data-table title="표 삽입">⊞ 표</button>
+  <button type="button" data-cmd="removeFormat" title="서식 지우기">지우기</button>`;
+document.querySelectorAll('.rt-toolbar[data-for]').forEach(tb => {
+  tb.innerHTML = RT_BTNS;
+  const ed = $(tb.dataset.for);
+  tb.querySelectorAll('button').forEach(b => b.onmousedown = e => e.preventDefault());   // 선택영역 유지
+  tb.querySelectorAll('[data-cmd]').forEach(b => b.onclick = () => {
+    ed.focus();
+    document.execCommand(b.dataset.cmd, false, null);
+  });
+  tb.querySelector('[data-table]').onclick = () => {
+    const r = Math.min(Math.max(parseInt(prompt('행 수 (1~10)', '3') || 0, 10) || 0, 1), 10);
+    if (!r) return;
+    const c = Math.min(Math.max(parseInt(prompt('열 수 (1~8)', '3') || 0, 10) || 0, 1), 8);
+    if (!c) return;
+    const row = '<tr>' + '<td><br></td>'.repeat(c) + '</tr>';
+    ed.focus();
+    document.execCommand('insertHTML', false, '<table><tbody>' + row.repeat(r) + '</tbody></table><p><br></p>');
+  };
 });
-document.querySelector('#task-m-tools [data-table]').onclick = () => {
-  const r = Math.min(Math.max(parseInt(prompt('행 수 (1~10)', '3') || 0, 10) || 0, 1), 10);
-  if (!r) return;
-  const c = Math.min(Math.max(parseInt(prompt('열 수 (1~8)', '3') || 0, 10) || 0, 1), 8);
-  if (!c) return;
-  const row = '<tr>' + '<td><br></td>'.repeat(c) + '</tr>';
-  $('task-m-desc').focus();
-  document.execCommand('insertHTML', false, '<table><tbody>' + row.repeat(r) + '</tbody></table><p><br></p>');
-};
 
 /* ── 업무 상세 모달 (관리자: 수정 가능 / 직원: 열람) ── */
 let _taskRef = null;
@@ -1403,7 +1417,7 @@ function leaveTable(list, withName) {
       <td>${esc(l.approver)}</td>
       <td>${chip(l.status)}${l.status === '반려' && l.rejectNote ? `<div style="font-size:11px;color:var(--bad);margin-top:2px">${esc(l.rejectNote)}</div>` : ''}
           ${l.status !== '대기' && l.decidedBy ? `<div style="font-size:11px;color:var(--ink-mute);margin-top:2px">${esc(l.decidedBy)}</div>` : ''}</td>
-      <td style="max-width:200px;font-size:12px;color:var(--ink-soft)">${esc(l.reason || '-')}</td></tr>`).join('')}
+      <td class="rt-view" style="max-width:200px;font-size:12px;color:var(--ink-soft)">${_rtHtml(l.reason)}</td></tr>`).join('')}
   </tbody></table>`;
 }
 function wireMy() {
@@ -1417,7 +1431,7 @@ function wireMy() {
     const p = pol();
     $('lv-approver').innerHTML = p.approvers.map(a => `<option>${esc(a)}</option>`).join('');
     $('lv-date').value = today();
-    $('lv-reason').value = '';
+    $('lv-reason').innerHTML = '';
     $('lv-type').value = '월차';
     $('lv-pool-wrap').style.display = 'none';
     $('ovl-leave').classList.add('on');
@@ -1439,7 +1453,7 @@ $('btn-lv-submit').onclick = async () => {
   if (pool === '연차' && s.yearLeft < days) { toast(`남은 연차(${s.yearLeft}일)가 부족합니다`, true); return; }
   LEAVES.push({
     id: 'L' + Date.now(), uid: ME.uid, type, pool, days, date,
-    reason: $('lv-reason').value.trim(), approver: $('lv-approver').value,
+    reason: _rtSanitize($('lv-reason').innerHTML), approver: $('lv-approver').value,
     status: '대기', createdAt: Date.now(),
   });
   try { await saveCol('leaves', LEAVES); $('ovl-leave').classList.remove('on'); toast('품의서를 제출했습니다'); }
@@ -1458,7 +1472,7 @@ function pageLibrary() {
       <thead><tr><th>제목</th><th>내용</th><th>등록자</th><th>등록일</th><th></th></tr></thead><tbody>
       ${list.map(x => `<tr>
         <td style="font-weight:700">${esc(x.title)}</td>
-        <td style="max-width:340px;font-size:12.5px;color:var(--ink-soft);word-break:break-all">${linkify(x.content)}</td>
+        <td class="rt-view" style="max-width:340px;font-size:12.5px;color:var(--ink-soft);word-break:break-all">${linkify(x.content)}</td>
         <td style="white-space:nowrap">${avaHtml(x.avatar || '', 20)} ${esc(x.by || '-')}</td>
         <td style="white-space:nowrap">${fmtD(new Date(x.createdAt || 0).toISOString())}</td>
         <td>${(x.uid === ME.uid || ME.mode === 'admin') ? `<button class="btn btn-sm btn-bad" data-lib-del="${esc(x.id)}">삭제</button>` : ''}</td>
@@ -1467,10 +1481,11 @@ function pageLibrary() {
   </div>`;
 }
 function linkify(s) {
+  if (/[<>]/.test(String(s || ''))) return _rtSanitize(s);   // 서식 문서는 정화 후 그대로
   return esc(s).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--brand-deep)">$1</a>');
 }
 function wireLibrary() {
-  $('btn-lib-open').onclick = () => { $('lib-title').value = ''; $('lib-content').value = ''; $('ovl-lib').classList.add('on'); };
+  $('btn-lib-open').onclick = () => { $('lib-title').value = ''; $('lib-content').innerHTML = ''; $('ovl-lib').classList.add('on'); };
   document.querySelectorAll('[data-lib-del]').forEach(b => b.onclick = async () => {
     if (!confirm('이 자료를 삭제할까요?')) return;
     LIBRARY = LIBRARY.filter(x => x.id !== b.dataset.libDel);
@@ -1480,7 +1495,7 @@ function wireLibrary() {
 $('btn-lib-save').onclick = async () => {
   const title = $('lib-title').value.trim();
   if (!title) { toast('제목을 입력해 주세요', true); return; }
-  LIBRARY.push({ id: 'B' + Date.now(), title, content: $('lib-content').value.trim(),
+  LIBRARY.push({ id: 'B' + Date.now(), title, content: _rtSanitize($('lib-content').innerHTML),
     uid: ME.uid, by: ME.name, avatar: ME.avatar, createdAt: Date.now() });
   try { await saveCol('library', LIBRARY); $('ovl-lib').classList.remove('on'); toast('등록했습니다'); }
   catch (e) { LIBRARY.pop(); toast('등록 실패: ' + e.message, true); }
