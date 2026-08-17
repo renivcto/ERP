@@ -354,7 +354,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.6.0';
+const STAFF_VERSION = 'v0.7.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -745,7 +745,11 @@ function attAdminCard() {
    첫 진입·로고 클릭으로만 연다 (사용자 지정 구성). */
 const MENUS = [
   { id: 'my', ico: '🙋', name: () => ME.mode === 'staff' ? `${ME.name} ${ME.title || ''}`.trim() : '직원 페이지 미리보기' },
-  { id: 'admin', ico: '👥', name: () => '직원 업무 관리', adminOnly: true },
+  { group: '직원 업무 관리', ico: '👥', adminOnly: true, items: [
+    { id: 'adm-att',    ico: '🕘', name: () => '출퇴근 관리' },
+    { id: 'adm-teams',  ico: '🗂️', name: () => '업무 배정' },
+    { id: 'adm-policy', ico: '⚙️', name: () => '근태 정책' },
+  ]},
   { group: '업무현황', ico: '📋', items: [
     { id: 'workflow', ico: '🧩', name: () => '워크플로우', sync: '임원용 ERP와 메뉴·데이터가 동일하게 연동됩니다' },
     { id: 'calendar', ico: '📅', name: () => '르니브 캘린더', sync: '임원용 ERP와 메뉴·데이터가 동일하게 연동됩니다' },
@@ -764,18 +768,22 @@ const MENUS = [
     { id: 'newproduct', ico: '🌱', name: () => '신제품 개발', sync: '임원용과 읽기·쓰기 모두 연동됩니다 (수익성 탭 제외)' },
   ]},
 ];
-const _navOpen = { '업무현황': true, '영업 관리': true, '제품 관리': true };   // 세션 내 접기 상태
+const _navOpen = { '직원 업무 관리': true, '업무현황': true, '영업 관리': true, '제품 관리': true };   // 세션 내 접기 상태
 
 function renderMenu() {
   const el = $('sb-menu');
+  const cntBadge = n => n ? `<span class="badge">${n}</span>` : '';
   const item = m => {
-    const badge = (m.id === 'admin') ? adminBadge() : '';
+    const badge = m.id === 'adm-att' ? cntBadge(USERS.filter(u => u.active !== true).length)
+                : m.id === 'adm-policy' ? cntBadge(LEAVES.filter(l => l.status === '대기').length)
+                : '';
     return `<div class="mi" data-pg="${m.id}"><span class="ico">${m.ico}</span>`
          + `<span>${esc(m.name())}${m.sync ? `<sup class="sync" title="${esc(m.sync)}">ⓘ</sup>` : ''}</span>${badge}</div>`;
   };
   let html = '';
   MENUS.forEach(m => {
     if (m.group) {
+      if (m.adminOnly && ME.mode !== 'admin') return;
       const open = _navOpen[m.group] !== false;
       html += `<div class="mi mi-group ${open ? '' : 'closed'}" data-group="${esc(m.group)}">`
             + `<span class="ico">${m.ico}</span><span>${esc(m.group)}</span><span class="arrow">▾</span></div>`
@@ -814,7 +822,9 @@ function renderPage() {
   const m = $('main');
   switch (CUR_PAGE) {
     case 'home':     m.innerHTML = pageHome(); wireHome(); break;
-    case 'admin':    m.innerHTML = pageAdmin(); wireAdmin(); break;
+    case 'adm-att':
+    case 'adm-teams':
+    case 'adm-policy': m.innerHTML = pageAdmin(CUR_PAGE); wireAdmin(); break;
     case 'my':       m.innerHTML = pageMy(); wireMy(); break;
     case 'library':  m.innerHTML = pageLibrary(); wireLibrary(); break;
     default:         m.innerHTML = pagePlaceholder(CUR_PAGE);
@@ -835,8 +845,8 @@ function pageHome() {
 
   // 상단 칩 — 임원용의 '결재 대기 N건 · 지출 결의 대기 N건' 자리
   const chips = isAdmin
-    ? [['계정 승인 대기', USERS.filter(u => u.active !== true).length, 'admin'],
-       ['근태 결재 대기', LEAVES.filter(l => l.status === '대기').length, 'admin']]
+    ? [['계정 승인 대기', USERS.filter(u => u.active !== true).length, 'adm-att'],
+       ['근태 결재 대기', LEAVES.filter(l => l.status === '대기').length, 'adm-policy']]
     : [['내 업무', myTasks().length, 'my'],
        ['근태 결재 대기', LEAVES.filter(l => l.uid === ME.uid && l.status === '대기').length, 'my']];
   const chipHtml = chips.map(([label, n, pg]) =>
@@ -890,7 +900,7 @@ function pageHome() {
       ${TEAMS.map(t => {
         const total = (t.tasks || []).length;
         const assigned = (t.tasks || []).filter(k => k.assignee).length;
-        return `<tr style="cursor:pointer" data-go="admin"><td style="font-weight:700">${esc(t.name)}</td>
+        return `<tr style="cursor:pointer" data-go="adm-teams"><td style="font-weight:700">${esc(t.name)}</td>
           <td>${esc(t.lead || '-')}</td><td>${esc(t.ai || '-')}</td><td>${total}건</td>
           <td>${assigned}/${total || 0}</td></tr>`;
       }).join('')}</tbody></table></div></div>`;
@@ -970,16 +980,12 @@ function staffName(uid) {
 }
 
 /* ═══════ (관리자) 직원 업무 관리 — 기획서 p7 ═══════ */
-function pageAdmin() {
+/* v0.7.0: 직원 업무 관리 → 3개 하위 페이지 (출퇴근 관리 / 업무 배정 / 근태 정책) */
+function pageAdmin(sec) {
   const pend = USERS.filter(u => u.active !== true);
   const wait = LEAVES.filter(l => l.status === '대기');
   const p = pol();
-  return `
-  <div class="pg on">
-    <div class="pg-h"><h1>직원 업무 관리</h1></div>
-    <div class="pg-sub">팀별로 업무를 나누고 담당자를 배정합니다. 근태 결재와 계정 승인도 여기서 합니다.</div>
-
-    ${pend.length ? `
+  const pendCard = !pend.length ? '' : `
     <div class="card"><div class="card-h">🔔 계정 승인 대기 <span class="sub">${pend.length}건 — 승인은 임원용 ERP 관리자만 가능합니다</span></div>
       <div class="card-b" style="padding:0 18px"><table><thead><tr><th>이름</th><th>전화번호</th><th>이메일</th><th>집주소</th><th>직책</th><th>입사일</th><th></th></tr></thead><tbody>
         ${pend.map(u => `<tr>
@@ -991,9 +997,8 @@ function pageAdmin() {
             ? `<button class="btn btn-sm btn-ok" data-approve="${esc(u.uid)}">승인</button>
                <button class="btn btn-sm btn-bad" data-reject="${esc(u.uid)}">거절</button>`
             : '<span style="font-size:11.5px;color:var(--ink-mute)">관리자 권한 필요</span>'}</td></tr>`).join('')}
-      </tbody></table></div></div>` : ''}
-
-    ${wait.length ? `
+      </tbody></table></div></div>`;
+  const waitCard = !wait.length ? '' : `
     <div class="card"><div class="card-h">🖋️ 근태 결재 대기 <span class="sub">${wait.length}건</span></div>
       <div class="card-b" style="padding:0 18px"><table><thead><tr><th>신청자</th><th>종류</th><th>날짜</th><th>사유</th><th>결재라인</th><th></th></tr></thead><tbody>
         ${wait.map(l => `<tr>
@@ -1002,11 +1007,8 @@ function pageAdmin() {
           <td style="text-align:right;white-space:nowrap">
             <button class="btn btn-sm btn-ok" data-lv-ok="${esc(l.id)}">승인</button>
             <button class="btn btn-sm btn-bad" data-lv-no="${esc(l.id)}">반려</button></td></tr>`).join('')}
-      </tbody></table></div></div>` : ''}
-
-    ${attAdminCard()}
-
-    <div class="card-h" style="border:none;padding:6px 2px 10px;font-size:15px">팀 보드</div>
+      </tbody></table></div></div>`;
+  const teamsBoard = `
     <div class="teams">
       ${TEAMS.map(t => `
       <div class="team" data-team="${esc(t.id)}">
@@ -1030,8 +1032,8 @@ function pageAdmin() {
         </div>
       </div>`).join('')}
       <div class="team-ghost" id="btn-team-add">+ 팀 추가</div>
-    </div>
-
+    </div>`;
+  const policyCard = `
     <div class="card" style="margin-top:22px"><div class="card-h">⚙️ 근태 정책 <span class="sub">월차·연차 기준과 결재라인 (기획서 p8)</span></div>
       <div class="card-b">
         <div class="grid" style="grid-template-columns:1fr 1fr 1fr;align-items:start">
@@ -1053,10 +1055,24 @@ function pageAdmin() {
             <button class="btn btn-sm" id="pol-apadd">+ 결재자 추가</button></div>
         </div>
         <div style="text-align:right"><button class="btn btn-p" id="btn-pol-save">정책 저장</button></div>
-      </div></div>
-
+      </div></div>`;
+  const leaveAll = `
     <div class="card"><div class="card-h">📋 전체 근태 내역</div>
-      <div class="card-b" style="padding:0 18px">${leaveTable(LEAVES, true)}</div></div>
+      <div class="card-b" style="padding:0 18px">${leaveTable(LEAVES, true)}</div></div>`;
+
+  const H = {
+    'adm-att':    ['🕘 출퇴근 관리', '오늘의 출퇴근 현황을 확인하고 신규 계정을 승인합니다.'],
+    'adm-teams':  ['🗂️ 업무 배정', '팀별로 업무를 나누고 담당자를 배정합니다.'],
+    'adm-policy': ['⚙️ 근태 정책', '월차·연차 기준과 결재라인을 설정하고 근태 결재를 처리합니다.'],
+  }[sec] || ['직원 업무 관리', ''];
+  const body = sec === 'adm-att' ? (pendCard + attAdminCard())
+             : sec === 'adm-teams' ? teamsBoard
+             : (waitCard + policyCard + leaveAll);
+  return `
+  <div class="pg on">
+    <div class="pg-h"><h1>${H[0]}</h1></div>
+    <div class="pg-sub">${H[1]}</div>
+    ${body}
   </div>`;
 }
 
@@ -1077,7 +1093,7 @@ function wireAdmin() {
   document.querySelectorAll('[data-lv-ok]').forEach(b => b.onclick = () => decideLeave(b.dataset.lvOk, '승인'));
   document.querySelectorAll('[data-lv-no]').forEach(b => b.onclick = () => decideLeave(b.dataset.lvNo, '반려'));
   // 팀
-  $('btn-team-add').onclick = async () => {
+  if ($('btn-team-add')) $('btn-team-add').onclick = async () => {
     const name = prompt('새 팀 이름');
     if (!name || !name.trim()) return;
     TEAMS.push({ id: 'T' + Date.now(), name: name.trim(), lead: '', ai: '', tasks: [] });
@@ -1120,7 +1136,7 @@ function wireAdmin() {
     openTaskModal(tid, kid, true);
   });
   // 정책
-  $('pol-yadd').onclick = () => {
+  if ($('pol-yadd')) $('pol-yadd').onclick = () => {
     const y = prompt('몇 년차를 추가할까요? (숫자)'); if (!y || isNaN(+y)) return;
     const d = prompt(`${y}년차 연차 일수`); if (d === null || isNaN(+d)) return;
     const p = pol(); p.annual = Object.assign({}, p.annual); p.annual[+y] = +d;
@@ -1130,7 +1146,7 @@ function wireAdmin() {
     const p = pol(); p.annual = Object.assign({}, p.annual); delete p.annual[b.dataset.polYdel];
     POLICY = p; renderPage();
   });
-  $('pol-apadd').onclick = () => {
+  if ($('pol-apadd')) $('pol-apadd').onclick = () => {
     const n = prompt('결재자 이름 (예: 홍길동 이사)'); if (!n || !n.trim()) return;
     const p = pol(); p.approvers = p.approvers.concat([n.trim()]);
     POLICY = p; renderPage();
@@ -1139,7 +1155,7 @@ function wireAdmin() {
     const p = pol(); p.approvers = p.approvers.filter((_, i) => i !== +b.dataset.polApdel);
     POLICY = p; renderPage();
   });
-  $('btn-pol-save').onclick = async () => {
+  if ($('btn-pol-save')) $('btn-pol-save').onclick = async () => {
     const p = pol();
     p.monthly = +($('pol-monthly').value || 1);
     document.querySelectorAll('[data-pol-y]').forEach(i => { p.annual[i.dataset.polY] = +i.value || 0; });
