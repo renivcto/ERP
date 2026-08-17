@@ -470,7 +470,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.16.0';
+const STAFF_VERSION = 'v0.16.1';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -605,7 +605,7 @@ if (DEMO) {
                k2: { done: false, pct: 60, memo: '발주 대기' },
                k3: { done: false, pct: 20, memo: '' } },
       note: '<b>바로팜</b> 신규 약국 2곳 입점 문의 있었습니다.',
-      fb: { by: '송희강', at: Date.now() - 80000e3, react: '👍', comment: '리뷰 매칭 빠르게 처리해 주셔서 감사합니다.' } },
+      fb: { by: '송희강', byTitle: '이사', byAvatar: '👑', at: Date.now() - 80000e3, react: '👍', comment: '리뷰 매칭 빠르게 처리해 주셔서 감사합니다.' } },
   ];
   demoStaff[0].lastSeen = Date.now() - 300e3;
   demoStaff[1].lastSeen = Date.now() - 3600e3;
@@ -1058,13 +1058,27 @@ function jrViewHtml(rec, uid) {
     <div class="rt-view" style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)">${rec && rec.note ? _rtHtml(rec.note) : '-'}</div>`;
   return html;
 }
+/* 의견 작성자 — 저장 시점의 아바타·이름·직책을 함께 남긴다 */
+function _fbWho() {
+  const isAdm = ME.mode === 'admin';
+  return {
+    by: ME.name,
+    byTitle: isAdm ? ((ME.profile && ME.profile.role) || '관리자') : (ME.title || ''),
+    byAvatar: isAdm ? '👑' : (ME.avatar || '🙂'),
+  };
+}
 function jrFbHtml(rec) {
   const fb = rec && rec.fb;
   if (!fb || (!fb.comment && !fb.react)) return '';
+  const who = `${esc(fb.by || '관리자')}${fb.byTitle ? ' ' + esc(fb.byTitle) : ''}`;
   return `<div style="margin-top:16px;border-top:1px solid var(--line-soft);padding-top:12px">
-      <div style="font-weight:700;font-size:13.5px">관리자 의견 ${fb.react ? `<span style="font-size:17px">${esc(fb.react)}</span>` : ''}</div>
-      <div class="rt-view" style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)">${_rtHtml(fb.comment || '-')}</div>
-      <div style="margin-top:5px;font-size:11.5px;color:var(--ink-mute)">${esc(fb.by || '')} · ${fb.at ? _fmtSeen(fb.at) : ''}</div>
+      <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13.5px">
+        <span style="font-size:19px;line-height:1">${avaHtml(fb.byAvatar || '👑', 24)}</span>
+        <span>${who}</span>
+        ${fb.react ? `<span style="font-size:18px">${esc(fb.react)}</span>` : ''}
+      </div>
+      <div class="rt-view" style="margin-top:7px;font-size:13.5px;color:var(--ink-soft)">${_rtHtml(fb.comment || '-')}</div>
+      <div style="margin-top:5px;font-size:11.5px;color:var(--ink-mute)">${fb.at ? _fmtSeen(fb.at) : ''}</div>
     </div>`;
 }
 
@@ -1297,7 +1311,7 @@ $('btn-jr-fb-save').onclick = async () => {
   if (!_jrRef) return;
   const rec = jrGet(_jrRef.uid, _jrRef.date);
   if (!rec) { toast('작성된 일지가 없습니다', true); return; }
-  rec.fb = { by: ME.name, at: Date.now(), react: _jrReact, comment: _rtSanitize($('jr-m-comment').innerHTML) };
+  rec.fb = Object.assign(_fbWho(), { at: Date.now(), react: _jrReact, comment: _rtSanitize($('jr-m-comment').innerHTML) });
   try { await jrSave(rec); $('ovl-jr').classList.remove('on'); toast('의견을 저장했습니다'); }
   catch (e) { toast('저장 실패: ' + e.message, true); }
 };
