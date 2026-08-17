@@ -84,35 +84,38 @@
     if (user) {
       console.log('🔐 [AUTH] 로그인 감지 — uid=' + String(user.uid).slice(0,10) + '… email=' + user.email);  // v2.3.191 진단
       try {
+        // v2.3.656: 직원용 계정은 임원용에 절대 진입 불가 — users 문서 유무·상태와 무관하게
+        //   '최우선' 으로 확인한다. v2.3.655 는 최초 로그인 분기에만 있어서, 이미 users
+        //   문서가 생긴 직원(승인대기·심지어 활성)이 대기 화면과 대시보드까지 봤다(실제 발생).
+        //   규칙 v2.4.4 는 isActive() 자체를 불성립시켜 콘솔 우회도 막는다.
+        try {
+          const _staffGate = await getDoc(doc(db, 'staff_users', user.uid));
+          if (_staffGate.exists()) {
+            console.warn('🔐 [AUTH] 직원용 계정 — 임원용 진입 전면 차단, 직원 ERP 로 이동');
+            document.body.innerHTML = `
+              <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f6f7fa;padding:20px;font-family:'Malgun Gothic',-apple-system,sans-serif">
+                <div style="background:#fff;border:1px solid #e6e9f0;border-radius:20px;padding:40px 36px;max-width:440px;text-align:center;box-shadow:0 4px 14px rgba(27,36,48,.08)">
+                  <div style="font-size:40px;margin-bottom:12px">👥</div>
+                  <div style="font-size:19px;font-weight:800;margin-bottom:8px;color:#1b2430">직원용 계정입니다</div>
+                  <div style="font-size:13.5px;color:#46536a;line-height:1.7;margin-bottom:22px">
+                    <b>${(user.email||'').replace(/[<>&]/g,'')}</b> 은 르니브 <b>직원 ERP</b> 계정입니다.<br>
+                    이 페이지(임원용 ERP)는 임원 계정만 사용할 수 있습니다.<br>
+                    잠시 후 직원 ERP 로 자동 이동합니다.</div>
+                  <a href="./staff/" style="display:block;background:#5b6cff;color:#fff;border-radius:11px;padding:12px;font-weight:700;text-decoration:none;font-size:14px">르니브 직원 ERP 로 이동</a>
+                </div>
+              </div>`;
+            setTimeout(() => { location.href = './staff/'; }, 2500);
+            return;
+          }
+        } catch(_) { /* staff 확인 실패(권한 등) → 직원 아님으로 보고 기존 흐름 */ }
+
         // Firestore에서 사용자 상태 확인
         const userRef = doc(db, 'users', user.uid);
         const userSnap = await getDoc(userRef);
 
         console.log('🔐 [AUTH] 내 문서 존재=' + userSnap.exists() + (userSnap.exists() ? ' status=' + (userSnap.data()||{}).status + ' name=' + (userSnap.data()||{}).name : ''));  // v2.3.191 진단
         if (!userSnap.exists()) {
-          // v2.3.655: 직원용 ERP 계정 차단 — 직원이 실수로 임원용에 로그인해도
-          //   '승인대기' 문서를 만들지 않고 직원 ERP 로 안내한다.
-          //   (규칙 v2.4.3 이 문서 생성 자체도 서버 수준에서 막는다 — 이 화면은 안내용)
-          try {
-            const _staffSnap = await getDoc(doc(db, 'staff_users', user.uid));
-            if (_staffSnap.exists()) {
-              console.warn('🔐 [AUTH] 직원용 계정 감지 — 임원용 가입 차단, 직원 ERP 안내');
-              document.body.innerHTML = `
-                <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f6f7fa;padding:20px;font-family:'Malgun Gothic',-apple-system,sans-serif">
-                  <div style="background:#fff;border:1px solid #e6e9f0;border-radius:20px;padding:40px 36px;max-width:440px;text-align:center;box-shadow:0 4px 14px rgba(27,36,48,.08)">
-                    <div style="font-size:40px;margin-bottom:12px">👥</div>
-                    <div style="font-size:19px;font-weight:800;margin-bottom:8px;color:#1b2430">직원용 계정입니다</div>
-                    <div style="font-size:13.5px;color:#46536a;line-height:1.7;margin-bottom:22px">
-                      <b>${(user.email||'').replace(/[<>&]/g,'')}</b> 은 르니브 <b>직원 ERP</b> 계정입니다.<br>
-                      이 페이지(임원용 ERP)는 임원 계정만 사용할 수 있습니다.<br>
-                      잠시 후 직원 ERP 로 자동 이동합니다.</div>
-                    <a href="./staff/" style="display:block;background:#5b6cff;color:#fff;border-radius:11px;padding:12px;font-weight:700;text-decoration:none;font-size:14px">르니브 직원 ERP 로 이동</a>
-                  </div>
-                </div>`;
-              setTimeout(() => { location.href = './staff/'; }, 2500);
-              return;
-            }
-          } catch(_) { /* staff 확인 실패 시엔 기존 흐름 유지 */ }
+          // (직원용 계정 차단은 v2.3.656 부터 로그인 직후 최상단에서 수행 — 여기 도달 = 직원 아님)
           console.warn('🔐 [AUTH] 최초 로그인 분기 — 새 사용자 문서 생성 시도');  // v2.3.191 진단
           // 최초 로그인 — 사용자 등록
           // v2.0 보안 패치: "첫 로그인 = 관리자" 로직 제거. ADMIN_EMAILS 화이트리스트에 있는 계정만 자동 관리자.
@@ -6252,7 +6255,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.655';
+const ERP_VERSION = 'v2.3.656';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
