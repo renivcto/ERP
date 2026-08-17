@@ -185,6 +185,11 @@ tr:last-child td { border-bottom:none; }
 .rt-editor td, .rt-editor th, .rt-view td, .rt-view th { border:1px solid #c9d2e0; padding:6px 9px; min-width:44px; text-align:left; }
 .rt-editor ul, .rt-editor ol, .rt-view ul, .rt-view ol { padding-left:22px; }
 .rt-view { line-height:1.65; }
+/* 출퇴근 표의 이름 — 밑줄 없이, 호버 때만 (v0.13.0) */
+.att-name { font-weight:700; color:var(--brand-deep); cursor:pointer; }
+.att-name:hover { text-decoration:underline; text-underline-offset:3px; }
+.att-nav { display:flex; align-items:center; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+.att-nav .lbl { font-weight:700; font-size:14.5px; min-width:190px; text-align:center; }
 .modal-f { display:flex; gap:8px; justify-content:flex-end; padding:14px 20px; border-top:1px solid var(--line-soft); }
 
 /* ── 토스트 ── */
@@ -401,7 +406,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.12.1';
+const STAFF_VERSION = 'v0.13.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -429,7 +434,10 @@ let TEAMS = [];             // staff_data/teams
 let LEAVES = [];            // staff_data/leaves
 let LIBRARY = [];           // staff_data/library
 let POLICY = null;          // staff_data/leave_policy
-let ATT = [];               // staff_data/attendance_YYYY-MM (이번 달 출퇴근)
+let ATT = [];               // staff_data/attendance_YYYY-MM (이번 달 출퇴근 — 실시간 구독)
+const ATT_MONTHS = {};      // 다른 달 캐시 { 'YYYY-MM': [records] } — 필요할 때만 읽는다
+let ATT_VIEW = 'day';       // 지난 데이터 보기: day | week | month
+let ATT_ANCHOR = null;      // 기준 날짜 (YYYY-MM-DD). null 이면 오늘
 let CUR_PAGE = '';
 let _unsubs = [];
 
@@ -508,6 +516,17 @@ if (DEMO) {
     { id: 'a2', uid: 'd2', type: 'in',  date: today(), time: '08:55:47', ts: Date.now() - 4.2 * 3600e3, ip: '175.223.10.4', ua: 'demo' },
     { id: 'a3', uid: 'd2', type: 'out', date: today(), time: '18:01:09', ts: Date.now() - 600e3, ip: '175.223.10.4', ua: 'demo', lunch: 'used' },
   ];
+  // 지난 데이터 확인용 데모 기록 (최근 5일)
+  for (let k = 1; k <= 5; k++) {
+    const dt = new Date(); dt.setDate(dt.getDate() - k);
+    const ds = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+    [['d1', 9, 2], ['d2', 8, 55]].forEach(([uid, h, m], i) => {
+      const inTs = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(), h, m, 11).getTime();
+      const outTs = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(), 18, 5 + i, 30).getTime();
+      ATT.push({ id: 'p' + k + uid + 'i', uid, type: 'in', date: ds, time: h + ':' + String(m).padStart(2,'0') + ':11', ts: inTs, ip: '203.44.144.246', ua: 'demo' });
+      ATT.push({ id: 'p' + k + uid + 'o', uid, type: 'out', date: ds, time: '18:' + String(5 + i).padStart(2,'0') + ':30', ts: outTs, ip: '203.44.144.246', ua: 'demo', lunch: 'used' });
+    });
+  }
   demoStaff[0].lastSeen = Date.now() - 300e3;
   demoStaff[1].lastSeen = Date.now() - 3600e3;
   POLICY = JSON.parse(JSON.stringify(DEFAULT_POLICY));
@@ -725,10 +744,34 @@ async function fetchIp() {
     return j.ip || '확인 안 됨';
   } catch (_) { return '확인 안 됨'; }
 }
-function attToday(uid) {
-  const d = today();
-  const mine = ATT.filter(a => a && a.uid === uid && a.date === d);
+function attAll() {
+  let all = ATT.slice();
+  const cur = today().slice(0, 7);
+  Object.keys(ATT_MONTHS).forEach(k => { if (k !== cur) all = all.concat(ATT_MONTHS[k] || []); });
+  return all;
+}
+async function ensureAttMonth(ym) {
+  if (DEMO) return;
+  if (ym === today().slice(0, 7)) return;          // 이번 달은 구독 중
+  if (ATT_MONTHS[ym] !== undefined) return;        // 이미 로드/요청됨
+  ATT_MONTHS[ym] = [];                             // 중복 요청 방지
+  try {
+    const s = await getDoc(doc(db, 'staff_data', 'attendance_' + ym));
+    ATT_MONTHS[ym] = parseCol(s, []);
+    rerender();
+  } catch (e) { console.warn('[attendance] ' + ym, e.message); }
+}
+function attPairsOn(uid, date) {
+  const mine = attAll().filter(a => a && a.uid === uid && a.date === date);
   return { inRec: mine.find(a => a.type === 'in'), outRec: mine.filter(a => a.type === 'out').slice(-1)[0] };
+}
+function attToday(uid) { return attPairsOn(uid, today()); }
+/* 하루 근무 시간 — 과거인데 퇴근 기록이 없으면 0 (지금까지로 계산되는 것 방지) */
+function dayWorkMs(uid, date) {
+  const { inRec, outRec } = attPairsOn(uid, date);
+  if (!inRec) return 0;
+  if (!outRec && date !== today()) return 0;
+  return workMs(inRec, outRec);
 }
 function fmtDur(ms) {
   if (!(ms > 0)) return '-';
@@ -826,16 +869,115 @@ async function clock(type) {
   } catch (e) { toast('저장 실패: ' + e.message, true); }
   _clockBusy = false;
 }
+/* ── 출퇴근 지난 데이터 (v0.13.0) — 일별 / 주간 / 월간 ── */
+function _ymd(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function _attAnchor() { return ATT_ANCHOR || today(); }
+function attRange() {
+  const a = _attAnchor(), d = new Date(a + 'T00:00:00');
+  if (ATT_VIEW === 'day') return [a, a];
+  if (ATT_VIEW === 'week') {
+    const dow = (d.getDay() + 6) % 7;                       // 월요일 시작
+    const s = new Date(d); s.setDate(d.getDate() - dow);
+    const e = new Date(s); e.setDate(s.getDate() + 6);
+    return [_ymd(s), _ymd(e)];
+  }
+  return [_ymd(new Date(d.getFullYear(), d.getMonth(), 1)),
+          _ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0))];
+}
+function attRangeLabel() {
+  const [f, t] = attRange(), d = new Date(f + 'T00:00:00');
+  if (ATT_VIEW === 'day') return f + ' (' + ['일','월','화','수','목','금','토'][new Date(f + 'T00:00:00').getDay()] + ')';
+  if (ATT_VIEW === 'week') return f + ' ~ ' + t;
+  return d.getFullYear() + '년 ' + (d.getMonth() + 1) + '월';
+}
+function attShift(dir) {
+  const d = new Date(_attAnchor() + 'T00:00:00');
+  if (ATT_VIEW === 'day') d.setDate(d.getDate() + dir);
+  else if (ATT_VIEW === 'week') d.setDate(d.getDate() + dir * 7);
+  else d.setMonth(d.getMonth() + dir);
+  ATT_ANCHOR = _ymd(d);
+  renderPage();
+}
+function attHistoryCard() {
+  const [from, to] = attRange();
+  new Set([from.slice(0, 7), to.slice(0, 7)]).forEach(m => { try { ensureAttMonth(m); } catch(_){} });
+  const act = USERS.filter(u => u.active === true);
+  const tabs = [['day','일별'],['week','주간'],['month','월간']]
+    .map(([k, n]) => `<button class="tab ${ATT_VIEW === k ? 'on' : ''}" data-atttab="${k}">${n}</button>`).join('');
+
+  let body;
+  if (!act.length) body = '<div class="empty">활성 직원이 없습니다</div>';
+  else if (ATT_VIEW === 'day') {
+    const rows = act.map(u => {
+      const { inRec, outRec } = attPairsOn(u.uid, from);
+      const st = !inRec ? '<span class="chip gray">미출근</span>'
+               : outRec ? '<span class="chip ok">퇴근</span>'
+               : (from === today() ? '<span class="chip wait">근무 중</span>' : '<span class="chip bad">퇴근 미기록</span>');
+      return `<tr><td style="white-space:nowrap"><span class="att-name" data-att-open="${esc(u.uid)}|${from}">${esc(staffName(u.uid))}</span> ${st}</td>
+        <td style="white-space:nowrap">${inRec ? inRec.time : '-'}</td>
+        <td style="font-size:13px">${lunchLabel(inRec, outRec)}</td>
+        <td style="white-space:nowrap">${outRec ? outRec.time : '-'}</td>
+        <td style="white-space:nowrap">${inRec ? (fmtDurS(dayWorkMs(u.uid, from)) || '-') : '-'}</td></tr>`;
+    }).join('');
+    body = `<table><thead><tr><th>직원</th><th>출근</th><th>점심시간</th><th>퇴근</th><th>근무 시간</th></tr></thead><tbody>${rows}</tbody></table>`;
+  } else {
+    // 주간·월간: 직원별 집계 + 상세 목록
+    const sum = act.map(u => {
+      const dates = [...new Set(attAll().filter(a => a && a.uid === u.uid && a.type === 'in'
+        && a.date >= from && a.date <= to).map(a => a.date))].sort();
+      const ms = dates.reduce((s, d) => s + dayWorkMs(u.uid, d), 0);
+      return { u, dates, ms };
+    });
+    const sumRows = sum.map(x => `<tr>
+      <td style="white-space:nowrap"><b>${esc(staffName(x.u.uid))}</b></td>
+      <td>${x.dates.length}일</td>
+      <td style="white-space:nowrap">${x.ms ? fmtDurS(x.ms) : '-'}</td>
+      <td style="white-space:nowrap">${x.dates.length ? fmtDurS(Math.round(x.ms / x.dates.length)) : '-'}</td></tr>`).join('');
+    const detail = [];
+    sum.forEach(x => x.dates.forEach(d => detail.push({ uid: x.u.uid, date: d })));
+    detail.sort((a, b) => b.date.localeCompare(a.date) || String(a.uid).localeCompare(String(b.uid)));
+    const detRows = detail.map(r => {
+      const { inRec, outRec } = attPairsOn(r.uid, r.date);
+      return `<tr><td style="white-space:nowrap">${r.date}</td>
+        <td style="white-space:nowrap"><span class="att-name" data-att-open="${esc(r.uid)}|${r.date}">${esc(staffName(r.uid))}</span></td>
+        <td style="white-space:nowrap">${inRec ? inRec.time : '-'}</td>
+        <td style="font-size:13px">${lunchLabel(inRec, outRec)}</td>
+        <td style="white-space:nowrap">${outRec ? outRec.time : '-'}</td>
+        <td style="white-space:nowrap">${fmtDurS(dayWorkMs(r.uid, r.date)) || '-'}</td></tr>`;
+    }).join('');
+    body = `<table><thead><tr><th>직원</th><th>출근일수</th><th>총 근무 시간</th><th>1일 평균</th></tr></thead><tbody>${sumRows}</tbody></table>`
+      + (detail.length
+        ? `<div style="margin:18px 0 8px;font-weight:700;font-size:13.5px;color:var(--ink-soft)">상세 기록 ${detail.length}건</div>
+           <table><thead><tr><th>날짜</th><th>직원</th><th>출근</th><th>점심시간</th><th>퇴근</th><th>근무 시간</th></tr></thead><tbody>${detRows}</tbody></table>`
+        : '<div class="empty">이 기간의 출퇴근 기록이 없습니다</div>');
+  }
+
+  return `<div class="card"><div class="card-h">📆 출퇴근 기록 <span class="sub">지난 데이터를 일별·주간·월간으로 확인합니다</span></div>
+    <div class="card-b">
+      <div class="tabs" style="margin-bottom:12px">${tabs}</div>
+      <div class="att-nav">
+        <button class="btn btn-sm" data-attnav="-1">◀ 이전</button>
+        <span class="lbl">${attRangeLabel()}</span>
+        <button class="btn btn-sm" data-attnav="1">다음 ▶</button>
+        <button class="btn btn-sm" data-attnav="0">오늘</button>
+      </div>
+      ${body}
+    </div></div>`;
+}
+
 /* 출퇴근 상세 모달 (v0.12.0) — 표에서 뺀 IP·기기·최근 접속을 여기서 전부 보여준다 */
-function openAttModal(uid) {
+function openAttModal(uid, date) {
   const u = USERS.find(x => x.uid === uid);
   if (!u) return;
-  const { inRec, outRec } = attToday(uid);
-  const st = !inRec ? '미출근' : outRec ? '퇴근' : '근무 중';
+  date = date || today();
+  const { inRec, outRec } = attPairsOn(uid, date);
+  const st = !inRec ? '미출근' : outRec ? '퇴근' : (date === today() ? '근무 중' : '퇴근 미기록');
   const row = (k, v) => `<div style="display:flex;justify-content:space-between;gap:14px;padding:9px 2px;border-bottom:1px solid var(--line-soft);font-size:13.5px">
     <span style="color:var(--ink-mute);white-space:nowrap">${k}</span>
     <span style="text-align:right;word-break:break-all;font-weight:600">${v}</span></div>`;
-  $('att-m-title').textContent = `${u.name} — 오늘 출퇴근 상세 (${today()})`;
+  $('att-m-title').textContent = `${u.name} — 출퇴근 상세 (${date})`;
   $('att-m-body').innerHTML =
     row('상태', esc(st)) +
     row('출근 시각', inRec ? esc(inRec.time) : '-') +
@@ -845,7 +987,7 @@ function openAttModal(uid) {
     row('퇴근 시각', outRec ? esc(outRec.time) : '-') +
     row('퇴근 IP', esc(outRec && outRec.ip || '-')) +
     row('퇴근 기기', `<span style="font-weight:400;font-size:12px">${esc(outRec && outRec.ua || '-')}</span>`) +
-    row('근무 시간', inRec ? fmtDurS(workMs(inRec, outRec)) : '-') +
+    row('근무 시간', inRec ? (fmtDurS(dayWorkMs(uid, date)) || '-') : '-') +
     row('최근 접속', _fmtSeen(u.lastSeen));
   $('ovl-att').classList.add('on');
 }
@@ -873,8 +1015,8 @@ function attAdminCard() {
     const dur = inRec ? fmtDurS(workMs(inRec, outRec)) : '-';
     const st = !inRec ? '<span class="chip gray">미출근</span>'
              : outRec ? '<span class="chip ok">퇴근</span>' : '<span class="chip wait">근무 중</span>';
-    return `<tr><td style="white-space:nowrap"><span data-att-open="${esc(u.uid)}" title="클릭하면 상세 정보"
-        style="font-weight:700;color:var(--brand-deep);cursor:pointer;text-decoration:underline;text-underline-offset:3px">${esc(staffName(u.uid))}</span> ${st}</td>
+    return `<tr><td style="white-space:nowrap"><span data-att-open="${esc(u.uid)}|${today()}" title="클릭하면 상세 정보"
+        class="att-name">${esc(staffName(u.uid))}</span> ${st}</td>
       <td style="white-space:nowrap">${inRec ? inRec.time : '-'}</td>
       <td style="font-size:13px">${lunchLabel(inRec, outRec)}</td>
       <td style="white-space:nowrap">${outRec ? outRec.time : '-'}</td>
@@ -1231,7 +1373,7 @@ function pageAdmin(sec) {
       <button class="tab ${ADM_LEAVE_TAB === 'list' ? 'on' : ''}" data-admtab="list">전체 휴가 내역</button>
       <button class="tab ${ADM_LEAVE_TAB === 'policy' ? 'on' : ''}" data-admtab="policy">휴가 정책</button>
     </div>`;
-  const body = sec === 'adm-att' ? (pendCard + attAdminCard())
+  const body = sec === 'adm-att' ? (pendCard + attAdminCard() + attHistoryCard())
              : sec === 'adm-teams' ? teamsBoard
              : (admLeaveTabs + (ADM_LEAVE_TAB === 'list' ? (waitCard + leaveAll) : policyCard));
   return `
@@ -1243,8 +1385,17 @@ function pageAdmin(sec) {
 }
 
 function wireAdmin() {
-  // 출퇴근 상세 모달
-  document.querySelectorAll('[data-att-open]').forEach(el => el.onclick = () => openAttModal(el.dataset.attOpen));
+  // 출퇴근 상세 모달 (uid|date)
+  document.querySelectorAll('[data-att-open]').forEach(el => el.onclick = () => {
+    const [uid, date] = String(el.dataset.attOpen).split('|');
+    openAttModal(uid, date);
+  });
+  // 지난 데이터 탭·이동
+  document.querySelectorAll('[data-atttab]').forEach(b => b.onclick = () => { ATT_VIEW = b.dataset.atttab; renderPage(); });
+  document.querySelectorAll('[data-attnav]').forEach(b => b.onclick = () => {
+    const d = +b.dataset.attnav;
+    if (d === 0) { ATT_ANCHOR = null; renderPage(); } else attShift(d);
+  });
   // 근태 관리 탭 전환
   document.querySelectorAll('[data-admtab]').forEach(b => b.onclick = () => { ADM_LEAVE_TAB = b.dataset.admtab; renderPage(); });
   // 계정 승인/거절
