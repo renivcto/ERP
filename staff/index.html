@@ -253,6 +253,22 @@ tr:last-child td { border-bottom:none; }
 /* 거래처 정보 · 외부 계정 (v0.19.0) */
 .pt-note { font-size:12.5px; color:var(--ink-soft); max-width:240px; text-align:left; }
 .pw-mask { font-family:ui-monospace,Menlo,Consolas,monospace; letter-spacing:1px; }
+/* 업무 일지 — 특이사항 보기/수정 (v0.23.0) */
+.jr-note-h { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:800; color:var(--ink-soft); margin-bottom:8px; }
+.jr-note-view { border:1px solid var(--line); border-radius:10px; padding:13px 15px; background:#fcfdff;
+  font-size:14px; line-height:1.75; min-height:52px; }
+/* 업무 일지 — 관리자 의견 (v0.23.0) */
+.jr-fb { margin-top:18px; border:1px solid #bfdbfe; background:#f4f8ff; border-radius:12px; padding:14px 16px; }
+.jr-fb-h { display:flex; align-items:center; gap:6px; font-size:13px; font-weight:800; color:#1d4ed8;
+  margin-bottom:11px; padding-bottom:9px; border-bottom:1px solid #dbeafe; }
+.jr-fb-who { display:flex; align-items:center; gap:9px; margin-bottom:10px; }
+.jr-fb-who .ava { flex:none; width:28px; height:28px; border-radius:50%; background:#fff; border:1px solid #bfdbfe;
+  display:inline-flex; align-items:center; justify-content:center; font-size:15px; line-height:1; overflow:hidden; }
+.jr-fb-who .ava img { width:100%; height:100%; border-radius:50%; object-fit:cover; display:block; }
+.jr-fb-who .nm { font-size:14px; font-weight:800; color:var(--ink); line-height:1.2; }
+.jr-fb-who .react { font-size:19px; line-height:1; }
+.jr-fb-who .when { margin-left:auto; font-size:11.5px; color:#64748b; white-space:nowrap; }
+.jr-fb-body { font-size:15px; color:var(--ink); line-height:1.8; }
 /* 외부 계정 (v0.21.0) — 열이 많아 가로 스크롤, 관리 열은 오른쪽 고정 */
 .acc-wrap { overflow-x:auto; }
 .acc-tb { min-width:940px; }
@@ -586,7 +602,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.22.0';
+const STAFF_VERSION = 'v0.23.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -621,6 +637,7 @@ const JR_MONTHS = {};       // 다른 달 캐시
 let JR_VIEW = 'day';        // 업무 일지 보기: day | week | month
 let JR_ANCHOR = null;       // 기준 날짜 (null = 오늘)
 let JR_ADM_UID = null;      // 관리자: 상세 보기 중인 직원
+let JR_NOTE_EDIT = false;   // 특이사항 편집 중인가 (저장하면 보기 화면으로 돌아간다)
 let ATT_VIEW = 'day';       // 지난 데이터 보기: day | week | month
 let ATT_ANCHOR = null;      // 기준 날짜 (YYYY-MM-DD). null 이면 오늘
 let BOARD = [];             // staff_data/board       — 임원용이 '직원용 게시' 체크한 글 (읽기 전용 미러)
@@ -1239,27 +1256,44 @@ function jrViewHtml(rec, uid) {
     <div class="rt-view" style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)">${rec && rec.note ? _rtHtml(rec.note) : '-'}</div>`;
   return html;
 }
-/* 의견 작성자 — 저장 시점의 아바타·이름·직책을 함께 남긴다 */
+/* 이름에 붙일 직함 (v0.23.0).
+   임원 계정의 users.role 은 권한/역할값(CTO·멤버)이라 직함으로 쓰면 '송희강 CTO' 가 된다.
+   결재라인(휴가 정책)과 팀 책임자에는 이미 '송희강 이사' 형태로 들어 있으니 거기서 뽑는다. */
+function _titleFor(name, fallback) {
+  const n = String(name || '').trim();
+  if (n) {
+    const pool = ((pol().approvers) || []).concat(TEAMS.map(t => (t && t.lead) || ''));
+    for (let i = 0; i < pool.length; i++) {
+      const s = String(pool[i] || '').trim();
+      if (s.indexOf(n) === 0 && s.length > n.length) return s.slice(n.length).trim();
+    }
+  }
+  return fallback || '';
+}
+/* 의견 작성자 — 저장 시점의 아바타·이름·직함을 함께 남긴다 */
 function _fbWho() {
   const isAdm = ME.mode === 'admin';
+  const p = ME.profile || {};
   return {
     by: ME.name,
-    byTitle: isAdm ? ((ME.profile && ME.profile.role) || '관리자') : (ME.title || ''),
+    byTitle: isAdm ? _titleFor(ME.name, p.position || p.rank || p.title || '관리자') : (ME.title || ''),
     byAvatar: isAdm ? '👑' : (ME.avatar || '🙂'),
   };
 }
 function jrFbHtml(rec) {
   const fb = rec && rec.fb;
   if (!fb || (!fb.comment && !fb.react)) return '';
-  const who = `${esc(fb.by || '관리자')}${fb.byTitle ? ' ' + esc(fb.byTitle) : ''}`;
-  return `<div style="margin-top:16px;border-top:1px solid var(--line-soft);padding-top:12px">
-      <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13.5px">
-        <span style="font-size:19px;line-height:1">${avaHtml(fb.byAvatar || '👑', 24)}</span>
-        <span>${who}</span>
-        ${fb.react ? `<span style="font-size:18px">${esc(fb.react)}</span>` : ''}
+  // 저장 당시 직함이 '관리자' 처럼 뭉뚱그려져 있어도, 지금 결재라인에 있으면 그 직함을 쓴다
+  const title = _titleFor(fb.by, fb.byTitle || '');
+  return `<div class="jr-fb">
+      <div class="jr-fb-h">💬 의견</div>
+      <div class="jr-fb-who">
+        <span class="ava">${avaHtml(fb.byAvatar || '👑', 26)}</span>
+        <span class="nm">${esc(fb.by || '관리자')}${title ? ' ' + esc(title) : ''}</span>
+        ${fb.react ? `<span class="react">${esc(fb.react)}</span>` : ''}
+        <span class="when">${fb.at ? _fmtSeen(fb.at) : ''}</span>
       </div>
-      <div class="rt-view" style="margin-top:7px;font-size:13.5px;color:var(--ink-soft)">${_rtHtml(fb.comment || '-')}</div>
-      <div style="margin-top:5px;font-size:11.5px;color:var(--ink-mute)">${fb.at ? _fmtSeen(fb.at) : ''}</div>
+      <div class="rt-view jr-fb-body">${_rtHtml(fb.comment || '-')}</div>
     </div>`;
 }
 
@@ -1316,12 +1350,21 @@ function pageJournal() {
     });
     if (!tasks.length) rows = `<div class="ph"><div class="big">🗂️</div><h3>배정된 업무가 없습니다</h3>
       <p>관리자가 업무를 배정하면 일지에 나타납니다.</p></div>`;
+    // 저장된 특이사항이 있으면 보기 화면 — 수정 버튼을 눌러야 편집한다 (v0.23.0)
+    const hasNote = !!(rec && rec.note && _plainText(rec.note));
+    const noteEditing = JR_NOTE_EDIT || !hasNote;
     body = `<div class="card"><div class="card-b">
         ${rows}
         <div style="margin-top:18px">
-          <div class="rt-toolbar" data-for="jr-note"></div>
-          <div class="rt-editor fi" id="jr-note" contenteditable="true" data-ph="${esc(JR_NOTE_PH)}"
-               style="min-height:110px">${rec && rec.note ? _rtSanitize(rec.note) : ''}</div>
+          <div class="jr-note-h">📝 특이사항${(hasNote && !noteEditing) ? `
+            <span style="margin-left:auto;display:flex;gap:6px">
+              <button class="btn btn-sm" id="btn-jr-note-edit">✏️ 수정</button>
+              <button class="btn btn-sm btn-bad" id="btn-jr-note-del">삭제</button></span>` : ''}</div>
+          ${noteEditing ? `
+            <div class="rt-toolbar" data-for="jr-note"></div>
+            <div class="rt-editor fi" id="jr-note" contenteditable="true" data-ph="${esc(JR_NOTE_PH)}"
+                 style="min-height:110px">${rec && rec.note ? _rtSanitize(rec.note) : ''}</div>`
+            : `<div class="rt-view jr-note-view">${_rtHtml(rec.note)}</div>`}
         </div>
         <div style="display:flex;align-items:center;gap:12px;margin-top:14px">
           <button class="btn btn-p" id="btn-jr-save">💾 일지 저장</button>
@@ -1353,9 +1396,11 @@ function pageJournal() {
   </div>`;
 }
 function _wireJrNav() {
-  document.querySelectorAll('[data-jrtab]').forEach(b => b.onclick = () => { JR_VIEW = b.dataset.jrtab; renderPage(); });
+  // 날짜·보기를 옮기면 편집 상태는 푼다 — 다른 날 일지가 편집창으로 열리면 헷갈린다
+  document.querySelectorAll('[data-jrtab]').forEach(b => b.onclick = () => { JR_VIEW = b.dataset.jrtab; JR_NOTE_EDIT = false; renderPage(); });
   document.querySelectorAll('[data-jrnav]').forEach(b => b.onclick = () => {
     const d = +b.dataset.jrnav;
+    JR_NOTE_EDIT = false;
     if (d === 0) { JR_ANCHOR = null; renderPage(); } else jrShift(d);
   });
 }
@@ -1366,7 +1411,7 @@ function wireJournal() {
     openTaskSummary(tid, kid);
   });
   document.querySelectorAll('[data-jr-goto]').forEach(el => el.onclick = () => {
-    JR_VIEW = 'day'; JR_ANCHOR = el.dataset.jrGoto; renderPage();
+    JR_VIEW = 'day'; JR_ANCHOR = el.dataset.jrGoto; JR_NOTE_EDIT = false; renderPage();
   });
   // 완료 체크 → 100%, 진행 바 → 라벨 갱신
   document.querySelectorAll('[data-jr-task]').forEach(row => {
@@ -1397,11 +1442,25 @@ function wireJournal() {
       };
     });
     const prev = jrGet(ME.uid, date);
+    // 보기 모드면 편집기가 없다 — 기존 특이사항을 그대로 둔다
+    const noteEl = $('jr-note');
     const rec = Object.assign({ id: 'J' + ME.uid + '_' + date, uid: ME.uid, date, createdAt: Date.now() }, prev || {}, {
-      items, note: _rtSanitize($('jr-note').innerHTML), updatedAt: Date.now(),
+      items, note: noteEl ? _rtSanitize(noteEl.innerHTML) : ((prev && prev.note) || ''), updatedAt: Date.now(),
     });
-    try { await jrSave(rec); toast('업무 일지를 저장했습니다'); }
+    try { await jrSave(rec); JR_NOTE_EDIT = false; toast('업무 일지를 저장했습니다'); renderPage(); }
     catch (e) { toast('저장 실패: ' + e.message, true); }
+  };
+  const ne = $('btn-jr-note-edit');
+  if (ne) ne.onclick = () => { JR_NOTE_EDIT = true; renderPage(); };
+  const nd = $('btn-jr-note-del');
+  if (nd) nd.onclick = async () => {
+    if (!confirm('특이사항을 삭제할까요? 업무 진행 기록은 그대로 남습니다.')) return;
+    const [date] = jrRange();
+    const prev = jrGet(ME.uid, date);
+    if (!prev) return;
+    const rec = Object.assign({}, prev, { note: '', updatedAt: Date.now() });
+    try { await jrSave(rec); JR_NOTE_EDIT = false; toast('삭제했습니다'); renderPage(); }
+    catch (e) { toast('삭제 실패: ' + e.message, true); }
   };
 }
 
