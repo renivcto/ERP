@@ -315,6 +315,15 @@ tr:last-child td { border-bottom:none; }
   </div>
 </div>
 
+<!-- ═══════ 모달: 출퇴근 상세 (v0.12.0) ═══════ -->
+<div class="ovl" id="ovl-att">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-h"><span class="t" id="att-m-title">출퇴근 상세</span><button class="modal-x" data-close="ovl-att">✕</button></div>
+    <div class="modal-b" id="att-m-body"></div>
+    <div class="modal-f"><button class="btn" data-close="ovl-att">닫기</button></div>
+  </div>
+</div>
+
 <!-- ═══════ 모달: 팀 수정 (v0.8.0 — prompt 대체) ═══════ -->
 <div class="ovl" id="ovl-team">
   <div class="modal" style="max-width:560px">
@@ -392,7 +401,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.11.1';
+const STAFF_VERSION = 'v0.12.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -762,11 +771,20 @@ function fmtDurS(ms) {
   return Math.floor(s / 3600) + '시간 ' + Math.floor((s % 3600) / 60) + '분 ' + (s % 60) + '초';
 }
 function lunchLabel(inRec, outRec) {
+  // 표에는 '사용했으면 시간대, 아니면 -' 만. 자세한 상태(연속 근무 등)는 상세 모달에.
   const cfg = _lunchCfg();
   if (!inRec) return cfg.label;                                    // 기본값 표시
   const end = outRec ? outRec.ts : Date.now();
-  if (_lunchOverlapMs(inRec.ts, end) <= 0) return '해당 없음';      // 점심과 안 겹치는 근무
-  return (outRec && outRec.lunch === 'none') ? '건너뜀 (연속 근무)' : cfg.label;
+  if (_lunchOverlapMs(inRec.ts, end) <= 0) return '-';             // 점심과 안 겹침 (차감 0)
+  return (outRec && outRec.lunch === 'none') ? '-' : cfg.label;    // 미사용 = 차감 0
+}
+function lunchDetail(inRec, outRec) {
+  const cfg = _lunchCfg();
+  if (!inRec) return '-';
+  const end = outRec ? outRec.ts : Date.now();
+  if (_lunchOverlapMs(inRec.ts, end) <= 0) return '해당 없음 — 점심시간과 겹치지 않는 근무';
+  if (outRec && outRec.lunch === 'none') return '사용 안 함 — 연속 근무 (차감 없음)';
+  return cfg.label + ' 사용 — 겹치는 시간 차감';
 }
 function _fmtSeen(ts) {
   if (!ts) return '-';
@@ -807,6 +825,30 @@ async function clock(type) {
   } catch (e) { toast('저장 실패: ' + e.message, true); }
   _clockBusy = false;
 }
+/* 출퇴근 상세 모달 (v0.12.0) — 표에서 뺀 IP·기기·최근 접속을 여기서 전부 보여준다 */
+function openAttModal(uid) {
+  const u = USERS.find(x => x.uid === uid);
+  if (!u) return;
+  const { inRec, outRec } = attToday(uid);
+  const st = !inRec ? '미출근' : outRec ? '퇴근' : '근무 중';
+  const row = (k, v) => `<div style="display:flex;justify-content:space-between;gap:14px;padding:9px 2px;border-bottom:1px solid var(--line-soft);font-size:13.5px">
+    <span style="color:var(--ink-mute);white-space:nowrap">${k}</span>
+    <span style="text-align:right;word-break:break-all;font-weight:600">${v}</span></div>`;
+  $('att-m-title').textContent = `${u.name} — 오늘 출퇴근 상세 (${today()})`;
+  $('att-m-body').innerHTML =
+    row('상태', esc(st)) +
+    row('출근 시각', inRec ? esc(inRec.time) : '-') +
+    row('출근 IP', esc(inRec && inRec.ip || '-')) +
+    row('출근 기기', `<span style="font-weight:400;font-size:12px">${esc(inRec && inRec.ua || '-')}</span>`) +
+    row('점심시간', esc(lunchDetail(inRec, outRec))) +
+    row('퇴근 시각', outRec ? esc(outRec.time) : '-') +
+    row('퇴근 IP', esc(outRec && outRec.ip || '-')) +
+    row('퇴근 기기', `<span style="font-weight:400;font-size:12px">${esc(outRec && outRec.ua || '-')}</span>`) +
+    row('근무 시간', inRec ? fmtDurS(workMs(inRec, outRec)) : '-') +
+    row('최근 접속', _fmtSeen(u.lastSeen));
+  $('ovl-att').classList.add('on');
+}
+
 function attMyTable() {
   const byDate = {};
   ATT.filter(a => a && a.uid === ME.uid).forEach(a => { (byDate[a.date] = byDate[a.date] || []).push(a); });
@@ -830,16 +872,17 @@ function attAdminCard() {
     const dur = inRec ? fmtDurS(workMs(inRec, outRec)) : '-';
     const st = !inRec ? '<span class="chip gray">미출근</span>'
              : outRec ? '<span class="chip ok">퇴근</span>' : '<span class="chip wait">근무 중</span>';
-    return `<tr><td style="white-space:nowrap"><b>${esc(staffName(u.uid))}</b> ${st}</td>
-      <td>${inRec ? inRec.time : '-'}</td><td style="font-size:12px" title="${esc(inRec && inRec.ua || '')}">${esc(inRec && inRec.ip || '-')}</td>
-      <td style="font-size:12.5px">${lunchLabel(inRec, outRec)}</td>
-      <td>${outRec ? outRec.time : '-'}</td><td style="font-size:12px" title="${esc(outRec && outRec.ua || '')}">${esc(outRec && outRec.ip || '-')}</td>
-      <td style="white-space:nowrap">${dur}</td><td style="font-size:12px">${_fmtSeen(u.lastSeen)}</td></tr>`;
+    return `<tr><td style="white-space:nowrap"><span data-att-open="${esc(u.uid)}" title="클릭하면 상세 정보"
+        style="font-weight:700;color:var(--brand-deep);cursor:pointer;text-decoration:underline;text-underline-offset:3px">${esc(staffName(u.uid))}</span> ${st}</td>
+      <td style="white-space:nowrap">${inRec ? inRec.time : '-'}</td>
+      <td style="font-size:13px">${lunchLabel(inRec, outRec)}</td>
+      <td style="white-space:nowrap">${outRec ? outRec.time : '-'}</td>
+      <td style="white-space:nowrap">${dur}</td></tr>`;
   }).join('');
-  return `<div class="card"><div class="card-h">🕘 오늘 출퇴근 현황 <span class="sub">${today()} · IP 에 마우스를 올리면 기기 정보</span></div>
+  return `<div class="card"><div class="card-h">🕘 오늘 출퇴근 현황 <span class="sub">${today()} · 이름을 클릭하면 IP·기기 등 상세 정보</span></div>
     <div class="card-b" style="padding:${act.length ? '0 18px' : '16px'}">
     ${act.length
-      ? `<table><thead><tr><th>직원</th><th>출근</th><th>출근 IP</th><th>점심시간</th><th>퇴근</th><th>퇴근 IP</th><th>근무 시간</th><th>최근 접속</th></tr></thead><tbody>${rows}</tbody></table>`
+      ? `<table><thead><tr><th>직원</th><th>출근</th><th>점심시간</th><th>퇴근</th><th>근무 시간</th></tr></thead><tbody>${rows}</tbody></table>`
       : '<div class="empty">활성 직원이 없습니다</div>'}
     </div></div>`;
 }
@@ -1199,6 +1242,8 @@ function pageAdmin(sec) {
 }
 
 function wireAdmin() {
+  // 출퇴근 상세 모달
+  document.querySelectorAll('[data-att-open]').forEach(el => el.onclick = () => openAttModal(el.dataset.attOpen));
   // 근태 관리 탭 전환
   document.querySelectorAll('[data-admtab]').forEach(b => b.onclick = () => { ADM_LEAVE_TAB = b.dataset.admtab; renderPage(); });
   // 계정 승인/거절
