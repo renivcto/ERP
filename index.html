@@ -2853,13 +2853,12 @@ try{
         <div class="card"><div class="card-body" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
           <button class="btn btn-outline btn-sm" onclick="staffTransfer('sellers')">🛒 판매업체 넘기기</button>
           <button class="btn btn-outline btn-sm" onclick="staffTransfer('shops')">🏪 쇼핑몰 넘기기</button>
-          <button class="btn btn-outline btn-sm" onclick="staffTransfer('accounts')">🔑 외부 계정 넘기기</button>
-          <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#b45309;font-weight:700;margin-left:4px;cursor:pointer">
-            <input type="checkbox" id="staff-tr-pw" checked> 외부 계정 비밀번호도 함께
-          </label>
+          <button class="btn btn-outline btn-sm" onclick="staffMirrorAccountsNow()">🔑 외부 계정 지금 동기화</button>
           <div style="flex-basis:100%;font-size:11.5px;color:var(--gray-400);line-height:1.7">
             협력사는 직원이 직접 입력합니다(p13) · 계좌번호·사업자등록증·통장사본·명함 등 첨부는 넘기지 않습니다<br>
-            ⚠️ 다시 누르면 직원용 데이터를 <b>통째로 덮어씁니다</b> — 직원이 수정한 내용도 사라집니다
+            🔑 <b>외부 계정만 자동 연동</b>입니다(v2.3.662) — 여기서 고치면 직원용에도 그대로 반영되고,
+            비밀번호도 함께 넘어갑니다. 위 버튼은 즉시 동기화용입니다.<br>
+            ⚠️ 판매업체·쇼핑몰은 <b>1회 이관</b>이라 다시 누르면 직원용 데이터를 통째로 덮어씁니다 — 직원이 수정한 내용도 사라집니다
           </div>
         </div></div>
       </div>
@@ -6334,7 +6333,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.661';
+const ERP_VERSION = 'v2.3.662';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -57658,6 +57657,7 @@ function setSitesTab(tab) {
     if (tabAccs)  tabAccs.style.cssText  = activeStyle;
     if (subSites) subSites.style.display = 'none';
     if (subAccs)  subAccs.style.display  = '';
+    _loadStaffAccounts();          // v2.3.662: 직원용 등록분 (60초 캐시)
     renderAccountsPage();
   }
 }
@@ -57754,7 +57754,8 @@ function renderAccountsPage() {
     chips.innerHTML = cats.map(c => {
       const col = _accCatColors[c] || _accCatColors['업무'];
       const isActive = c === _accountFilter;
-      const cnt = c === '전체' ? (DB.accounts||[]).length : (DB.accounts||[]).filter(a=>a.cat===c).length;
+      const _allAcc = (DB.accounts||[]).concat(window._staffAccounts||[]);   // v2.3.662
+      const cnt = c === '전체' ? _allAcc.length : _allAcc.filter(a=>a.cat===c).length;
       return `<div onclick="setAccountFilter('${c}')" style="
         display:inline-flex;align-items:center;padding:7px 14px;
         cursor:pointer;font-size:12px;font-weight:${isActive?'600':'500'};
@@ -57783,7 +57784,12 @@ function renderAccountsPage() {
     '결제/금융':'cyan','광고':'amber','행정/인증':'purple','리뷰/제휴':'red','업무':'gray'
   })[c]||'gray';
 
-  const filtered = _accountFilter === '전체' ? (DB.accounts||[]) : (DB.accounts||[]).filter(a=>a.cat===_accountFilter);
+  // v2.3.662: 직원용 ERP 에서 등록한 계정을 뒤에 덧붙인다 (단방향 — 여기선 읽기만)
+  const _staffRows = (Array.isArray(window._staffAccounts) ? window._staffAccounts : [])
+    .map(a => Object.assign({}, a, { _staff: true }));
+  const _allRows = (DB.accounts||[]).concat(_staffRows);
+  const filtered = _accountFilter === '전체' ? _allRows : _allRows.filter(a=>a.cat===_accountFilter);
+  const _dbLen = filtered.filter(a => !a._staff).length;   // 순서 이동은 임원용 계정끼리만
   const tb = document.getElementById('accounts-table');
   if (!tb) return;
   if (!filtered.length) {
@@ -57791,7 +57797,8 @@ function renderAccountsPage() {
     return;
   }
   tb.innerHTML = filtered.map((a, fIdx) => {
-    const totalLen = filtered.length;
+    const totalLen = _dbLen;
+    const isStaffAcc = !!a._staff;
     const col = _accCatColors[a.cat] || _accCatColors['업무'];
     const rowBg = col.row || '#fff';
     const catBadge = `<span style="display:inline-flex;align-items:center;padding:2px 9px;background:${col.inactive};color:${col.text};border:1px solid ${col.border};border-radius:9px;font-size:10.5px;font-weight:600;white-space:nowrap">${a.cat||'업무'}</span>`;
@@ -57806,7 +57813,7 @@ function renderAccountsPage() {
     return `
     <tr style="background:${rowBg}">
       <td style="text-align:center;vertical-align:middle">${catBadge}</td>
-      <td style="text-align:center;padding:8px 10px;vertical-align:middle;font-weight:600;font-size:12.5px;word-break:keep-all;line-height:1.5">${safeName}${urlBtn}</td>
+      <td style="text-align:center;padding:8px 10px;vertical-align:middle;font-weight:600;font-size:12.5px;word-break:keep-all;line-height:1.5">${safeName}${urlBtn}${isStaffAcc ? '<div style="margin-top:3px"><span style="display:inline-block;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:9px;padding:1px 7px;font-size:9.5px;font-weight:700">👥 직원 ERP 등록</span></div>' : ''}</td>
       <td style="text-align:center;vertical-align:middle;font-family:monospace;font-size:11.5px;color:#1f2937;word-break:break-all">${safeId || '<span style="color:#cbd5e1">-</span>'}</td>
       <td style="text-align:center;vertical-align:middle">
         ${a.pw ? `<span style="display:inline-flex;align-items:center;gap:5px">
@@ -57819,7 +57826,8 @@ function renderAccountsPage() {
       <td style="text-align:center;padding:6px 10px;vertical-align:middle;font-size:11px;color:#6b7280;line-height:1.5;word-break:keep-all">${safeNote || '<span style="color:#cbd5e1">-</span>'}</td>
       <td style="text-align:center;white-space:nowrap;vertical-align:middle">
         <div style="display:inline-flex;align-items:center;gap:3px">
-          ${canWrite ? `
+          ${isStaffAcc ? `<span style="font-size:10px;color:#94a3b8;line-height:1.4" title="직원용 ERP에서 등록한 계정입니다. 수정·삭제는 직원용 ERP → 외부 계정에서 합니다">직원용에서<br>관리</span>` : ''}
+          ${(canWrite && !isStaffAcc) ? `
             <button title="수정" onclick="openAccountModal('${a.id}')" style="background:#eef2ff;color:#6366f1;border:1px solid #e0e7ff;width:24px;height:22px;padding:0;border-radius:5px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1">✏️</button>
             <div style="display:inline-flex;flex-direction:column;gap:1px">
               <button onclick="moveAccount('${a.id}','${fIdx > 0 ? filtered[fIdx-1].id : ''}')" ${fIdx===0?'disabled':''} style="background:${fIdx===0?'var(--gray-100)':'var(--sky-50)'};border:1px solid ${fIdx===0?'var(--gray-200)':'var(--sky-200)'};color:${fIdx===0?'var(--gray-300)':'var(--sky-500)'};border-radius:3px;width:14px;height:13px;cursor:${fIdx===0?'default':'pointer'};font-size:7px;display:flex;align-items:center;justify-content:center;padding:0">▲</button>
@@ -57841,6 +57849,7 @@ function moveAccount(idA, idB) {
   DB.accounts[iA] = DB.accounts[iB];
   DB.accounts[iB] = tmp;
   saveData();
+  try { _staffMirrorAccounts(); } catch(_){}   // v2.3.662
   renderAccountsPage();
 }
 
@@ -57946,6 +57955,7 @@ function deleteAccount() {
   DB.accounts = DB.accounts.filter(a=>a.id!==_accountEditId);
   if (typeof saveDataNow === 'function') saveDataNow().catch(e=>console.error(e));
   else saveData();
+  try { _staffMirrorAccounts(); } catch(_){}   // v2.3.662: 직원용 반영
   closeModal('add-account');
   renderAccountsPage();
   showNotif('삭제되었습니다');
@@ -58537,6 +58547,36 @@ function _staffCalPayload() {
     .sort((a, b) => a.d.localeCompare(b.d));
 }
 async function _staffMirrorCalendar() { return _staffPush('calendar', _staffCalPayload()); }
+
+/* v2.3.662 — 외부 계정 미러. 이관(1회)에서 연동(자동)으로 바뀌었다.
+   직원용은 이 문서를 원본으로 보고, 자기가 지우거나 고친 것은 accounts_ov 오버레이에 쌓는다.
+   ⚠️ 비밀번호도 함께 넘어간다 — 직원용 ERP 활성 직원 전원이 볼 수 있다. */
+function _staffAccPayload() {
+  return (DB.accounts || []).map(a => ({
+    id: String(a.id), cat: a.cat || '업무', name: a.name || '', loginId: a.loginId || '',
+    pw: a.pw || '', email: a.email || '', url: a.url || '', note: a.note || ''
+  }));
+}
+async function _staffMirrorAccounts() { return _staffPush('accounts', _staffAccPayload()); }
+window._staffMirrorAccounts = _staffMirrorAccounts;
+
+/* 직원용 ERP 에서 등록한 계정 — 단방향(읽기 전용)으로 외부 계정 목록에 함께 보여준다 */
+window._staffAccounts = [];
+async function _loadStaffAccounts(force) {
+  const now = Date.now();
+  if (!force && window._staffAccLoadedAt && now - window._staffAccLoadedAt < 60000) return;
+  window._staffAccLoadedAt = now;
+  try {
+    const snap = await window._firestoreGetDoc(
+      window._firestoreDoc(window._firebaseDb, 'staff_data', 'accounts_staff'));
+    window._staffAccounts = (snap && snap.exists()) ? (JSON.parse(snap.data().data || '[]') || []) : [];
+  } catch (e) {
+    window._staffAccounts = [];
+    console.warn('👥 [직원 등록 계정] 로드 실패:', e && e.message);
+  }
+  try { renderAccountsPage(); } catch(_) {}
+}
+window._loadStaffAccounts = _loadStaffAccounts;
 window._staffMirrorCalendar = _staffMirrorCalendar;
 
 // 홈을 열 때마다 쓰기가 나가지 않도록 6시간 스로틀. 즉시 반영은 staffMirrorNow().
@@ -58550,8 +58590,13 @@ function _staffMirrorCalendarThrottled() {
 }
 /* v2.3.661 — 거래처·외부계정 최초 이관 (기획서 p13·p14). 미러와 달리 자동이 아니다:
    관리자가 버튼을 누를 때만 넘어가고, 그 뒤로는 직원용에서 따로 관리된다. */
+window.staffMirrorAccountsNow = async function() {
+  const ok = await _staffMirrorAccounts();
+  showNotif(ok ? ('✅ 외부 계정 ' + (DB.accounts || []).length + '건을 직원용 ERP와 동기화했습니다')
+               : '동기화 실패 — 콘솔을 확인해 주세요', ok ? 'success' : 'error');
+};
 window.staffTransfer = async function(kind) {
-  const pwOn = !!(document.getElementById('staff-tr-pw') || {}).checked;
+  const pwOn = true;   // v2.3.662: 외부 계정은 자동 연동으로 이동 — pw 는 항상 포함
   let docId, arr, label;
   if (kind === 'sellers') {
     label = '판매업체'; docId = 'partners_seller';
@@ -58591,9 +58636,10 @@ window.staffTransfer = async function(kind) {
 window.staffMirrorNow = async function() {
   const board = await _staffMirrorBoard();
   const calendar = await _staffMirrorCalendar();
+  const accounts = await _staffMirrorAccounts();
   try { localStorage.setItem('reniv_staff_cal_push', String(Date.now())); } catch(_) {}
-  console.log('👥 직원용 미러 재동기:', { board, calendar });
-  return { board, calendar };
+  console.log('👥 직원용 미러 재동기:', { board, calendar, accounts });
+  return { board, calendar, accounts };
 };
 
 // v2.3.601: 공용 API Key 전용 저장 — 서버에 실제로 반영됐는지 되읽어 확인한다.

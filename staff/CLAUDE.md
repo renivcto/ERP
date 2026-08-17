@@ -72,7 +72,10 @@ Google 로그인
 | `board_staff` | 직원이 직접 쓴 게시글. `{id, title, content(HTML), cat, pinned, uid, by, avatar, createdAt, updatedAt}` |
 | `calendar` | **임원용 미러** — 업무 일정. 기간 일정은 압축: `{d(시작 YYYY-MM-DD), n(제목), b(보드), i(아이콘), c/t(색), days, done, ty, urg}` |
 | `partners_coop` / `partners_seller` / `partners_shop` | 거래처 — 협력사(직원 직접입력) / 판매업체 / 쇼핑몰. `{id, company, ...}` |
-| `accounts` | 외부 계정. `{id, cat, name, loginId, pw, email, url, note}` |
+| `accounts` | **임원용 미러** — 외부 계정 원본. `{id, cat, name, loginId, pw, email, url, note}` |
+| `accounts_staff` | 직원이 등록한 계정. 임원용에는 읽기 전용으로 표시된다 |
+| `accounts_ov` | 미러에 대한 직원용 덮어쓰기 `{hidden:[id], edit:{id:{필드}}}` |
+| `accounts_policy` | `{erpEditable:true}` — false 면 미러 항목이 직원용에서 읽기 전용 |
 
 ### 임원용 → 직원용 데이터 흐름 (v0.18~0.19 · 기획서 p10·p11·p13·p14)
 
@@ -80,8 +83,23 @@ Google 로그인
 
 | 종류 | 문서 | 시점 | 임원용 함수 |
 |---|---|---|---|
-| **미러(자동)** | `board` · `calendar` | 글 저장·삭제 시 / 홈 렌더 6시간 스로틀 | `_staffMirrorBoard()` · `_staffMirrorCalendar()` · 수동 `staffMirrorNow()` |
-| **최초 1회 이관(수동)** | `partners_seller` · `partners_shop` · `accounts` | 관리자가 사용자 관리에서 버튼 클릭 | `staffTransfer('sellers'\|'shops'\|'accounts')` |
+| **미러(자동)** | `board` · `calendar` · `accounts` | 글/계정 저장·삭제 시 / 홈 렌더 6시간 스로틀 | `_staffMirrorBoard()` · `_staffMirrorCalendar()` · `_staffMirrorAccounts()` · 수동 `staffMirrorNow()` |
+| **최초 1회 이관(수동)** | `partners_seller` · `partners_shop` | 관리자가 사용자 관리에서 버튼 클릭 | `staffTransfer('sellers'\|'shops')` |
+| **직원용 → 임원용(읽기 전용)** | `accounts_staff` | 임원용 외부 계정 탭 진입 시 (60초 캐시) | `_loadStaffAccounts()` |
+
+#### 외부 계정만 예외 — 양방향 표시 (v0.21.0 / 임원용 v2.3.662)
+
+기획서 p14 는 "연동되지 않는다" 였지만 **사용자 지시로 바꿨다.**
+임원용에서 고치면 직원용에 그대로 반영되고, 직원용에서 등록한 것은 임원용에 읽기 전용으로 보인다.
+
+- 미러(`accounts`)는 통째로 덮어써지므로 직원용의 삭제·수정은 원본을 못 건드린다.
+  → **`accounts_ov` 오버레이**(`hidden` / `edit`)에 쌓아 미러가 갱신돼도 살아남게 했다.
+  화면 조립은 `accAll()` 한 곳: 미러 − hidden + edit → `src:'erp'`, 직원분 → `src:'staff'`.
+- 직원용에서 고친 미러 항목은 `✏️ 수정됨` 배지 + **되돌리기** 버튼(오버레이 edit 삭제).
+- 정리가 끝나면 관리자가 외부 계정 페이지의 스위치를 끈다 → `accounts_policy.erpEditable=false`
+  → 미러 항목의 수정·삭제 버튼이 사라진다(이미 숨긴 항목은 계속 숨김).
+- 행을 클릭하면 상세 모달이 열리고 **어디서 수정하는지** 안내가 뜬다.
+- ⚠️ 비밀번호는 평문으로 미러된다. 표에서 가리는 것은 어깨너머 노출 방지일 뿐이다.
 
 - ⚠️ **미러 문서에 직원이 쓰게 하지 말 것.** 미러는 통째 덮어쓰기라 직원 글이 날아간다.
   그래서 게시판이 `board`(미러) / `board_staff`(직원 작성) 두 문서로 나뉘어 있다.
