@@ -65,7 +65,9 @@ Google 로그인
 | `teams` | `[{id, name, lead(책임자), ai(AI직원), tasks:[{id, title, assignee(uid), desc(HTML)}]}]` |
 | `leaves` | `[{id, uid, type(월차/연차/반차/반반차), pool(차감대상), days, date, reason(HTML), approver, status(대기/승인/반려), decidedBy, rejectNote}]` |
 | `leave_policy` | `{monthly, annual:{년차:일수}, approvers:[결재자명]}` — 기본값 `DEFAULT_POLICY` |
-| `library` | `[{id, title, content(HTML), uid, by, avatar, createdAt}]` |
+| `library` | 자료실 등록 자료 `[{id, title, content(HTML), uid, by, avatar, createdAt}]` |
+| `gdocs` | 자료실 **문서 공유** `[{id, type(sheets/slides/docs/note), title, url, content, by, createdAt}]` |
+| `drive` | 자료실 **드라이브 폴더** `[{id, name, category, url, description, pinned, by, createdAt}]` |
 | `attendance_YYYY-MM` | 출퇴근 (월별 문서 — 비대화 방지). `{id, uid, type(in/out), date, time(HH:MM:SS), ts, ip, ua, lunch(used/none)}` |
 | `journal_YYYY-MM` | 업무 일지 (월별 문서). `{id, uid, date, items:{taskId:{done,pct,memo}}, note(HTML), fb:{by,at,react,comment(HTML)}}` |
 | `board` | **임원용이 통째로 덮어쓰는 미러** — 운영 업무 공유 중 '직원용 ERP에도 게시' 체크된 글. `{id, title, content(HTML), cat, catLabel/catIcon/catBg/catFg, by, pinned, images[공개URL], createdAt}` |
@@ -116,6 +118,18 @@ Google 로그인
   직원 앱도 `calRows()` 에서 한 번 더 거른다 — 미러가 갱신되기 전에도 화면에서 즉시 빠지게.
 - 직원용은 **읽기 전용**이다. Trello 쓰기는 API 키가 필요한데 그 키는 `settings/`(관리자 전용 read)에 있다.
   카드 클릭은 Trello 링크를 열 뿐이다.
+
+#### 자료실 = 미러가 아니다 (v0.27.0)
+
+기획서 p12 그대로 **임원용과 따로 작동**한다. 임원용 `gdocs`/`driveFolders` 를 가져오지 않고,
+직원이 `staff_data/gdocs` · `staff_data/drive` 에 직접 등록한다. 링크만 저장하므로 파일 자체는
+구글 드라이브에 있고 접근 권한은 구글이 관리한다.
+
+- ⚠️ **드라이브 검색·카테고리 필터에서 `renderPage()` 를 부르지 말 것.**
+  페이지 전체가 다시 그려져 검색창 포커스가 날아간다. `renderDfBody()` 가 그 카드만 다시 그리고
+  끝에서 `wireDrive()` 로 다시 배선한다.
+- 문서 종류 `note`(직접 작성)는 링크 대신 본문을 저장한다. 5만자 제한 —
+  문서 하나가 커지면 `staff_data/gdocs` 가 1MB 한도에 닿는다.
 
 - ⚠️ **미러 문서에 직원이 쓰게 하지 말 것.** 미러는 통째 덮어쓰기라 직원 글이 날아간다.
   그래서 게시판이 `board`(미러) / `board_staff`(직원 작성) 두 문서로 나뉘어 있다.
