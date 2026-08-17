@@ -2844,6 +2844,24 @@ try{
             </table>
           </div>
         </div>
+
+        <!-- v2.3.661: 직원용 ERP 데이터 최초 이관 (기획서 p13·p14) -->
+        <div style="display:flex;align-items:center;gap:10px;margin:26px 0 10px">
+          <span style="font-weight:700;font-size:15px">📤 직원용 ERP 데이터 이관</span>
+          <span style="font-size:12px;color:var(--gray-400)">최초 1회만 넘겨줍니다 — 이후 임원용 변경은 자동 반영되지 않습니다 (기획서 p13·p14)</span>
+        </div>
+        <div class="card"><div class="card-body" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+          <button class="btn btn-outline btn-sm" onclick="staffTransfer('sellers')">🛒 판매업체 넘기기</button>
+          <button class="btn btn-outline btn-sm" onclick="staffTransfer('shops')">🏪 쇼핑몰 넘기기</button>
+          <button class="btn btn-outline btn-sm" onclick="staffTransfer('accounts')">🔑 외부 계정 넘기기</button>
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#b45309;font-weight:700;margin-left:4px;cursor:pointer">
+            <input type="checkbox" id="staff-tr-pw" checked> 외부 계정 비밀번호도 함께
+          </label>
+          <div style="flex-basis:100%;font-size:11.5px;color:var(--gray-400);line-height:1.7">
+            협력사는 직원이 직접 입력합니다(p13) · 계좌번호·사업자등록증·통장사본·명함 등 첨부는 넘기지 않습니다<br>
+            ⚠️ 다시 누르면 직원용 데이터를 <b>통째로 덮어씁니다</b> — 직원이 수정한 내용도 사라집니다
+          </div>
+        </div></div>
       </div>
     </div>
 
@@ -6316,7 +6334,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.660';
+const ERP_VERSION = 'v2.3.661';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58530,6 +58548,46 @@ function _staffMirrorCalendarThrottled() {
     setTimeout(() => { _staffMirrorCalendar().catch(() => {}); }, 4000);
   } catch(_) {}
 }
+/* v2.3.661 — 거래처·외부계정 최초 이관 (기획서 p13·p14). 미러와 달리 자동이 아니다:
+   관리자가 버튼을 누를 때만 넘어가고, 그 뒤로는 직원용에서 따로 관리된다. */
+window.staffTransfer = async function(kind) {
+  const pwOn = !!(document.getElementById('staff-tr-pw') || {}).checked;
+  let docId, arr, label;
+  if (kind === 'sellers') {
+    label = '판매업체'; docId = 'partners_seller';
+    arr = (DB.sellers || []).map(s => ({
+      id: String(s.id), company: s.company || '', bizno: s.bizno || '', ceo: s.ceo || '',
+      contact: s.contact || '', phone: s.phone || '', email: s.email || '',
+      address: s.address || '', channel: s.channel || '',
+      note: String(s.note || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').trim()
+    }));
+  } else if (kind === 'shops') {
+    label = '쇼핑몰'; docId = 'partners_shop';
+    const _ch = { consumer: '소비자몰', biz: 'B2B', open: '오픈마켓' };
+    arr = (DB.shops || []).map(s => ({
+      id: String(s.id), company: s.name || '', channel: _ch[s.channelType] || s.channelType || '',
+      manager: s.manager || '', settlement: s.settlementCycle || '',
+      note: String(s.memo || '').replace(/<[^>]+>/g, ' ').trim()
+    })).filter(s => s.company);
+  } else {
+    label = '외부 계정'; docId = 'accounts';
+    arr = (DB.accounts || []).map(a => ({
+      id: String(a.id), cat: a.cat || '', name: a.name || '', loginId: a.loginId || '',
+      pw: pwOn ? (a.pw || '') : '', email: a.email || '', url: a.url || '', note: a.note || ''
+    }));
+  }
+  if (!arr.length) { showNotif(label + ' 데이터가 없습니다', 'warning'); return; }
+  const warn = (kind === 'accounts' && pwOn)
+    ? '\n\n⚠️ 비밀번호가 함께 넘어갑니다 — 직원용 ERP를 쓰는 모든 활성 직원이 볼 수 있습니다.' : '';
+  if (!confirm(label + ' ' + arr.length + '건을 직원용 ERP로 넘길까요?\n\n'
+             + '· 최초 1회 이관입니다 — 이후 임원용 변경은 반영되지 않습니다\n'
+             + '· 직원용에 이미 있던 ' + label + ' 데이터는 덮어씁니다(직원이 수정한 내용 포함)\n'
+             + '· 계좌·첨부파일은 넘어가지 않습니다' + warn)) return;
+  const ok = await _staffPush(docId, arr);
+  showNotif(ok ? ('✅ ' + label + ' ' + arr.length + '건을 직원용 ERP로 넘겼습니다')
+               : (label + ' 이관 실패 — 콘솔을 확인해 주세요'), ok ? 'success' : 'error');
+};
+
 window.staffMirrorNow = async function() {
   const board = await _staffMirrorBoard();
   const calendar = await _staffMirrorCalendar();
