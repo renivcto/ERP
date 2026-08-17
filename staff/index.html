@@ -204,6 +204,12 @@ tr:last-child td { border-bottom:none; }
   border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--ink-mute);
   font-size:12px; font-weight:800; line-height:1; cursor:pointer; padding:0; transition:all .15s; }
 .mem-hash:hover { border-color:var(--brand); color:var(--brand-deep); background:var(--brand-soft); }
+/* 오른쪽 레일용 컴팩트 (v0.20.0) */
+.mem-tb.compact th { padding:6px 3px; font-size:10.5px; }
+.mem-tb.compact td { padding:6px 3px; font-size:11.5px; }
+.mem-tb.compact .mem-cell { gap:4px; }
+.mem-tb.compact .mem-team { font-size:12px; }
+.mem-tb.compact .mem-hash { width:17px; height:17px; font-size:10.5px; border-radius:5px; }
 .mem-dm { cursor:pointer; border-bottom:1px dashed var(--line); }
 .mem-dm:hover { color:var(--brand-deep); border-bottom-color:var(--brand); }
 /* 운영 업무 게시판 (v0.18.0) */
@@ -560,7 +566,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.19.0';
+const STAFF_VERSION = 'v0.20.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1776,16 +1782,14 @@ function pageHome() {
       </div></div></div>`;
   }
 
-  // 왼쪽 큰 카드 — 르니브 MEMBER (v0.17.0). 팀명 클릭 시 팀 정보·업무 모달.
-  const memberCard = `<div class="card"><div class="card-h">👥 르니브 MEMBER <span class="sub"># 은 슬랙 채널, 이름은 슬랙 DM 으로 연결됩니다</span></div>
-    <div class="card-b" style="padding:${TEAMS.length ? '0 18px' : '16px'}">
-    ${TEAMS.length ? `<table class="mem-tb">
-      <colgroup>${isAdmin ? '<col style="width:28%"><col style="width:23%"><col style="width:19%"><col style="width:13%"><col style="width:17%">'
-                          : '<col style="width:40%"><col style="width:32%"><col style="width:28%">'}</colgroup>
-      <thead><tr><th>팀</th><th>책임자</th><th>AI직원</th>${isAdmin ? '<th>업무</th><th>담당자 배정</th>' : ''}</tr></thead><tbody>
+  // 오른쪽 레일 — 르니브 MEMBER (v0.20.0: 다가오는 일정 위, 좁은 폭에 맞춘 컴팩트 3열)
+  const memberCard = `<div class="card"><div class="card-h" style="padding:11px 14px;font-size:14px">👥 르니브 MEMBER
+      <span class="sub" style="margin-left:auto;font-size:11px">#=채널 · 이름=DM</span></div>
+    <div class="card-b" style="padding:${TEAMS.length ? '0 12px' : '14px'}">
+    ${TEAMS.length ? `<table class="mem-tb compact">
+      <colgroup><col style="width:42%"><col style="width:33%"><col style="width:25%"></colgroup>
+      <thead><tr><th>팀</th><th>책임자</th><th>AI직원</th></tr></thead><tbody>
       ${TEAMS.map(t => {
-        const total = (t.tasks || []).length;
-        const assigned = (t.tasks || []).filter(k => k.assignee).length;
         const dm = (name, kind, hint) => name
           ? `<span class="mem-dm" data-mem-slack="${esc(t.id)}|${kind}" title="${hint} 슬랙 DM 열기">${esc(name)}</span>`
           : '<span style="color:var(--ink-mute)">-</span>';
@@ -1793,8 +1797,7 @@ function pageHome() {
           <td><span class="mem-cell"><span class="mem-team" data-team-open-home="${esc(t.id)}" title="팀 정보와 업무 보기">${esc(t.name)}</span>
             <button type="button" class="mem-hash" data-mem-slack="${esc(t.id)}|team" title="${esc(t.name)} 슬랙 채널 열기">#</button></span></td>
           <td>${dm(t.lead, 'lead', '책임자')}</td>
-          <td>${dm(t.ai, 'ai', 'AI직원')}</td>
-          ${isAdmin ? `<td>${total}건</td><td>${assigned}/${total || 0}</td>` : ''}</tr>`;
+          <td>${dm(t.ai, 'ai', 'AI직원')}</td></tr>`;
       }).join('')}</tbody></table>`
       : '<div class="empty">등록된 팀이 없습니다</div>'}
     </div></div>`;
@@ -1844,49 +1847,8 @@ function pageHome() {
       ${up.map(e => upRowHtml(e, false)).join('')}`
       : '<div class="empty" style="padding:14px">예정된 일정이 없습니다</div>'}</div></div>`;
 
-  // 왼쪽 아래 — (직원) 내 업무 / (관리자) 팀 요약
-  let workCard;
-  if (isAdmin) {
-    workCard = '';   // 팀 현황은 르니브 MEMBER 카드에 합쳤다 (v0.17.0)
-  } else {
-    const tasks = myTasks();
-    workCard = `<div class="card"><div class="card-h">🗂️ 내 업무 <span class="sub">${tasks.length}건</span></div>
-      <div class="card-b">${tasks.length
-        ? `<div class="mytasks">${tasks.slice(0, 6).map(x => `
-            <div class="mytask" data-my-open="${esc(x.team.id)}|${esc(x.task.id)}">
-              <span class="team-tag">${esc(x.team.name)}</span>
-              <div class="t">${esc(x.task.title)}</div></div>`).join('')}</div>`
-        : '<div class="empty">배정된 업무가 없습니다 — 관리자가 배정하면 여기에 나타납니다</div>'}</div></div>`;
-  }
-
-  // 오른쪽 레일 — KPI (임원용의 재무·매출 카드 자리를 근태·인원 지표로 대체)
-  let kpiHtml;
-  if (isAdmin) {
-    const act = USERS.filter(u => u.active === true).length;
-    const taskN = TEAMS.reduce((s, t) => s + (t.tasks || []).length, 0);
-    const todayIn = new Set(ATT.filter(a => a && a.type === 'in' && a.date === today()).map(a => a.uid)).size;
-    kpiHtml = `
-      <div class="kpi"><div class="k">오늘 출근</div><div class="v">${todayIn}<small> / ${act}명</small></div></div>
-      <div class="kpi"><div class="k">팀 / 업무</div><div class="v">${TEAMS.length}<small>팀</small> · ${taskN}<small>건</small></div></div>`;
-  } else {
-    const s = myLeaveStats();
-    kpiHtml = `
-      <div class="kpi"><div class="k">남은 월차 (이번 달)</div><div class="v">${s.monthLeft}<small> / ${s.monthly}일</small></div></div>
-      <div class="kpi"><div class="k">남은 연차 (올해 · ${s.years}년차)</div><div class="v">${s.yearLeft}<small> / ${s.grant}일</small></div></div>`;
-  }
-
-  // 최근 근태 — 관리자: 전체 / 직원: 본인
-  const recent = (isAdmin ? LEAVES : LEAVES.filter(l => l.uid === ME.uid))
-    .slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 5);
-  const chip = st => st === '승인' ? '<span class="chip ok">승인</span>'
-              : st === '반려' ? '<span class="chip bad">반려</span>' : '<span class="chip wait">대기</span>';
-  const leaveCard = `<div class="card"><div class="card-h">🕐 최근 휴가</div>
-    <div class="card-b" style="padding:${recent.length ? '0 16px' : '16px'}">
-    ${recent.length ? `<table>${recent.map(l => `<tr>
-        ${isAdmin ? `<td style="font-weight:700;white-space:nowrap">${esc(staffName(l.uid))}</td>` : ''}
-        <td>${esc(l.type)}</td><td style="white-space:nowrap">${fmtD(l.date)}</td><td>${chip(l.status)}</td></tr>`).join('')}</table>`
-      : '<div class="empty" style="padding:10px">휴가 내역이 없습니다</div>'}
-    </div></div>`;
+  // v0.20.0 — 내 업무 카드 · KPI(월차/연차) · 최근 휴가 카드는 홈에서 뺐다.
+  //   상단 칩('내 업무 N건' / '휴가 결재 대기 N건')과 각 전용 메뉴가 같은 내용을 담당한다.
 
   return `
   <div class="pg on">
@@ -1895,9 +1857,9 @@ function pageHome() {
       <h1 style="font-size:23px;font-weight:800;letter-spacing:-.4px">오늘의 업무 현황</h1>
       <div style="display:flex;gap:8px">${chipHtml}</div>
     </div>
-    <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(240px,1fr);gap:16px;align-items:start">
-      <div>${attCard}${boardCard}${calCard}${memberCard}${workCard}</div>
-      <div><div class="kpis" style="grid-template-columns:1fr;margin-bottom:14px">${kpiHtml}</div>${upCard}${leaveCard}</div>
+    <div style="display:grid;grid-template-columns:minmax(0,1.8fr) minmax(290px,1fr);gap:16px;align-items:start">
+      <div>${attCard}${boardCard}${calCard}</div>
+      <div>${memberCard}${upCard}</div>
     </div>
   </div>`;
 }
