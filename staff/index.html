@@ -61,7 +61,7 @@ input, select, textarea { font-family:inherit; font-size:13px; color:var(--ink);
 /* 화이트 사이드바 — 기획서 p2 "왼쪽 메뉴바의 색상은 화이트버전" */
 aside { width:244px; min-width:244px; background:var(--panel); border-right:1px solid var(--line);
   display:flex; flex-direction:column; position:sticky; top:0; height:100vh; }
-.sb-logo { padding:20px 18px 14px; font-size:18px; font-weight:800; letter-spacing:-.3px; }
+.sb-logo { padding:22px 18px 14px; font-size:21px; font-weight:800; letter-spacing:-.3px; }
 .sb-logo em { color:var(--brand); font-style:normal; }
 .sb-logo small { display:block; font-size:10.5px; font-weight:600; color:var(--ink-mute); letter-spacing:.4px; margin-top:2px; }
 .sb-scroll { flex:1; overflow-y:auto; padding:4px 10px 10px; }
@@ -392,7 +392,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.10.1';
+const STAFF_VERSION = 'v0.10.2';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -938,7 +938,9 @@ function pageHome() {
       ${TEAMS.map(t => {
         const total = (t.tasks || []).length;
         const assigned = (t.tasks || []).filter(k => k.assignee).length;
-        return `<tr style="cursor:pointer" data-go="adm-teams"><td style="font-weight:700">${esc(t.name)}</td>
+        return `<tr style="cursor:pointer" data-go="adm-teams">
+          <td><span data-team-open-home="${esc(t.id)}" title="클릭하면 이 팀의 업무를 수정합니다"
+                style="font-weight:700;color:var(--brand-deep);cursor:pointer;text-decoration:underline;text-underline-offset:3px">${esc(t.name)}</span></td>
           <td>${esc(t.lead || '-')}</td><td>${esc(t.ai || '-')}</td><td>${total}건</td>
           <td>${assigned}/${total || 0}</td></tr>`;
       }).join('')}</tbody></table></div></div>`;
@@ -961,7 +963,6 @@ function pageHome() {
     const todayIn = new Set(ATT.filter(a => a && a.type === 'in' && a.date === today()).map(a => a.uid)).size;
     kpiHtml = `
       <div class="kpi"><div class="k">오늘 출근</div><div class="v">${todayIn}<small> / ${act}명</small></div></div>
-      <div class="kpi"><div class="k">활성 직원</div><div class="v">${act}<small>명</small></div></div>
       <div class="kpi"><div class="k">팀 / 업무</div><div class="v">${TEAMS.length}<small>팀</small> · ${taskN}<small>건</small></div></div>`;
   } else {
     const s = myLeaveStats();
@@ -997,6 +998,11 @@ function pageHome() {
   </div>`;
 }
 function wireHome() {
+  // 팀명 클릭 → 해당 팀 수정 모달 (행 클릭의 페이지 이동과 겹치지 않게 전파 차단)
+  document.querySelectorAll('[data-team-open-home]').forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    openTeamModal(el.dataset.teamOpenHome);
+  });
   const ci = $('btn-clock-in');  if (ci) ci.onclick = () => clock('in');
   const co = $('btn-clock-out'); if (co) co.onclick = () => clock('out');
   document.querySelectorAll('[data-go]').forEach(el => el.onclick = () => go(el.dataset.go));
