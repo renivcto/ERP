@@ -602,7 +602,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.23.0';
+const STAFF_VERSION = 'v0.23.1';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1367,7 +1367,9 @@ function pageJournal() {
             : `<div class="rt-view jr-note-view">${_rtHtml(rec.note)}</div>`}
         </div>
         <div style="display:flex;align-items:center;gap:12px;margin-top:14px">
-          <button class="btn btn-p" id="btn-jr-save">💾 일지 저장</button>
+          <!-- v0.23.1: 저장은 고칠 게 있을 때만 보인다. 보기 화면에는 없다.
+               (특이사항 수정을 눌렀거나, 체크·진행률·메모를 건드리면 나타난다) -->
+          <button class="btn btn-p" id="btn-jr-save" style="display:${noteEditing ? '' : 'none'}">저장</button>
           <span style="font-size:12.5px;color:var(--ink-mute)">${rec && rec.updatedAt ? '마지막 저장 ' + _fmtSeen(rec.updatedAt) : '아직 저장하지 않았습니다'}</span>
         </div>
         ${jrFbHtml(rec)}
@@ -1413,21 +1415,27 @@ function wireJournal() {
   document.querySelectorAll('[data-jr-goto]').forEach(el => el.onclick = () => {
     JR_VIEW = 'day'; JR_ANCHOR = el.dataset.jrGoto; JR_NOTE_EDIT = false; renderPage();
   });
+  // v0.23.1: 뭔가를 고치면 저장 버튼이 나타난다 (보기 화면에서는 숨어 있다)
+  const jrDirty = () => { const b = $('btn-jr-save'); if (b) b.style.display = ''; };
   // 완료 체크 → 100%, 진행 바 → 라벨 갱신
   document.querySelectorAll('[data-jr-task]').forEach(row => {
     const done = row.querySelector('[data-jr-done]');
     const rng = row.querySelector('[data-jr-pct]');
     const pct = row.querySelector('.pct');
     const tt = row.querySelector('.tt');
+    const memo = row.querySelector('[data-jr-memo]');
     if (rng) rng.oninput = () => {
       pct.textContent = rng.value + '%';
       if (+rng.value === 100) { done.checked = true; tt.classList.add('done'); }
       else if (done.checked) { done.checked = false; tt.classList.remove('done'); }
+      jrDirty();
     };
     if (done) done.onchange = () => {
       tt.classList.toggle('done', done.checked);
       if (done.checked) { rng.value = 100; pct.textContent = '100%'; }
+      jrDirty();
     };
+    if (memo) memo.oninput = jrDirty;
   });
   const sv = $('btn-jr-save');
   if (sv) sv.onclick = async () => {
