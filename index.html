@@ -31,6 +31,20 @@
   // v1.9.922: 로그인 시 항상 Google 계정 선택창 표시 — 다른 계정으로 잘못 로그인되는 것 방지
   provider.setCustomParameters({ prompt: 'select_account' });
 
+  // v2.3.658: 직원용 계정 플래그가 있으면 인증 확인이 끝날 때까지 화면 전체를 가린다.
+  //   임원용 UI 는 인증보다 먼저 그려지므로, 직원 브라우저에서 대시보드가 몇 초 비치는
+  //   문제(실제 발생)를 즉시 가림막으로 막는다. 임원이 같은 브라우저를 쓰는 경우를 위해
+  //   인증 흐름이 '직원 아님' 으로 확인되면 플래그·가림막을 걷는다.
+  try {
+    if (localStorage.getItem('reniv_staff_account') === '1') {
+      const _ov = document.createElement('div');
+      _ov.id = 'staff-gate-overlay';
+      _ov.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#f6f7fa;display:flex;align-items:center;justify-content:center;font-family:sans-serif;color:#46536a;font-size:14px';
+      _ov.textContent = '계정 확인 중…';
+      (document.body || document.documentElement).appendChild(_ov);
+    }
+  } catch(_){}
+
   // 관리자 이메일 (화이트리스트) — 이 목록에 있는 Google 계정만 자동 관리자 권한을 부여받습니다.
   // ⚠️ 보안: null로 두면 "첫 로그인 = 관리자" 가 되어 외부인이 권한을 선점할 위험이 있습니다.
   const ADMIN_EMAILS = ['reniv.cto@gmail.com'];
@@ -93,6 +107,16 @@
           const _staffGate = await getDoc(doc(db, 'staff_users', user.uid));
           if (_staffGate.exists()) {
             console.warn('🔐 [AUTH] 직원용 계정 — 임원용 진입 전면 차단, 직원 ERP 로 이동');
+            // v2.3.658: ① 다음 방문부터 대시보드가 비치지 않게 플래그 기록
+            //   ② 이 기기에 남은 임원용 캐시(localStorage·IDB — 재무 등 민감 데이터) 청소.
+            //   실제로 직원 브라우저에 지급예정 금액이 캐시로 떠 있었다.
+            try { localStorage.setItem('reniv_staff_account', '1'); } catch(_){}
+            try {
+              Object.keys(localStorage)
+                .filter(k => k.indexOf('reniv_') === 0 && k !== 'reniv_staff_account')
+                .forEach(k => { try { localStorage.removeItem(k); } catch(_){} });
+            } catch(_){}
+            try { indexedDB.deleteDatabase('reniv_idb'); } catch(_){}
             document.body.innerHTML = `
               <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f6f7fa;padding:20px;font-family:'Malgun Gothic',-apple-system,sans-serif">
                 <div style="background:#fff;border:1px solid #e6e9f0;border-radius:20px;padding:40px 36px;max-width:440px;text-align:center;box-shadow:0 4px 14px rgba(27,36,48,.08)">
@@ -109,6 +133,13 @@
             return;
           }
         } catch(_) { /* staff 확인 실패(권한 등) → 직원 아님으로 보고 기존 흐름 */ }
+
+        // v2.3.658: 여기 도달 = 직원 아님 — 플래그·가림막을 걷는다 (임원이 같은 브라우저를 쓰는 경우)
+        try {
+          localStorage.removeItem('reniv_staff_account');
+          const _ovDone = document.getElementById('staff-gate-overlay');
+          if (_ovDone) _ovDone.remove();
+        } catch(_){}
 
         // Firestore에서 사용자 상태 확인
         const userRef = doc(db, 'users', user.uid);
@@ -232,6 +263,8 @@
       _tryShowERP(0);
     } else {
       window._currentUser = null;
+      // v2.3.658: 로그아웃 상태 — 가림막이 로그인 화면을 덮지 않게 걷는다 (플래그는 유지)
+      try { const _ovOut = document.getElementById('staff-gate-overlay'); if (_ovOut) _ovOut.remove(); } catch(_){}
       // v1.9.737: showLoginScreen 도 동일 패턴
       const _tryShowLogin = (attempts) => {
         if (typeof window.showLoginScreen === 'function') {
@@ -6256,7 +6289,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.657';
+const ERP_VERSION = 'v2.3.658';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
