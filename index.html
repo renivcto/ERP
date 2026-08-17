@@ -6338,7 +6338,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.665';
+const ERP_VERSION = 'v2.3.666';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58617,6 +58617,61 @@ function _staffWfPayload() {
   });
 }
 async function _staffMirrorWorkflow() { return _staffPush('workflow', _staffWfPayload()); }
+
+/* ══════════ v2.3.666 — 직원용 데이터 미러 1단계 (기획서(2) 슬라이드 1·4·6·8) ══════════
+   ⚠️ 고객정보·원가는 '화면에서 숨김' 이 아니라 여기서 **아예 넣지 않는다.**
+      공개 저장소 정적 앱이라 화면 숨김은 보안이 아니다. */
+const _STAFF_PII_DENY = ['customerName','customerPhone','customerEmail','recipientName','recipientPhone',
+  'phone','email','address','addressDetail','zipCode','receiver','buyer','buyerName','buyerPhone'];
+function _staffStripPii(o) {   // 허용목록으로 만든 뒤 금지목록으로 한 번 더 거른다
+  const out = {};
+  Object.keys(o || {}).forEach(k => { if (_STAFF_PII_DENY.indexOf(k) < 0) out[k] = o[k]; });
+  return out;
+}
+function _staffPubImg(v) { return (typeof v === 'string' && v.indexOf('http') === 0) ? v : ''; }
+
+// 완제품 품목 — 원가(price)·재고평가액은 넘기지 않는다
+function _staffItemsPayload() {
+  const sellers = {};
+  (DB.sellers || []).forEach(s => { if (s) sellers[String(s.id)] = s.company || ''; });
+  return (DB.items || []).filter(i => i && i.type === '완제품' && !i._archivedAt).map(i => _staffStripPii({
+    id: String(i.id), code: i.code || '', name: i.name || '', spec: i.spec || '',
+    channels: Array.isArray(i.channels) ? i.channels : (i.channels ? [i.channels] : []),
+    image: _staffPubImg(i.image || i.thumb), stock: Number(i.stock) || 0,
+    whStock: (i.whStock && typeof i.whStock === 'object') ? i.whStock : {},
+    defaultWh: i.defaultWh || '', minStock: Number(i.minStock) || 0,
+    salePrice: Number(i.actualSalePrice || i.salePrice) || 0,
+    supply: (Array.isArray(i.supplyPrices) ? i.supplyPrices : []).map(p => ({
+      seller: sellers[String(p && p.sellerId)] || '', price: Number(p && p.price) || 0 })).filter(p => p.seller),
+    note: i.note || ''
+  }));
+}
+async function _staffMirrorItems() { return _staffPush('items_fin', _staffItemsPayload()); }
+
+// 창고 목록 (이름만)
+function _staffWhPayload() {
+  const list = (window._WH && Array.isArray(window._WH.list)) ? window._WH.list : [];
+  return list.map(w => ({ id: String(w.id), name: w.name || '' }));
+}
+async function _staffMirrorWarehouses() { return _staffPush('warehouses', _staffWhPayload()); }
+
+// 주문 — 고객정보 없는 필드만. 최신순으로 담아 용량 초과 시 오래된 것부터 잘린다.
+const _STAFF_ORDER_FIELDS = ['id','orderNo','orderDate','shopId','shopName','productName','qty',
+  'paymentAmount','status','stockStatus','note'];
+function _staffOrdersPayload() {
+  const shops = {};
+  (DB.shops || []).forEach(s => { if (s) shops[String(s.id)] = s.name || ''; });
+  return (DB.shopOrders || []).map(o => {
+    const r = {};
+    _STAFF_ORDER_FIELDS.forEach(k => { if (o && o[k] != null) r[k] = o[k]; });
+    r.id = String(r.id || '');
+    if (!r.shopName && r.shopId) r.shopName = shops[String(r.shopId)] || '';
+    return _staffStripPii(r);
+  }).sort((a, b) => String(b.orderDate || '').localeCompare(String(a.orderDate || '')));
+}
+async function _staffMirrorOrders() { return _staffPush('orders', _staffOrdersPayload()); }
+window._staffMirrorItems = _staffMirrorItems;
+window._staffMirrorOrders = _staffMirrorOrders;
 window._staffMirrorWorkflow = _staffMirrorWorkflow;
 
 /* v2.3.662 — 외부 계정 미러. 이관(1회)에서 연동(자동)으로 바뀌었다.
@@ -58659,6 +58714,9 @@ function _staffMirrorCalendarThrottled() {
     setTimeout(() => {
       _staffMirrorCalendar().catch(() => {});
       _staffMirrorWorkflow().catch(() => {});   // v2.3.665
+      _staffMirrorItems().catch(() => {});      // v2.3.666
+      _staffMirrorWarehouses().catch(() => {});
+      _staffMirrorOrders().catch(() => {});
     }, 4000);
   } catch(_) {}
 }
@@ -58712,9 +58770,12 @@ window.staffMirrorNow = async function() {
   const calendar = await _staffMirrorCalendar();
   const accounts = await _staffMirrorAccounts();
   const workflow = await _staffMirrorWorkflow();
+  const items = await _staffMirrorItems();
+  const warehouses = await _staffMirrorWarehouses();
+  const orders = await _staffMirrorOrders();
   try { localStorage.setItem('reniv_staff_cal_push', String(Date.now())); } catch(_) {}
-  console.log('👥 직원용 미러 재동기:', { board, calendar, accounts, workflow });
-  return { board, calendar, accounts, workflow };
+  console.log('👥 직원용 미러 재동기:', { board, calendar, accounts, workflow, items, warehouses, orders });
+  return { board, calendar, accounts, workflow, items, warehouses, orders };
 };
 
 // v2.3.601: 공용 API Key 전용 저장 — 서버에 실제로 반영됐는지 되읽어 확인한다.

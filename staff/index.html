@@ -297,6 +297,18 @@ tr:last-child td { border-bottom:none; }
 .df-card .b { display:flex; gap:6px; margin-top:10px; }
 .df-pin { background:linear-gradient(135deg,#fffbeb,#fef3c7); border:1px solid #fde68a; border-radius:10px; padding:12px; margin-bottom:16px; }
 .df-pin .h { font-size:11.5px; font-weight:800; color:#b45309; margin-bottom:8px; }
+/* 임원용 연동 데이터 화면 (v0.28.0) */
+.dp-wrap { overflow-x:auto; }
+.dp-tb { min-width:880px; }
+.dp-tb td, .dp-tb th { padding:8px 7px; }
+.dp-tb .nm { font-weight:700; text-align:left; }
+.dp-img { width:34px; height:34px; border-radius:6px; object-fit:cover; border:1px solid var(--line); }
+.dp-chip { display:inline-block; border-radius:99px; padding:1px 8px; font-size:10.5px; font-weight:700;
+  background:var(--brand-soft); color:var(--brand-deep); }
+.dp-ro { display:inline-flex; align-items:center; gap:6px; background:#f1f5f9; color:#475569; border:1px solid var(--line);
+  border-radius:8px; padding:6px 12px; font-size:12px; font-weight:700; }
+.dp-wh { font-size:11.5px; color:var(--ink-soft); white-space:nowrap; text-align:right; }
+.dp-wh b { color:var(--ink); }
 /* 르니브 업무 일정 (v0.18.0) */
 .cal-nav { display:flex; align-items:center; gap:8px; margin-left:auto; }
 .cal-nav .btn-sm { padding:4px 10px; }
@@ -721,7 +733,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.27.0';
+const STAFF_VERSION = 'v0.28.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -763,6 +775,10 @@ let BOARD = [];             // staff_data/board       — 임원용이 '직원�
 let BOARD_S = [];           // staff_data/board_staff — 직원이 직접 등록한 글
 let CAL = [];               // staff_data/calendar    — 르니브 업무 일정 미러 (압축: 시작일 + days)
 let WF = [];                // staff_data/workflow    — 워크플로우 3개 보드 (신제품 개발 제외)
+let ITEMS = [];             // staff_data/items_fin   — 완제품 품목 (원가·재고평가액 제외, 읽기 전용)
+let WHS = [];               // staff_data/warehouses  — 창고 목록
+let ORDERS = [];            // staff_data/orders      — 주문 (고객정보 없음, 읽기 전용)
+let ITEM_Q = '', STOCK_Q = '', ORD_Q = '';
 let GDOCS = [];             // staff_data/gdocs       — 자료실 문서 공유 (직원 등록)
 let DRIVE = [];             // staff_data/drive       — 자료실 드라이브 폴더 (직원 등록)
 let DF_CAT = null;          // 드라이브 카테고리 필터
@@ -929,6 +945,26 @@ if (DEMO) {
     { key: 'homeshop', name: '홈쇼핑 준비', icon: '🏠', color: '#b91c1c', owner: '', url: '',
       lists: [{ id: 'H1', name: '준비' }],
       cards: [{ id: 'h1', idList: 'H1', name: '방송 대본 검토', url: '', due: '', done: false, labels: [], cover: '' }] },
+  ];
+  WHS = [{ id: 'w1', name: '르니브 창고' }, { id: 'w2', name: '쿠팡 창고' }, { id: 'w3', name: '바로팜 창고' }];
+  ITEMS = [
+    { id: 'i1', code: 'P-3X-02', name: '3중 장벽 20층 리뉴 크림 30ml', spec: '30mL / NET WT. 1.06 OZ',
+      channels: ['온라인'], image: '', stock: 1985, whStock: { w2: 225, w1: 1760 }, defaultWh: 'w1',
+      minStock: 100, salePrice: 27900, supply: [{ seller: '쿠팡 Wing', price: 27900 }], note: '' },
+    { id: 'i2', code: 'P-3X-03', name: '3중 장벽 20층 리뉴 크림 60ml', spec: '60mL / NET WT. 2.13 OZ',
+      channels: ['약국'], image: '', stock: 3443, whStock: { w3: 157, w1: 3286 }, defaultWh: 'w1',
+      minStock: 200, salePrice: 39000, supply: [{ seller: '바로팜', price: 39000 }], note: '' },
+    { id: 'i3', code: 'P-GS-01', name: '글로우샷 30ml', spec: '30ml', channels: ['약국'], image: '',
+      stock: 5742, whStock: { w3: 113, w1: 5629 }, defaultWh: 'w1', minStock: 0, salePrice: 32000,
+      supply: [{ seller: '바로팜', price: 32000 }], note: '' },
+  ];
+  ORDERS = [
+    { id: 'o1', orderNo: 'BP-2026-0812', orderDate: '2026-08-12', shopName: '바로팜',
+      productName: '3중 장벽 20층 리뉴 크림 60ml', qty: 30, paymentAmount: 1170000, status: '배송완료', stockStatus: '출고완료' },
+    { id: 'o2', orderNo: 'CP-2026-0814', orderDate: '2026-08-14', shopName: '쿠팡',
+      productName: '글로우샷 30ml', qty: 4, paymentAmount: 128000, status: '배송중', stockStatus: '출고완료' },
+    { id: 'o3', orderNo: 'SS-2026-0816', orderDate: '2026-08-16', shopName: '스마트스토어',
+      productName: '3중 장벽 20층 리뉴 크림 30ml', qty: 1, paymentAmount: 27900, status: '결제완료', stockStatus: '대기' },
   ];
   GDOCS = [
     { id: 'g1', type: 'sheets', title: '르니브 운영계획표', url: 'https://docs.google.com/spreadsheets/d/demo' },
@@ -1148,6 +1184,12 @@ function subscribeData() {
     e => console.warn('[calendar]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'workflow'), s => { WF = parseCol(s, []); rerender(); },
     e => console.warn('[workflow]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'items_fin'), s => { ITEMS = parseCol(s, []); rerender(); },
+    e => console.warn('[items]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'warehouses'), s => { WHS = parseCol(s, []); rerender(); },
+    e => console.warn('[warehouses]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'orders'), s => { ORDERS = parseCol(s, []); rerender(); },
+    e => console.warn('[orders]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'gdocs'), s => { GDOCS = parseCol(s, []); rerender(); },
     e => console.warn('[gdocs]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'drive'), s => { DRIVE = parseCol(s, []); rerender(); },
@@ -2006,6 +2048,9 @@ function renderPage() {
     case 'adm-journal': m.innerHTML = pageAdmJournal(); wireAdmJournal(); break;
     case 'partners': m.innerHTML = pagePartners(); wirePt('pt'); break;
     case 'accounts': m.innerHTML = pageAccounts(); wireAccounts(); break;
+    case 'items':    m.innerHTML = pageItems(); wireDataPage(); break;
+    case 'stock':    m.innerHTML = pageStock(); wireDataPage(); break;
+    case 'sales':    m.innerHTML = pageSales(); wireDataPage(); break;
     case 'workflow': m.innerHTML = pageWorkflow(); wireWorkflow(); break;
     case 'board':    m.innerHTML = pageBoard(); wireBoard(); break;
     case 'calendar': m.innerHTML = pageCalendar(); wireCalendar(); break;
@@ -3449,6 +3494,132 @@ $('btn-board-save').onclick = async () => {
   catch (e) { BOARD_S = keep; toast('저장 실패: ' + e.message, true); }
 };
 
+/* ═══════════ 임원용 연동 데이터 — 1단계 읽기 전용 (v0.28.0) ═══════════
+   기획서(2) 슬라이드 1·4·6·8.
+   ⚠️ 원가·재고평가액·고객정보는 화면에서 숨기는 게 아니라 미러에 아예 없다.
+      임원용 _staffItemsPayload / _staffOrdersPayload 가 넣지 않는다. */
+function whName(id) { const w = (WHS || []).find(x => String(x.id) === String(id)); return w ? w.name : ''; }
+function itemWhRows(it) {
+  const ws = it && it.whStock ? it.whStock : {};
+  return Object.keys(ws).filter(k => Number(ws[k])).map(k => ({ name: whName(k) || '미지정', qty: Number(ws[k]) }));
+}
+function dpFilter(list, q, fields) {
+  const s = String(q || '').trim().toLowerCase();
+  if (!s) return list;
+  return list.filter(x => fields.some(f => String(x[f] == null ? '' : x[f]).toLowerCase().indexOf(s) >= 0));
+}
+function dpSearch(id, ph) {
+  return `<input class="df-search" id="${id}" placeholder="🔍 ${ph}" style="width:230px" value="${esc(
+    id === 'dp-q-item' ? ITEM_Q : id === 'dp-q-stock' ? STOCK_Q : ORD_Q)}">`;
+}
+const DP_RO = '<span class="dp-ro">🔒 읽기 전용 — 수정은 임원용 ERP에서 합니다</span>';
+function dpEmpty(what) {
+  return `<div class="ph"><div class="big">📭</div><h3>${what} 데이터가 아직 없습니다</h3>
+    <p>임원용 ERP를 한 번 열면 자동으로 넘어옵니다. 즉시 반영이 필요하면 임원용 콘솔에서
+       <b>staffMirrorNow()</b> 를 실행하세요.</p></div>`;
+}
+
+/* ── 품목 정보 (완제품, 원가·재고평가액 없음) ── */
+function pageItems() {
+  const list = dpFilter(ITEMS || [], ITEM_Q, ['name', 'code', 'spec']);
+  return `<div class="pg on">
+    <div class="pg-h"><h1>품목 정보<sup class="sync" style="font-size:13px" title="임원용 ERP에서 단방향으로 연동됩니다"> ⓘ</sup></h1>
+      <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${dpSearch('dp-q-item', '품목명·코드 검색')}</span></div>
+    <div class="pg-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      완제품 ${(ITEMS || []).length}건 · 원가와 재고평가액은 표시되지 않습니다 ${DP_RO}</div>
+    ${list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb">
+      <thead><tr><th>분류</th><th>품목코드</th><th>판매채널</th><th>품목명</th><th>이미지</th><th>용량</th>
+        <th>창고 재고</th><th>판매업체</th><th>판매가</th></tr></thead><tbody>
+      ${list.map(i => `<tr>
+        <td><span class="dp-chip">완제품</span></td>
+        <td style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px">${esc(i.code || '-')}</td>
+        <td>${(i.channels || []).map(c => `<span class="dp-chip" style="background:#fee2e2;color:#b91c1c">${esc(c)}</span>`).join(' ') || '-'}</td>
+        <td class="nm">${esc(i.name)}</td>
+        <td>${i.image ? `<img class="dp-img" src="${esc(i.image)}" alt="">` : '<span style="color:var(--ink-mute)">-</span>'}</td>
+        <td style="font-size:12px">${esc(i.spec || '-')}</td>
+        <td class="dp-wh">${itemWhRows(i).map(w => `${esc(w.name)} <b>${w.qty.toLocaleString()}</b>`).join('<br>')
+          || `<b>${Number(i.stock || 0).toLocaleString()}</b>`}</td>
+        <td style="font-size:12px">${(i.supply || []).map(sp => esc(sp.seller)).join('<br>') || '-'}</td>
+        <td style="white-space:nowrap">${(i.supply || []).length
+          ? i.supply.map(sp => '₩' + Number(sp.price || 0).toLocaleString()).join('<br>')
+          : (i.salePrice ? '₩' + Number(i.salePrice).toLocaleString() : '-')}</td></tr>`).join('')}
+      </tbody></table></div></div>`
+      : ((ITEMS || []).length ? '<div class="empty">검색 결과가 없습니다</div>' : dpEmpty('품목'))}
+  </div>`;
+}
+
+/* ── 재고 관리 — 재고 현황 (재고평가액 없음) ── */
+function pageStock() {
+  const list = dpFilter(ITEMS || [], STOCK_Q, ['name', 'code']);
+  const low = (ITEMS || []).filter(i => i.minStock && Number(i.stock) < Number(i.minStock)).length;
+  return `<div class="pg on">
+    <div class="pg-h"><h1>재고 관리<sup class="sync" style="font-size:13px" title="임원용 ERP와 연동됩니다"> ⓘ</sup></h1>
+      <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${dpSearch('dp-q-stock', '품목명·코드 검색')}</span></div>
+    <div class="pg-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      완제품 ${(ITEMS || []).length}건${low ? ` · <b style="color:var(--bad)">안전재고 미만 ${low}건</b>` : ''} ·
+      재고평가액은 표시되지 않습니다 ${DP_RO}</div>
+    ${list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb">
+      <thead><tr><th>분류</th><th>품목코드</th><th>품목명</th><th>용량</th><th>재고 위치</th><th>재고 수량</th><th>합계</th><th>안전재고</th></tr></thead><tbody>
+      ${list.map(i => {
+        const rows = itemWhRows(i);
+        const total = Number(i.stock) || 0;
+        const isLow = i.minStock && total < Number(i.minStock);
+        return `<tr>
+          <td><span class="dp-chip">완제품</span></td>
+          <td style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px">${esc(i.code || '-')}</td>
+          <td class="nm">${esc(i.name)}</td>
+          <td style="font-size:12px">${esc(i.spec || '-')}</td>
+          <td style="font-size:12px;text-align:right">${rows.map(w => esc(w.name)).join('<br>') || '-'}</td>
+          <td style="text-align:right;font-weight:700">${rows.map(w => w.qty.toLocaleString()).join('<br>') || '-'}</td>
+          <td style="font-weight:800;color:${isLow ? 'var(--bad)' : 'var(--ink)'}">${total.toLocaleString()}</td>
+          <td style="font-size:12px;color:var(--ink-mute)">${i.minStock ? Number(i.minStock).toLocaleString() : '-'}</td></tr>`;
+      }).join('')}</tbody></table></div></div>`
+      : ((ITEMS || []).length ? '<div class="empty">검색 결과가 없습니다</div>' : dpEmpty('재고'))}
+    <div class="ph" style="margin-top:16px;padding:22px"><div class="big">🚧</div>
+      <h3>위탁 재고이동 · 창고 관리 · 입출고 처리는 다음 단계입니다</h3>
+      <p>이 기능들은 직원이 <b>쓰기</b>를 하므로, 직원이 쓴 내용을 임원용으로 되돌리는 구조가 함께 필요합니다.</p></div>
+  </div>`;
+}
+
+/* ── 판매 관리 — 주문 관리 (고객정보 없음, 읽기 전용) ── */
+function pageSales() {
+  const list = dpFilter(ORDERS || [], ORD_Q, ['orderNo', 'productName', 'shopName']).slice(0, 500);
+  const sum = list.reduce((s, o) => s + (Number(o.paymentAmount) || 0), 0);
+  return `<div class="pg on">
+    <div class="pg-h"><h1>판매 관리<sup class="sync" style="font-size:13px" title="임원용 ERP와 연동됩니다"> ⓘ</sup></h1>
+      <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${dpSearch('dp-q-ord', '주문번호·품목·쇼핑몰 검색')}</span></div>
+    <div class="pg-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      주문 ${(ORDERS || []).length}건 · 고객명·연락처·주소는 직원용에 넘어오지 않습니다 ${DP_RO}</div>
+    ${list.length ? `<div class="card"><div class="card-h">📦 주문 관리 <span class="sub">${list.length}건 표시${(ORDERS || []).length > 500 ? ' (최신 500건)' : ''} · 합계 ₩${sum.toLocaleString()}</span></div>
+      <div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb">
+      <thead><tr><th>주문일</th><th>주문번호</th><th>쇼핑몰</th><th>품목</th><th>수량</th><th>결제금액</th><th>주문상태</th><th>출고</th></tr></thead><tbody>
+      ${list.map(o => `<tr>
+        <td style="white-space:nowrap">${esc(o.orderDate || '-')}</td>
+        <td style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px">${esc(o.orderNo || '-')}</td>
+        <td>${esc(o.shopName || '-')}</td>
+        <td class="nm" style="font-weight:600">${esc(o.productName || '-')}</td>
+        <td style="text-align:right">${o.qty != null ? Number(o.qty).toLocaleString() : '-'}</td>
+        <td style="text-align:right;font-weight:700;white-space:nowrap">${o.paymentAmount != null ? '₩' + Number(o.paymentAmount).toLocaleString() : '-'}</td>
+        <td>${o.status ? `<span class="chip ok">${esc(o.status)}</span>` : '-'}</td>
+        <td style="font-size:12px">${esc(o.stockStatus || '-')}</td></tr>`).join('')}
+      </tbody></table></div></div>`
+      : ((ORDERS || []).length ? '<div class="empty">검색 결과가 없습니다</div>' : dpEmpty('주문'))}
+    <div class="ph" style="margin-top:16px;padding:22px"><div class="big">🚧</div>
+      <h3>위탁 재고이동 · 광고비 관리는 다음 단계입니다</h3>
+      <p>기획서대로 이 두 메뉴도 들어옵니다. 매출 대시보드와 마진 분석은 넣지 않습니다(원가 비공개).</p></div>
+  </div>`;
+}
+/* 검색은 그 페이지만 다시 그리면 되지만, 표가 통째로 바뀌므로 renderPage 로 충분하다.
+   대신 입력값을 상태에 담아 두어 다시 그린 뒤 포커스를 복원한다. */
+function wireDataPage() {
+  [['dp-q-item', v => ITEM_Q = v], ['dp-q-stock', v => STOCK_Q = v], ['dp-q-ord', v => ORD_Q = v]].forEach(([id, set]) => {
+    const el = $(id);
+    if (!el) return;
+    el.oninput = () => { const pos = el.selectionStart; set(el.value); renderPage();
+      const n = $(id); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (_) {} } };
+  });
+}
+
 /* ═══════════ 워크플로우 (v0.26.0 · 기획서 p11) ═══════════
    임원용 Trello 보드 3개(르니브 운영 본부·약국 영업·홈쇼핑 준비)를 읽기 전용으로 보여준다.
    ⚠️ 신제품 개발은 임원용 전용이라 미러에 아예 넘어오지 않는다.
@@ -3640,10 +3811,7 @@ function wireCalendar() { wireCalCommon(); }
 /* ═══════ 플레이스홀더 — 기획서 p5 "우선 메뉴만" ═══════ */
 const PH = {
   approval:  { ico: '🖋️', t: '결재 관리', d: '지출 결의서와 일반 결재 품의서를 작성합니다. 결재라인 지정 후 1차 결재(전결 가능) → 2차 본부장(전결 가능) → 3차 대표이사 순으로 진행되며, 작성된 문서는 임원용 ERP에도 연동됩니다. 임원용 ERP의 결재 데이터는 여기에 보이지 않습니다.', sync: true },
-  sales:     { ico: '🛒', t: '판매 관리', d: '주문관리 · 위탁 재고이동 · 광고비 관리 세 메뉴가 임원용과 연동됩니다. 주문관리에서 고객정보는 표시되지 않습니다.', sync: true },
   pharmacy:  { ico: '💊', t: '약국 관리', d: '약사 CS 관리와 약국 리스트가 임원용과 연동됩니다. 일반 고객 정보는 공개되지 않습니다.', sync: true },
-  items:     { ico: '🧴', t: '품목 정보', d: '완제품만 표시되며 원가·재고평가액은 보이지 않습니다. 임원용에서 연동되는 읽기 전용 메뉴입니다.', sync: true },
-  stock:     { ico: '🏬', t: '재고 관리', d: '완제품 재고와 위탁 재고이동 · 창고 관리가 임원용과 연동됩니다 (완제품만 가능).', sync: true },
   newproduct:{ ico: '🌱', t: '신제품 개발', d: '임원용과 읽기·쓰기 모두 연동됩니다. 수익성 탭은 표시되지 않습니다.', sync: true },
 };
 function pagePlaceholder(id) {
