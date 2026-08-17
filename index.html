@@ -5714,6 +5714,14 @@ EXP YYYYMMDD 까지</textarea></div>
           📌 상단 고정 (중요 공지)
         </label>
       </div>
+      <!-- v2.3.660: 직원용 ERP 게시 (기획서 p10) — 체크한 글만 직원용 게시판으로 넘어간다 -->
+      <div class="fg" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px">
+        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;font-size:13px;color:#4338ca;font-weight:700">
+          <input type="checkbox" id="feed-post-staff" style="cursor:pointer">
+          👥 직원용 ERP에도 게시
+        </label>
+        <span style="font-size:12px;color:#94a3b8">체크한 글만 직원용 ERP 운영 업무 게시판에 보입니다</span>
+      </div>
     </div>
     <div class="modal-ft" style="padding:16px 24px;gap:10px">
       <button class="btn btn-outline" onclick="_closeGuard('feed-post',true)">취소</button>
@@ -6308,7 +6316,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.659';
+const ERP_VERSION = 'v2.3.660';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12856,6 +12864,7 @@ function renderDashboard() {
   renderDashProdTable();
   renderDashTimeline();
   try { renderDashCalendar(); } catch(_){}  // v2.3.435: 르니브 업무 일정 캘린더
+  try { _staffMirrorCalendarThrottled(); } catch(_){}  // v2.3.660: 직원용 ERP 일정 미러
   renderDashKPI();
   renderDashKanban();
 }
@@ -35901,6 +35910,7 @@ function renderFeedCardHtml(p){
       </div>
       <span class="feed-eyebrow" style="color:#cbd5e1">·</span>
       <span class="feed-cat-badge" style="background:${cat.bg};color:${cat.fg}">${cat.icon} ${cat.label}</span>
+      ${p.staffShare ? '<span class="feed-cat-badge" style="background:#eef2ff;color:#4338ca" title="직원용 ERP 운영 업무 게시판에 게시됨">👥 직원 게시</span>' : ''}
       <span class="feed-eyebrow" style="color:#cbd5e1">·</span>
       <span class="feed-eyebrow" style="color:#94a3b8">${feedTimeAgo(p.createdAt)}${p.updatedAt && p.updatedAt !== p.createdAt ? ' · EDITED' : ''}</span>
       ${isNew ? '<span class="feed-new-badge">NEW</span>' : ''}
@@ -36234,6 +36244,7 @@ function openFeedPostModal(postId){
   document.getElementById('feed-post-summary').value = '';
   // v1.9.278: AI 요약 박스는 항상 보이게 유지 (display 토글 제거)
   document.getElementById('feed-post-pinned').checked = false;
+  { const _sf = document.getElementById('feed-post-staff'); if (_sf) _sf.checked = false; }
   document.getElementById('feed-post-file').value = '';
   if (postId) {
     // v1.9.345: id 타입 안전 비교 — Firestore 직렬화 후 string/number 혼재 가능
@@ -36253,6 +36264,7 @@ function openFeedPostModal(postId){
         }
       }
       document.getElementById('feed-post-pinned').checked = !!p.pinned;
+      { const _sf = document.getElementById('feed-post-staff'); if (_sf) _sf.checked = !!p.staffShare; }
       _feedEditingCategory = p.category || 'free';
       _feedEditingImages = Array.isArray(p.images) ? [...p.images] : [];
       _feedAttachments = Array.isArray(p.files) ? p.files.map(f => Object.assign({}, f)) : [];  // v2.3.238
@@ -36478,6 +36490,8 @@ async function saveFeedPost(){
   const content = _sanitizeFeedHtml(rawHtml);
   const plainCheck = content.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
   const pinned = document.getElementById('feed-post-pinned').checked;
+  const _staffShareEl = document.getElementById('feed-post-staff');       // v2.3.660
+  const staffShare = _staffShareEl ? _staffShareEl.checked : false;
   const aiSummary = (document.getElementById('feed-post-summary').value||'').trim();
   if (!title) { showNotif('제목을 입력해주세요', 'warning'); return; }
   if (!plainCheck) { showNotif('본문을 입력해주세요', 'warning'); return; }
@@ -36501,6 +36515,7 @@ async function saveFeedPost(){
       p.images = _newImgs;
       p.files = _newFiles;  // v2.3.238
       p.pinned = pinned;
+      p.staffShare = staffShare;   // v2.3.660
       p.aiSummary = aiSummary;
       p.updatedAt = now;
     } else {
@@ -36531,7 +36546,7 @@ async function saveFeedPost(){
       images: [..._feedEditingImages],
       files: _feedAttachments.map(f => Object.assign({}, f)),  // v2.3.238
       imagesUpdatedAt: now, filesUpdatedAt: now,  // v2.3.241
-      pinned, aiSummary,
+      pinned, staffShare, aiSummary,
       authorName: u.name,
       authorEmail: u.email,
       createdAt: now,
@@ -36636,6 +36651,9 @@ async function saveFeedPost(){
     return;
   }
 
+  // v2.3.660: 직원용 게시판 미러 갱신 (체크된 글만 — 체크 해제 시 직원 화면에서도 내려간다)
+  try { await _staffMirrorBoard(); } catch(e) { console.warn('직원용 미러 실패:', e); }
+
   // v2.3.404: 저장 완료 → 버튼을 '저장이 완료되었습니다'(초록)로 바꿔 명확히 표시
   if (saveBtn) {
     saveBtn.style.background = '#16a34a'; saveBtn.style.borderColor = '#15803d'; saveBtn.style.color = '#fff';
@@ -36738,6 +36756,7 @@ async function deleteFeedPost(id){
   try {
     if (typeof saveDataNow === 'function') await saveDataNow();
     else if (typeof saveData === 'function') saveData();
+    try { await _staffMirrorBoard(); } catch(_){}   // v2.3.660: 삭제분을 직원 게시판에서도 내린다
   } catch(e) {
     console.error('피드 삭제 Firestore 동기화 실패:', e);
     try { showNotif('⚠️ 클라우드 삭제 동기화 실패 — 새로고침 시 글이 복원될 수 있습니다', 'warning'); } catch(_){}
@@ -58429,6 +58448,95 @@ async function saveSharedSetting(key, value) {
   try { localStorage.setItem('reniv_shared_' + key, JSON.stringify(value)); } catch(e) {}
   return fsOk;
 }
+
+/* ══════════ v2.3.660 — 직원용 ERP 미러 (기획서 p10·p11) ══════════
+   직원 계정은 firestore.rules 상 erp_data 를 읽을 수 없다(v2.4.4). 그래서
+   '직원에게 보여줄 것만' 임원용이 staff_data/* 로 밀어 넣는다. 단방향이다.
+     staff_data/board    ← 운영 업무 공유 중 '직원용 ERP에도 게시' 체크된 글
+     staff_data/calendar ← 르니브 업무 일정 (전체 종합)
+   ⚠️ 직원 앱이 쓰는 문서(board_staff 등)와 이름이 겹치면 안 된다 —
+      이 미러는 문서를 통째로 덮어쓰므로 직원이 쓴 글이 날아간다. */
+const _STAFF_MIRROR_MAX = 700 * 1024;   // Firestore 1MB 한도 여유분
+
+async function _staffPush(docId, arr) {
+  if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return false;
+  let list = Array.isArray(arr) ? arr : [];
+  let json = JSON.stringify(list);
+  let dropped = 0;
+  // 한도 초과 시 뒤(=오래된/먼 미래)부터 덜어낸다. 호출부가 중요한 것을 앞에 둔다.
+  while (json.length > _STAFF_MIRROR_MAX && list.length > 1) {
+    list = list.slice(0, list.length - 1); dropped++; json = JSON.stringify(list);
+  }
+  if (dropped) console.warn('👥 [직원용 미러] ' + docId + ': 용량 초과로 ' + dropped + '건 제외');
+  try {
+    await window._firestoreSetDoc(
+      window._firestoreDoc(window._firebaseDb, 'staff_data', docId),
+      { data: json, ts: Date.now() });
+    console.log('👥 [직원용 미러] ' + docId + ': ' + list.length + '건 (' + Math.round(json.length / 1024) + 'KB)');
+    return true;
+  } catch(e) { console.warn('👥 [직원용 미러] ' + docId + ' 실패:', e && e.message); return false; }
+}
+
+// 운영 업무 공유 → 직원 게시판. base64 이미지는 빼고 공개 URL 만 넘긴다(용량).
+function _staffBoardPayload() {
+  return (DB.feedPosts || [])
+    .filter(p => p && p.staffShare)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    .map(p => {
+      const cat = (typeof feedCatInfo === 'function')
+        ? feedCatInfo(p.category)
+        : { label: p.category || '자유', icon: '📌', bg: '#f8fafc', fg: '#475569' };
+      return {
+        id: String(p.id), title: p.title || '', content: p.content || '',
+        cat: p.category || 'free', catLabel: cat.label, catIcon: cat.icon || '📌',
+        catBg: cat.bg, catFg: cat.fg,
+        by: p.authorName || '익명', pinned: !!p.pinned,
+        images: (Array.isArray(p.images) ? p.images : [])
+          .filter(s => typeof s === 'string' && s.indexOf('http') === 0).slice(0, 6),
+        createdAt: p.createdAt || '', updatedAt: p.updatedAt || ''
+      };
+    });
+}
+async function _staffMirrorBoard() { return _staffPush('board', _staffBoardPayload()); }
+window._staffMirrorBoard = _staffMirrorBoard;
+
+// 업무 일정 → 직원 캘린더. 기간 이벤트는 시작일 1행 + days 로 압축(직원 앱이 펼친다).
+function _staffCalPayload() {
+  if (typeof _getAllTrelloEvents !== 'function' || typeof _ymd !== 'function') return [];
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const from = new Date(today); from.setDate(from.getDate() - 45);
+  const to = new Date(today); to.setDate(to.getDate() + 240);
+  const fY = _ymd(from), tY = _ymd(to);
+  return _getAllTrelloEvents('all')
+    .filter(e => e && !e.rangeIdx && e.date >= fY && e.date <= tY)
+    .map(e => ({
+      d: e.date, n: String(e.name || '').slice(0, 120),
+      b: e.board || '', i: e.boardIcon || '📌',
+      c: e.color || '#e2e8f0', t: e.textColor || '#334155',
+      days: e.rangeDays || 1, done: !!e.dueComplete,
+      ty: e.type || '', urg: e.urgency || ''
+    }))
+    .sort((a, b) => a.d.localeCompare(b.d));
+}
+async function _staffMirrorCalendar() { return _staffPush('calendar', _staffCalPayload()); }
+window._staffMirrorCalendar = _staffMirrorCalendar;
+
+// 홈을 열 때마다 쓰기가 나가지 않도록 6시간 스로틀. 즉시 반영은 staffMirrorNow().
+function _staffMirrorCalendarThrottled() {
+  try {
+    const last = Number(localStorage.getItem('reniv_staff_cal_push') || 0);
+    if (Date.now() - last < 6 * 60 * 60 * 1000) return;
+    localStorage.setItem('reniv_staff_cal_push', String(Date.now()));
+    setTimeout(() => { _staffMirrorCalendar().catch(() => {}); }, 4000);
+  } catch(_) {}
+}
+window.staffMirrorNow = async function() {
+  const board = await _staffMirrorBoard();
+  const calendar = await _staffMirrorCalendar();
+  try { localStorage.setItem('reniv_staff_cal_push', String(Date.now())); } catch(_) {}
+  console.log('👥 직원용 미러 재동기:', { board, calendar });
+  return { board, calendar };
+};
 
 // v2.3.601: 공용 API Key 전용 저장 — 서버에 실제로 반영됐는지 되읽어 확인한다.
 //   (키는 '전 직원이 읽을 수 있어야' 의미가 있으므로, 저장했다는 말만으론 부족)
