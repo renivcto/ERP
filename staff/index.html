@@ -392,7 +392,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.10.3';
+const STAFF_VERSION = 'v0.11.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -496,7 +496,7 @@ if (DEMO) {
   ATT = [
     { id: 'a1', uid: 'd1', type: 'in',  date: today(), time: '09:02:11', ts: Date.now() - 4 * 3600e3, ip: '121.140.22.10', ua: 'demo' },
     { id: 'a2', uid: 'd2', type: 'in',  date: today(), time: '08:55:47', ts: Date.now() - 4.2 * 3600e3, ip: '175.223.10.4', ua: 'demo' },
-    { id: 'a3', uid: 'd2', type: 'out', date: today(), time: '18:01:09', ts: Date.now() - 600e3, ip: '175.223.10.4', ua: 'demo' },
+    { id: 'a3', uid: 'd2', type: 'out', date: today(), time: '18:01:09', ts: Date.now() - 600e3, ip: '175.223.10.4', ua: 'demo', lunch: 'used' },
   ];
   demoStaff[0].lastSeen = Date.now() - 300e3;
   demoStaff[1].lastSeen = Date.now() - 3600e3;
@@ -725,6 +725,33 @@ function fmtDur(ms) {
   const m = Math.floor(ms / 60000);
   return Math.floor(m / 60) + '시간 ' + (m % 60) + '분';
 }
+/* ── 점심시간 (v0.11.0) — 기본 12~1시, 차감은 '겹치는 시간만' ── */
+const LUNCH = { s: 12 * 60, e: 13 * 60, label: '12~1시' };
+function _lunchOverlapMs(inTs, outTs) {
+  const d = new Date(inTs);
+  const base = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const ls = base + LUNCH.s * 60000, le = base + LUNCH.e * 60000;
+  return Math.max(0, Math.min(outTs, le) - Math.max(inTs, ls));
+}
+function workMs(inRec, outRec) {
+  // 점심 제외 근무 시간. 점심을 안 쓴 경우(out.lunch === 'none')는 제외하지 않는다.
+  if (!inRec) return 0;
+  const end = outRec ? outRec.ts : Date.now();
+  let ms = end - inRec.ts;
+  if (!outRec || outRec.lunch !== 'none') ms -= _lunchOverlapMs(inRec.ts, end);
+  return Math.max(0, ms);
+}
+function fmtDurS(ms) {
+  if (!(ms > 0)) return '-';
+  const s = Math.floor(ms / 1000);
+  return Math.floor(s / 3600) + '시간 ' + Math.floor((s % 3600) / 60) + '분 ' + (s % 60) + '초';
+}
+function lunchLabel(inRec, outRec) {
+  if (!inRec) return LUNCH.label;                                  // 기본값 표시
+  const end = outRec ? outRec.ts : Date.now();
+  if (_lunchOverlapMs(inRec.ts, end) <= 0) return '해당 없음';      // 점심과 안 겹치는 근무
+  return (outRec && outRec.lunch === 'none') ? '건너뜀 (연속 근무)' : LUNCH.label;
+}
 function _fmtSeen(ts) {
   if (!ts) return '-';
   const d = new Date(Number(ts));
@@ -737,12 +764,20 @@ async function clock(type) {
   const { inRec, outRec } = attToday(ME.uid);
   if (type === 'in' && inRec) { toast('오늘은 이미 출근 처리되었습니다 (' + inRec.time + ')', true); return; }
   if (type === 'out' && !inRec) { toast('출근 기록이 없습니다 — 먼저 출근을 눌러주세요', true); return; }
+  // v0.11.0: 근무 구간이 점심시간과 겹치면 사용 여부를 직접 확인한다.
+  //   (점심 없이 1시에 퇴근하는 경우를 자동 규칙으로는 구분할 수 없다)
+  let lunch = 'used';
+  if (type === 'out' && _lunchOverlapMs(inRec.ts, Date.now()) > 0) {
+    lunch = confirm('점심시간(' + LUNCH.label + ')을 사용하셨나요?\n\n'
+      + '[확인] 사용함 — 겹치는 시간을 근무 시간에서 제외\n'
+      + '[취소] 점심 없이 계속 근무함 — 제외하지 않음') ? 'used' : 'none';
+  }
   _clockBusy = true;
   toast(type === 'in' ? '출근 처리 중…' : '퇴근 처리 중…');
   const ip = await fetchIp();     // 정적 앱이라 공인 IP 는 외부 조회로 가져온다
   const rec = { id: 'A' + Date.now(), uid: ME.uid, type, date: today(), time: nowClock(),
-                ts: Date.now(), ip, ua: String(navigator.userAgent || '').slice(0, 120) };
-  if (type === 'out' && outRec) Object.assign(outRec, { time: rec.time, ts: rec.ts, ip: rec.ip, ua: rec.ua });
+                ts: Date.now(), ip, ua: String(navigator.userAgent || '').slice(0, 120), lunch };
+  if (type === 'out' && outRec) Object.assign(outRec, { time: rec.time, ts: rec.ts, ip: rec.ip, ua: rec.ua, lunch });
   else ATT.push(rec);
   try {
     await saveCol(_attDocId(), ATT);
@@ -755,12 +790,13 @@ function attMyTable() {
   ATT.filter(a => a && a.uid === ME.uid).forEach(a => { (byDate[a.date] = byDate[a.date] || []).push(a); });
   const dates = Object.keys(byDate).sort().reverse();
   if (!dates.length) return '<div class="empty">이번 달 출퇴근 기록이 없습니다</div>';
-  return `<table><thead><tr><th>날짜</th><th>출근</th><th>퇴근</th><th>근무</th><th>출근 IP</th><th>퇴근 IP</th></tr></thead><tbody>
+  return `<table><thead><tr><th>날짜</th><th>출근</th><th>점심시간</th><th>퇴근</th><th>근무 시간</th><th>출근 IP</th><th>퇴근 IP</th></tr></thead><tbody>
     ${dates.map(d => {
       const rs = byDate[d];
       const i = rs.find(a => a.type === 'in'), o = rs.filter(a => a.type === 'out').slice(-1)[0];
-      return `<tr><td>${d}</td><td>${i ? i.time : '-'}</td><td>${o ? o.time : '-'}</td>
-        <td>${i && o ? fmtDur(o.ts - i.ts) : '-'}</td>
+      return `<tr><td>${d}</td><td>${i ? i.time : '-'}</td>
+        <td style="font-size:12.5px">${lunchLabel(i, o)}</td><td>${o ? o.time : '-'}</td>
+        <td style="white-space:nowrap">${i && o ? fmtDurS(workMs(i, o)) : '-'}</td>
         <td style="font-size:12px" title="${esc(i && i.ua || '')}">${esc(i && i.ip || '-')}</td>
         <td style="font-size:12px" title="${esc(o && o.ua || '')}">${esc(o && o.ip || '-')}</td></tr>`;
     }).join('')}</tbody></table>`;
@@ -769,18 +805,19 @@ function attAdminCard() {
   const act = USERS.filter(u => u.active === true);
   const rows = act.map(u => {
     const { inRec, outRec } = attToday(u.uid);
-    const dur = inRec ? fmtDur((outRec ? outRec.ts : Date.now()) - inRec.ts) : '-';
+    const dur = inRec ? fmtDurS(workMs(inRec, outRec)) : '-';
     const st = !inRec ? '<span class="chip gray">미출근</span>'
              : outRec ? '<span class="chip ok">퇴근</span>' : '<span class="chip wait">근무 중</span>';
     return `<tr><td style="white-space:nowrap"><b>${esc(staffName(u.uid))}</b> ${st}</td>
       <td>${inRec ? inRec.time : '-'}</td><td style="font-size:12px" title="${esc(inRec && inRec.ua || '')}">${esc(inRec && inRec.ip || '-')}</td>
+      <td style="font-size:12.5px">${lunchLabel(inRec, outRec)}</td>
       <td>${outRec ? outRec.time : '-'}</td><td style="font-size:12px" title="${esc(outRec && outRec.ua || '')}">${esc(outRec && outRec.ip || '-')}</td>
-      <td>${dur}</td><td style="font-size:12px">${_fmtSeen(u.lastSeen)}</td></tr>`;
+      <td style="white-space:nowrap">${dur}</td><td style="font-size:12px">${_fmtSeen(u.lastSeen)}</td></tr>`;
   }).join('');
   return `<div class="card"><div class="card-h">🕘 오늘 출퇴근 현황 <span class="sub">${today()} · IP 에 마우스를 올리면 기기 정보</span></div>
     <div class="card-b" style="padding:${act.length ? '0 18px' : '16px'}">
     ${act.length
-      ? `<table><thead><tr><th>직원</th><th>출근</th><th>출근 IP</th><th>퇴근</th><th>퇴근 IP</th><th>근무</th><th>최근 접속</th></tr></thead><tbody>${rows}</tbody></table>`
+      ? `<table><thead><tr><th>직원</th><th>출근</th><th>출근 IP</th><th>점심시간</th><th>퇴근</th><th>퇴근 IP</th><th>근무 시간</th><th>최근 접속</th></tr></thead><tbody>${rows}</tbody></table>`
       : '<div class="empty">활성 직원이 없습니다</div>'}
     </div></div>`;
 }
@@ -904,7 +941,7 @@ function pageHome() {
   let attCard = '';
   if (!isAdmin) {
     const { inRec, outRec } = attToday(ME.uid);
-    const dur = inRec ? fmtDur((outRec ? outRec.ts : Date.now()) - inRec.ts) : '-';
+    const dur = inRec ? fmtDurS(workMs(inRec, outRec)) : '-';
     const state = !inRec ? ['미출근', 'gray'] : (outRec ? ['퇴근 완료', 'ok'] : ['근무 중', 'wait']);
     attCard = `<div class="card"><div class="card-b" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
       <div style="flex:1;min-width:220px">
