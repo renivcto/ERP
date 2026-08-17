@@ -174,6 +174,16 @@ tr:last-child td { border-bottom:none; }
 .avagrid button.on { border-color:var(--brand); background:var(--brand-soft); }
 .avaphoto { font-size:20px; width:46px; height:42px; flex-shrink:0; border:2px solid transparent; border-radius:9px; background:var(--line-soft); display:flex; align-items:center; justify-content:center; }
 .avaphoto.on { border-color:var(--brand); background:var(--brand-soft); }
+/* ── 서식 편집기 (업무 상세, v0.9.0) ── */
+.rt-toolbar { display:flex; gap:4px; flex-wrap:wrap; border:1px solid var(--line); border-bottom:none; border-radius:9px 9px 0 0; background:var(--line-soft); padding:6px 8px; }
+.rt-toolbar button { border:1px solid transparent; background:none; border-radius:6px; padding:4px 10px; font-size:12.5px; color:var(--ink-soft); font-weight:600; }
+.rt-toolbar button:hover { background:#fff; border-color:var(--line); }
+.rt-toolbar .sep { width:1px; background:var(--line); margin:2px 4px; }
+.rt-editor { min-height:280px; max-height:48vh; overflow-y:auto; border-radius:0 0 9px 9px; line-height:1.75; font-size:14px; }
+.rt-editor.ro { background:var(--line-soft); border-radius:9px; }
+.rt-editor table { border-collapse:collapse; width:100%; margin:8px 0; }
+.rt-editor td, .rt-editor th { border:1px solid #c9d2e0; padding:6px 9px; min-width:44px; text-align:left; }
+.rt-editor ul, .rt-editor ol { padding-left:22px; }
 .modal-f { display:flex; gap:8px; justify-content:flex-end; padding:14px 20px; border-top:1px solid var(--line-soft); }
 
 /* ── 토스트 ── */
@@ -283,12 +293,28 @@ tr:last-child td { border-bottom:none; }
 
 <!-- ═══════ 모달: 업무 상세 (기획서 p7 "제목 클릭하면 팝업으로 상세") ═══════ -->
 <div class="ovl" id="ovl-task">
-  <div class="modal">
+  <div class="modal" style="max-width:780px">
     <div class="modal-h"><span class="t" id="task-m-title">업무 상세</span><button class="modal-x" data-close="ovl-task">✕</button></div>
     <div class="modal-b">
-      <div class="fld"><label>업무명</label><input class="fi" id="task-m-name"></div>
-      <div class="fld"><label>담당자</label><select class="fi" id="task-m-assignee"></select></div>
-      <div class="fld"><label>상세 내용</label><textarea class="fi" id="task-m-desc" rows="6" placeholder="업무 내용, 목표, 참고사항 등을 적습니다"></textarea></div>
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+        <div class="fld"><label>업무명</label><input class="fi" id="task-m-name"></div>
+        <div class="fld"><label>담당자</label><select class="fi" id="task-m-assignee"></select></div>
+      </div>
+      <div class="fld"><label>상세 내용</label>
+        <div class="rt-toolbar" id="task-m-tools">
+          <button type="button" data-cmd="bold" title="굵게"><b>B</b></button>
+          <button type="button" data-cmd="italic" title="기울임"><i>I</i></button>
+          <button type="button" data-cmd="underline" title="밑줄"><u>U</u></button>
+          <button type="button" data-cmd="strikeThrough" title="취소선"><s>S</s></button>
+          <span class="sep"></span>
+          <button type="button" data-cmd="insertUnorderedList" title="글머리 목록">• 목록</button>
+          <button type="button" data-cmd="insertOrderedList" title="번호 목록">1. 목록</button>
+          <span class="sep"></span>
+          <button type="button" data-table title="표 삽입">⊞ 표</button>
+          <button type="button" data-cmd="removeFormat" title="서식 지우기">지우기</button>
+        </div>
+        <div class="rt-editor fi" id="task-m-desc" contenteditable="true"></div>
+      </div>
       <div class="hint" id="task-m-meta" style="font-size:12px;color:var(--ink-mute)"></div>
     </div>
     <div class="modal-f">
@@ -372,7 +398,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.8.0';
+const STAFF_VERSION = 'v0.9.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1226,6 +1252,36 @@ $('btn-team-save').onclick = async () => {
   toast(_teamEditId ? '팀을 저장했습니다' : '팀을 만들었습니다');
 };
 
+/* ── 서식 편집기 헬퍼 (v0.9.0) ── */
+function _rtSanitize(html) {
+  const t = document.createElement('div');
+  t.innerHTML = String(html || '');
+  t.querySelectorAll('script,style,iframe,object,embed,link,meta,form,input,button').forEach(n => n.remove());
+  t.querySelectorAll('*').forEach(n => {
+    [...n.attributes].forEach(a => {
+      const nm = a.name.toLowerCase();
+      if (nm.indexOf('on') === 0) n.removeAttribute(a.name);
+      else if ((nm === 'href' || nm === 'src') && /^\s*javascript:/i.test(a.value)) n.removeAttribute(a.name);
+    });
+  });
+  return t.innerHTML;
+}
+// 툴바 — mousedown 에서 선택영역이 풀리지 않게 preventDefault
+document.querySelectorAll('#task-m-tools button').forEach(b => b.onmousedown = e => e.preventDefault());
+document.querySelectorAll('#task-m-tools [data-cmd]').forEach(b => b.onclick = () => {
+  $('task-m-desc').focus();
+  document.execCommand(b.dataset.cmd, false, null);
+});
+document.querySelector('#task-m-tools [data-table]').onclick = () => {
+  const r = Math.min(Math.max(parseInt(prompt('행 수 (1~10)', '3') || 0, 10) || 0, 1), 10);
+  if (!r) return;
+  const c = Math.min(Math.max(parseInt(prompt('열 수 (1~8)', '3') || 0, 10) || 0, 1), 8);
+  if (!c) return;
+  const row = '<tr>' + '<td><br></td>'.repeat(c) + '</tr>';
+  $('task-m-desc').focus();
+  document.execCommand('insertHTML', false, '<table><tbody>' + row.repeat(r) + '</tbody></table><p><br></p>');
+};
+
 /* ── 업무 상세 모달 (관리자: 수정 가능 / 직원: 열람) ── */
 let _taskRef = null;
 function openTaskModal(tid, kid, editable) {
@@ -1234,9 +1290,14 @@ function openTaskModal(tid, kid, editable) {
   _taskRef = { tid, kid, editable };
   $('task-m-title').textContent = `${t.name} — 업무 상세`;
   $('task-m-name').value = k.title;
-  $('task-m-desc').value = k.desc || '';
+  // 기존 데이터가 일반 텍스트면 줄바꿈만 살려 표시, HTML 이면 정화 후 그대로 (하위 호환)
+  const _d = k.desc || '';
+  $('task-m-desc').innerHTML = /[<>]/.test(_d) ? _rtSanitize(_d) : esc(_d).replace(/\n/g, '<br>');
   $('task-m-assignee').innerHTML = staffOptions(k.assignee);
-  $('task-m-name').disabled = $('task-m-desc').disabled = $('task-m-assignee').disabled = !editable;
+  $('task-m-name').disabled = $('task-m-assignee').disabled = !editable;
+  $('task-m-desc').contentEditable = editable ? 'true' : 'false';
+  $('task-m-desc').classList.toggle('ro', !editable);
+  $('task-m-tools').style.display = editable ? 'flex' : 'none';
   $('btn-task-save').style.display = editable ? '' : 'none';
   $('btn-task-del').style.display = editable ? '' : 'none';
   $('task-m-meta').textContent = `팀: ${t.name} · 책임자: ${t.lead || '미지정'} · AI직원: ${t.ai || '없음'}`;
@@ -1247,7 +1308,7 @@ $('btn-task-save').onclick = async () => {
   const t = TEAMS.find(x => x.id === _taskRef.tid); const k = t && (t.tasks || []).find(x => x.id === _taskRef.kid);
   if (!k) return;
   k.title = $('task-m-name').value.trim() || k.title;
-  k.desc = $('task-m-desc').value;
+  k.desc = _rtSanitize($('task-m-desc').innerHTML);
   k.assignee = $('task-m-assignee').value;
   await saveTeams();
   $('ovl-task').classList.remove('on');
