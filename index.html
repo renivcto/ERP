@@ -5667,6 +5667,15 @@ EXP YYYYMMDD 까지</textarea></div>
     <div class="modal-hdr"><span class="modal-ttl">✍️ 업무 공유 작성</span><button class="modal-x" onclick="_closeGuard('feed-post',true)">✕</button></div>
     <div class="modal-body">
       <input type="hidden" id="feed-post-id" value="">
+      <!-- v2.3.663: 직원용 ERP 게시 (기획서 p10). 맨 아래에 있으면 저장 직전에 안 보여서 맨 위로 올렸다.
+           체크한 글만 직원용 게시판으로 넘어간다. -->
+      <label id="feed-post-staff-box" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;cursor:pointer;user-select:none;
+             background:linear-gradient(135deg,#eff6ff,#eef2ff);border:1.5px solid #bfdbfe;border-radius:10px;
+             padding:12px 15px;margin-bottom:16px;transition:all .15s">
+        <input type="checkbox" id="feed-post-staff" style="cursor:pointer;width:16px;height:16px;accent-color:#4338ca;margin:0">
+        <span style="font-size:13.5px;color:#3730a3;font-weight:800;white-space:nowrap">👥 직원용 ERP에도 게시</span>
+        <span style="font-size:12px;color:#64748b">체크한 글만 직원용 ERP 운영 업무 게시판에 보입니다</span>
+      </label>
       <!-- 카테고리 칩 -->
       <div class="fg" style="margin-bottom:14px">
         <label style="font-size:12px;color:#475569;font-weight:700;margin-bottom:6px;display:block">카테고리 <span style="color:#dc2626">*</span></label>
@@ -5730,14 +5739,6 @@ EXP YYYYMMDD 까지</textarea></div>
           <input type="checkbox" id="feed-post-pinned" style="cursor:pointer">
           📌 상단 고정 (중요 공지)
         </label>
-      </div>
-      <!-- v2.3.660: 직원용 ERP 게시 (기획서 p10) — 체크한 글만 직원용 게시판으로 넘어간다 -->
-      <div class="fg" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px">
-        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;font-size:13px;color:#4338ca;font-weight:700">
-          <input type="checkbox" id="feed-post-staff" style="cursor:pointer">
-          👥 직원용 ERP에도 게시
-        </label>
-        <span style="font-size:12px;color:#94a3b8">체크한 글만 직원용 ERP 운영 업무 게시판에 보입니다</span>
       </div>
     </div>
     <div class="modal-ft" style="padding:16px 24px;gap:10px">
@@ -6333,7 +6334,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.662';
+const ERP_VERSION = 'v2.3.663';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -36261,7 +36262,7 @@ function openFeedPostModal(postId){
   document.getElementById('feed-post-summary').value = '';
   // v1.9.278: AI 요약 박스는 항상 보이게 유지 (display 토글 제거)
   document.getElementById('feed-post-pinned').checked = false;
-  { const _sf = document.getElementById('feed-post-staff'); if (_sf) _sf.checked = false; }
+  { const _sf = document.getElementById('feed-post-staff'); if (_sf) { _sf.checked = false; _feedStaffBoxPaint(); } }
   document.getElementById('feed-post-file').value = '';
   if (postId) {
     // v1.9.345: id 타입 안전 비교 — Firestore 직렬화 후 string/number 혼재 가능
@@ -36281,7 +36282,7 @@ function openFeedPostModal(postId){
         }
       }
       document.getElementById('feed-post-pinned').checked = !!p.pinned;
-      { const _sf = document.getElementById('feed-post-staff'); if (_sf) _sf.checked = !!p.staffShare; }
+      { const _sf = document.getElementById('feed-post-staff'); if (_sf) { _sf.checked = !!p.staffShare; _feedStaffBoxPaint(); } }
       _feedEditingCategory = p.category || 'free';
       _feedEditingImages = Array.isArray(p.images) ? [...p.images] : [];
       _feedAttachments = Array.isArray(p.files) ? p.files.map(f => Object.assign({}, f)) : [];  // v2.3.238
@@ -36303,6 +36304,25 @@ function openFeedPostModal(postId){
   document.removeEventListener('paste', _feedPasteHandler);
   document.addEventListener('paste', _feedPasteHandler);
 }
+
+// v2.3.663: 체크 상태에 따라 배너 색을 바꿔 켜진 걸 한눈에 보이게 한다
+function _feedStaffBoxPaint(){
+  const box = document.getElementById('feed-post-staff-box');
+  const chk = document.getElementById('feed-post-staff');
+  if (!box || !chk) return;
+  if (chk.checked) {
+    box.style.background = 'linear-gradient(135deg,#dbeafe,#e0e7ff)';
+    box.style.borderColor = '#6366f1';
+    box.style.boxShadow = '0 0 0 3px rgba(99,102,241,.12)';
+  } else {
+    box.style.background = 'linear-gradient(135deg,#eff6ff,#eef2ff)';
+    box.style.borderColor = '#bfdbfe';
+    box.style.boxShadow = '';
+  }
+}
+document.addEventListener('change', e => {
+  if (e.target && e.target.id === 'feed-post-staff') _feedStaffBoxPaint();
+});
 
 function renderFeedPostCategoryPicker(){
   const box = document.getElementById('feed-post-category-picker');
