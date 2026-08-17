@@ -6338,7 +6338,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.667';
+const ERP_VERSION = 'v2.3.668';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58682,15 +58682,22 @@ const _STAFF_INBOX = [
   { doc: 'inbox_expenses',  arr: 'expenses',  label: '지출결의서' },
   { doc: 'inbox_approvals', arr: 'approvals', label: '일반결재' },
 ];
-async function _staffInboxDrain() {
-  if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return 0;
+async function _staffInboxDrain(verbose) {
+  if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) {
+    if (verbose) console.warn('📥 [직원 인박스] Firestore 준비 전 — 잠시 후 다시 시도하세요');
+    return 0;
+  }
   let added = 0;
+  const seen = { pending: 0, done: 0, boxes: [] };
   for (const box of _STAFF_INBOX) {
     try {
       const ref = window._firestoreDoc(window._firebaseDb, 'staff_data', box.doc);
       const snap = await window._firestoreGetDoc(ref);
-      if (!snap || !snap.exists()) continue;
+      if (!snap || !snap.exists()) { seen.boxes.push(box.label + ' 0건(문서 없음)'); continue; }
       const list = JSON.parse(snap.data().data || '[]') || [];
+      seen.boxes.push(box.label + ' ' + list.length + '건');
+      seen.pending += list.filter(r => r && !r.applied).length;
+      seen.done += list.filter(r => r && r.applied).length;
       if (!list.length) continue;
       if (!Array.isArray(DB[box.arr])) DB[box.arr] = [];
       const have = new Set(DB[box.arr].map(x => String(x && x.id)));
@@ -58707,6 +58714,13 @@ async function _staffInboxDrain() {
       }
     } catch (e) { console.warn('📥 [직원 인박스] ' + box.doc + ' 실패:', e && e.message); }
   }
+  if (verbose) {
+    console.log('📥 [직원 인박스] ' + seen.boxes.join(' · ')
+      + ' — 새로 반영 ' + added + '건, 이미 반영됨 ' + seen.done + '건');
+    if (!added && !seen.pending) {
+      console.log('📥 가져올 새 문서가 없습니다. 직원용 ERP → 결재 관리에서 상신하면 여기로 들어옵니다.');
+    }
+  }
   if (added) {
     try { if (typeof saveDataNow === 'function') await saveDataNow(); else saveData(); } catch(_){}
     try { showNotif('📥 직원용 ERP에서 결재 ' + added + '건이 들어왔습니다', 'info'); } catch(_){}
@@ -58714,7 +58728,7 @@ async function _staffInboxDrain() {
   }
   return added;
 }
-window.staffInboxNow = _staffInboxDrain;
+window.staffInboxNow = function() { return _staffInboxDrain(true); };
 function _staffInboxThrottled() {
   try {
     const last = Number(sessionStorage.getItem('reniv_staff_inbox') || 0);
