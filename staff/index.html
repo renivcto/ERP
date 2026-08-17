@@ -263,8 +263,6 @@ tr:last-child td { border-bottom:none; }
 .acc-tb tbody tr:hover td.act { background:var(--brand-soft); }
 .acc-chip { border:1px solid; border-radius:8px; padding:7px 13px; font-size:12px; font-weight:700; }
 .acc-badge { display:inline-flex; align-items:center; border-radius:9px; padding:2px 8px; font-size:10.5px; font-weight:700; white-space:nowrap; }
-.acc-sw { display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-size:12.5px; font-weight:700; color:var(--ink-soft);
-  border:1px solid var(--line); border-radius:9px; padding:7px 12px; background:#fff; }
 .acc-note { padding:11px 13px; border-radius:9px; font-size:12.5px; line-height:1.75; text-align:left; }
 /* 출퇴근 표의 이름 — 밑줄 없이, 호버 때만 (v0.13.0) */
 .att-name { font-weight:700; color:var(--brand-deep); cursor:pointer; }
@@ -588,7 +586,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.21.0';
+const STAFF_VERSION = 'v0.22.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -635,8 +633,6 @@ let CAL_ANCHOR = null;      // 캘린더 기준 달 'YYYY-MM' (null = 이번 달
 const PT = { coop: [], seller: [], shop: [] };   // 거래처 (협력사 · 판매업체 · 쇼핑몰)
 let ACC = [];               // staff_data/accounts        — 임원용 미러 (원본, 통째 덮어쓰기)
 let ACC_S = [];             // staff_data/accounts_staff  — 직원이 등록한 계정
-let ACC_OV = null;          // staff_data/accounts_ov     — 미러에 대한 직원용 덮어쓰기 {hidden:[id], edit:{id:{}}}
-let ACC_POL = null;         // staff_data/accounts_policy — {erpEditable:true}
 let ACC_CAT = null;         // 분류 탭 필터 (null = 전체)
 let PT_TAB = 'coop';        // 거래처 정보 탭
 let PT_EDIT = null;         // { kind, id }
@@ -986,10 +982,6 @@ function subscribeData() {
     e => console.warn('[accounts]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'accounts_staff'), s => { ACC_S = parseCol(s, []); rerender(); },
     e => console.warn('[accounts_staff]', e.message)));
-  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'accounts_ov'), s => { ACC_OV = parseCol(s, null); rerender(); },
-    e => console.warn('[accounts_ov]', e.message)));
-  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'accounts_policy'), s => { ACC_POL = parseCol(s, null); rerender(); },
-    e => console.warn('[accounts_policy]', e.message)));
 }
 function defaultTeams() {
   // 기획서 p7 의 기본 3팀. 저장 전까지는 로컬 기본값으로 표시.
@@ -2558,12 +2550,13 @@ function pagePartners() {
     ${ptTable(PT_TAB)}
   </div>`;
 }
-/* ═══════════ 외부 계정 (v0.21.0) ═══════════
-   임원용 등록분 : staff_data/accounts 미러 — 임원용에서 고치면 여기도 바뀐다(단방향)
-   직원 등록분   : staff_data/accounts_staff — 여기서만 수정·삭제, 임원용엔 읽기 전용 표시
-   ⚠️ 미러는 통째로 덮어써진다. 직원용의 삭제·수정은 원본을 못 건드리므로
-      staff_data/accounts_ov 오버레이({hidden, edit})에 따로 쌓아 미러 갱신에도 살아남게 한다.
-   정리가 끝나면 관리자가 스위치를 꺼서(accounts_policy) 미러 항목의 수정·삭제를 막는다. */
+/* ═══════════ 외부 계정 (v0.22.0) ═══════════
+   임원용 등록분 : staff_data/accounts 미러 — 여기서는 읽기 전용.
+                   비밀번호를 포함해 임원용에서 고친 내용이 그대로 반영된다.
+   직원 등록분   : staff_data/accounts_staff — 여기서만 수정·삭제, 임원용엔 읽기 전용 표시.
+   ⚠️ 미러 행에는 수정·삭제 버튼을 만들지 않는다. 임원용이 문서를 통째로 덮어쓰므로
+      직원용에서 고쳐 봐야 다음 동기화에 사라진다 — 버튼이 있으면 그게 거짓말이 된다.
+      v0.21.0 의 오버레이(accounts_ov)·정책(accounts_policy)은 이 규칙이 확정되며 걷어냈다. */
 const ACC_CATS = ['쇼핑몰', '마케팅/SNS', '이미지 / 영상', '물류/발주', '결제/금융', '광고', '행정/인증', '리뷰/제휴', '업무'];
 const ACC_COL = {   // 임원용 외부 계정 탭과 같은 색
   '쇼핑몰':        { bg: '#f0fdf4', bd: '#86efac', fg: '#166534' },
@@ -2577,19 +2570,10 @@ const ACC_COL = {   // 임원용 외부 계정 탭과 같은 색
   '업무':          { bg: '#f9fafb', bd: '#d1d5db', fg: '#374151' },
 };
 function accCol(c) { return ACC_COL[c] || ACC_COL['업무']; }
-function accErpEditable() { return !(ACC_POL && ACC_POL.erpEditable === false); }
-function _accOv() {
-  const o = ACC_OV || {};
-  return { hidden: Array.isArray(o.hidden) ? o.hidden.slice() : [], edit: Object.assign({}, o.edit || {}) };
-}
 function accAll() {
-  const ov = _accOv();
-  const hidden = new Set(ov.hidden.map(String));
-  const mirror = (ACC || []).filter(a => a && !hidden.has(String(a.id)))
-    .map(a => Object.assign({}, a, ov.edit[String(a.id)] || {},
-                            { src: 'erp', edited: !!ov.edit[String(a.id)] }));
-  const mine = (ACC_S || []).map(a => Object.assign({}, a, { src: 'staff' }));
-  return mirror.concat(mine);
+  // 임원용 미러는 원본 그대로 — 직원용에서 고칠 수 없으므로 덮어쓸 것도 없다 (v0.22.0)
+  return (ACC || []).filter(Boolean).map(a => Object.assign({}, a, { src: 'erp' }))
+    .concat((ACC_S || []).map(a => Object.assign({}, a, { src: 'staff' })));
 }
 function accFind(src, id) { return accAll().find(a => a.src === src && String(a.id) === String(id)); }
 function accCatList() {
@@ -2605,16 +2589,15 @@ function accCell(a, k) {
   if (k === 'url') return `<a href="${esc(v)}" target="_blank" rel="noopener" style="color:var(--brand-deep)">${esc(v.replace(/^https?:\/\//, ''))}</a>`;
   return esc(v).replace(/\n/g, '<br>');
 }
+// 직원용에서 등록한 것만 표시한다 — 임원용 등록분에 매 행 배지를 달면 목록이 온통 같은 말이 된다
 function accSrcBadge(a) {
-  if (a.src === 'staff')
-    return '<span class="acc-badge" style="background:var(--brand-soft);color:var(--brand-deep)">👥 직원 등록</span>';
-  return '<span class="acc-badge" style="background:#eef2ff;color:#4338ca">🔗 임원용</span>'
-       + (a.edited ? ' <span class="acc-badge" style="background:#fef3c7;color:#92400e" title="직원용에서 고친 값입니다">✏️ 수정됨</span>' : '');
+  return a.src === 'staff'
+    ? ' <span class="acc-badge" style="background:var(--brand-soft);color:var(--brand-deep)">👥 직원 등록</span>'
+    : '';
 }
 function pageAccounts() {
   const all = accAll();
   const list = ACC_CAT ? all.filter(a => (a.cat || '업무') === ACC_CAT) : all;
-  const erpN = all.filter(a => a.src === 'erp').length;
   const chip = (key, label, n) => {
     const on = (ACC_CAT || '') === key;
     const c = key ? accCol(key) : { bg: '#e8f4fd', bd: '#bfdbfe', fg: '#1e40af' };
@@ -2627,35 +2610,25 @@ function pageAccounts() {
   <div class="pg on">
     <div class="pg-h"><h1>외부 계정</h1>
       <button class="btn btn-p" data-acc-new="1" style="margin-left:auto">+ 계정 등록</button></div>
-    <div class="pg-sub">임원용 ERP에서 등록한 계정은 <b>임원용에서 수정하면 여기에도 자동 반영</b>됩니다 ·
-      직원용에서 등록한 계정은 여기서 관리하고 임원용에는 읽기 전용으로 표시됩니다 ·
-      임원용 ${erpN}건 / 직원 등록 ${all.length - erpN}건</div>
-    <div class="bd-chips">${tabs}</div>
-    ${ME.mode === 'admin' ? `<div style="margin-bottom:14px">
-      <label class="acc-sw"><input type="checkbox" id="acc-pol" ${accErpEditable() ? 'checked' : ''}>
-        🔓 임원용 등록분도 직원용에서 수정·삭제 허용 <span style="font-weight:500;color:var(--ink-mute)">(정리 기간 — 끄면 임원용 등록분은 읽기 전용이 됩니다)</span></label>
-    </div>` : ''}
+    <div class="bd-chips" style="margin-top:16px">${tabs}</div>
     ${list.length ? `<div class="card"><div class="card-b acc-wrap" style="padding:0 0 0 18px">
       <table class="acc-tb">
-        <thead><tr><th>분류</th><th>서비스명</th><th>아이디</th><th>비밀번호</th><th>이메일</th><th>주소</th><th>메모</th><th>출처</th><th class="act">관리</th></tr></thead>
+        <thead><tr><th>분류</th><th>서비스명</th><th>아이디</th><th>비밀번호</th><th>이메일</th><th>주소</th><th>메모</th><th class="act">관리</th></tr></thead>
         <tbody>${list.map(a => {
           const c = accCol(a.cat);
-          const canEdit = (a.src === 'staff') || accErpEditable();
+          const mine = a.src === 'staff';   // 직원용에서 등록한 것만 여기서 고칠 수 있다
           return `<tr data-acc-row="${esc(a.src)}|${esc(a.id)}" title="클릭하면 상세와 수정 위치 안내가 열립니다">
             <td><span class="acc-badge" style="background:${c.bg};border:1px solid ${c.bd};color:${c.fg}">${esc(a.cat || '업무')}</span></td>
-            <td style="font-weight:700">${esc(a.name || '-')}</td>
+            <td style="font-weight:700">${esc(a.name || '-')}${accSrcBadge(a)}</td>
             <td style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;word-break:break-all">${accCell(a, 'loginId')}</td>
             <td>${accCell(a, 'pw')}</td>
             <td style="font-size:11.5px;word-break:break-all">${accCell(a, 'email')}</td>
             <td style="font-size:11.5px;word-break:break-all;max-width:200px">${accCell(a, 'url')}</td>
             <td class="pt-note">${accCell(a, 'note')}</td>
-            <td>${accSrcBadge(a)}</td>
-            <td class="act">${canEdit
-              ? `<button class="btn btn-sm" data-acc-edit="${esc(a.src)}|${esc(a.id)}">수정</button>
-                 <button class="btn btn-sm btn-bad" data-acc-del="${esc(a.src)}|${esc(a.id)}">삭제</button>`
-              : '<span style="font-size:11px;color:var(--ink-mute)">임원용에서 관리</span>'}
-              ${(a.src === 'erp' && a.edited) ? `<button class="btn btn-sm" data-acc-reset="${esc(a.id)}" title="임원용 원본 값으로 되돌립니다">되돌리기</button>` : ''}
-            </td></tr>`;
+            <td class="act">${mine
+              ? `<button class="btn btn-sm" data-acc-edit="staff|${esc(a.id)}">수정</button>
+                 <button class="btn btn-sm btn-bad" data-acc-del="staff|${esc(a.id)}">삭제</button>`
+              : ''}</td></tr>`;
         }).join('')}</tbody></table></div></div>`
       : `<div class="ph"><div class="big">🔑</div><h3>표시할 계정이 없습니다</h3>
           <p>임원용 ERP의 <b>업무현황 → 외부 계정</b>에 등록하면 여기에 자동으로 나타납니다.
@@ -2675,14 +2648,6 @@ function wireAccounts() {
     const [src, id] = b.dataset.accDel.split('|');
     accDelete(src, id);
   });
-  document.querySelectorAll('[data-acc-reset]').forEach(b => b.onclick = async e => {
-    e.stopPropagation();
-    if (!confirm('직원용에서 고친 값을 버리고 임원용 원본으로 되돌릴까요?')) return;
-    const ov = _accOv();
-    delete ov.edit[String(b.dataset.accReset)];
-    try { await saveCol('accounts_ov', ov); ACC_OV = ov; toast('원본으로 되돌렸습니다'); rerender(); }
-    catch (err) { toast('실패: ' + err.message, true); }
-  });
   document.querySelectorAll('[data-acc-row]').forEach(tr => tr.onclick = () => {
     const [src, id] = tr.dataset.accRow.split('|');
     openAccView(src, id);
@@ -2696,37 +2661,21 @@ function wireAccounts() {
     s.dataset.on = shown ? '' : '1';
     b.textContent = shown ? '보기' : '숨기기';
   });
-  const pol = $('acc-pol');
-  if (pol) pol.onchange = async () => {
-    const v = { erpEditable: pol.checked };
-    try { await saveCol('accounts_policy', v); ACC_POL = v;
-      toast(pol.checked ? '임원용 등록분도 수정·삭제할 수 있습니다' : '임원용 등록분은 이제 읽기 전용입니다'); rerender(); }
-    catch (e) { pol.checked = !pol.checked; toast('저장 실패: ' + e.message, true); }
-  };
 }
 async function accDelete(src, id) {
   const a = accFind(src, id);
   if (!a) return;
-  if (src === 'staff') {
-    if (!confirm(`'${a.name}' 계정을 삭제할까요?`)) return;
-    const arr = (ACC_S || []).filter(x => String(x.id) !== String(id));
-    try { await saveCol('accounts_staff', arr); ACC_S = arr; toast('삭제했습니다'); rerender(); }
-    catch (e) { toast('삭제 실패: ' + e.message, true); }
-    return;
-  }
-  if (!confirm(`'${a.name}' 계정을 직원용 ERP 목록에서 숨길까요?\n\n임원용 ERP의 원본은 지워지지 않습니다.\n임원용에서 다시 동기화돼도 계속 숨겨집니다.`)) return;
-  const ov = _accOv();
-  if (ov.hidden.map(String).indexOf(String(id)) < 0) ov.hidden.push(String(id));
-  delete ov.edit[String(id)];
-  try { await saveCol('accounts_ov', ov); ACC_OV = ov; toast('직원용 목록에서 숨겼습니다'); rerender(); }
-  catch (e) { toast('실패: ' + e.message, true); }
+  if (src !== 'staff') { toast('임원용 ERP에서 등록한 계정입니다 — 삭제는 임원용에서 합니다', true); return; }
+  if (!confirm(`'${a.name}' 계정을 삭제할까요?`)) return;
+  const arr = (ACC_S || []).filter(x => String(x.id) !== String(id));
+  try { await saveCol('accounts_staff', arr); ACC_S = arr; toast('삭제했습니다'); rerender(); }
+  catch (e) { toast('삭제 실패: ' + e.message, true); }
 }
 /* 행 클릭 — 상세 + '어디서 수정하는지' 안내 */
 function openAccView(src, id) {
   const a = accFind(src, id);
   if (!a) return;
   const mine = a.src === 'staff';
-  const canEdit = mine || accErpEditable();
   $('accv-t').textContent = '🔑 ' + (a.name || '계정');
   const row = (label, html) => `<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:13px">
       <span style="width:74px;flex:none;color:var(--ink-mute);font-weight:700;text-align:left">${label}</span>
@@ -2738,20 +2687,17 @@ function openAccView(src, id) {
     + row('이메일', accCell(a, 'email'))
     + row('주소', accCell(a, 'url'))
     + row('메모', accCell(a, 'note'))
-    + row('출처', accSrcBadge(a))
     + `<div class="acc-note" style="margin-top:14px;background:${mine ? 'var(--brand-soft)' : '#eef2ff'};color:${mine ? 'var(--brand-deep)' : '#4338ca'}">
         ${mine
           ? '👥 <b>직원용 ERP에서 등록한 계정</b>입니다.<br>수정·삭제는 <b>여기(직원용 ERP → 외부 계정)</b>에서 합니다. 임원용 ERP에는 읽기 전용으로 함께 표시됩니다.'
-          : '🔗 <b>임원용 ERP에서 등록한 계정</b>입니다.<br>원본 수정은 <b>임원용 ERP → 업무현황 → 외부 계정</b>에서 하며, 거기서 고치면 이 화면에도 자동으로 반영됩니다.'
-            + (accErpEditable()
-               ? '<br><br>지금은 정리 기간이라 직원용에서도 수정·삭제할 수 있습니다. 여기서 고치거나 지운 것은 <b>직원용 ERP에만</b> 적용되고 임원용 원본은 그대로입니다.'
-               : '<br><br>직원용에서는 수정·삭제할 수 없습니다.')}
+          : '🔗 <b>임원용 ERP에서 등록한 계정</b>입니다. 직원용에서는 수정·삭제할 수 없습니다.'
+            + '<br>수정은 <b>임원용 ERP → 업무현황 → 외부 계정</b>에서 하며, 비밀번호를 포함해 거기서 고친 내용이 이 화면에 자동 반영됩니다.'}
        </div>`;
   $('accv-f').innerHTML = `<button class="btn" data-close="ovl-accv">닫기</button>`
-    + (canEdit ? `<button class="btn btn-sm btn-bad" id="accv-del" style="padding:9px 16px">삭제</button>
-                  <button class="btn btn-p" id="accv-edit">✏️ 수정</button>` : '');
+    + (mine ? `<button class="btn btn-sm btn-bad" id="accv-del" style="padding:9px 16px">삭제</button>
+               <button class="btn btn-p" id="accv-edit">✏️ 수정</button>` : '');
   $('accv-f').querySelectorAll('[data-close]').forEach(b => b.onclick = () => $('ovl-accv').classList.remove('on'));
-  if (canEdit) {
+  if (mine) {
     $('accv-edit').onclick = () => { $('ovl-accv').classList.remove('on'); openPtModal('acc', a.id, a.src); };
     $('accv-del').onclick = () => { $('ovl-accv').classList.remove('on'); accDelete(a.src, a.id); };
   }
@@ -2814,20 +2760,14 @@ $('btn-pt-save').onclick = async () => {
 
   // v0.21.0 — 외부 계정. 임원용 미러는 원본을 못 고치므로 오버레이에 덮어쓰기만 남긴다.
   if (kind === 'acc') {
+    // 임원용 등록분은 여기서 고칠 수 없다 — 버튼도 안 만들지만 경로 자체를 막아 둔다
+    if (src === 'erp') { toast('임원용 ERP에서 등록한 계정입니다 — 수정은 임원용에서 합니다', true); return; }
     try {
-      if (src === 'erp') {
-        const ov = _accOv();
-        ov.edit[String(id)] = obj;
-        await saveCol('accounts_ov', ov); ACC_OV = ov;
-        toast('직원용 ERP에만 반영했습니다 — 임원용 원본은 그대로입니다');
-      } else {
-        const arr = (ACC_S || []).slice();
-        const i = arr.findIndex(x => String(x.id) === String(obj.id));
-        if (i >= 0) arr[i] = Object.assign({}, arr[i], obj); else arr.push(obj);
-        await saveCol('accounts_staff', arr); ACC_S = arr;
-        toast('저장했습니다');
-      }
-      $('ovl-pt').classList.remove('on'); rerender();
+      const arr = (ACC_S || []).slice();
+      const i = arr.findIndex(x => String(x.id) === String(obj.id));
+      if (i >= 0) arr[i] = Object.assign({}, arr[i], obj); else arr.push(obj);
+      await saveCol('accounts_staff', arr); ACC_S = arr;
+      $('ovl-pt').classList.remove('on'); toast('저장했습니다'); rerender();
     } catch (e) { toast('저장 실패: ' + e.message, true); }
     return;
   }
