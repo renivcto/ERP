@@ -87,6 +87,38 @@ Google 로그인
 | **미러(자동)** | `board` · `calendar` · `accounts` · `workflow` | 글/계정 저장·삭제 시 / Trello 동기화 직후 / 홈 렌더 6시간 스로틀 | `_staffMirrorBoard()` · `_staffMirrorCalendar()` · `_staffMirrorAccounts()` · `_staffMirrorWorkflow()` · 수동 `staffMirrorNow()` |
 | **최초 1회 이관(수동)** | `partners_seller` · `partners_shop` | 관리자가 사용자 관리에서 버튼 클릭 | `staffTransfer('sellers'\|'shops')` |
 | **직원용 → 임원용(읽기 전용)** | `accounts_staff` | 임원용 외부 계정 탭 진입 시 (60초 캐시) | `_loadStaffAccounts()` |
+| **받은편지함(직원 → 임원)** | `inbox_*` | 임원용 홈을 열 때 (세션 10분 스로틀) | `_staffInboxDrain()` · `_staffInboxStock()` · `_staffInboxAds()` |
+
+### 기획서(2) 데이터 연동 — 전체 지도 (v0.28~0.33 / 임원용 v2.3.666~672)
+
+| 메뉴 | 미러(임원→직원) | 인박스(직원→임원) | 뺀 것 |
+|---|---|---|---|
+| 품목 정보 | `items_fin` (완제품) | — (읽기 전용) | 원가·재고평가액 |
+| 재고 관리 | `items_fin`·`warehouses` | `inbox_stockmoves`·`inbox_warehouses` | 재고평가액 |
+| 판매 관리 | `orders`·`ads`·`consign` | `inbox_ads` | 고객정보, 매출 대시보드·마진 분석 |
+| 약국 관리 | `pharmacies`·`cs_pharm` | `inbox_cs` (upsert) | 소비자 CS·고객 리스트·클레임 |
+| 신제품 개발 | `newproducts` | `inbox_newproducts` (upsert) | 수익성(원가) 전 필드 |
+| 결재 관리 | — (임원 결재는 안 내려감) | `inbox_expenses`·`inbox_approvals` | — |
+
+**설계 원칙 — 지키지 않으면 사고가 난다**
+
+1. **고객정보·원가는 화면에서 숨기지 않는다. 미러에 아예 넣지 않는다.**
+   공개 저장소 정적 앱이라 화면 숨김은 보안이 아니다. 주문은 허용목록(`_STAFF_ORDER_FIELDS`)으로
+   만들고 `_staffStripPii()` 로 한 번 더 거른다. 품목은 `price` 를, 신제품은 `_STAFF_NP_DENY` 를 뺀다.
+2. **직원은 '상태' 를 직접 고치지 않는다.** 재고는 요청만 올리고 임원용이 `_applyStockMove()` /
+   `_staffApplyInOut()` 으로 적용한다. 두 곳에서 각자 `whStock` 을 계산하면 재고가 갈라진다.
+3. **인박스는 합친 뒤에도 지우지 않는다.** `applied` 표시만 남긴다 — 지웠다가 임원용 저장이
+   실패하면 그 문서가 증발한다. 실패는 `result:'fail'` + `error` 로 되돌려 직원 화면에 사유를 띄운다.
+4. **upsert 는 `updatedAt` 비교로만 덮어쓴다.** 임원이 고친 값을 직원의 오래된 사본이 되돌리지 않게.
+   직원 사본에 없는 키(원가 등)는 `Object.assign` 이 지우지 않으므로 임원용 값이 보존된다.
+5. **전달 대기 중인 인박스 사본은 미러 위에 덮어 보여준다**(`npAll()`). 안 그러면 저장했는데
+   화면이 안 바뀌어 저장 실패로 보인다. 임원용이 받아간 뒤에는 미러가 원본이므로 사본을 버린다.
+6. **위탁 명세서 발행은 직원용에서 하지 않는다.** 판매업체별 공급 단가로 공급가액·세액을 계산하는데
+   직원용에는 단가가 없다(공급가 비공개). 잘못 계산하면 정산 사고다. 물건을 위탁 창고로 보내는 것은
+   재고 이동 요청으로 처리한다.
+
+**수동 명령(임원용 콘솔)**: `staffMirrorNow()` (전체 미러) · `staffInboxNow()` (결재·CS·신제품) ·
+`staffStockNow()` (재고·창고) · `staffAdsNow()` (광고비)
 
 #### 외부 계정만 예외 — 소유자별 편집 (v0.22.0 / 임원용 v2.3.662)
 

@@ -652,6 +652,28 @@ tr:last-child td { border-bottom:none; }
   </div>
 </div>
 
+<!-- 광고비 등록 요청 (v0.33.0) -->
+<div class="ovl" id="ovl-ad">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-h"><span class="t">📢 광고비 등록 요청</span><button class="modal-x" data-close="ovl-ad">✕</button></div>
+    <div class="modal-b">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fld"><label>쇼핑몰</label><select class="fi" id="ad-f-shop"></select></div>
+        <div class="fld"><label>구분</label><select class="fi" id="ad-f-type"></select></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fld"><label>시작일</label><input class="fi" id="ad-f-start" type="date"></div>
+        <div class="fld"><label>종료일</label><input class="fi" id="ad-f-end" type="date"></div>
+      </div>
+      <div class="fld"><label>금액 (원)</label><input class="fi" id="ad-f-cost" type="number" min="0" placeholder="0"></div>
+      <div class="fld"><label>메모</label><input class="fi" id="ad-f-memo"></div>
+      <div class="hint" style="background:#f4f8ff;border:1px solid #bfdbfe;border-radius:9px;padding:10px 12px;color:#1d4ed8;line-height:1.7">
+        요청을 올리면 임원용 ERP의 광고비 관리에 등록됩니다.</div>
+    </div>
+    <div class="modal-f"><button class="btn" data-close="ovl-ad">취소</button><button class="btn btn-p" id="btn-ad-save">요청 올리기</button></div>
+  </div>
+</div>
+
 <!-- 재고 요청 (v0.32.0) -->
 <div class="ovl" id="ovl-sm">
   <div class="modal" style="max-width:520px">
@@ -865,7 +887,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.32.0';
+const STAFF_VERSION = 'v0.33.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -926,6 +948,10 @@ let NP_EDIT = null, NP_TAB = 'over';
 let SMV = [];               // staff_data/inbox_stockmoves — 직원이 올린 재고 요청
 let WHI = [];               // staff_data/inbox_warehouses — 직원이 올린 창고 추가·수정
 let SM_KIND = 'move';       // 요청 모달 종류: in | out | move
+let ADS = [];               // staff_data/ads        — 광고비 미러
+let ADI = [];               // staff_data/inbox_ads  — 직원이 올린 광고비 등록 요청
+let CONS = [];              // staff_data/consign    — 위탁 재고이동 (읽기 전용)
+let SALES_TAB = 'order';    // 판매 관리 탭: order | consign | ads
 let WH_EDIT = null;
 let GDOCS = [];             // staff_data/gdocs       — 자료실 문서 공유 (직원 등록)
 let DRIVE = [];             // staff_data/drive       — 자료실 드라이브 폴더 (직원 등록)
@@ -1093,6 +1119,19 @@ if (DEMO) {
     { key: 'homeshop', name: '홈쇼핑 준비', icon: '🏠', color: '#b91c1c', owner: '', url: '',
       lists: [{ id: 'H1', name: '준비' }],
       cards: [{ id: 'h1', idList: 'H1', name: '방송 대본 검토', url: '', due: '', done: false, labels: [], cover: '' }] },
+  ];
+  ADS = [
+    { id: 'a1', shopId: 'sh1', shopName: '쿠팡', type: '검색광고', startDate: '2026-08-01',
+      endDate: '2026-08-31', cost: 1200000, memo: '8월 상시' },
+    { id: 'a2', shopId: 'sh2', shopName: '스마트스토어', type: 'SNS', startDate: '2026-07-15',
+      endDate: '2026-08-15', cost: 450000, memo: '' },
+  ];
+  ADI = [{ id: 'AD1', shopId: 'sh1', type: 'SNS', startDate: '2026-08-18', endDate: '2026-08-31',
+           cost: 300000, memo: '인스타 추가 집행', _by: '김서연', _byUid: 'd1', createdAt: Date.now() - 1800e3 }];
+  CONS = [
+    { id: 'cs1', date: '2026-08-12', seller: '바로팜', items: '3중 장벽 20층 리뉴 크림 60ml 외 2종',
+      qty: 330, total: 8910000, wh: '바로팜 창고' },
+    { id: 'cs2', date: '2026-07-28', seller: '바로팜', items: '글로우샷 30ml', qty: 120, total: 2880000, wh: '바로팜 창고' },
   ];
   SMV = [
     { id: 'M1', kind: 'move', itemId: 'i2', itemName: '3중 장벽 20층 리뉴 크림 60ml', qty: 100,
@@ -1374,6 +1413,12 @@ function subscribeData() {
     e => console.warn('[calendar]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'workflow'), s => { WF = parseCol(s, []); rerender(); },
     e => console.warn('[workflow]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'ads'), s => { ADS = parseCol(s, []); rerender(); },
+    e => console.warn('[ads]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_ads'), s => { ADI = parseCol(s, []); rerender(); },
+    e => console.warn('[inbox_ads]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'consign'), s => { CONS = parseCol(s, []); rerender(); },
+    e => console.warn('[consign]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_stockmoves'), s => { SMV = parseCol(s, []); rerender(); },
     e => console.warn('[inbox_stockmoves]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_warehouses'), s => { WHI = parseCol(s, []); rerender(); },
@@ -4333,7 +4378,18 @@ $('btn-wh-save').onclick = async () => {
 };
 
 /* ── 판매 관리 — 주문 관리 (고객정보 없음, 읽기 전용) ── */
+/* ── 판매 관리 — 주문 관리 / 위탁 재고이동 / 광고비 관리 (기획서(2) 슬라이드 4) ──
+   매출 대시보드·마진 분석은 넣지 않는다(원가 비공개, 사용자 확정). */
+function adsAll() {
+  const mirror = (ADS || []).map(a => Object.assign({}, a, { src: 'erp' }));
+  const ids = new Set(mirror.map(a => String(a.id)));
+  const mine = (ADI || []).filter(a => !ids.has(String(a.id)) && !a.applied)
+    .map(a => Object.assign({}, a, { src: 'staff' }));
+  return mine.concat(mirror).sort((a, b) => String(b.startDate || '').localeCompare(String(a.startDate || '')));
+}
 function pageSales() {
+  if (SALES_TAB === 'consign') return pageSalesConsign();
+  if (SALES_TAB === 'ads') return pageSalesAds();
   const list = dpFilter(ORDERS || [], ORD_Q, ['orderNo', 'productName', 'shopName']).slice(0, 500);
   const sum = list.reduce((s, o) => s + (Number(o.paymentAmount) || 0), 0);
   return `<div class="pg on">
@@ -4341,6 +4397,7 @@ function pageSales() {
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${dpSearch('dp-q-ord', '주문번호·품목·쇼핑몰 검색')}</span></div>
     <div class="pg-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       주문 ${(ORDERS || []).length}건 · 고객명·연락처·주소는 직원용에 넘어오지 않습니다 ${DP_RO}</div>
+    ${salesTabsHtml()}
     ${list.length ? `<div class="card"><div class="card-h">📦 주문 관리 <span class="sub">${list.length}건 표시${(ORDERS || []).length > 500 ? ' (최신 500건)' : ''} · 합계 ₩${sum.toLocaleString()}</span></div>
       <div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb">
       <thead><tr><th>주문일</th><th>주문번호</th><th>쇼핑몰</th><th>품목</th><th>수량</th><th>결제금액</th><th>주문상태</th><th>출고</th></tr></thead><tbody>
@@ -4355,9 +4412,6 @@ function pageSales() {
         <td style="font-size:12px">${esc(o.stockStatus || '-')}</td></tr>`).join('')}
       </tbody></table></div></div>`
       : ((ORDERS || []).length ? '<div class="empty">검색 결과가 없습니다</div>' : dpEmpty('주문'))}
-    <div class="ph" style="margin-top:16px;padding:22px"><div class="big">🚧</div>
-      <h3>위탁 재고이동 · 광고비 관리는 다음 단계입니다</h3>
-      <p>기획서대로 이 두 메뉴도 들어옵니다. 매출 대시보드와 마진 분석은 넣지 않습니다(원가 비공개).</p></div>
   </div>`;
 }
 /* 검색은 그 페이지만 다시 그리면 되지만, 표가 통째로 바뀌므로 renderPage 로 충분하다.
@@ -4365,6 +4419,8 @@ function pageSales() {
 function wireDataPage() {
   document.querySelectorAll('[data-sm-new]').forEach(b => b.onclick = () => openSmModal(b.dataset.smNew));
   const wo = $('btn-wh-open'); if (wo) wo.onclick = openWhModal;
+  document.querySelectorAll('[data-sales-tab]').forEach(b => b.onclick = () => { SALES_TAB = b.dataset.salesTab; renderPage(); });
+  const an = $('btn-ad-new'); if (an) an.onclick = openAdModal;
   [['dp-q-item', v => ITEM_Q = v], ['dp-q-stock', v => STOCK_Q = v], ['dp-q-ord', v => ORD_Q = v]].forEach(([id, set]) => {
     const el = $(id);
     if (!el) return;
@@ -4372,6 +4428,90 @@ function wireDataPage() {
       const n = $(id); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (_) {} } };
   });
 }
+
+function salesTabsHtml() {
+  const t = [['order', '📦 주문 관리', (ORDERS || []).length], ['consign', '🧾 위탁 재고이동', (CONS || []).length],
+             ['ads', '📢 광고비 관리', adsAll().length]];
+  return `<div class="tabs">${t.map(([k, label, n]) =>
+    `<button class="tab ${SALES_TAB === k ? 'on' : ''}" data-sales-tab="${k}">${label} (${n})</button>`).join('')}</div>`;
+}
+function pageSalesConsign() {
+  const list = CONS || [];
+  return `<div class="pg on">
+    <div class="pg-h"><h1>판매 관리<sup class="sync" style="font-size:13px"> ⓘ</sup></h1></div>
+    <div class="pg-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      바로팜 등 위탁 판매처로 보낸 재고입니다 ${DP_RO}</div>
+    ${salesTabsHtml()}
+    ${list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb" style="min-width:760px">
+      <thead><tr><th>출고일</th><th>판매업체</th><th>입고 창고</th><th>품목</th><th>수량</th><th>합계금액</th></tr></thead><tbody>
+      ${list.map(c => `<tr>
+        <td style="white-space:nowrap">${esc(c.date || '-')}</td>
+        <td class="nm">${esc(c.seller || '-')}</td>
+        <td style="font-size:12px">${esc(c.wh || '-')}</td>
+        <td class="pt-note">${esc(c.items || '-')}</td>
+        <td style="text-align:right;font-weight:700">${Number(c.qty || 0).toLocaleString()}</td>
+        <td class="ap-amt">₩${Number(c.total || 0).toLocaleString()}</td></tr>`).join('')}
+      </tbody></table></div></div>` : dpEmpty('위탁 재고이동')}
+    <div class="ph" style="margin-top:16px;padding:20px"><div class="big">🧾</div>
+      <h3>위탁 명세서 발행은 임원용 ERP에서 합니다</h3>
+      <p>위탁 명세서는 판매업체별 <b>공급 단가</b>로 공급가액·세액을 계산해 거래명세서를 발행합니다.
+         직원용에는 단가가 없어(원가·공급가 비공개) 여기서 발행하면 정산 금액이 틀어집니다.<br>
+         물건을 위탁 창고로 보내는 것 자체는 <b>재고 관리 → 🔁 재고 이동</b> 요청으로 올리시면 됩니다.</p></div>
+  </div>`;
+}
+function pageSalesAds() {
+  const list = adsAll();
+  const sum = list.reduce((s, a) => s + (Number(a.cost) || 0), 0);
+  const wait = list.filter(a => a.src === 'staff').length;
+  return `<div class="pg on">
+    <div class="pg-h"><h1>판매 관리<sup class="sync" style="font-size:13px"> ⓘ</sup></h1>
+      <button class="btn btn-p" id="btn-ad-new" style="margin-left:auto">＋ 광고비 등록</button></div>
+    <div class="pg-sub">집행 광고비 ${list.length}건 · 합계 ₩${sum.toLocaleString()}${wait ? ` · <b style="color:var(--warn)">반영 대기 ${wait}건</b>` : ''}</div>
+    ${salesTabsHtml()}
+    ${list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb" style="min-width:760px">
+      <thead><tr><th>쇼핑몰</th><th>구분</th><th>시작일</th><th>종료일</th><th>금액</th><th>메모</th><th>상태</th></tr></thead><tbody>
+      ${list.map(a => `<tr>
+        <td class="nm">${esc(a.shopName || shopNameOf(a.shopId) || '-')}</td>
+        <td><span class="dp-chip">${esc(a.type || '기타')}</span></td>
+        <td style="white-space:nowrap">${esc(a.startDate || '-')}</td>
+        <td style="white-space:nowrap">${esc(a.endDate || '-')}</td>
+        <td class="ap-amt">₩${Number(a.cost || 0).toLocaleString()}</td>
+        <td class="pt-note">${esc(a.memo || '')}</td>
+        <td>${a.src === 'staff'
+          ? (a.result === 'fail' ? `<span class="chip bad" title="${esc(a.error || '')}">실패</span>` : '<span class="chip wait">반영 대기</span>')
+          : '<span class="chip ok">반영됨</span>'}</td></tr>`).join('')}
+      </tbody></table></div></div>` : dpEmpty('광고비')}
+  </div>`;
+}
+function shopNameOf(id) { const a = (ADS || []).find(x => String(x.shopId) === String(id)); return a ? a.shopName : ''; }
+function adShops() {
+  const m = {};
+  (ADS || []).forEach(a => { if (a && a.shopId) m[String(a.shopId)] = a.shopName || ''; });
+  (ORDERS || []).forEach(o => { if (o && o.shopId && !m[String(o.shopId)]) m[String(o.shopId)] = o.shopName || ''; });
+  return Object.keys(m).map(k => ({ id: k, name: m[k] || k }));
+}
+function openAdModal() {
+  const shops = adShops();
+  if (!shops.length) { toast('쇼핑몰 정보가 아직 넘어오지 않았습니다', true); return; }
+  $('ad-f-shop').innerHTML = shops.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+  $('ad-f-type').innerHTML = ['검색광고', 'SNS', '배너', '제휴', '기타']
+    .map(t => `<option>${t}</option>`).join('');
+  ['ad-f-start', 'ad-f-end', 'ad-f-cost', 'ad-f-memo'].forEach(id => $(id).value = '');
+  $('ovl-ad').classList.add('on');
+}
+$('btn-ad-save').onclick = async () => {
+  const cost = Number($('ad-f-cost').value) || 0;
+  if (!cost) { toast('금액을 입력해 주세요', true); return; }
+  if (!$('ad-f-start').value) { toast('시작일을 입력해 주세요', true); return; }
+  const shopId = $('ad-f-shop').value;
+  const arr = (ADI || []).slice();
+  arr.push({ id: 'AD' + Date.now(), shopId, shopName: (adShops().find(s => s.id === shopId) || {}).name || '',
+    type: $('ad-f-type').value, startDate: $('ad-f-start').value, endDate: $('ad-f-end').value,
+    cost, memo: $('ad-f-memo').value.trim(), _by: ME.name, _byUid: ME.uid, createdAt: Date.now() });
+  try { await saveCol('inbox_ads', arr); ADI = arr; $('ovl-ad').classList.remove('on');
+    toast('요청을 올렸습니다 — 임원용 ERP에서 반영됩니다'); rerender(); }
+  catch (e) { toast('실패: ' + e.message, true); }
+};
 
 /* ═══════════ 워크플로우 (v0.26.0 · 기획서 p11) ═══════════
    임원용 Trello 보드 3개(르니브 운영 본부·약국 영업·홈쇼핑 준비)를 읽기 전용으로 보여준다.

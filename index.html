@@ -6338,7 +6338,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.671';
+const ERP_VERSION = 'v2.3.672';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58823,6 +58823,81 @@ async function _staffInboxStock(verbose) {
   return done;
 }
 window.staffStockNow = function() { return _staffInboxStock(true); };
+
+/* ══════════ v2.3.672 — 광고비 · 위탁 재고이동 (기획서(2) 슬라이드 4·8) ══════════ */
+function _staffAdsPayload() {
+  const out = [];
+  (DB.shops || []).forEach(s => {
+    if (!s) return;
+    (Array.isArray(s.adsCosts) ? s.adsCosts : []).forEach(a => {
+      if (!a) return;
+      out.push({ id: String(a.id), shopId: String(s.id), shopName: s.name || '',
+        type: a.type || '', startDate: a.startDate || '', endDate: a.endDate || '',
+        cost: Number(a.cost) || 0, memo: a.memo || '' });
+    });
+  });
+  return out.sort((a, b) => String(b.startDate || '').localeCompare(String(a.startDate || '')));
+}
+async function _staffMirrorAds() { return _staffPush('ads', _staffAdsPayload()); }
+
+// 위탁 재고이동 — 읽기 전용 요약. 단가는 넘기지 않고 합계 금액만 넘긴다.
+function _staffConsignPayload() {
+  const list = (window._consign && Array.isArray(window._consign.shipments)) ? window._consign.shipments : [];
+  const sellers = {};
+  (DB.sellers || []).forEach(s => { if (s) sellers[String(s.id)] = s.company || ''; });
+  return list.map(sh => {
+    let total = 0;
+    try { const A = _consignAmounts(sh); total = Number(A && (A.total != null ? A.total : A.sum)) || 0; } catch(_) {}
+    const lines = Array.isArray(sh.lines) ? sh.lines : [];
+    return {
+      id: String(sh.id || sh.createdAt || ''), date: sh.date || '',
+      seller: sellers[String(sh.sellerId)] || sh.sellerName || '',
+      items: lines.length ? (String(lines[0].name || '') + (lines.length > 1 ? ' 외 ' + (lines.length - 1) + '종' : '')) : '',
+      qty: lines.reduce((s, l) => s + (Number(l && l.qty) || 0), 0),
+      total: total, wh: sh.toWh || sh.warehouse || ''
+    };
+  }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+async function _staffMirrorConsign() { return _staffPush('consign', _staffConsignPayload()); }
+window._staffMirrorAds = _staffMirrorAds;
+window._staffMirrorConsign = _staffMirrorConsign;
+
+/* 직원이 올린 광고비 등록 요청 */
+async function _staffInboxAds(verbose) {
+  if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return 0;
+  let done = 0, failed = 0;
+  try {
+    const ref = window._firestoreDoc(window._firebaseDb, 'staff_data', 'inbox_ads');
+    const snap = await window._firestoreGetDoc(ref);
+    if (snap && snap.exists()) {
+      const list = JSON.parse(snap.data().data || '[]') || [];
+      let touched = false;
+      list.forEach(r => {
+        if (!r || r.applied) return;
+        const shop = (DB.shops || []).find(s => s && String(s.id) === String(r.shopId));
+        r.applied = true; r.appliedAt = Date.now();
+        touched = true;
+        if (!shop) { r.result = 'fail'; r.error = '쇼핑몰을 찾을 수 없습니다'; failed++; return; }
+        shop.adsCosts = Array.isArray(shop.adsCosts) ? shop.adsCosts : [];
+        shop.adsCosts.push({ id: Date.now() + Math.floor(Math.random() * 1000),
+          type: r.type || '기타', startDate: r.startDate || '', endDate: r.endDate || '',
+          cost: Number(r.cost) || 0, memo: (r.memo || '') + ' (직원용 ERP · ' + (r._by || '') + ')' });
+        shop.updatedAt = Date.now();
+        r.result = 'ok'; delete r.error; done++;
+      });
+      if (touched) await window._firestoreSetDoc(ref, { data: JSON.stringify(list), ts: Date.now() });
+    }
+  } catch (e) { console.warn('📥 [직원 광고비] 실패:', e && e.message); }
+  if (done || failed) {
+    try { if (typeof saveDataNow === 'function') await saveDataNow(); else saveData(); } catch(_){}
+    try { if (typeof renderAdsPage === 'function') renderAdsPage(); } catch(_){}
+    try { showNotif('📥 직원용 광고비 ' + done + '건 반영' + (failed ? ' · ' + failed + '건 실패' : ''),
+      failed ? 'warning' : 'info'); } catch(_){}
+    try { _staffMirrorAds(); } catch(_){}
+  } else if (verbose) console.log('📥 [직원 광고비] 처리할 요청이 없습니다');
+  return done;
+}
+window.staffAdsNow = function() { return _staffInboxAds(true); };
 window._staffMirrorCs = _staffMirrorCs;
 
 /* ══════════ v2.3.667 — 직원용 받은편지함 (직원 → 임원 단방향) ══════════
@@ -58901,6 +58976,7 @@ function _staffInboxThrottled() {
     setTimeout(() => {
       _staffInboxDrain().catch(() => {});
       _staffInboxStock().catch(() => {});   // v2.3.671
+      _staffInboxAds().catch(() => {});     // v2.3.672
     }, 6000);
   } catch(_) {}
 }
@@ -58953,6 +59029,8 @@ function _staffMirrorCalendarThrottled() {
       _staffMirrorPharm().catch(() => {});     // v2.3.669
       _staffMirrorCs().catch(() => {});
       _staffMirrorNp().catch(() => {});         // v2.3.670
+      _staffMirrorAds().catch(() => {});        // v2.3.672
+      _staffMirrorConsign().catch(() => {});
     }, 4000);
   } catch(_) {}
 }
@@ -59012,9 +59090,11 @@ window.staffMirrorNow = async function() {
   const pharmacies = await _staffMirrorPharm();
   const cs = await _staffMirrorCs();
   const newproducts = await _staffMirrorNp();
+  const ads = await _staffMirrorAds();
+  const consign = await _staffMirrorConsign();
   try { localStorage.setItem('reniv_staff_cal_push', String(Date.now())); } catch(_) {}
-  console.log('👥 직원용 미러 재동기:', { board, calendar, accounts, workflow, items, warehouses, orders, pharmacies, cs, newproducts });
-  return { board, calendar, accounts, workflow, items, warehouses, orders, pharmacies, cs, newproducts };
+  console.log('👥 직원용 미러 재동기:', { board, calendar, accounts, workflow, items, warehouses, orders, pharmacies, cs, newproducts, ads, consign });
+  return { board, calendar, accounts, workflow, items, warehouses, orders, pharmacies, cs, newproducts, ads, consign };
 };
 
 // v2.3.601: 공용 API Key 전용 저장 — 서버에 실제로 반영됐는지 되읽어 확인한다.
