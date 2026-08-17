@@ -193,8 +193,19 @@ tr:last-child td { border-bottom:none; }
 .tv-link { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--line); background:#fff;
   border-radius:8px; padding:5px 11px; font-size:12.5px; font-weight:700; color:var(--ink-soft); }
 .tv-link:hover { border-color:var(--brand); color:var(--brand-deep); background:var(--brand-soft); }
+/* 르니브 MEMBER 표 (v0.17.1) — 열 폭 고정, 이름 자체가 슬랙 링크 */
+.mem-tb { table-layout:fixed; }
+.mem-tb th, .mem-tb td { padding-left:6px; padding-right:6px; }
+.mem-cell { display:inline-flex; align-items:center; justify-content:center; gap:6px; max-width:100%; }
+.mem-cell > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .mem-team { font-weight:700; color:var(--brand-deep); cursor:pointer; }
 .mem-team:hover { text-decoration:underline; text-underline-offset:3px; }
+.mem-hash { flex:none; display:inline-flex; align-items:center; justify-content:center; width:21px; height:21px;
+  border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--ink-mute);
+  font-size:12px; font-weight:800; line-height:1; cursor:pointer; padding:0; transition:all .15s; }
+.mem-hash:hover { border-color:var(--brand); color:var(--brand-deep); background:var(--brand-soft); }
+.mem-dm { cursor:pointer; border-bottom:1px dashed var(--line); }
+.mem-dm:hover { color:var(--brand-deep); border-bottom-color:var(--brand); }
 /* 출퇴근 표의 이름 — 밑줄 없이, 호버 때만 (v0.13.0) */
 .att-name { font-weight:700; color:var(--brand-deep); cursor:pointer; }
 .att-name:hover { text-decoration:underline; text-underline-offset:3px; }
@@ -481,7 +492,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.17.0';
+const STAFF_VERSION = 'v0.17.1';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1639,15 +1650,23 @@ function pageHome() {
   }
 
   // 왼쪽 큰 카드 — 르니브 MEMBER (v0.17.0). 팀명 클릭 시 팀 정보·업무 모달.
-  const memberCard = `<div class="card"><div class="card-h">👥 르니브 MEMBER <span class="sub">팀명을 클릭하면 팀 정보와 업무를 볼 수 있습니다</span></div>
+  const memberCard = `<div class="card"><div class="card-h">👥 르니브 MEMBER <span class="sub"># 은 슬랙 채널, 이름은 슬랙 DM 으로 연결됩니다</span></div>
     <div class="card-b" style="padding:${TEAMS.length ? '0 18px' : '16px'}">
-    ${TEAMS.length ? `<table><thead><tr><th>팀</th><th>책임자</th><th>AI직원</th>${isAdmin ? '<th>업무</th><th>담당자 배정</th>' : ''}</tr></thead><tbody>
+    ${TEAMS.length ? `<table class="mem-tb">
+      <colgroup>${isAdmin ? '<col style="width:28%"><col style="width:23%"><col style="width:19%"><col style="width:13%"><col style="width:17%">'
+                          : '<col style="width:40%"><col style="width:32%"><col style="width:28%">'}</colgroup>
+      <thead><tr><th>팀</th><th>책임자</th><th>AI직원</th>${isAdmin ? '<th>업무</th><th>담당자 배정</th>' : ''}</tr></thead><tbody>
       ${TEAMS.map(t => {
         const total = (t.tasks || []).length;
         const assigned = (t.tasks || []).filter(k => k.assignee).length;
+        const dm = (name, kind, hint) => name
+          ? `<span class="mem-dm" data-mem-slack="${esc(t.id)}|${kind}" title="${hint} 슬랙 DM 열기">${esc(name)}</span>`
+          : '<span style="color:var(--ink-mute)">-</span>';
         return `<tr>
-          <td><span class="mem-team" data-team-open-home="${esc(t.id)}" title="팀 정보 보기">${esc(t.name)}</span></td>
-          <td>${esc(t.lead || '-')}</td><td>${esc(t.ai || '-')}</td>
+          <td><span class="mem-cell"><span class="mem-team" data-team-open-home="${esc(t.id)}" title="팀 정보와 업무 보기">${esc(t.name)}</span>
+            <button type="button" class="mem-hash" data-mem-slack="${esc(t.id)}|team" title="${esc(t.name)} 슬랙 채널 열기">#</button></span></td>
+          <td>${dm(t.lead, 'lead', '책임자')}</td>
+          <td>${dm(t.ai, 'ai', 'AI직원')}</td>
           ${isAdmin ? `<td>${total}건</td><td>${assigned}/${total || 0}</td>` : ''}</tr>`;
       }).join('')}</tbody></table>`
       : '<div class="empty">등록된 팀이 없습니다</div>'}
@@ -1733,6 +1752,14 @@ function wireHome() {
   document.querySelectorAll('[data-team-open-home]').forEach(el => el.onclick = e => {
     e.stopPropagation();
     openTeamView(el.dataset.teamOpenHome);      // 보기 → (수정 버튼) → 수정
+  });
+  // # / 이름 클릭 → 슬랙 (팀 모달을 거치지 않고 바로) (v0.17.1)
+  document.querySelectorAll('[data-mem-slack]').forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    const [tid, kind] = el.dataset.memSlack.split('|');
+    const t = TEAMS.find(x => x.id === tid); if (!t) return;
+    _openLink(kind === 'team' ? t.slack : kind === 'lead' ? t.leadSlack : t.aiSlack,
+              kind === 'team' ? '슬랙 채널' : kind === 'lead' ? '책임자 슬랙 DM' : 'AI직원 슬랙 DM');
   });
   const ci = $('btn-clock-in');  if (ci) ci.onclick = () => clock('in');
   const co = $('btn-clock-out'); if (co) co.onclick = () => clock('out');
