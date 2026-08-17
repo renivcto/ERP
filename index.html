@@ -6338,7 +6338,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.666';
+const ERP_VERSION = 'v2.3.667';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12887,6 +12887,7 @@ function renderDashboard() {
   renderDashTimeline();
   try { renderDashCalendar(); } catch(_){}  // v2.3.435: 르니브 업무 일정 캘린더
   try { _staffMirrorCalendarThrottled(); } catch(_){}  // v2.3.660: 직원용 ERP 일정 미러
+  try { _staffInboxThrottled(); } catch(_){}           // v2.3.667: 직원이 올린 결재 수신
   renderDashKPI();
   renderDashKanban();
 }
@@ -58671,6 +58672,57 @@ function _staffOrdersPayload() {
 }
 async function _staffMirrorOrders() { return _staffPush('orders', _staffOrdersPayload()); }
 window._staffMirrorItems = _staffMirrorItems;
+
+/* ══════════ v2.3.667 — 직원용 받은편지함 (직원 → 임원 단방향) ══════════
+   직원 계정은 erp_data 를 못 쓴다. 그래서 직원이 쓴 문서는 staff_data/inbox_* 에 쌓이고,
+   임원이 임원용 ERP 를 열 때 여기서 끌어와 DB 에 합친다.
+   ⚠️ 합친 뒤 인박스에서 삭제하지 않는다 — 삭제했다가 임원용 저장이 실패하면 그 문서는 증발한다.
+      applied 표시만 하고 남겨 둔다(직원 화면의 '전달됨' 표시도 이 값을 본다). */
+const _STAFF_INBOX = [
+  { doc: 'inbox_expenses',  arr: 'expenses',  label: '지출결의서' },
+  { doc: 'inbox_approvals', arr: 'approvals', label: '일반결재' },
+];
+async function _staffInboxDrain() {
+  if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return 0;
+  let added = 0;
+  for (const box of _STAFF_INBOX) {
+    try {
+      const ref = window._firestoreDoc(window._firebaseDb, 'staff_data', box.doc);
+      const snap = await window._firestoreGetDoc(ref);
+      if (!snap || !snap.exists()) continue;
+      const list = JSON.parse(snap.data().data || '[]') || [];
+      if (!list.length) continue;
+      if (!Array.isArray(DB[box.arr])) DB[box.arr] = [];
+      const have = new Set(DB[box.arr].map(x => String(x && x.id)));
+      let touched = false;
+      list.forEach(r => {
+        if (!r || r.applied) return;
+        if (!have.has(String(r.id))) { DB[box.arr].push(Object.assign({}, r, { applied: undefined })); added++; }
+        r.applied = true; r.appliedAt = Date.now();
+        touched = true;
+      });
+      if (touched) {
+        await window._firestoreSetDoc(ref, { data: JSON.stringify(list), ts: Date.now() });
+        console.log('📥 [직원 인박스] ' + box.label + ': ' + added + '건 반영');
+      }
+    } catch (e) { console.warn('📥 [직원 인박스] ' + box.doc + ' 실패:', e && e.message); }
+  }
+  if (added) {
+    try { if (typeof saveDataNow === 'function') await saveDataNow(); else saveData(); } catch(_){}
+    try { showNotif('📥 직원용 ERP에서 결재 ' + added + '건이 들어왔습니다', 'info'); } catch(_){}
+    try { if (typeof renderApprovalPage === 'function') renderApprovalPage(); } catch(_){}
+  }
+  return added;
+}
+window.staffInboxNow = _staffInboxDrain;
+function _staffInboxThrottled() {
+  try {
+    const last = Number(sessionStorage.getItem('reniv_staff_inbox') || 0);
+    if (Date.now() - last < 10 * 60 * 1000) return;      // 세션 내 10분
+    sessionStorage.setItem('reniv_staff_inbox', String(Date.now()));
+    setTimeout(() => { _staffInboxDrain().catch(() => {}); }, 6000);
+  } catch(_) {}
+}
 window._staffMirrorOrders = _staffMirrorOrders;
 window._staffMirrorWorkflow = _staffMirrorWorkflow;
 

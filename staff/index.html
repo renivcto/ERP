@@ -309,6 +309,10 @@ tr:last-child td { border-bottom:none; }
   border-radius:8px; padding:6px 12px; font-size:12px; font-weight:700; }
 .dp-wh { font-size:11.5px; color:var(--ink-soft); white-space:nowrap; text-align:right; }
 .dp-wh b { color:var(--ink); }
+/* 결재 관리 (v0.29.0) */
+.ap-line { font-size:11.5px; color:var(--ink-soft); white-space:nowrap; }
+.ap-line b { color:var(--ink); }
+.ap-amt { text-align:right; font-weight:800; white-space:nowrap; }
 /* 르니브 업무 일정 (v0.18.0) */
 .cal-nav { display:flex; align-items:center; gap:8px; margin-left:auto; }
 .cal-nav .btn-sm { padding:4px 10px; }
@@ -632,6 +636,39 @@ tr:last-child td { border-bottom:none; }
   </div>
 </div>
 
+<!-- 결재 작성/수정 (v0.29.0) -->
+<div class="ovl" id="ovl-ap">
+  <div class="modal" style="max-width:620px">
+    <div class="modal-h"><span class="t" id="ap-m-t">지출 결의서 작성</span><button class="modal-x" data-close="ovl-ap">✕</button></div>
+    <div class="modal-b">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fld"><label>분류</label><select class="fi" id="ap-f-cat"></select></div>
+        <div class="fld" data-ap-exp><label>업체</label><input class="fi" id="ap-f-vendor" placeholder="예: (주)바이오코스텍"></div>
+      </div>
+      <div class="fld"><label>제목</label><input class="fi" id="ap-f-title"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px" data-ap-exp>
+        <div class="fld"><label>금액 (원)</label><input class="fi" id="ap-f-amount" type="number" min="0" placeholder="0"></div>
+        <div class="fld"><label>지급 예정일</label><input class="fi" id="ap-f-due" type="date"></div>
+      </div>
+      <div class="fld"><label>사유 / 내용</label>
+        <div class="rt-toolbar" data-for="ap-f-reason"></div>
+        <div class="rt-editor fi" id="ap-f-reason" contenteditable="true" style="min-height:110px"
+             data-ph="결재가 필요한 이유를 적어주세요"></div></div>
+      <div class="fld" style="background:#f4f8ff;border:1px solid #bfdbfe;border-radius:12px;padding:13px 14px">
+        <label style="color:#1d4ed8">🖋️ 결재라인</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:4px">
+          <div><div class="hint" style="margin:0 0 4px">1차 (전결 가능)</div><select class="fi" id="ap-f-l1"></select></div>
+          <div><div class="hint" style="margin:0 0 4px">2차 본부장 (전결 가능)</div><input class="fi" id="ap-f-l2" readonly></div>
+          <div><div class="hint" style="margin:0 0 4px">3차 대표이사</div><input class="fi" id="ap-f-l3" readonly></div>
+        </div>
+        <div class="hint">1차 결재자만 고르면 됩니다. 결재는 임원용 ERP에서 진행됩니다.</div>
+      </div>
+    </div>
+    <div class="modal-f"><button class="btn btn-bad" id="btn-ap-del" style="margin-right:auto;display:none">삭제</button>
+      <button class="btn" data-close="ovl-ap">취소</button><button class="btn btn-p" id="btn-ap-save">상신</button></div>
+  </div>
+</div>
+
 <!-- 자료실: 문서 공유 등록/수정 (v0.27.0) -->
 <div class="ovl" id="ovl-gd">
   <div class="modal" style="max-width:520px">
@@ -733,7 +770,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.28.0';
+const STAFF_VERSION = 'v0.29.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -779,6 +816,10 @@ let ITEMS = [];             // staff_data/items_fin   — 완제품 품목 (원�
 let WHS = [];               // staff_data/warehouses  — 창고 목록
 let ORDERS = [];            // staff_data/orders      — 주문 (고객정보 없음, 읽기 전용)
 let ITEM_Q = '', STOCK_Q = '', ORD_Q = '';
+let APX = [];               // staff_data/inbox_expenses  — 직원이 쓴 지출결의서
+let APN = [];               // staff_data/inbox_approvals — 직원이 쓴 일반결재
+let AP_TAB = 'exp';         // 결재 탭: exp | gen
+let AP_EDIT = null;         // 편집 중인 id
 let GDOCS = [];             // staff_data/gdocs       — 자료실 문서 공유 (직원 등록)
 let DRIVE = [];             // staff_data/drive       — 자료실 드라이브 폴더 (직원 등록)
 let DF_CAT = null;          // 드라이브 카테고리 필터
@@ -946,6 +987,14 @@ if (DEMO) {
       lists: [{ id: 'H1', name: '준비' }],
       cards: [{ id: 'h1', idList: 'H1', name: '방송 대본 검토', url: '', due: '', done: false, labels: [], cover: '' }] },
   ];
+  APX = [{ id: 'SX1', category: '기타', title: '사무용품 구매의 건', vendor: '오피스디포', amount: 128000,
+           dueDate: '2026-08-25', reason: '탕비실 비품 보충', line: { first: '권다빈 이사' },
+           _by: '김서연', _byUid: 'd1', createdAt: Date.now() - 86400e3, applied: true, appliedAt: Date.now() - 80000e3 },
+         { id: 'SX2', category: '광고비', title: '8월 인스타 광고 집행', vendor: '메타', amount: 500000,
+           dueDate: '2026-08-30', reason: '신제품 런칭 광고', line: { first: '송희강 이사' },
+           _by: '김서연', _byUid: 'd1', createdAt: Date.now() - 3600e3 }];
+  APN = [{ id: 'SN1', category: '기타', title: '재택근무 시행 품의', reason: '태풍 대비 재택 전환 요청',
+           line: { first: '권다빈 이사' }, _by: '김서연', _byUid: 'd1', createdAt: Date.now() - 7200e3 }];
   WHS = [{ id: 'w1', name: '르니브 창고' }, { id: 'w2', name: '쿠팡 창고' }, { id: 'w3', name: '바로팜 창고' }];
   ITEMS = [
     { id: 'i1', code: 'P-3X-02', name: '3중 장벽 20층 리뉴 크림 30ml', spec: '30mL / NET WT. 1.06 OZ',
@@ -1184,6 +1233,10 @@ function subscribeData() {
     e => console.warn('[calendar]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'workflow'), s => { WF = parseCol(s, []); rerender(); },
     e => console.warn('[workflow]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_expenses'), s => { APX = parseCol(s, []); rerender(); },
+    e => console.warn('[inbox_expenses]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_approvals'), s => { APN = parseCol(s, []); rerender(); },
+    e => console.warn('[inbox_approvals]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'items_fin'), s => { ITEMS = parseCol(s, []); rerender(); },
     e => console.warn('[items]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'warehouses'), s => { WHS = parseCol(s, []); rerender(); },
@@ -2048,6 +2101,7 @@ function renderPage() {
     case 'adm-journal': m.innerHTML = pageAdmJournal(); wireAdmJournal(); break;
     case 'partners': m.innerHTML = pagePartners(); wirePt('pt'); break;
     case 'accounts': m.innerHTML = pageAccounts(); wireAccounts(); break;
+    case 'approval': m.innerHTML = pageApproval(); wireApproval(); break;
     case 'items':    m.innerHTML = pageItems(); wireDataPage(); break;
     case 'stock':    m.innerHTML = pageStock(); wireDataPage(); break;
     case 'sales':    m.innerHTML = pageSales(); wireDataPage(); break;
@@ -3494,6 +3548,136 @@ $('btn-board-save').onclick = async () => {
   catch (e) { BOARD_S = keep; toast('저장 실패: ' + e.message, true); }
 };
 
+/* ═══════════ 결재 관리 (v0.29.0 · 기획서(2) 슬라이드 3) ═══════════
+   직원이 쓴 문서는 staff_data/inbox_expenses · inbox_approvals 에 쌓이고,
+   임원이 임원용 ERP 를 열 때 임원용 결재함으로 들어간다(받은편지함 방식).
+   ⚠️ 임원용 결재 데이터는 여기에 내려오지 않는다 — 이 화면은 '직원이 올린 것'만 보여준다. */
+const AP_EXP_CATS = ['발주 선급금', '발주 잔금', '샘플 구매', '광고비', '기타'];
+const AP_GEN_CATS = ['기타', '인사', '총무', '계약', '마케팅'];
+const AP_L2 = '본부장', AP_L3 = '대표이사';
+function apDoc() { return AP_TAB === 'exp' ? 'inbox_expenses' : 'inbox_approvals'; }
+function apList() { return (AP_TAB === 'exp' ? APX : APN) || []; }
+function apSetList(arr) { if (AP_TAB === 'exp') APX = arr; else APN = arr; }
+function apMine(r) { return ME.mode === 'admin' || (r && r._byUid === ME.uid); }
+/* 결재자 후보 — 휴가 정책의 결재라인을 그대로 쓴다(이미 '송희강 이사' 형태로 관리 중) */
+function apApprovers() {
+  const a = (pol().approvers || []).filter(Boolean);
+  return a.length ? a : ['권다빈 이사', '송희강 이사'];
+}
+function apStatus(r) {
+  if (!r) return '';
+  if (r.applied) return '<span class="chip ok">임원용 전달됨</span>';
+  return '<span class="chip wait">전달 대기</span>';
+}
+function apWhen(t) {
+  const d = new Date(Number(t) || 0);
+  return isNaN(d.getTime()) || !t ? '-'
+    : d.getFullYear() + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + String(d.getDate()).padStart(2, '0');
+}
+function pageApproval() {
+  const isExp = AP_TAB === 'exp';
+  const all = apList().slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const list = ME.mode === 'admin' ? all : all.filter(r => r._byUid === ME.uid);
+  const waiting = list.filter(r => !r.applied).length;
+  return `<div class="pg on">
+    <div class="pg-h"><h1>결재 관리<sup class="sync" style="font-size:13px" title="여기서 작성한 문서가 임원용 ERP 결재함으로 전달됩니다"> ⓘ</sup></h1>
+      <button class="btn btn-p" id="btn-ap-new" style="margin-left:auto">＋ ${isExp ? '지출 결의서' : '일반 결재'} 작성</button></div>
+    <div class="pg-sub">작성한 문서는 임원용 ERP 결재함으로 전달됩니다 · 결재는 1차(전결 가능) → 2차 본부장(전결 가능) → 3차 대표이사 순으로 임원용에서 진행됩니다${waiting ? ` · <b style="color:var(--warn)">전달 대기 ${waiting}건</b>` : ''}</div>
+    <div class="tabs">
+      <button class="tab ${isExp ? 'on' : ''}" data-ap-tab="exp">💳 지출 결의서 (${(APX || []).filter(r => ME.mode === 'admin' || r._byUid === ME.uid).length})</button>
+      <button class="tab ${!isExp ? 'on' : ''}" data-ap-tab="gen">📝 일반 결재 (${(APN || []).filter(r => ME.mode === 'admin' || r._byUid === ME.uid).length})</button>
+    </div>
+    ${list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb" style="min-width:${isExp ? 940 : 760}px">
+      <thead><tr><th>작성일</th><th>분류</th>${isExp ? '<th>업체</th>' : ''}<th>제목</th>
+        ${isExp ? '<th>금액</th><th>지급예정일</th>' : ''}<th>결재라인</th><th>작성자</th><th>상태</th><th>관리</th></tr></thead><tbody>
+      ${list.map(r => `<tr>
+        <td style="white-space:nowrap">${apWhen(r.createdAt)}</td>
+        <td><span class="dp-chip">${esc(r.category || '기타')}</span></td>
+        ${isExp ? `<td>${esc(r.vendor || '-')}</td>` : ''}
+        <td class="nm">${esc(r.title || '-')}</td>
+        ${isExp ? `<td class="ap-amt">${r.amount ? '₩' + Number(r.amount).toLocaleString() : '-'}</td>
+                   <td style="white-space:nowrap">${esc(r.dueDate || '-')}</td>` : ''}
+        <td class="ap-line">1차 <b>${esc((r.line && r.line.first) || '-')}</b><br>2차 ${AP_L2} · 3차 ${AP_L3}</td>
+        <td style="white-space:nowrap">${esc(r._by || '-')}</td>
+        <td>${apStatus(r)}</td>
+        <td style="white-space:nowrap">${(!r.applied && apMine(r))
+          ? `<button class="btn btn-sm" data-ap-edit="${esc(r.id)}">수정</button>
+             <button class="btn btn-sm btn-bad" data-ap-del="${esc(r.id)}">삭제</button>`
+          : '<span style="font-size:11px;color:var(--ink-mute)">임원용에서 진행 중</span>'}</td></tr>`).join('')}
+      </tbody></table></div></div>`
+      : `<div class="ph"><div class="big">🖋️</div><h3>작성한 ${isExp ? '지출 결의서' : '일반 결재'}가 없습니다</h3>
+          <p>위 <b>작성</b> 버튼으로 올리면 임원용 ERP 결재함으로 전달됩니다.
+             임원용 ERP의 결재 문서는 이 화면에 보이지 않습니다.</p></div>`}
+  </div>`;
+}
+function openApModal(id) {
+  const isExp = AP_TAB === 'exp';
+  const r = id ? apList().find(x => String(x.id) === String(id)) : null;
+  if (r && r.applied) { toast('이미 임원용으로 전달되어 수정할 수 없습니다', true); return; }
+  AP_EDIT = r ? r.id : null;
+  $('ap-m-t').textContent = (r ? '✏️ ' : '＋ ') + (isExp ? '지출 결의서' : '일반 결재') + (r ? ' 수정' : ' 작성');
+  const cats = isExp ? AP_EXP_CATS : AP_GEN_CATS;
+  $('ap-f-cat').innerHTML = cats.map(c => `<option${r && r.category === c ? ' selected' : ''}>${esc(c)}</option>`).join('');
+  $('ap-f-title').value = r ? (r.title || '') : '';
+  $('ap-f-vendor').value = r ? (r.vendor || '') : '';
+  $('ap-f-amount').value = r && r.amount ? r.amount : '';
+  $('ap-f-due').value = r ? (r.dueDate || '') : '';
+  $('ap-f-reason').innerHTML = r ? _rtSanitize(r.reason || '') : '';
+  $('ap-f-l1').innerHTML = apApprovers().map(a =>
+    `<option${r && r.line && r.line.first === a ? ' selected' : ''}>${esc(a)}</option>`).join('');
+  $('ap-f-l2').value = AP_L2;
+  $('ap-f-l3').value = AP_L3;
+  document.querySelectorAll('[data-ap-exp]').forEach(el => el.style.display = isExp ? '' : 'none');
+  $('btn-ap-del').style.display = r ? '' : 'none';
+  $('ovl-ap').classList.add('on');
+  try { buildRtToolbars(); } catch (_) {}
+}
+$('btn-ap-save').onclick = async () => {
+  const isExp = AP_TAB === 'exp';
+  const title = $('ap-f-title').value.trim();
+  if (!title) { toast('제목을 입력해 주세요', true); return; }
+  const amount = Number($('ap-f-amount').value) || 0;
+  if (isExp && !amount) { toast('금액을 입력해 주세요', true); return; }
+  const reason = _rtSanitize($('ap-f-reason').innerHTML);
+  const data = {
+    category: $('ap-f-cat').value || '기타', title, reason,
+    line: { first: $('ap-f-l1').value || '', second: AP_L2, third: AP_L3 },
+    updatedAt: Date.now(),
+  };
+  if (isExp) { data.vendor = $('ap-f-vendor').value.trim(); data.amount = amount; data.dueDate = $('ap-f-due').value || ''; }
+  const arr = apList().slice();
+  const i = arr.findIndex(x => String(x.id) === String(AP_EDIT));
+  if (i >= 0) {
+    if (arr[i].applied) { toast('이미 전달되어 수정할 수 없습니다', true); return; }
+    arr[i] = Object.assign({}, arr[i], data);
+  } else {
+    arr.push(Object.assign({ id: (isExp ? 'SX' : 'SN') + Date.now(), createdAt: Date.now(),
+      _by: ME.name, _byUid: ME.uid, _from: '직원용 ERP' }, data));
+  }
+  try { await saveCol(apDoc(), arr); apSetList(arr); $('ovl-ap').classList.remove('on');
+    toast('상신했습니다 — 임원용 ERP를 열면 결재함으로 들어갑니다'); rerender(); }
+  catch (e) { toast('저장 실패: ' + e.message, true); }
+};
+$('btn-ap-del').onclick = async () => {
+  if (!AP_EDIT || !confirm('이 문서를 삭제할까요?')) return;
+  const cur = apList().find(x => String(x.id) === String(AP_EDIT));
+  if (cur && cur.applied) { toast('이미 전달되어 삭제할 수 없습니다', true); return; }
+  const arr = apList().filter(x => String(x.id) !== String(AP_EDIT));
+  try { await saveCol(apDoc(), arr); apSetList(arr); $('ovl-ap').classList.remove('on'); toast('삭제했습니다'); rerender(); }
+  catch (e) { toast('삭제 실패: ' + e.message, true); }
+};
+function wireApproval() {
+  document.querySelectorAll('[data-ap-tab]').forEach(b => b.onclick = () => { AP_TAB = b.dataset.apTab; renderPage(); });
+  const nb = $('btn-ap-new'); if (nb) nb.onclick = () => openApModal(null);
+  document.querySelectorAll('[data-ap-edit]').forEach(b => b.onclick = () => openApModal(b.dataset.apEdit));
+  document.querySelectorAll('[data-ap-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('이 문서를 삭제할까요?')) return;
+    const arr = apList().filter(x => String(x.id) !== String(b.dataset.apDel));
+    try { await saveCol(apDoc(), arr); apSetList(arr); toast('삭제했습니다'); rerender(); }
+    catch (e) { toast('삭제 실패: ' + e.message, true); }
+  });
+}
+
 /* ═══════════ 임원용 연동 데이터 — 1단계 읽기 전용 (v0.28.0) ═══════════
    기획서(2) 슬라이드 1·4·6·8.
    ⚠️ 원가·재고평가액·고객정보는 화면에서 숨기는 게 아니라 미러에 아예 없다.
@@ -3810,7 +3994,6 @@ function wireCalendar() { wireCalCommon(); }
 
 /* ═══════ 플레이스홀더 — 기획서 p5 "우선 메뉴만" ═══════ */
 const PH = {
-  approval:  { ico: '🖋️', t: '결재 관리', d: '지출 결의서와 일반 결재 품의서를 작성합니다. 결재라인 지정 후 1차 결재(전결 가능) → 2차 본부장(전결 가능) → 3차 대표이사 순으로 진행되며, 작성된 문서는 임원용 ERP에도 연동됩니다. 임원용 ERP의 결재 데이터는 여기에 보이지 않습니다.', sync: true },
   pharmacy:  { ico: '💊', t: '약국 관리', d: '약사 CS 관리와 약국 리스트가 임원용과 연동됩니다. 일반 고객 정보는 공개되지 않습니다.', sync: true },
   newproduct:{ ico: '🌱', t: '신제품 개발', d: '임원용과 읽기·쓰기 모두 연동됩니다. 수익성 탭은 표시되지 않습니다.', sync: true },
 };
