@@ -16,8 +16,10 @@ Claude Code에서 이어서 작업할 때 이 문서를 먼저 읽을 것.
 > "직원용 ERP에는 **우선 메뉴만 만든 다음**, 임원용 ERP의 데이터에서
 > **내가 넣어달라고 하는 것들만** 넣는다."
 
-- v0.1 = 메뉴 골격 전체 + **직원용 고유 기능만 완전 동작**
-  (로그인·가입·승인 / 직원 업무 관리 / 근태 / 자료실 / 마이 계정)
+- v0.1~v0.10 에서 완성된 것 (직원용 고유 기능):
+  로그인·가입(이메일·집주소 포함)·관리자 승인 / 업무 배정(팀 보드 + 팀 수정 모달) /
+  근태(월차·연차·반차·품의서·결재) / **출퇴근**(IP·기기·초단위, 월별 문서) /
+  자료실 / 마이 계정(사진 아바타) / 홈 대시보드 / 서식·표 편집기
 - 임원용 데이터 연동(품목·재고·판매·약국·워크플로우·캘린더·결재 등)은
   **사용자가 항목을 지정할 때** 하나씩 붙인다. 미리 만들지 말 것.
 - 플레이스홀더 페이지(`PH` 객체)에 각 메뉴의 연동 규칙(기획서 요약)이 적혀 있다 —
@@ -60,10 +62,19 @@ Google 로그인
 
 | 문서 | 내용 |
 |---|---|
-| `teams` | `[{id, name, lead(책임자), ai(AI직원), tasks:[{id, title, assignee(uid), desc}]}]` |
-| `leaves` | `[{id, uid, type(월차/연차/반차/반반차), pool(차감대상), days, date, reason, approver, status(대기/승인/반려), decidedBy, rejectNote}]` |
+| `teams` | `[{id, name, lead(책임자), ai(AI직원), tasks:[{id, title, assignee(uid), desc(HTML)}]}]` |
+| `leaves` | `[{id, uid, type(월차/연차/반차/반반차), pool(차감대상), days, date, reason(HTML), approver, status(대기/승인/반려), decidedBy, rejectNote}]` |
 | `leave_policy` | `{monthly, annual:{년차:일수}, approvers:[결재자명]}` — 기본값 `DEFAULT_POLICY` |
-| `library` | `[{id, title, content, uid, by, avatar, createdAt}]` |
+| `library` | `[{id, title, content(HTML), uid, by, avatar, createdAt}]` |
+| `attendance_YYYY-MM` | 출퇴근 (월별 문서 — 비대화 방지). `{id, uid, type(in/out), date, time(HH:MM:SS), ts, ip, ua}` |
+
+- **출퇴근 규칙**: 출근 하루 1회 / 퇴근 재클릭 시 갱신 / 출근 없이 퇴근 불가.
+  IP 는 api.ipify.org 외부 조회(4초 타임아웃). 최근 접속은 `staff_users.lastSeen`(5분 스로틀).
+- **서식 편집기(v0.9~0.10)**: contenteditable + execCommand, 외부 라이브러리 없음.
+  새 편집기는 `.rt-toolbar[data-for=편집기id]` + `.rt-editor` 두 줄이면 자동 배선된다.
+  저장·표시 모두 `_rtSanitize` 통과(HTML 저장). 읽기 표시는 `.rt-view` 클래스.
+  desc/reason/content 는 HTML 일 수 있다 — 표시할 때 `esc()` 로 감싸면 태그가 그대로 보인다.
+  `_rtHtml()`/`linkify()` 를 쓸 것.
 
 - 저장은 **문서 통째 read-modify-write**(`saveCol`). 직원 수가 적어 race 위험이 낮지만,
   동시 편집이 잦아지면 임원용의 merge 패턴을 참고해 보강할 것.
@@ -89,10 +100,24 @@ Google 로그인
 - 왼쪽 하단 = 마이 계정 (아바타·이름·직책, 클릭 → 수정 모달) (기획서 p3·p22).
 - 관리자 계정의 마이 계정은 임원용 ERP 설정 프로필로 안내만 한다 (기획서 p21).
 
+## 6-1. 메뉴 구조 (v0.7 확정)
+
+접이식 그룹(`_navOpen`). 홈(업무 현황)은 메뉴에 없고 첫 진입·로고 클릭으로만 연다.
+- 직원 업무 관리(관리자, 배지) > 출퇴근 관리(+계정 승인) / 업무 배정 / 근태 관리(내역·정책 탭)
+- 업무현황 > 워크플로우·캘린더·자료실·외부 계정 / 결재 관리(상위) /
+  영업 관리 > 판매·약국·거래처 / 제품 관리 > 품목 정보·재고·신제품
+- 표는 전역 가운데 정렬(th/td). 편집기 안 표만 좌측 정렬 예외.
+
 ## 7. 함정 (실제로 겪은 것)
 
 1. **데모 부트스트랩은 `queueMicrotask(startApp)`** — 모듈 최상위에서 바로 부르면
    아래쪽 `const MENUS` 가 TDZ 라 `Cannot access before initialization` 로 죽는다.
+1-1. **본인 문서 읽기는 승인 전에도 허용돼야 한다 (rules v2.4.2).** 빠지면 승인대기
+   직원이 자기 문서를 못 읽어 등록 화면이 반복해서 나온다 (실제 발생).
+1-2. **직원 계정의 임원용 접근은 두 겹으로 차단 (rules v2.4.3 + 임원용 v2.3.655).**
+   규칙이 users 가입 문서 생성을 막고, 임원용 화면은 직원 ERP 로 안내·이동한다.
+1-3. **사진 아바타는 base64 수 KB 로 리사이즈(96px)** 해서 넣는다. 텍스트 자리에는
+   `avaChar()`(빈 문자열), HTML 자리에는 `avaHtml()` — 안 지키면 base64 문자열이 샌다.
 2. 데모 모드(`?demo=`)는 world 앱과 같은 원칙: **유일한 더미 데이터 예외.**
    `saveCol` 이 데모에서 화면만 갱신하고 저장하지 않는다. 새 쓰기 경로를 추가하면
    반드시 `DEMO` 가드를 같이 넣을 것 (updateDoc 직접 호출 3곳에 이미 있음).
