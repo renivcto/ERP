@@ -60,6 +60,10 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.auth.uid == uid
         && request.resource.data.uid == uid
+        // v2.4.3: 직원용 ERP 계정(staff_users 등록)은 임원용 가입 문서를 만들 수 없다.
+        //   직원이 임원용 주소로 접근해 '승인대기' 를 만들고, 관리자가 실수로 승인하면
+        //   erp_data 전체가 열리기 때문. 임원용 가입은 직원 계정이 아닌 경우만.
+        && !exists(/databases/$(database)/documents/staff_users/$(request.auth.uid))
         && (
           (isWhitelistedAdminEmail()
             && request.resource.data.isAdmin == true
