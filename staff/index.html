@@ -200,7 +200,8 @@ tr:last-child td { border-bottom:none; }
   border-radius:7px; padding:3px 10px; display:inline-block; margin:14px 0 8px; }
 .jr-row { display:flex; align-items:center; gap:12px; padding:9px 12px; border:1px solid var(--line);
   border-radius:10px; margin-bottom:7px; background:#fff; flex-wrap:wrap; }
-.jr-row .tt { flex:1 1 190px; font-weight:600; font-size:13.5px; }
+.jr-row .tt { flex:1 1 190px; font-weight:600; font-size:13.5px; cursor:pointer; }
+.jr-row .tt:hover { color:var(--brand-deep); text-decoration:underline; text-underline-offset:3px; }
 .jr-row .tt.done { color:var(--ink-mute); text-decoration:line-through; }
 .jr-row input[type=range] { width:130px; accent-color:var(--brand); }
 .jr-row .pct { font-size:12px; font-weight:800; color:var(--brand-deep); width:38px; text-align:right; }
@@ -342,6 +343,16 @@ tr:last-child td { border-bottom:none; }
   </div>
 </div>
 
+<!-- ═══════ 모달: 업무 요약 (v0.16.0) — 일지 작성 중 빠르게 확인 ═══════ -->
+<div class="ovl" id="ovl-tsum">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-h"><span class="t" id="tsum-title">업무 요약</span><button class="modal-x" data-close="ovl-tsum">✕</button></div>
+    <div class="modal-b" id="tsum-body"></div>
+    <div class="modal-f"><button class="btn" data-close="ovl-tsum">닫기</button>
+      <button class="btn btn-p" id="btn-tsum-full">전체 보기</button></div>
+  </div>
+</div>
+
 <!-- ═══════ 모달: 업무 일지 상세 + 관리자 의견 (v0.15.0) ═══════ -->
 <div class="ovl" id="ovl-jr">
   <div class="modal" style="max-width:720px">
@@ -459,7 +470,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.15.1';
+const STAFF_VERSION = 'v0.16.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1057,6 +1068,35 @@ function jrFbHtml(rec) {
     </div>`;
 }
 
+/* 업무 요약 모달 (v0.16.0) — 서식 문서에서 글자만 뽑아 앞부분만 보여준다 */
+const TSUM_MAX = 220;
+let _tsumRef = null;
+function _plainText(html) {
+  const d = document.createElement('div');
+  d.innerHTML = _rtSanitize(html || '');
+  return (d.textContent || '').replace(/\s+/g, ' ').trim();
+}
+function openTaskSummary(tid, kid) {
+  const t = TEAMS.find(x => x.id === tid);
+  const k = t && (t.tasks || []).find(x => x.id === kid);
+  if (!k) return;
+  _tsumRef = { tid, kid };
+  const txt = _plainText(k.desc);
+  const cut = txt.length > TSUM_MAX;
+  $('tsum-title').textContent = k.title;
+  $('tsum-body').innerHTML = `
+    <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--ink-mute);margin-bottom:12px">
+      <span>팀 <b style="color:var(--ink)">${esc(t.name)}</b></span>
+      <span>담당자 <b style="color:var(--ink)">${esc(staffName(k.assignee))}</b></span>
+    </div>
+    <div style="font-size:13.5px;line-height:1.75;color:var(--ink-soft)">
+      ${txt ? esc(cut ? txt.slice(0, TSUM_MAX) + '…' : txt) : '등록된 상세 내용이 없습니다'}
+    </div>
+    ${cut ? '<div style="margin-top:10px;font-size:12px;color:var(--ink-mute)">전체 내용은 아래 <b>전체 보기</b> 에서 확인하세요</div>' : ''}`;
+  $('ovl-tsum').classList.add('on');
+}
+$('btn-tsum-full').onclick = () => { if (_tsumRef) openTaskModal(_tsumRef.tid, _tsumRef.kid, false); };
+
 /* ── 직원: 업무 일지 ── */
 function pageJournal() {
   const [from, to] = jrRange();
@@ -1072,7 +1112,8 @@ function pageJournal() {
       const it = items[x.task.id] || {};
       rows += `<div class="jr-row" data-jr-task="${esc(x.task.id)}">
         <input type="checkbox" data-jr-done ${it.done ? 'checked' : ''} title="완료">
-        <span class="tt ${it.done ? 'done' : ''}">${esc(x.task.title)}</span>
+        <span class="tt ${it.done ? 'done' : ''}" data-tsum="${esc(x.team.id)}|${esc(x.task.id)}"
+              title="클릭하면 업무 요약">${esc(x.task.title)}</span>
         <input type="range" min="0" max="100" step="5" value="${+it.pct || 0}" data-jr-pct>
         <span class="pct">${+it.pct || 0}%</span>
         <input class="memo" data-jr-memo value="${esc(it.memo || '')}" placeholder="메모">
@@ -1125,6 +1166,10 @@ function _wireJrNav() {
 }
 function wireJournal() {
   _wireJrNav();
+  document.querySelectorAll('[data-tsum]').forEach(el => el.onclick = () => {
+    const [tid, kid] = String(el.dataset.tsum).split('|');
+    openTaskSummary(tid, kid);
+  });
   document.querySelectorAll('[data-jr-goto]').forEach(el => el.onclick = () => {
     JR_VIEW = 'day'; JR_ANCHOR = el.dataset.jrGoto; renderPage();
   });
