@@ -185,6 +185,11 @@ tr:last-child td { border-bottom:none; }
 .rt-editor td, .rt-editor th, .rt-view td, .rt-view th { border:1px solid #c9d2e0; padding:6px 9px; min-width:44px; text-align:left; }
 .rt-editor ul, .rt-editor ol, .rt-view ul, .rt-view ol { padding-left:22px; }
 .rt-view { line-height:1.65; }
+#ovl-task { z-index:95; }   /* 팀 보기 모달 위에 겹쳐 열린다 (v0.14.0) */
+.tv-task { display:flex; align-items:center; gap:10px; padding:11px 13px; border:1px solid var(--line); border-radius:10px; margin-bottom:7px; cursor:pointer; transition:all .15s; }
+.tv-task:hover { border-color:var(--brand); background:var(--brand-soft); }
+.tv-task .t { flex:1; font-weight:700; font-size:14px; }
+.tv-task .a { font-size:12.5px; color:var(--ink-soft); white-space:nowrap; }
 /* 출퇴근 표의 이름 — 밑줄 없이, 호버 때만 (v0.13.0) */
 .att-name { font-weight:700; color:var(--brand-deep); cursor:pointer; }
 .att-name:hover { text-decoration:underline; text-underline-offset:3px; }
@@ -315,6 +320,7 @@ tr:last-child td { border-bottom:none; }
     <div class="modal-f">
       <button class="btn btn-bad" id="btn-task-del" style="margin-right:auto">삭제</button>
       <button class="btn" data-close="ovl-task">닫기</button>
+      <button class="btn btn-p" id="btn-task-edit">✏️ 수정</button>
       <button class="btn btn-p" id="btn-task-save">저장</button>
     </div>
   </div>
@@ -326,6 +332,18 @@ tr:last-child td { border-bottom:none; }
     <div class="modal-h"><span class="t" id="att-m-title">출퇴근 상세</span><button class="modal-x" data-close="ovl-att">✕</button></div>
     <div class="modal-b" id="att-m-body"></div>
     <div class="modal-f"><button class="btn" data-close="ovl-att">닫기</button></div>
+  </div>
+</div>
+
+<!-- ═══════ 모달: 팀 업무 보기 (v0.14.0) ═══════ -->
+<div class="ovl" id="ovl-teamview">
+  <div class="modal" style="max-width:600px">
+    <div class="modal-h"><span class="t" id="tv-title">팀 업무</span><button class="modal-x" data-close="ovl-teamview">✕</button></div>
+    <div class="modal-b" id="tv-body"></div>
+    <div class="modal-f">
+      <button class="btn" data-close="ovl-teamview">닫기</button>
+      <button class="btn btn-p" id="btn-tv-edit">✏️ 수정</button>
+    </div>
   </div>
 </div>
 
@@ -406,7 +424,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.13.0';
+const STAFF_VERSION = 'v0.14.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1255,14 +1273,14 @@ function wireHome() {
   // 팀명 클릭 → 해당 팀 수정 모달 (행 클릭의 페이지 이동과 겹치지 않게 전파 차단)
   document.querySelectorAll('[data-team-open-home]').forEach(el => el.onclick = e => {
     e.stopPropagation();
-    openTeamModal(el.dataset.teamOpenHome);
+    openTeamView(el.dataset.teamOpenHome);      // 보기 → (수정 버튼) → 수정
   });
   const ci = $('btn-clock-in');  if (ci) ci.onclick = () => clock('in');
   const co = $('btn-clock-out'); if (co) co.onclick = () => clock('out');
   document.querySelectorAll('[data-go]').forEach(el => el.onclick = () => go(el.dataset.go));
   document.querySelectorAll('[data-my-open]').forEach(el => el.onclick = () => {
     const [tid, kid] = el.dataset.myOpen.split('|');
-    openTaskModal(tid, kid, ME.mode === 'admin');
+    openTaskModal(tid, kid, false);              // 보기 → (관리자는 수정 버튼)
   });
 }
 
@@ -1425,7 +1443,7 @@ function wireAdmin() {
   // 업무 상세 (보드는 보기 전용 — 추가·배정은 팀 수정 모달에서)
   document.querySelectorAll('[data-task-open]').forEach(el => el.onclick = () => {
     const [tid, kid] = el.dataset.taskOpen.split('|');
-    openTaskModal(tid, kid, true);
+    openTaskModal(tid, kid, false);              // 보기 → (수정 버튼) → 수정
   });
   // 정책
   if ($('pol-yadd')) $('pol-yadd').onclick = () => {
@@ -1471,6 +1489,36 @@ async function decideLeave(id, status) {
   try { await saveCol('leaves', LEAVES); toast(status === '승인' ? '승인했습니다' : '반려했습니다'); }
   catch (e) { toast('실패: ' + e.message, true); }
 }
+
+/* ── 팀 업무 보기 모달 (v0.14.0) — 보기가 기본, 수정은 버튼으로 한 단계 더 ── */
+let _teamViewId = null;
+function openTeamView(tid) {
+  const t = TEAMS.find(x => x.id === tid);
+  if (!t) return;
+  _teamViewId = tid;
+  $('tv-title').textContent = `${t.name} — 팀 업무`;
+  const tasks = t.tasks || [];
+  $('tv-body').innerHTML =
+    `<div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13.5px;color:var(--ink-soft);margin-bottom:14px">
+       <span>책임자 : <b style="color:var(--ink)">${esc(t.lead || '미지정')}</b></span>
+       <span>AI직원 : <b style="color:var(--ink)">${esc(t.ai || '없음')}</b></span>
+       <span>업무 : <b style="color:var(--ink)">${tasks.length}건</b></span>
+     </div>`
+    + (tasks.length
+      ? tasks.map(k => `<div class="tv-task" data-tv-task="${esc(k.id)}" title="클릭하면 업무 상세">
+           <span class="t">${esc(k.title)}</span>
+           <span class="a">${esc(staffName(k.assignee))}</span></div>`).join('')
+      : '<div class="empty">등록된 업무가 없습니다 — 수정에서 추가하세요</div>');
+  $('tv-body').querySelectorAll('[data-tv-task]').forEach(el => el.onclick = () => {
+    openTaskModal(tid, el.dataset.tvTask, false);      // 업무도 '보기' 로 먼저 연다
+  });
+  $('btn-tv-edit').style.display = (ME.mode === 'admin') ? '' : 'none';
+  $('ovl-teamview').classList.add('on');
+}
+$('btn-tv-edit').onclick = () => {
+  $('ovl-teamview').classList.remove('on');
+  if (_teamViewId) openTeamModal(_teamViewId);
+};
 
 /* ── 팀 수정 모달 (v0.8.0) — 팀명·책임자·AI직원·업무 목록을 한 화면에서 ── */
 let _teamEditId = null;         // null 이면 생성 모드
@@ -1595,9 +1643,12 @@ function openTaskModal(tid, kid, editable) {
   $('task-m-tools').style.display = editable ? 'flex' : 'none';
   $('btn-task-save').style.display = editable ? '' : 'none';
   $('btn-task-del').style.display = editable ? '' : 'none';
+  // 관리자는 보기 상태에서 '수정' 버튼으로 편집 모드에 들어간다 (v0.14.0)
+  $('btn-task-edit').style.display = (!editable && ME.mode === 'admin') ? '' : 'none';
   $('task-m-meta').textContent = `팀: ${t.name} · 책임자: ${t.lead || '미지정'} · AI직원: ${t.ai || '없음'}`;
   $('ovl-task').classList.add('on');
 }
+$('btn-task-edit').onclick = () => { if (_taskRef) openTaskModal(_taskRef.tid, _taskRef.kid, true); };
 $('btn-task-save').onclick = async () => {
   if (!_taskRef) return;
   const t = TEAMS.find(x => x.id === _taskRef.tid); const k = t && (t.tasks || []).find(x => x.id === _taskRef.kid);
