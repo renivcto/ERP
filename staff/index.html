@@ -392,7 +392,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.11.0';
+const STAFF_VERSION = 'v0.11.1';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -428,6 +428,7 @@ const DEFAULT_POLICY = {
   monthly: 1,                                   // 월차: 한 달에 한 번 (기획서 p8)
   annual: { 1: 3, 2: 5 },                       // 연차: 1년차 3일 / 2년차 5일 — 관리자 설정 가능
   approvers: ['권다빈 이사', '송희강 이사'],       // 현재 결재라인 (기획서 p8)
+  lunchS: '12:00', lunchE: '13:00',             // 점심시간 (근무 시간 차감) — 관리자 설정 가능
 };
 const AVATARS = ['😀','😎','🤗','😊','🦊','🐻','🐱','🐶','🦁','🐯','🐰','🐼','🐨','🦄','🐥','🌟'];
 const $ = id => document.getElementById(id);
@@ -725,12 +726,26 @@ function fmtDur(ms) {
   const m = Math.floor(ms / 60000);
   return Math.floor(m / 60) + '시간 ' + (m % 60) + '분';
 }
-/* ── 점심시간 (v0.11.0) — 기본 12~1시, 차감은 '겹치는 시간만' ── */
-const LUNCH = { s: 12 * 60, e: 13 * 60, label: '12~1시' };
+/* ── 점심시간 (v0.11.1) — 정책에서 읽는다(기본 12~1시). 차감은 '겹치는 시간만' ── */
+function _hm2min(t) {
+  const m = String(t || '').match(/^(\d{1,2}):(\d{2})$/);
+  return m ? (+m[1]) * 60 + (+m[2]) : null;
+}
+function _lunchCfg() {
+  const p = pol();
+  const s = _hm2min(p.lunchS) != null ? _hm2min(p.lunchS) : 12 * 60;
+  const e = _hm2min(p.lunchE) != null ? _hm2min(p.lunchE) : 13 * 60;
+  const h12 = mm => { const h = Math.floor(mm / 60) % 24; return h % 12 === 0 ? 12 : h % 12; };
+  const label = (s % 60 === 0 && e % 60 === 0)
+    ? h12(s) + '~' + h12(e) + '시'
+    : h12(s) + '시' + (s % 60 ? (s % 60) + '분' : '') + '~' + h12(e) + '시' + (e % 60 ? (e % 60) + '분' : '');
+  return { s, e, label };
+}
 function _lunchOverlapMs(inTs, outTs) {
+  const cfg = _lunchCfg();
   const d = new Date(inTs);
   const base = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const ls = base + LUNCH.s * 60000, le = base + LUNCH.e * 60000;
+  const ls = base + cfg.s * 60000, le = base + cfg.e * 60000;
   return Math.max(0, Math.min(outTs, le) - Math.max(inTs, ls));
 }
 function workMs(inRec, outRec) {
@@ -747,10 +762,11 @@ function fmtDurS(ms) {
   return Math.floor(s / 3600) + '시간 ' + Math.floor((s % 3600) / 60) + '분 ' + (s % 60) + '초';
 }
 function lunchLabel(inRec, outRec) {
-  if (!inRec) return LUNCH.label;                                  // 기본값 표시
+  const cfg = _lunchCfg();
+  if (!inRec) return cfg.label;                                    // 기본값 표시
   const end = outRec ? outRec.ts : Date.now();
   if (_lunchOverlapMs(inRec.ts, end) <= 0) return '해당 없음';      // 점심과 안 겹치는 근무
-  return (outRec && outRec.lunch === 'none') ? '건너뜀 (연속 근무)' : LUNCH.label;
+  return (outRec && outRec.lunch === 'none') ? '건너뜀 (연속 근무)' : cfg.label;
 }
 function _fmtSeen(ts) {
   if (!ts) return '-';
@@ -768,9 +784,15 @@ async function clock(type) {
   //   (점심 없이 1시에 퇴근하는 경우를 자동 규칙으로는 구분할 수 없다)
   let lunch = 'used';
   if (type === 'out' && _lunchOverlapMs(inRec.ts, Date.now()) > 0) {
-    lunch = confirm('점심시간(' + LUNCH.label + ')을 사용하셨나요?\n\n'
-      + '[확인] 사용함 — 겹치는 시간을 근무 시간에서 제외\n'
-      + '[취소] 점심 없이 계속 근무함 — 제외하지 않음') ? 'used' : 'none';
+    const cfg = _lunchCfg();
+    const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+    // 점심 종료 +1시간(기본 14시) 이후 퇴근 = 점심을 지나 계속 일한 것이 명백 → 질문 없이 자동 차감.
+    // 그 이전 퇴근만 '점심 없이 연속 근무' 가능성이 있어 직접 확인한다.
+    if (nowMin < cfg.e + 60) {
+      lunch = confirm('점심시간 ' + cfg.label + ' 사용하셨나요?\n\n'
+        + '[확인] 사용함 — 겹치는 시간을 근무 시간에서 제외\n'
+        + '[취소] 점심 없이 계속 근무함 — 제외하지 않음') ? 'used' : 'none';
+    }
   }
   _clockBusy = true;
   toast(type === 'in' ? '출근 처리 중…' : '퇴근 처리 중…');
@@ -1123,7 +1145,7 @@ function pageAdmin(sec) {
   const policyCard = `
     <div class="card" style="margin-top:22px"><div class="card-h">⚙️ 휴가 정책 <span class="sub">월차·연차 기준과 결재라인 (기획서 p8)</span></div>
       <div class="card-b">
-        <div class="grid" style="grid-template-columns:1fr 1fr 1fr;align-items:start">
+        <div class="grid" style="grid-template-columns:repeat(4, 1fr);align-items:start">
           <div class="fld"><label>월차 (한 달 기준)</label><input class="fi" type="number" min="0" step="0.5" id="pol-monthly" value="${p.monthly}">
             <div class="hint">한 달에 쓸 수 있는 월차 일수</div></div>
           <div class="fld"><label>연차 (년차별 일수)</label>
@@ -1140,6 +1162,14 @@ function pageAdmin(sec) {
                  <input class="fi" data-pol-ap="${i}" value="${esc(a)}">
                  <button class="iconbtn" data-pol-apdel="${i}">✕</button></div>`).join('')}</div>
             <button class="btn btn-sm" id="pol-apadd">+ 결재자 추가</button></div>
+          <div class="fld"><label>점심시간</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input class="fi" type="time" id="pol-lunch-s" value="${p.lunchS || '12:00'}">
+              <span style="color:var(--ink-mute)">~</span>
+              <input class="fi" type="time" id="pol-lunch-e" value="${p.lunchE || '13:00'}">
+            </div>
+            <div class="hint">근무 시간에서 겹치는 만큼 차감됩니다. 종료 1시간 뒤(기본 14시)
+              이후 퇴근은 질문 없이 자동 차감, 그 이전 퇴근만 사용 여부를 묻습니다.</div></div>
         </div>
         <div style="text-align:right"><button class="btn btn-p" id="btn-pol-save">정책 저장</button></div>
       </div></div>`;
@@ -1223,6 +1253,8 @@ function wireAdmin() {
   if ($('btn-pol-save')) $('btn-pol-save').onclick = async () => {
     const p = pol();
     p.monthly = +($('pol-monthly').value || 1);
+    p.lunchS = ($('pol-lunch-s') && $('pol-lunch-s').value) || '12:00';
+    p.lunchE = ($('pol-lunch-e') && $('pol-lunch-e').value) || '13:00';
     document.querySelectorAll('[data-pol-y]').forEach(i => { p.annual[i.dataset.polY] = +i.value || 0; });
     document.querySelectorAll('[data-pol-ap]').forEach((i, idx) => { p.approvers[idx] = i.value.trim(); });
     p.approvers = p.approvers.filter(Boolean);
