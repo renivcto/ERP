@@ -11,7 +11,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-  import { getFirestore, doc, getDoc, getDocFromServer, getDocFromCache, setDoc, collection, getDocs, waitForPendingWrites, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { getFirestore, doc, getDoc, getDocFromServer, getDocFromCache, setDoc, deleteDoc, collection, getDocs, waitForPendingWrites, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
   import { getStorage, ref as _storageRefFn, uploadString as _storageUploadString, getDownloadURL as _storageGetUrl, deleteObject as _storageDelete } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
   import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";  // v2.3.341: onCall(스마트스토어 수동수집)
 
@@ -48,6 +48,7 @@
   window._firestoreGetDocFromServer = getDocFromServer;
   window._firestoreGetDocFromCache = getDocFromCache;
   window._firestoreSetDoc = setDoc;
+  window._firestoreDeleteDoc = deleteDoc;    // v2.3.657: 사용자 완전 삭제(관리자)
   window._firestoreWriteBatch = writeBatch;  // v2.3.402: shopOrders 샤드 원자적 저장
   window._firestoreWaitForPendingWrites = () => waitForPendingWrites(db);
   window._firestoreCollection = collection;
@@ -6255,7 +6256,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.656';
+const ERP_VERSION = 'v2.3.657';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -61079,14 +61080,22 @@ async function rejectFirestoreUser(uid) {
     alert('⚠️ 본인 계정은 거절(삭제)할 수 없습니다.');
     return;
   }
-  if (!confirm('이 계정을 거부(삭제)하시겠습니까?')) return;
+  if (!confirm('이 계정을 완전히 삭제하시겠습니까? 되돌릴 수 없습니다.')) return;
   const userRef = window._firestoreDoc(window._firebaseDb, 'users', uid);
   try {
-    await window._firestoreSetDoc(userRef, {
-      status: '삭제됨',
-      rejectedAt: new Date().toISOString()
-    }, { merge: true });
-    showNotif('계정이 거부 처리되었습니다', 'info');
+    // v2.3.657: 진짜 삭제(rules v2.4.5, 관리자만). 규칙 미게시 등으로 거부되면
+    //   종전 방식('삭제됨' 표시 — 목록에서 사라짐)으로 폴백한다.
+    try {
+      await window._firestoreDeleteDoc(userRef);
+      showNotif('계정을 완전히 삭제했습니다', 'info');
+    } catch (delErr) {
+      console.warn('[사용자 삭제] deleteDoc 거부 — 삭제됨 표시로 폴백:', delErr && delErr.message);
+      await window._firestoreSetDoc(userRef, {
+        status: '삭제됨',
+        rejectedAt: new Date().toISOString()
+      }, { merge: true });
+      showNotif('계정을 목록에서 제거했습니다 (완전 삭제는 규칙 게시 후 가능)', 'info');
+    }
     if (typeof renderUserTableFirestore === 'function') await renderUserTableFirestore();
   } catch(e) {
     console.error('rejectFirestoreUser 실패:', e);
