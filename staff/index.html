@@ -336,7 +336,7 @@ tr:last-child td { border-bottom:none; }
 <!-- ═══════ 모달: 근태 품의서 (기획서 p8) ═══════ -->
 <div class="ovl" id="ovl-leave">
   <div class="modal">
-    <div class="modal-h"><span class="t">📝 근태 품의서 작성</span><button class="modal-x" data-close="ovl-leave">✕</button></div>
+    <div class="modal-h"><span class="t">📝 휴가 품의서 작성</span><button class="modal-x" data-close="ovl-leave">✕</button></div>
     <div class="modal-b">
       <div class="fld"><label>종류</label>
         <select class="fi" id="lv-type">
@@ -392,7 +392,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.10.0';
+const STAFF_VERSION = 'v0.10.1';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -786,7 +786,7 @@ const MENUS = [
   { group: '직원 업무 관리', ico: '👥', adminOnly: true, items: [
     { id: 'adm-att',    ico: '🕘', name: () => '출퇴근 관리' },
     { id: 'adm-teams',  ico: '🗂️', name: () => '업무 배정' },
-    { id: 'adm-policy', ico: '🗓️', name: () => '근태 관리' },
+    { id: 'adm-policy', ico: '🌴', name: () => '휴가 관리' },
   ]},
   { group: '업무현황', ico: '📋', items: [
     { id: 'workflow', ico: '🧩', name: () => '워크플로우', sync: '임원용 ERP와 메뉴·데이터가 동일하게 연동됩니다' },
@@ -884,9 +884,9 @@ function pageHome() {
   // 상단 칩 — 임원용의 '결재 대기 N건 · 지출 결의 대기 N건' 자리
   const chips = isAdmin
     ? [['계정 승인 대기', USERS.filter(u => u.active !== true).length, 'adm-att'],
-       ['근태 결재 대기', LEAVES.filter(l => l.status === '대기').length, 'adm-policy']]
+       ['휴가 결재 대기', LEAVES.filter(l => l.status === '대기').length, 'adm-policy']]
     : [['내 업무', myTasks().length, 'my'],
-       ['근태 결재 대기', LEAVES.filter(l => l.uid === ME.uid && l.status === '대기').length, 'my']];
+       ['휴가 결재 대기', LEAVES.filter(l => l.uid === ME.uid && l.status === '대기').length, 'my']];
   const chipHtml = chips.map(([label, n, pg]) =>
     `<span data-go="${pg}" style="cursor:pointer;display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-size:12.5px;font-weight:600;color:var(--ink-soft)">
        ${label} <b style="font-size:16px;color:${n > 0 ? 'var(--brand-deep)' : 'var(--ink-mute)'}">${n}</b> 건</span>`).join('');
@@ -975,12 +975,12 @@ function pageHome() {
     .slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 5);
   const chip = st => st === '승인' ? '<span class="chip ok">승인</span>'
               : st === '반려' ? '<span class="chip bad">반려</span>' : '<span class="chip wait">대기</span>';
-  const leaveCard = `<div class="card"><div class="card-h">🕐 최근 근태</div>
+  const leaveCard = `<div class="card"><div class="card-h">🕐 최근 휴가</div>
     <div class="card-b" style="padding:${recent.length ? '0 16px' : '16px'}">
     ${recent.length ? `<table>${recent.map(l => `<tr>
         ${isAdmin ? `<td style="font-weight:700;white-space:nowrap">${esc(staffName(l.uid))}</td>` : ''}
         <td>${esc(l.type)}</td><td style="white-space:nowrap">${fmtD(l.date)}</td><td>${chip(l.status)}</td></tr>`).join('')}</table>`
-      : '<div class="empty" style="padding:10px">근태 내역이 없습니다</div>'}
+      : '<div class="empty" style="padding:10px">휴가 내역이 없습니다</div>'}
     </div></div>`;
 
   return `
@@ -1037,7 +1037,7 @@ function pageAdmin(sec) {
             : '<span style="font-size:11.5px;color:var(--ink-mute)">관리자 권한 필요</span>'}</td></tr>`).join('')}
       </tbody></table></div></div>`;
   const waitCard = !wait.length ? '' : `
-    <div class="card"><div class="card-h">🖋️ 근태 결재 대기 <span class="sub">${wait.length}건</span></div>
+    <div class="card"><div class="card-h">🖋️ 휴가 결재 대기 <span class="sub">${wait.length}건</span></div>
       <div class="card-b" style="padding:0 18px"><table><thead><tr><th>신청자</th><th>종류</th><th>날짜</th><th>사유</th><th>결재라인</th><th></th></tr></thead><tbody>
         ${wait.map(l => `<tr>
           <td><b>${esc(staffName(l.uid))}</b></td><td>${esc(l.type)} (${l.days}일)</td><td>${fmtD(l.date)}</td>
@@ -1069,7 +1069,7 @@ function pageAdmin(sec) {
       <div class="team-ghost" id="btn-team-add">+ 팀 추가</div>
     </div>`;
   const policyCard = `
-    <div class="card" style="margin-top:22px"><div class="card-h">⚙️ 근태 정책 <span class="sub">월차·연차 기준과 결재라인 (기획서 p8)</span></div>
+    <div class="card" style="margin-top:22px"><div class="card-h">⚙️ 휴가 정책 <span class="sub">월차·연차 기준과 결재라인 (기획서 p8)</span></div>
       <div class="card-b">
         <div class="grid" style="grid-template-columns:1fr 1fr 1fr;align-items:start">
           <div class="fld"><label>월차 (한 달 기준)</label><input class="fi" type="number" min="0" step="0.5" id="pol-monthly" value="${p.monthly}">
@@ -1092,18 +1092,18 @@ function pageAdmin(sec) {
         <div style="text-align:right"><button class="btn btn-p" id="btn-pol-save">정책 저장</button></div>
       </div></div>`;
   const leaveAll = `
-    <div class="card"><div class="card-h">📋 전체 근태 내역</div>
+    <div class="card"><div class="card-h">📋 전체 휴가 내역</div>
       <div class="card-b" style="padding:0 18px">${leaveTable(LEAVES, true)}</div></div>`;
 
   const H = {
     'adm-att':    ['🕘 출퇴근 관리', '오늘의 출퇴근 현황을 확인하고 신규 계정을 승인합니다.'],
     'adm-teams':  ['🗂️ 업무 배정', '팀별로 업무를 나누고 담당자를 배정합니다.'],
-    'adm-policy': ['🗓️ 근태 관리', '근태 결재를 처리하고 월차·연차 기준과 결재라인을 설정합니다.'],
+    'adm-policy': ['🌴 휴가 관리', '휴가 결재를 처리하고 월차·연차 기준과 결재라인을 설정합니다.'],
   }[sec] || ['직원 업무 관리', ''];
   const admLeaveTabs = `
     <div class="tabs">
-      <button class="tab ${ADM_LEAVE_TAB === 'list' ? 'on' : ''}" data-admtab="list">전체 근태 내역</button>
-      <button class="tab ${ADM_LEAVE_TAB === 'policy' ? 'on' : ''}" data-admtab="policy">근태 정책</button>
+      <button class="tab ${ADM_LEAVE_TAB === 'list' ? 'on' : ''}" data-admtab="list">전체 휴가 내역</button>
+      <button class="tab ${ADM_LEAVE_TAB === 'policy' ? 'on' : ''}" data-admtab="policy">휴가 정책</button>
     </div>`;
   const body = sec === 'adm-att' ? (pendCard + attAdminCard())
              : sec === 'adm-teams' ? teamsBoard
@@ -1174,7 +1174,7 @@ function wireAdmin() {
     document.querySelectorAll('[data-pol-y]').forEach(i => { p.annual[i.dataset.polY] = +i.value || 0; });
     document.querySelectorAll('[data-pol-ap]').forEach((i, idx) => { p.approvers[idx] = i.value.trim(); });
     p.approvers = p.approvers.filter(Boolean);
-    try { await saveCol('leave_policy', p); toast('근태 정책을 저장했습니다'); }
+    try { await saveCol('leave_policy', p); toast('휴가 정책을 저장했습니다'); }
     catch (e) { toast('저장 실패: ' + e.message, true); }
   };
 }
@@ -1371,10 +1371,10 @@ function pageMy() {
   return `
   <div class="pg on">
     <div class="pg-h"><h1>${isPreview ? '직원 페이지 미리보기' : esc(`${ME.name} ${ME.title || ''}`.trim())}</h1></div>
-    <div class="pg-sub">${isPreview ? '직원에게 보이는 화면입니다 (관리자는 근태 신청 불가)' : '내가 담당하는 업무와 근태를 관리합니다'}</div>
+    <div class="pg-sub">${isPreview ? '직원에게 보이는 화면입니다 (관리자는 휴가 신청 불가)' : '내가 담당하는 업무와 휴가·출퇴근을 관리합니다'}</div>
     <div class="tabs">
       <button class="tab ${MY_TAB === 'tasks' ? 'on' : ''}" data-mytab="tasks">내 업무</button>
-      <button class="tab ${MY_TAB === 'leave' ? 'on' : ''}" data-mytab="leave">근태 관리</button>
+      <button class="tab ${MY_TAB === 'leave' ? 'on' : ''}" data-mytab="leave">휴가 관리</button>
       <button class="tab ${MY_TAB === 'att' ? 'on' : ''}" data-mytab="att">출퇴근 기록</button>
     </div>
 
