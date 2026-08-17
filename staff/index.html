@@ -636,6 +636,30 @@ tr:last-child td { border-bottom:none; }
   </div>
 </div>
 
+<!-- 약사 CS 작성/수정 (v0.30.0) -->
+<div class="ovl" id="ovl-cs">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-h"><span class="t" id="cs-m-t">💊 약사 CS 등록</span><button class="modal-x" data-close="ovl-cs">✕</button></div>
+    <div class="modal-b">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fld"><label>약국 / 약사</label><input class="fi" id="cs-f-customer" list="cs-f-phlist" placeholder="예: 온누리약국 김약사">
+          <datalist id="cs-f-phlist"></datalist></div>
+        <div class="fld"><label>연락처</label><input class="fi" id="cs-f-phone" placeholder="02-000-0000"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div class="fld"><label>분류</label><select class="fi" id="cs-f-cat"></select></div>
+        <div class="fld"><label>경로</label><select class="fi" id="cs-f-ch"></select></div>
+        <div class="fld"><label>상태</label><select class="fi" id="cs-f-status"></select></div>
+      </div>
+      <div class="fld"><label>제품</label><select class="fi" id="cs-f-item"></select></div>
+      <div class="fld"><label>상담 내용</label><textarea class="fi" id="cs-f-content" rows="5" style="resize:vertical"></textarea></div>
+      <div class="fld"><label>조치 사항</label><input class="fi" id="cs-f-action"></div>
+    </div>
+    <div class="modal-f"><button class="btn btn-bad" id="btn-cs-del" style="margin-right:auto;display:none">삭제</button>
+      <button class="btn" data-close="ovl-cs">취소</button><button class="btn btn-p" id="btn-cs-save">저장</button></div>
+  </div>
+</div>
+
 <!-- 결재 작성/수정 (v0.29.0) -->
 <div class="ovl" id="ovl-ap">
   <div class="modal" style="max-width:620px">
@@ -770,7 +794,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.29.0';
+const STAFF_VERSION = 'v0.30.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -820,6 +844,11 @@ let APX = [];               // staff_data/inbox_expenses  — 직원이 쓴 지�
 let APN = [];               // staff_data/inbox_approvals — 직원이 쓴 일반결재
 let AP_TAB = 'exp';         // 결재 탭: exp | gen
 let AP_EDIT = null;         // 편집 중인 id
+let PHARM = [];             // staff_data/pharmacies — 약국 리스트 (읽기 전용)
+let CSP = [];               // staff_data/cs_pharm   — 약사 CS 미러
+let CSI = [];               // staff_data/inbox_cs   — 직원이 쓴 약사 CS
+let PH_TAB = 'cs';          // 약국 관리 탭: cs | list
+let PH_Q = '', CS_EDIT = null;
 let GDOCS = [];             // staff_data/gdocs       — 자료실 문서 공유 (직원 등록)
 let DRIVE = [];             // staff_data/drive       — 자료실 드라이브 폴더 (직원 등록)
 let DF_CAT = null;          // 드라이브 카테고리 필터
@@ -987,6 +1016,21 @@ if (DEMO) {
       lists: [{ id: 'H1', name: '준비' }],
       cards: [{ id: 'h1', idList: 'H1', name: '방송 대본 검토', url: '', due: '', done: false, labels: [], cover: '' }] },
   ];
+  PHARM = [
+    { key: 'p1', name: '온누리약국 김약사', phone: '02-555-1234', email: 'onnuri@example.com',
+      address: '서울시 강남구 …', totalSpent: 480000, orders: 6, lastDate: '2026-08-14', tier: 'vip' },
+    { key: 'p2', name: '건강한약국 이약사', phone: '031-777-8888', email: '',
+      address: '경기도 성남시 …', totalSpent: 215000, orders: 3, lastDate: '2026-08-09', tier: 'good' },
+    { key: 'p3', name: '미소약국', phone: '051-333-2222', email: '', address: '부산시 해운대구 …',
+      totalSpent: 78000, orders: 1, lastDate: '2026-07-30', tier: 'normal' },
+  ];
+  CSP = [{ id: 'C1', type: 'pharmacist', customer: '온누리약국 김약사', phone: '02-555-1234',
+           category: '제품 문의', linkedProductName: '3중 장벽 20층 리뉴 크림 60ml',
+           content: '재입고 일정 문의 — 8월 말 예정 안내함', status: '완료', channel: '전화',
+           date: '2026-08-14 10:20', consultant: '권다빈' }];
+  CSI = [{ id: 'SC1', type: 'pharmacist', customer: '건강한약국 이약사', phone: '031-777-8888',
+           category: '교환/반품', content: '용기 불량 1건 교환 요청', status: '접수', channel: '전화',
+           date: '2026-08-17 09:40', _by: '김서연', _byUid: 'd1', createdAt: Date.now() - 3600e3 }];
   APX = [{ id: 'SX1', category: '기타', title: '사무용품 구매의 건', vendor: '오피스디포', amount: 128000,
            dueDate: '2026-08-25', reason: '탕비실 비품 보충', line: { first: '권다빈 이사' },
            _by: '김서연', _byUid: 'd1', createdAt: Date.now() - 86400e3, applied: true, appliedAt: Date.now() - 80000e3 },
@@ -1233,6 +1277,12 @@ function subscribeData() {
     e => console.warn('[calendar]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'workflow'), s => { WF = parseCol(s, []); rerender(); },
     e => console.warn('[workflow]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'pharmacies'), s => { PHARM = parseCol(s, []); rerender(); },
+    e => console.warn('[pharmacies]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'cs_pharm'), s => { CSP = parseCol(s, []); rerender(); },
+    e => console.warn('[cs_pharm]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_cs'), s => { CSI = parseCol(s, []); rerender(); },
+    e => console.warn('[inbox_cs]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_expenses'), s => { APX = parseCol(s, []); rerender(); },
     e => console.warn('[inbox_expenses]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_approvals'), s => { APN = parseCol(s, []); rerender(); },
@@ -2101,6 +2151,7 @@ function renderPage() {
     case 'adm-journal': m.innerHTML = pageAdmJournal(); wireAdmJournal(); break;
     case 'partners': m.innerHTML = pagePartners(); wirePt('pt'); break;
     case 'accounts': m.innerHTML = pageAccounts(); wireAccounts(); break;
+    case 'pharmacy': m.innerHTML = pagePharmacy(); wirePharmacy(); break;
     case 'approval': m.innerHTML = pageApproval(); wireApproval(); break;
     case 'items':    m.innerHTML = pageItems(); wireDataPage(); break;
     case 'stock':    m.innerHTML = pageStock(); wireDataPage(); break;
@@ -3548,6 +3599,139 @@ $('btn-board-save').onclick = async () => {
   catch (e) { BOARD_S = keep; toast('저장 실패: ' + e.message, true); }
 };
 
+/* ═══════════ 약국 관리 (v0.30.0 · 기획서(2) 슬라이드 5) ═══════════
+   약사 CS  : 임원용 미러(cs_pharm) + 직원이 쓴 것(inbox_cs) 을 합쳐 본다. 직원 작성분만 수정·삭제.
+   약국 리스트 : 읽기 전용 (주문에서 자동 집계되는 목록이라 손으로 고칠 대상이 아니다)
+   ⚠️ 소비자 CS·고객 리스트·클레임 관리는 미러에 아예 없다 — 일반 고객 정보 비공개 원칙. */
+const CS_CATS = ['제품 문의', '교환/반품', '배송 문의', '입점 문의', '기타'];
+const CS_CHANNELS = ['전화', '메일', '카톡', '방문', '기타'];
+const CS_STATUS = ['접수', '처리중', '완료'];
+const PH_TIER = { vip: ['👑', 'VIP'], good: ['🥈', '우수'], normal: ['', '일반'] };
+function csAll() {
+  const mirror = (CSP || []).map(c => Object.assign({}, c, { src: 'erp' }));
+  const ids = new Set(mirror.map(c => String(c.id)));
+  // 임원용이 받아간 뒤에는 미러 쪽이 원본이 된다 — 인박스 사본은 화면에서 뺀다
+  const mine = (CSI || []).filter(c => !ids.has(String(c.id))).map(c => Object.assign({}, c, { src: 'staff' }));
+  return mirror.concat(mine).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+function csEditable(c) { return c && c.src === 'staff' && !c.applied && (ME.mode === 'admin' || c._byUid === ME.uid); }
+function pagePharmacy() {
+  const isCs = PH_TAB === 'cs';
+  const cs = csAll();
+  const list = isCs ? dpFilter(cs, PH_Q, ['customer', 'content', 'category'])
+                    : dpFilter(PHARM || [], PH_Q, ['name', 'phone', 'address']);
+  return `<div class="pg on">
+    <div class="pg-h"><h1>약국 관리<sup class="sync" style="font-size:13px" title="약사 CS와 약국 리스트가 임원용과 연동됩니다"> ⓘ</sup></h1>
+      <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
+        <input class="df-search" id="dp-q-ph" placeholder="🔍 ${isCs ? '약국·상담내용 검색' : '약국명·연락처·주소 검색'}" style="width:230px" value="${esc(PH_Q)}">
+        ${isCs ? '<button class="btn btn-p" id="btn-cs-new">＋ CS 등록</button>' : ''}</span></div>
+    <div class="pg-sub">약사·약국만 표시됩니다 — 일반 소비자 CS·고객 리스트는 직원용에 넘어오지 않습니다</div>
+    <div class="tabs">
+      <button class="tab ${isCs ? 'on' : ''}" data-ph-tab="cs">💊 약사 CS (${cs.length})</button>
+      <button class="tab ${!isCs ? 'on' : ''}" data-ph-tab="list">🏥 약국 리스트 (${(PHARM || []).length})</button>
+    </div>
+    ${isCs ? (list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb">
+      <thead><tr><th>상담일시</th><th>약국 / 약사</th><th>연락처</th><th>분류</th><th>제품</th><th>상담내용</th><th>상태</th><th>관리</th></tr></thead><tbody>
+      ${list.map(c => `<tr>
+        <td style="white-space:nowrap;font-size:12px">${esc(c.date || '-')}</td>
+        <td class="nm">${esc(c.customer || '-')}</td>
+        <td style="white-space:nowrap;font-size:12px">${esc(c.phone || '-')}</td>
+        <td><span class="dp-chip">${esc(c.category || '기타')}</span></td>
+        <td style="font-size:12px">${esc(c.linkedProductName || c.productName || '-')}</td>
+        <td class="pt-note">${esc(c.content || '')}</td>
+        <td>${c.status === '완료' ? '<span class="chip ok">완료</span>'
+             : c.status === '처리중' ? '<span class="chip wait">처리중</span>' : '<span class="chip gray">접수</span>'}
+             ${c.src === 'staff' ? (c.applied ? '' : '<div style="margin-top:3px"><span class="chip wait">전달 대기</span></div>') : ''}</td>
+        <td style="white-space:nowrap">${csEditable(c)
+          ? `<button class="btn btn-sm" data-cs-edit="${esc(c.id)}">수정</button>
+             <button class="btn btn-sm btn-bad" data-cs-del="${esc(c.id)}">삭제</button>`
+          : '<span style="font-size:11px;color:var(--ink-mute)">임원용 관리</span>'}</td></tr>`).join('')}
+      </tbody></table></div></div>`
+      : (cs.length ? '<div class="empty">검색 결과가 없습니다</div>'
+         : `<div class="ph"><div class="big">💊</div><h3>약사 CS 기록이 없습니다</h3>
+             <p>＋ CS 등록으로 남기면 임원용 ERP의 약사 CS로 전달됩니다.</p></div>`))
+    : (list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb">
+      <thead><tr><th>등급</th><th>약국 / 약사</th><th>연락처</th><th>주소</th><th>총 구매액</th><th>주문</th><th>최근 주문일</th></tr></thead><tbody>
+      ${list.map(p => `<tr>
+        <td>${(PH_TIER[p.tier] || PH_TIER.normal)[0]} <span style="font-size:11px;color:var(--ink-mute)">${(PH_TIER[p.tier] || PH_TIER.normal)[1]}</span></td>
+        <td class="nm">${esc(p.name || '-')}</td>
+        <td style="white-space:nowrap;font-size:12px">${esc(p.phone || '-')}</td>
+        <td class="pt-note" style="font-size:12px">${esc(p.address || '-')}</td>
+        <td class="ap-amt">₩${Number(p.totalSpent || 0).toLocaleString()}</td>
+        <td style="text-align:right">${Number(p.orders || 0).toLocaleString()}건</td>
+        <td style="white-space:nowrap;font-size:12px">${esc(p.lastDate || '-')}</td></tr>`).join('')}
+      </tbody></table></div></div>
+      <div class="pg-sub" style="margin-top:10px">${DP_RO} — 약국 리스트는 주문에서 자동 집계됩니다</div>`
+      : ((PHARM || []).length ? '<div class="empty">검색 결과가 없습니다</div>' : dpEmpty('약국')))}
+  </div>`;
+}
+function openCsModal(id) {
+  const c = id ? csAll().find(x => String(x.id) === String(id)) : null;
+  if (c && !csEditable(c)) { toast('임원용에서 관리하는 기록입니다', true); return; }
+  CS_EDIT = c ? c.id : null;
+  $('cs-m-t').textContent = c ? '✏️ 약사 CS 수정' : '💊 약사 CS 등록';
+  const opt = (arr, v) => arr.map(x => `<option${x === v ? ' selected' : ''}>${esc(x)}</option>`).join('');
+  $('cs-f-cat').innerHTML = opt(CS_CATS, c && c.category);
+  $('cs-f-ch').innerHTML = opt(CS_CHANNELS, c && c.channel);
+  $('cs-f-status').innerHTML = opt(CS_STATUS, c && c.status);
+  $('cs-f-item').innerHTML = '<option value="">— 선택 안 함 —</option>'
+    + (ITEMS || []).map(i => `<option${c && (c.linkedProductName === i.name) ? ' selected' : ''}>${esc(i.name)}</option>`).join('');
+  $('cs-f-phlist').innerHTML = (PHARM || []).map(p => `<option value="${esc(p.name)}">`).join('');
+  $('cs-f-customer').value = c ? (c.customer || '') : '';
+  $('cs-f-phone').value = c ? (c.phone || '') : '';
+  $('cs-f-content').value = c ? (c.content || '') : '';
+  $('cs-f-action').value = c ? (c.action || '') : '';
+  $('btn-cs-del').style.display = c ? '' : 'none';
+  $('ovl-cs').classList.add('on');
+}
+$('btn-cs-save').onclick = async () => {
+  const customer = $('cs-f-customer').value.trim();
+  const content = $('cs-f-content').value.trim();
+  if (!customer) { toast('약국 / 약사를 입력해 주세요', true); return; }
+  if (!content) { toast('상담 내용을 입력해 주세요', true); return; }
+  const now = new Date();
+  const data = {
+    type: 'pharmacist', customer, phone: $('cs-f-phone').value.trim(),
+    category: $('cs-f-cat').value, channel: $('cs-f-ch').value, status: $('cs-f-status').value,
+    linkedProductName: $('cs-f-item').value || '', content, action: $('cs-f-action').value.trim(),
+    consultant: ME.name, updatedAt: Date.now(),
+  };
+  const arr = (CSI || []).slice();
+  const i = arr.findIndex(x => String(x.id) === String(CS_EDIT));
+  if (i >= 0) {
+    if (arr[i].applied) { toast('이미 전달되어 수정할 수 없습니다', true); return; }
+    arr[i] = Object.assign({}, arr[i], data);
+  } else {
+    arr.push(Object.assign({
+      id: 'SC' + Date.now(), createdAt: Date.now(), _by: ME.name, _byUid: ME.uid, _from: '직원용 ERP',
+      date: now.toISOString().slice(0, 16).replace('T', ' '),
+    }, data));
+  }
+  try { await saveCol('inbox_cs', arr); CSI = arr; $('ovl-cs').classList.remove('on');
+    toast('저장했습니다 — 임원용 ERP를 열면 약사 CS로 전달됩니다'); rerender(); }
+  catch (e) { toast('저장 실패: ' + e.message, true); }
+};
+$('btn-cs-del').onclick = async () => {
+  if (!CS_EDIT || !confirm('이 CS 기록을 삭제할까요?')) return;
+  const arr = (CSI || []).filter(x => String(x.id) !== String(CS_EDIT));
+  try { await saveCol('inbox_cs', arr); CSI = arr; $('ovl-cs').classList.remove('on'); toast('삭제했습니다'); rerender(); }
+  catch (e) { toast('삭제 실패: ' + e.message, true); }
+};
+function wirePharmacy() {
+  document.querySelectorAll('[data-ph-tab]').forEach(b => b.onclick = () => { PH_TAB = b.dataset.phTab; PH_Q = ''; renderPage(); });
+  const nb = $('btn-cs-new'); if (nb) nb.onclick = () => openCsModal(null);
+  document.querySelectorAll('[data-cs-edit]').forEach(b => b.onclick = () => openCsModal(b.dataset.csEdit));
+  document.querySelectorAll('[data-cs-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('이 CS 기록을 삭제할까요?')) return;
+    const arr = (CSI || []).filter(x => String(x.id) !== String(b.dataset.csDel));
+    try { await saveCol('inbox_cs', arr); CSI = arr; toast('삭제했습니다'); rerender(); }
+    catch (e) { toast('삭제 실패: ' + e.message, true); }
+  });
+  const s = $('dp-q-ph');
+  if (s) s.oninput = () => { const p = s.selectionStart; PH_Q = s.value; renderPage();
+    const n = $('dp-q-ph'); if (n) { n.focus(); try { n.setSelectionRange(p, p); } catch (_) {} } };
+}
+
 /* ═══════════ 결재 관리 (v0.29.0 · 기획서(2) 슬라이드 3) ═══════════
    직원이 쓴 문서는 staff_data/inbox_expenses · inbox_approvals 에 쌓이고,
    임원이 임원용 ERP 를 열 때 임원용 결재함으로 들어간다(받은편지함 방식).
@@ -3994,7 +4178,6 @@ function wireCalendar() { wireCalCommon(); }
 
 /* ═══════ 플레이스홀더 — 기획서 p5 "우선 메뉴만" ═══════ */
 const PH = {
-  pharmacy:  { ico: '💊', t: '약국 관리', d: '약사 CS 관리와 약국 리스트가 임원용과 연동됩니다. 일반 고객 정보는 공개되지 않습니다.', sync: true },
   newproduct:{ ico: '🌱', t: '신제품 개발', d: '임원용과 읽기·쓰기 모두 연동됩니다. 수익성 탭은 표시되지 않습니다.', sync: true },
 };
 function pagePlaceholder(id) {

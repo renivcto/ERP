@@ -6338,7 +6338,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.668';
+const ERP_VERSION = 'v2.3.669';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58673,6 +58673,39 @@ function _staffOrdersPayload() {
 async function _staffMirrorOrders() { return _staffPush('orders', _staffOrdersPayload()); }
 window._staffMirrorItems = _staffMirrorItems;
 
+/* v2.3.669 — 약국 관리 미러 (기획서(2) 슬라이드 5).
+   ⚠️ 약국·약사는 거래처로 보아 이름·연락처·주소를 넘긴다(사용자 확정).
+      '일반 고객' 은 여전히 넘기지 않는다 — 소비자 CS·고객 리스트·클레임은 미러에 없다. */
+function _staffPharmPayload() {
+  if (typeof _aggregateCustomers !== 'function' || typeof _isPharmacyCustomer !== 'function') return [];
+  return _aggregateCustomers('').filter(_isPharmacyCustomer).map(c => ({
+    key: String(c.key || ''), name: c.name || '', phone: c.phone || '', email: c.email || '',
+    address: (c.addresses && c.addresses.size) ? Array.from(c.addresses)[0] : '',
+    totalSpent: Number(c.totalSpent) || 0,
+    orders: Array.isArray(c.orders) ? c.orders.length : 0,
+    lastDate: c.lastDate || '',
+    tier: (typeof _pharmacyTier === 'function') ? _pharmacyTier(c) : ''
+  }));
+}
+async function _staffMirrorPharm() { return _staffPush('pharmacies', _staffPharmPayload()); }
+
+// 약사 CS 만. 큰 값(첨부 등)과 내부 필드(_로 시작)는 빼고 넘긴다.
+function _staffCsPayload() {
+  return (DB.cs || []).filter(c => c && c.type === 'pharmacist').map(c => {
+    const out = {};
+    Object.keys(c).forEach(k => {
+      if (k.charAt(0) === '_') return;
+      const v = c[k];
+      if (typeof v === 'string' && v.length > 3000) return;
+      out[k] = v;
+    });
+    return out;
+  });
+}
+async function _staffMirrorCs() { return _staffPush('cs_pharm', _staffCsPayload()); }
+window._staffMirrorPharm = _staffMirrorPharm;
+window._staffMirrorCs = _staffMirrorCs;
+
 /* ══════════ v2.3.667 — 직원용 받은편지함 (직원 → 임원 단방향) ══════════
    직원 계정은 erp_data 를 못 쓴다. 그래서 직원이 쓴 문서는 staff_data/inbox_* 에 쌓이고,
    임원이 임원용 ERP 를 열 때 여기서 끌어와 DB 에 합친다.
@@ -58681,6 +58714,8 @@ window._staffMirrorItems = _staffMirrorItems;
 const _STAFF_INBOX = [
   { doc: 'inbox_expenses',  arr: 'expenses',  label: '지출결의서' },
   { doc: 'inbox_approvals', arr: 'approvals', label: '일반결재' },
+  // upsert: 같은 id 가 이미 있으면 '직원이 더 나중에 고쳤을 때만' 덮어쓴다 (임원 수정본 보호)
+  { doc: 'inbox_cs',        arr: 'cs',        label: '약사 CS', upsert: true },
 ];
 async function _staffInboxDrain(verbose) {
   if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) {
@@ -58704,7 +58739,14 @@ async function _staffInboxDrain(verbose) {
       let touched = false;
       list.forEach(r => {
         if (!r || r.applied) return;
-        if (!have.has(String(r.id))) { DB[box.arr].push(Object.assign({}, r, { applied: undefined })); added++; }
+        if (!have.has(String(r.id))) {
+          DB[box.arr].push(Object.assign({}, r, { applied: undefined })); added++;
+        } else if (box.upsert) {
+          const cur = DB[box.arr].find(x => x && String(x.id) === String(r.id));
+          if (cur && (Number(r.updatedAt) || 0) > (Number(cur.updatedAt) || 0)) {
+            Object.assign(cur, r, { applied: undefined }); added++;
+          }
+        }
         r.applied = true; r.appliedAt = Date.now();
         touched = true;
       });
@@ -58783,6 +58825,8 @@ function _staffMirrorCalendarThrottled() {
       _staffMirrorItems().catch(() => {});      // v2.3.666
       _staffMirrorWarehouses().catch(() => {});
       _staffMirrorOrders().catch(() => {});
+      _staffMirrorPharm().catch(() => {});     // v2.3.669
+      _staffMirrorCs().catch(() => {});
     }, 4000);
   } catch(_) {}
 }
@@ -58839,9 +58883,11 @@ window.staffMirrorNow = async function() {
   const items = await _staffMirrorItems();
   const warehouses = await _staffMirrorWarehouses();
   const orders = await _staffMirrorOrders();
+  const pharmacies = await _staffMirrorPharm();
+  const cs = await _staffMirrorCs();
   try { localStorage.setItem('reniv_staff_cal_push', String(Date.now())); } catch(_) {}
-  console.log('👥 직원용 미러 재동기:', { board, calendar, accounts, workflow, items, warehouses, orders });
-  return { board, calendar, accounts, workflow, items, warehouses, orders };
+  console.log('👥 직원용 미러 재동기:', { board, calendar, accounts, workflow, items, warehouses, orders, pharmacies, cs });
+  return { board, calendar, accounts, workflow, items, warehouses, orders, pharmacies, cs };
 };
 
 // v2.3.601: 공용 API Key 전용 저장 — 서버에 실제로 반영됐는지 되읽어 확인한다.
