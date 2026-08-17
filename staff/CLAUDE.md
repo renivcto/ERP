@@ -71,6 +71,7 @@ Google 로그인
 | `board` | **임원용이 통째로 덮어쓰는 미러** — 운영 업무 공유 중 '직원용 ERP에도 게시' 체크된 글. `{id, title, content(HTML), cat, catLabel/catIcon/catBg/catFg, by, pinned, images[공개URL], createdAt}` |
 | `board_staff` | 직원이 직접 쓴 게시글. `{id, title, content(HTML), cat, pinned, uid, by, avatar, createdAt, updatedAt}` |
 | `calendar` | **임원용 미러** — 업무 일정. 기간 일정은 압축: `{d(시작 YYYY-MM-DD), n(제목), b(보드), i(아이콘), c/t(색), days, done, ty, urg}` |
+| `workflow` | **임원용 미러** — Trello 보드 3개. `[{key, name, icon, color, owner, url, lists:[{id,name}], cards:[{id,idList,name,url,due,done,labels,cover}]}]` |
 | `partners_coop` / `partners_seller` / `partners_shop` | 거래처 — 협력사(직원 직접입력) / 판매업체 / 쇼핑몰. `{id, company, ...}` |
 | `accounts` | **임원용 미러** — 외부 계정 원본. `{id, cat, name, loginId, pw, email, url, note}` |
 | `accounts_staff` | 직원이 등록한 계정. 임원용에는 읽기 전용으로 표시된다 |
@@ -81,7 +82,7 @@ Google 로그인
 
 | 종류 | 문서 | 시점 | 임원용 함수 |
 |---|---|---|---|
-| **미러(자동)** | `board` · `calendar` · `accounts` | 글/계정 저장·삭제 시 / 홈 렌더 6시간 스로틀 | `_staffMirrorBoard()` · `_staffMirrorCalendar()` · `_staffMirrorAccounts()` · 수동 `staffMirrorNow()` |
+| **미러(자동)** | `board` · `calendar` · `accounts` · `workflow` | 글/계정 저장·삭제 시 / Trello 동기화 직후 / 홈 렌더 6시간 스로틀 | `_staffMirrorBoard()` · `_staffMirrorCalendar()` · `_staffMirrorAccounts()` · `_staffMirrorWorkflow()` · 수동 `staffMirrorNow()` |
 | **최초 1회 이관(수동)** | `partners_seller` · `partners_shop` | 관리자가 사용자 관리에서 버튼 클릭 | `staffTransfer('sellers'\|'shops')` |
 | **직원용 → 임원용(읽기 전용)** | `accounts_staff` | 임원용 외부 계정 탭 진입 시 (60초 캐시) | `_loadStaffAccounts()` |
 
@@ -104,6 +105,17 @@ Google 로그인
 - 관리 열은 `position:sticky; right:0` — 열이 많아 가로 스크롤에 묻히던 문제.
 - 행 클릭 → 상세 모달에 **어디서 수정하는지** 안내가 뜬다.
 - ⚠️ 비밀번호는 평문으로 미러된다. 표에서 가리는 것은 어깨너머 노출 방지일 뿐이다.
+
+#### 워크플로우·캘린더에서 '신제품 개발' 제외 (v0.26.0 / 임원용 v2.3.665)
+
+**신제품 개발 보드는 임원용 전용이다.** 직원용에는 3개만 간다 —
+르니브 운영 본부(`_trelloCards2`) · 약국 영업(`_trelloCards4`) · 홈쇼핑 준비(`_trelloCards3`).
+
+- 워크플로우: `_STAFF_WF_BOARDS` 가 대상 보드 목록이다. 여기에만 이름을 넣으면 된다.
+- 캘린더: `_staffCalPayload()` 가 `board !== '신제품'` 으로 거른다.
+  직원 앱도 `calRows()` 에서 한 번 더 거른다 — 미러가 갱신되기 전에도 화면에서 즉시 빠지게.
+- 직원용은 **읽기 전용**이다. Trello 쓰기는 API 키가 필요한데 그 키는 `settings/`(관리자 전용 read)에 있다.
+  카드 클릭은 Trello 링크를 열 뿐이다.
 
 - ⚠️ **미러 문서에 직원이 쓰게 하지 말 것.** 미러는 통째 덮어쓰기라 직원 글이 날아간다.
   그래서 게시판이 `board`(미러) / `board_staff`(직원 작성) 두 문서로 나뉘어 있다.

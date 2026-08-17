@@ -241,6 +241,28 @@ tr:last-child td { border-bottom:none; }
 .bcal-post:hover { filter:brightness(.95); }
 .bcal-post .t { display:block; font-size:11px; font-weight:700; line-height:1.35; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .bcal-post .a { display:block; font-size:10px; color:var(--ink-mute); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* 워크플로우 (v0.26.0) — 임원용 Trello 보드 3개 읽기 전용 */
+.wf-sum { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:18px; }
+.wf-sumcard { background:var(--panel); border:1px solid var(--line); border-left:4px solid; border-radius:var(--r); padding:13px 15px; }
+.wf-sumcard .n { font-size:13px; font-weight:800; display:flex; align-items:center; gap:6px; }
+.wf-sumcard .o { font-size:11.5px; color:var(--ink-mute); margin-top:2px; }
+.wf-sumcard .v { font-size:26px; font-weight:800; margin-top:7px; letter-spacing:-.5px; }
+.wf-sumcard .v small { font-size:12px; font-weight:600; color:var(--ink-mute); margin-left:3px; }
+.wf-board { border:1px solid var(--line); border-left:4px solid; border-radius:var(--r); background:var(--panel); margin-bottom:12px; }
+.wf-bh { display:flex; align-items:center; gap:12px; padding:14px 16px; flex-wrap:wrap; }
+.wf-bh .t { font-size:15px; font-weight:800; }
+.wf-bh .o { font-size:12.5px; color:var(--ink-mute); }
+.wf-bh .right { margin-left:auto; display:flex; gap:7px; }
+.wf-cols { display:flex; gap:10px; overflow-x:auto; padding:0 16px 16px; align-items:flex-start; }
+.wf-col { flex:0 0 236px; background:#eef1f6; border-radius:10px; padding:10px; }
+.wf-col .h { display:flex; justify-content:space-between; align-items:center; font-size:12.5px; font-weight:700; color:#172b4d; margin-bottom:8px; }
+.wf-col .h span:last-child { background:#0052cc; color:#fff; border-radius:10px; padding:1px 8px; font-size:11px; }
+.wf-card { background:#fff; border-radius:6px; padding:9px 10px; margin-bottom:6px; box-shadow:0 1px 3px rgba(20,26,40,.1);
+  font-size:12px; line-height:1.5; text-align:left; width:100%; border:0; cursor:pointer; transition:box-shadow .12s; }
+.wf-card:hover { box-shadow:0 3px 10px rgba(20,26,40,.16); }
+.wf-card.done { opacity:.6; }
+.wf-labels { display:flex; gap:3px; flex-wrap:wrap; margin-bottom:6px; }
+.wf-labels i { height:6px; width:34px; border-radius:3px; display:inline-block; }
 /* 르니브 업무 일정 (v0.18.0) */
 .cal-nav { display:flex; align-items:center; gap:8px; margin-left:auto; }
 .cal-nav .btn-sm { padding:4px 10px; }
@@ -620,7 +642,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.25.0';
+const STAFF_VERSION = 'v0.26.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -661,6 +683,8 @@ let ATT_ANCHOR = null;      // 기준 날짜 (YYYY-MM-DD). null 이면 오늘
 let BOARD = [];             // staff_data/board       — 임원용이 '직원용 게시' 체크한 글 (읽기 전용 미러)
 let BOARD_S = [];           // staff_data/board_staff — 직원이 직접 등록한 글
 let CAL = [];               // staff_data/calendar    — 르니브 업무 일정 미러 (압축: 시작일 + days)
+let WF = [];                // staff_data/workflow    — 워크플로우 3개 보드 (신제품 개발 제외)
+const WF_OPEN = {};         // 보드별 펼침 상태
 let BOARD_CAT = null;       // 게시판 분류 필터 (null = 전체)
 let BOARD_CUR = null;       // 게시판에서 펼쳐 보는 글 id
 let BOARD_EDIT_CAT = 'free';// 글쓰기 모달에서 고른 분류
@@ -809,6 +833,19 @@ if (DEMO) {
            email: '', url: '', note: '' }];
   ACC_S = [{ id: 'X1', cat: '업무', name: '피그마', loginId: 'design@reniv.co.kr', pw: 'staffpw',
              email: 'design@reniv.co.kr', url: 'https://figma.com', note: '디자인팀 공용' }];
+  WF = [
+    { key: 'ops', name: '르니브 운영 본부', icon: '🏢', color: '#166534', owner: '권다빈', url: 'https://trello.com/b/SMzNZ6Hw',
+      lists: [{ id: 'L1', name: '할 일' }, { id: 'L2', name: '진행 중' }, { id: 'L3', name: '완료' }],
+      cards: [{ id: 'c1', idList: 'L1', name: '8월 정산 자료 정리', url: '', due: '', done: false, labels: ['green'], cover: '' },
+              { id: 'c2', idList: 'L2', name: '쿠팡 로켓그로스 입고', url: '', due: '', done: false, labels: [], cover: '' },
+              { id: 'c3', idList: 'L3', name: '7월 광고비 마감', url: '', due: '', done: true, labels: ['blue'], cover: '' }] },
+    { key: 'pharmacy', name: '약국 영업', icon: '💊', color: '#1d4ed8', owner: '백찬식', url: '',
+      lists: [{ id: 'P1', name: '방문 예정' }, { id: 'P2', name: '완료' }],
+      cards: [{ id: 'p1', idList: 'P1', name: '서울권 신규 약국 5곳', url: '', due: '', done: false, labels: [], cover: '' }] },
+    { key: 'homeshop', name: '홈쇼핑 준비', icon: '🏠', color: '#b91c1c', owner: '', url: '',
+      lists: [{ id: 'H1', name: '준비' }],
+      cards: [{ id: 'h1', idList: 'H1', name: '방송 대본 검토', url: '', due: '', done: false, labels: [], cover: '' }] },
+  ];
   demoStaff[0].lastSeen = Date.now() - 300e3;
   demoStaff[1].lastSeen = Date.now() - 3600e3;
   POLICY = JSON.parse(JSON.stringify(DEFAULT_POLICY));
@@ -1011,6 +1048,8 @@ function subscribeData() {
     e => console.warn('[board_staff]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'calendar'), s => { CAL = parseCol(s, []); rerender(); },
     e => console.warn('[calendar]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'workflow'), s => { WF = parseCol(s, []); rerender(); },
+    e => console.warn('[workflow]', e.message)));
   // v0.19.0 — 거래처 정보 · 외부 계정 (임원용에서 최초 1회 이관, 이후 직원용에서 따로 관리)
   ['coop', 'seller', 'shop'].forEach(k => _unsubs.push(
     onSnapshot(doc(db, 'staff_data', PT_DEFS[k].doc), s => { PT[k] = parseCol(s, []); rerender(); },
@@ -1865,6 +1904,7 @@ function renderPage() {
     case 'adm-journal': m.innerHTML = pageAdmJournal(); wireAdmJournal(); break;
     case 'partners': m.innerHTML = pagePartners(); wirePt('pt'); break;
     case 'accounts': m.innerHTML = pageAccounts(); wireAccounts(); break;
+    case 'workflow': m.innerHTML = pageWorkflow(); wireWorkflow(); break;
     case 'board':    m.innerHTML = pageBoard(); wireBoard(); break;
     case 'calendar': m.innerHTML = pageCalendar(); wireCalendar(); break;
     case 'library':  m.innerHTML = pageLibrary(); wireLibrary(); break;
@@ -1967,7 +2007,7 @@ function pageHome() {
         <button class="btn btn-sm" data-cal-shift="0">오늘</button>
         <button class="btn btn-sm" data-cal-shift="1">›</button>
         <button class="btn btn-sm" data-go="calendar">전체보기 →</button></span></div>
-    <div class="card-b">${CAL.length ? calGridHtml(true)
+    <div class="card-b">${calRows().length ? calGridHtml(true)
       : '<div class="empty">임원용 ERP에서 일정이 아직 넘어오지 않았습니다</div>'}</div></div>`;
 
   // 다가오는 일정 (오른쪽 레일)
@@ -3104,6 +3144,86 @@ $('btn-board-save').onclick = async () => {
   catch (e) { BOARD_S = keep; toast('저장 실패: ' + e.message, true); }
 };
 
+/* ═══════════ 워크플로우 (v0.26.0 · 기획서 p11) ═══════════
+   임원용 Trello 보드 3개(르니브 운영 본부·약국 영업·홈쇼핑 준비)를 읽기 전용으로 보여준다.
+   ⚠️ 신제품 개발은 임원용 전용이라 미러에 아예 넘어오지 않는다.
+   Trello 쓰기는 API 키가 필요해(관리자 전용 read) 직원용에서는 카드 이동·수정을 하지 않는다. */
+const WF_LABEL_COLOR = { green:'#61bd4f', yellow:'#f2d600', orange:'#ff9f1a', red:'#eb5a46', purple:'#c377e0',
+  blue:'#0079bf', sky:'#00c2e0', lime:'#51e898', pink:'#ff80ce', black:'#344563' };
+const WF_COVER_BG = { pink:'#ff9fc1', red:'#ff8b7b', orange:'#ffb163', yellow:'#ffe066', lime:'#b3e065',
+  green:'#7eca8f', sky:'#81cbd7', blue:'#6fa5d6', purple:'#c797df', black:'#5d6f86' };
+function wfCards(b) { return Array.isArray(b && b.cards) ? b.cards : []; }
+function wfBoardHtml(b) {
+  const cards = wfCards(b);
+  const lists = Array.isArray(b.lists) ? b.lists : [];
+  if (!lists.length) return '<div class="empty">불러온 카드가 없습니다</div>';
+  return `<div class="wf-cols">${lists.map(l => {
+    const lc = cards.filter(c => String(c.idList) === String(l.id));
+    return `<div class="wf-col">
+      <div class="h"><span>${esc(l.name)}</span><span>${lc.length}</span></div>
+      ${lc.map(c => {
+        const bg = c.cover ? (WF_COVER_BG[c.cover] || '#fff') : '#fff';
+        return `<button type="button" class="wf-card${c.done ? ' done' : ''}" style="background:${esc(bg)}"
+          ${c.url ? `data-wf-url="${esc(c.url)}"` : ''} title="${esc(c.name)}">
+          ${(c.labels || []).length ? `<span class="wf-labels">${c.labels.map(k =>
+            `<i style="background:${esc(WF_LABEL_COLOR[k] || WF_LABEL_COLOR[String(k).split('_')[0]] || '#b3bac5')}"></i>`).join('')}</span>` : ''}
+          ${c.done ? '<span style="color:#2f7d3a;font-weight:800">✓ </span>' : ''}${esc(c.name)}
+        </button>`;
+      }).join('') || '<div style="font-size:11.5px;color:#8b95a5;padding:4px 2px">카드 없음</div>'}
+    </div>`;
+  }).join('')}</div>`;
+}
+function pageWorkflow() {
+  const boards = Array.isArray(WF) ? WF : [];
+  const total = boards.reduce((s, b) => s + wfCards(b).length, 0);
+  const doing = boards.reduce((s, b) => s + wfCards(b).filter(c => !c.done).length, 0);
+  if (!boards.length) {
+    return `<div class="pg on">
+      <div class="pg-h"><h1>워크플로우<sup class="sync" style="font-size:13px" title="임원용 ERP의 Trello 보드와 연동됩니다"> ⓘ</sup></h1></div>
+      <div class="pg-sub">르니브 운영 본부 · 약국 영업 · 홈쇼핑 준비 보드가 표시됩니다 (신제품 개발은 임원용 전용)</div>
+      <div class="ph"><div class="big">🧩</div><h3>아직 넘어온 보드가 없습니다</h3>
+        <p>임원용 ERP에서 <b>워크플로우 → Trello 동기화</b>를 한 번 실행하면 여기에 나타납니다.</p></div></div>`;
+  }
+  return `<div class="pg on">
+    <div class="pg-h"><h1>워크플로우<sup class="sync" style="font-size:13px" title="임원용 ERP의 Trello 보드와 연동됩니다"> ⓘ</sup></h1></div>
+    <div class="pg-sub">전체 <b>${total}</b>장 · 진행 중 <b>${doing}</b>장 · 임원용 ERP와 같은 내용입니다 (읽기 전용, 신제품 개발 제외)</div>
+    <div class="wf-sum">${boards.map(b => {
+      const cs = wfCards(b);
+      return `<div class="wf-sumcard" style="border-left-color:${esc(b.color || '#94a3b8')}">
+        <div class="n" style="color:${esc(b.color || 'var(--ink)')}">${esc(b.icon || '📋')} ${esc(b.name)}</div>
+        <div class="o">${b.owner ? '담당자 ' + esc(b.owner) : '담당자 미지정'}</div>
+        <div class="v">${cs.length}<small>장</small></div>
+        <div class="o">진행 중 ${cs.filter(c => !c.done).length}장</div>
+      </div>`;
+    }).join('')}</div>
+    ${boards.map(b => {
+      const open = WF_OPEN[b.key] === true;
+      return `<div class="wf-board" style="border-left-color:${esc(b.color || '#94a3b8')}">
+        <div class="wf-bh">
+          <span class="t" style="color:${esc(b.color || 'var(--ink)')}">${esc(b.icon || '📋')} ${esc(b.name)}</span>
+          <span class="o">${b.owner ? '담당자 <b>' + esc(b.owner) + '</b>' : ''}</span>
+          <span class="right">
+            ${b.url ? `<button class="btn btn-sm" data-wf-url="${esc(b.url)}">📋 Trello 열기</button>` : ''}
+            <button class="btn btn-sm ${open ? '' : 'btn-p'}" data-wf-open="${esc(b.key)}">${open ? '▲ 접기' : '▶ 펼치기'}</button>
+          </span>
+        </div>
+        ${open ? wfBoardHtml(b) : ''}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+function wireWorkflow() {
+  document.querySelectorAll('[data-wf-open]').forEach(b => b.onclick = () => {
+    const k = b.dataset.wfOpen;
+    WF_OPEN[k] = !(WF_OPEN[k] === true);
+    renderPage();
+  });
+  document.querySelectorAll('[data-wf-url]').forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    _openLink(b.dataset.wfUrl, 'Trello');
+  });
+}
+
 /* ═══════════ 르니브 업무 일정 (v0.18.0 · 기획서 p11) ═══════════
    staff_data/calendar 미러를 읽는다. 기간 일정은 '시작일 1행 + days' 로 압축돼 오므로
    화면에서 날짜별로 펼친다(문서 용량 — 하루 단위로 펼쳐 넘기면 수천 행이 된다). */
@@ -3119,9 +3239,11 @@ function calShift(n) {
   CAL_ANCHOR = a.getFullYear() + '-' + String(a.getMonth() + 1).padStart(2, '0');
   renderPage();
 }
+/* 신제품 개발은 임원용 전용 — 미러에 남아 있어도 화면에서 뺀다 (v0.26.0) */
+function calRows() { return (CAL || []).filter(e => e && e.b !== '신제품'); }
 function calByDay(fromYmd, toYmd) {
   const map = {};
-  (CAL || []).forEach(e => {
+  calRows().forEach(e => {
     if (!e || !e.d) return;
     const days = Math.max(1, Math.min(Number(e.days) || 1, 400));
     const cur = new Date(e.d + 'T00:00:00');
@@ -3160,13 +3282,13 @@ function calUpcoming(days) {
   const t0 = today();
   const e = new Date(); e.setDate(e.getDate() + (days || 14));
   const t1 = _ymdOf(e);
-  return (CAL || []).filter(x => x && x.d >= t0 && x.d <= t1 && !x.done)
+  return calRows().filter(x => x && x.d >= t0 && x.d <= t1 && !x.done)
     .sort((a, b) => a.d.localeCompare(b.d)).slice(0, 12);
 }
 /* 지난 입고 예정 중 미완료 — 임원용 '지연 입고' 와 같은 기준 */
 function calOverdue() {
   const t0 = today();
-  return (CAL || []).filter(x => x && x.ty === 'po' && !x.done && x.d < t0)
+  return calRows().filter(x => x && x.ty === 'po' && !x.done && x.d < t0)
     .sort((a, b) => a.d.localeCompare(b.d)).slice(0, 5);
 }
 function upRowHtml(e, late) {
@@ -3191,7 +3313,7 @@ function pageCalendar() {
   return `
   <div class="pg on">
     <div class="pg-h"><h1>르니브 캘린더<sup class="sync" style="font-size:13px" title="임원용 ERP의 업무 일정과 동일하게 연동됩니다"> ⓘ</sup></h1></div>
-    <div class="pg-sub">임원용 ERP의 업무 일정(워크플로우 보드·입고 예정)이 그대로 표시됩니다 · 총 ${CAL.length}건</div>
+    <div class="pg-sub">임원용 ERP의 업무 일정이 표시됩니다 (신제품 개발 제외) · 총 ${calRows().length}건</div>
     <div class="bd-grid">
       <div class="card">
         <div class="card-h">🗓️ ${calLabel()}
@@ -3199,7 +3321,7 @@ function pageCalendar() {
             <button class="btn btn-sm" data-cal-shift="-1">‹ 이전달</button>
             <button class="btn btn-sm" data-cal-shift="0">오늘</button>
             <button class="btn btn-sm" data-cal-shift="1">다음달 ›</button></span></div>
-        <div class="card-b">${CAL.length ? calGridHtml(false)
+        <div class="card-b">${calRows().length ? calGridHtml(false)
           : '<div class="empty">임원용 ERP에서 일정이 아직 넘어오지 않았습니다 — 관리자가 임원용 홈을 한 번 열면 동기화됩니다</div>'}</div></div>
       <div class="card"><div class="card-h">🔔 다가오는 일정 <span class="sub">14일 이내</span></div>
         <div class="card-b bd-scroll">${(up.length || late.length)
@@ -3212,7 +3334,6 @@ function wireCalendar() { wireCalCommon(); }
 
 /* ═══════ 플레이스홀더 — 기획서 p5 "우선 메뉴만" ═══════ */
 const PH = {
-  workflow:  { ico: '🧩', t: '워크플로우', d: '임원용 ERP의 워크플로우(Trello 보드)와 메뉴·데이터가 동일하게 연동됩니다.', sync: true },
   approval:  { ico: '🖋️', t: '결재 관리', d: '지출 결의서와 일반 결재 품의서를 작성합니다. 결재라인 지정 후 1차 결재(전결 가능) → 2차 본부장(전결 가능) → 3차 대표이사 순으로 진행되며, 작성된 문서는 임원용 ERP에도 연동됩니다. 임원용 ERP의 결재 데이터는 여기에 보이지 않습니다.', sync: true },
   sales:     { ico: '🛒', t: '판매 관리', d: '주문관리 · 위탁 재고이동 · 광고비 관리 세 메뉴가 임원용과 연동됩니다. 주문관리에서 고객정보는 표시되지 않습니다.', sync: true },
   pharmacy:  { ico: '💊', t: '약국 관리', d: '약사 CS 관리와 약국 리스트가 임원용과 연동됩니다. 일반 고객 정보는 공개되지 않습니다.', sync: true },

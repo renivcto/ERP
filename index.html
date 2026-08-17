@@ -6338,7 +6338,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.664';
+const ERP_VERSION = 'v2.3.665';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -48996,6 +48996,7 @@ async function loadTrelloCards() {
     DB._trelloLists3 = lists3;   // v2.3.178
     DB._trelloCards3 = cards3;
     DB._trelloLists4 = lists4;   // v2.3.274
+    try { _staffMirrorWorkflow(); } catch(_){}   // v2.3.665: 직원용 워크플로우 반영
     DB._trelloCards4 = cards4;
     try {
       localStorage.setItem('reniv_trello_lists', JSON.stringify(lists));
@@ -58573,7 +58574,8 @@ function _staffCalPayload() {
   const to = new Date(today); to.setDate(to.getDate() + 240);
   const fY = _ymd(from), tY = _ymd(to);
   return _getAllTrelloEvents('all')
-    .filter(e => e && !e.rangeIdx && e.date >= fY && e.date <= tY)
+    // v2.3.665: 신제품 개발은 임원용 전용 — 직원용 캘린더로 넘기지 않는다
+    .filter(e => e && !e.rangeIdx && e.board !== '신제품' && e.date >= fY && e.date <= tY)
     .map(e => ({
       d: e.date, n: String(e.name || '').slice(0, 120),
       b: e.board || '', i: e.boardIcon || '📌',
@@ -58584,6 +58586,38 @@ function _staffCalPayload() {
     .sort((a, b) => a.d.localeCompare(b.d));
 }
 async function _staffMirrorCalendar() { return _staffPush('calendar', _staffCalPayload()); }
+
+/* v2.3.665 — 워크플로우 미러. 직원용에는 신제품 개발을 뺀 3개 보드만 넘긴다.
+   Trello 쓰기는 API 키(settings/, 관리자 전용 read)가 필요하므로 직원용은 읽기 전용이다. */
+const _STAFF_WF_BOARDS = [
+  { key: 'ops',      name: '르니브 운영 본부', icon: '🏢', color: '#166534', owner: '권다빈',
+    lists: '_trelloLists2', cards: '_trelloCards2', url: 'https://trello.com/b/SMzNZ6Hw' },
+  { key: 'pharmacy', name: '약국 영업',        icon: '💊', color: '#1d4ed8', owner: '백찬식',
+    lists: '_trelloLists4', cards: '_trelloCards4', url: 'https://trello.com/b/' + TRELLO_BOARD_ID_4 },
+  { key: 'homeshop', name: '홈쇼핑 준비',      icon: '🏠', color: '#b91c1c', owner: '',
+    lists: '_trelloLists3', cards: '_trelloCards3', url: 'https://trello.com/b/' + TRELLO_BOARD_ID_3 },
+];
+function _staffWfPayload() {
+  return _STAFF_WF_BOARDS.map(b => {
+    const lists = Array.isArray(DB[b.lists]) ? DB[b.lists] : [];
+    const cards = Array.isArray(DB[b.cards]) ? DB[b.cards] : [];
+    return {
+      key: b.key, name: b.name, icon: b.icon, color: b.color, owner: b.owner, url: b.url,
+      lists: lists.map(l => ({ id: String(l.id), name: String(l.name || '') })),
+      cards: cards.map(c => ({
+        id: String(c.id), idList: String(c.idList || ''),
+        name: String(c.name || '').slice(0, 200),
+        url: c.shortUrl || c.url || b.url,
+        due: c.due || '', start: c.start || '',
+        done: !!(c.dueComplete || (c.badges && c.badges.dueComplete) || c.isComplete),
+        labels: (Array.isArray(c.labels) ? c.labels : []).map(l => l && l.color).filter(Boolean).slice(0, 6),
+        cover: (c.cover && c.cover.color) || ''
+      }))
+    };
+  });
+}
+async function _staffMirrorWorkflow() { return _staffPush('workflow', _staffWfPayload()); }
+window._staffMirrorWorkflow = _staffMirrorWorkflow;
 
 /* v2.3.662 — 외부 계정 미러. 이관(1회)에서 연동(자동)으로 바뀌었다.
    직원용은 이 문서를 원본으로 보고, 자기가 지우거나 고친 것은 accounts_ov 오버레이에 쌓는다.
@@ -58622,7 +58656,10 @@ function _staffMirrorCalendarThrottled() {
     const last = Number(localStorage.getItem('reniv_staff_cal_push') || 0);
     if (Date.now() - last < 6 * 60 * 60 * 1000) return;
     localStorage.setItem('reniv_staff_cal_push', String(Date.now()));
-    setTimeout(() => { _staffMirrorCalendar().catch(() => {}); }, 4000);
+    setTimeout(() => {
+      _staffMirrorCalendar().catch(() => {});
+      _staffMirrorWorkflow().catch(() => {});   // v2.3.665
+    }, 4000);
   } catch(_) {}
 }
 /* v2.3.661 — 거래처·외부계정 최초 이관 (기획서 p13·p14). 미러와 달리 자동이 아니다:
@@ -58674,9 +58711,10 @@ window.staffMirrorNow = async function() {
   const board = await _staffMirrorBoard();
   const calendar = await _staffMirrorCalendar();
   const accounts = await _staffMirrorAccounts();
+  const workflow = await _staffMirrorWorkflow();
   try { localStorage.setItem('reniv_staff_cal_push', String(Date.now())); } catch(_) {}
-  console.log('👥 직원용 미러 재동기:', { board, calendar, accounts });
-  return { board, calendar, accounts };
+  console.log('👥 직원용 미러 재동기:', { board, calendar, accounts, workflow });
+  return { board, calendar, accounts, workflow };
 };
 
 // v2.3.601: 공용 API Key 전용 저장 — 서버에 실제로 반영됐는지 되읽어 확인한다.
