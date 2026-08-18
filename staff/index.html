@@ -213,6 +213,8 @@ tr:last-child td { border-bottom:none; }
 .ord-kpi .t { font-size:11.5px; font-weight:700; color:var(--ink-soft); }
 .ord-kpi .v { font-size:21px; font-weight:800; margin-top:3px; letter-spacing:-.4px; }
 .ord-kpi .s { font-size:11px; color:var(--ink-mute); }
+.sales-period { display:inline-flex; align-items:center; gap:7px; font-size:12.5px; font-weight:700; color:var(--ink-soft); margin-bottom:12px; }
+.sales-period select { width:auto; min-width:140px; padding:6px 10px; font-size:12.5px; }
 .ord-chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
 .ord-chip { border:1px solid var(--line); background:#fff; border-radius:999px; padding:4px 12px; font-size:12px; font-weight:700; cursor:pointer; color:var(--ink-soft); }
 .ord-chip.on { background:var(--brand); border-color:var(--brand); color:#fff; }
@@ -1178,7 +1180,7 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
 import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
-const STAFF_VERSION = 'v0.46.0';
+const STAFF_VERSION = 'v0.47.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -2538,9 +2540,16 @@ const MENUS = [
     { id: 'library', ico: '📚', name: () => '르니브 자료실' },
     { id: 'accounts', ico: '🔑', name: () => '외부 계정' },
   ]},
-  { id: 'approval', ico: '🖋️', name: () => '결재 관리', sync: '작성한 지출결의서·품의서가 임원용 ERP에 연동됩니다' },
+  { group: '결재 관리', ico: '🖋️', items: [
+    { id: 'approval', ico: '💳', name: () => '지출 결의서', tab: 'exp', sync: '작성한 지출결의서가 임원용 ERP 결재함으로 갑니다' },
+    { id: 'approval-gen', ico: '📝', name: () => '일반 결재', tab: 'gen', sync: '작성한 품의서가 임원용 ERP 결재함으로 갑니다' },
+  ]},
+  { group: '판매 관리', ico: '🛒', items: [
+    { id: 'sales', ico: '📦', name: () => '주문 관리', tab: 'order', sync: '임원용과 연동됩니다 (고객정보 제외)' },
+    { id: 'sales-consign', ico: '🧾', name: () => '위탁 재고이동', tab: 'consign', sync: '위탁 출고·명세서가 임원용과 연동됩니다' },
+    { id: 'sales-ads', ico: '📢', name: () => '광고비 관리', tab: 'ads', sync: '광고비·프로젝트가 임원용과 연동됩니다' },
+  ]},
   { group: '영업 관리', ico: '💼', items: [
-    { id: 'sales', ico: '🛒', name: () => '판매 관리', sync: '주문관리·위탁 재고이동·광고비 관리가 임원용과 연동됩니다 (고객정보 제외)' },
     { id: 'pharmacy', ico: '💊', name: () => '약국 관리', sync: '약사 CS·약국 리스트가 임원용과 연동됩니다' },
     { id: 'partners', ico: '🤝', name: () => '거래처 정보' },
   ]},
@@ -2608,6 +2617,11 @@ function markActive() {
   document.querySelectorAll('#sb-menu .mi').forEach(mi => mi.classList.toggle('on', mi.dataset.pg === CUR_PAGE));
 }
 function go(pg) {
+  // v0.47.0: 하위 메뉴가 곧 탭이다 — 메뉴 정의의 tab 값을 화면 상태로 옮긴다
+  const _item = MENUS.flatMap(x => x.items || [x]).find(x => x && x.id === pg);
+  if (_item && _item.tab) {
+    if (pg.indexOf('approval') === 0) AP_TAB = _item.tab; else SALES_TAB = _item.tab;
+  }
   CUR_PAGE = pg;
   // 다른 화면에서 넘어와도 그 항목이 속한 그룹은 열어 준다 (활성 메뉴가 접힌 채 숨지 않게)
   const g = _groupOf(pg);
@@ -2635,10 +2649,11 @@ function renderPage() {
     case 'accounts': m.innerHTML = pageAccounts(); wireAccounts(); break;
     case 'newproduct': m.innerHTML = pageNewProduct(); wireNewProduct(); break;
     case 'pharmacy': m.innerHTML = pagePharmacy(); wirePharmacy(); break;
-    case 'approval': m.innerHTML = pageApproval(); wireApproval(); break;
+    case 'approval': case 'approval-gen': m.innerHTML = pageApproval(); wireApproval(); break;
     case 'items':    m.innerHTML = pageItems(); wireDataPage(); break;
     case 'stock':    m.innerHTML = pageStock(); wireDataPage(); break;
-    case 'sales':    m.innerHTML = pageSales(); wireDataPage(); break;
+    case 'sales': case 'sales-consign': case 'sales-ads':
+      m.innerHTML = pageSales(); wireDataPage(); break;
     case 'workflow': m.innerHTML = pageWorkflow(); wireWorkflow(); break;
     case 'board':    m.innerHTML = pageBoard(); wireBoard(); break;
     case 'calendar': m.innerHTML = pageCalendar(); wireCalendar(); break;
@@ -5432,7 +5447,7 @@ function ordShops() {
   return Object.keys(m).sort().map(k => ({ name: k, n: m[k] }));
 }
 function ordFiltered() {
-  let list = ordAll();
+  let list = ordAll().filter(o => inPeriod(o.orderDate));
   if (ORD_SHOP) list = list.filter(o => o.shopName === ORD_SHOP);
   return dpFilter(list, ORD_Q, ['orderNo', 'productName', 'shopName']);
 }
@@ -5482,6 +5497,31 @@ $('btn-ord-save').onclick = async () => {
     toast('수정 요청을 올렸습니다 — 임원용 ERP를 열면 반영됩니다'); rerender();
   } catch (e) { toast('실패: ' + e.message, true); }
 };
+
+/* ═══════════ 기간 조회 (v0.47.0) ═══════════
+   판매 관리 3탭이 같은 컨트롤을 쓴다. 값은 'YYYY-MM' | 'YYYY' | '' (전체). */
+let SALES_PERIOD = (function () { const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); })();
+function periodHtml() {
+  const now = new Date(), months = [], years = [];
+  for (let i = 0; i < 18; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'));
+  }
+  for (let y = now.getFullYear(); y >= now.getFullYear() - 3; y--) years.push(String(y));
+  const opt = (v, l) => `<option value="${v}"${SALES_PERIOD === v ? ' selected' : ''}>${l}</option>`;
+  return `<div class="sales-period">📅 기간
+    <select class="fi" id="sales-period">
+      ${months.map(m => opt(m, m.replace('-', '년 ') + '월')).join('')}
+      <optgroup label="연도별">${years.map(y => opt(y, y + '년 전체')).join('')}</optgroup>
+      ${opt('', '전체 기간')}
+    </select></div>`;
+}
+/* 날짜 문자열(YYYY-MM-DD)이 선택 기간에 드는가 */
+function inPeriod(d) {
+  if (!SALES_PERIOD) return true;
+  return String(d || '').slice(0, SALES_PERIOD.length) === SALES_PERIOD;
+}
 function pageSales() {
   if (SALES_TAB === 'consign') return pageSalesConsign();
   if (SALES_TAB === 'ads') return pageSalesAds();
@@ -5494,6 +5534,7 @@ function pageSales() {
     <div class="pg-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       주문 ${(ORDERS || []).length}건 · 고객명·연락처·주소는 직원용에 넘어오지 않습니다${pend ? ` · <b style="color:var(--warn)">반영 대기 ${pend}건</b>` : ''}</div>
     ${salesTabsHtml()}
+    ${periodHtml()}
     ${ordKpiHtml(all)}
     <div class="ord-chips"><button class="ord-chip ${ORD_SHOP ? '' : 'on'}" data-ord-shop="">전체 ${ordAll().length}</button>
       ${ordShops().map(s => `<button class="ord-chip ${ORD_SHOP === s.name ? 'on' : ''}" data-ord-shop="${esc(s.name)}">${esc(s.name)} ${s.n}</button>`).join('')}</div>
@@ -5523,6 +5564,7 @@ function wireDataPage() {
   document.querySelectorAll('[data-sm-new]').forEach(b => b.onclick = () => openSmModal(b.dataset.smNew));
   const wo = $('btn-wh-open'); if (wo) wo.onclick = openWhModal;
   document.querySelectorAll('[data-sales-tab]').forEach(b => b.onclick = () => { SALES_TAB = b.dataset.salesTab; renderPage(); });
+  const sp = $('sales-period'); if (sp) sp.onchange = () => { SALES_PERIOD = sp.value; renderPage(); };
   document.querySelectorAll('[data-ord-shop]').forEach(b => b.onclick = () => { ORD_SHOP = b.dataset.ordShop; renderPage(); });
   document.querySelectorAll('[data-ord-edit]').forEach(b => b.onclick = () => openOrdModal(b.dataset.ordEdit));
   const cn = $('btn-cg-new'); if (cn) cn.onclick = openCgModal;
@@ -5786,13 +5828,14 @@ function adTrendHtml(list) {
       </svg></div></div>`;
 }
 function pageSalesConsign() {
-  const list = consAll();
+  const list = consAll().filter(c => inPeriod(c.date));
   return `<div class="pg on">
     <div class="pg-h"><h1>판매 관리<sup class="sync" style="font-size:13px"> ⓘ</sup></h1>
       <button class="btn btn-p" id="btn-cg-new" style="margin-left:auto">🚚 위탁 출고 등록</button></div>
     <div class="pg-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       바로팜 등 위탁 판매처로 보낸 재고입니다 ${DP_RO}</div>
     ${salesTabsHtml()}
+    ${periodHtml()}
     ${list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb" style="min-width:760px">
       <thead><tr><th>출고일</th><th>판매업체</th><th>입고 창고</th><th>품목</th><th>수량</th><th>합계금액</th>
         <th style="width:120px">거래처 명세서</th><th style="width:120px">3PL용 명세서</th></tr></thead><tbody>
@@ -5891,7 +5934,7 @@ $('btn-adp-save').onclick = async () => {
   catch (e) { toast('실패: ' + e.message, true); }
 };
 function pageSalesAds() {
-  const list = adsAll();
+  const list = adsAll().filter(a => inPeriod(a.startDate));
   const sum = list.reduce((s, a) => s + (Number(a.cost) || 0), 0);
   const wait = list.filter(a => a.src === 'staff').length;
   return `<div class="pg on">
@@ -5902,6 +5945,7 @@ function pageSalesAds() {
     <div class="pg-sub">집행 광고비 ${list.length}건 · 합계 ₩${sum.toLocaleString()}${wait ? ` · <b style="color:var(--warn)">반영 대기 ${wait}건</b>` : ''}</div>
     ${salesTabsHtml()}
     ${adsKpiHtml(list)}
+    ${periodHtml()}
     ${adTrendHtml(list)}
     ${adProjectsHtml(list)}
     ${list.length ? `<div class="card"><div class="card-h">📢 광고비 이력 <span class="sub">${list.length}건</span></div>
