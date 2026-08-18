@@ -357,6 +357,9 @@ tr:last-child td { border-bottom:none; }
 .cal-d.today { border-color:var(--brand); box-shadow:inset 0 0 0 1px var(--brand); }
 .cal-d .n { font-size:11.5px; font-weight:700; color:var(--ink-soft); text-align:right; padding-right:2px; line-height:1.2; }
 .cal-ev { font-size:10.5px; font-weight:700; border-radius:4px; padding:2px 5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; }
+.cal-ev[data-cal-url], .up-row[data-cal-url] { cursor:pointer; }
+.cal-ev[data-cal-url]:hover { filter:brightness(.93); }
+.up-row[data-cal-url]:hover { border-color:var(--brand); background:#f8fafc; }
 .cal-ev.done { opacity:.45; text-decoration:line-through; }
 .cal-more { font-size:10px; color:var(--ink-mute); font-weight:700; padding-left:3px; text-align:left; }
 .up-row { display:flex; align-items:center; gap:9px; padding:7px 10px; border:1px solid var(--line-soft); border-radius:8px; margin-bottom:5px; font-size:12.5px; }
@@ -902,7 +905,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.36.2';
+const STAFF_VERSION = 'v0.37.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -4776,7 +4779,7 @@ function calGridHtml(mini) {
     const ymd = _ymdOf(d), evs = map[ymd] || [];
     const shown = evs.slice(0, maxEv).map(e =>
       `<div class="cal-ev${e.done ? ' done' : ''}" style="background:${esc(e.c || '#e2e8f0')};color:${esc(e.t || '#334155')}"
-            title="${esc((e.i || '') + ' ' + (e.n || ''))}">${e.isStart ? esc(e.i || '') + ' ' : ''}${esc(e.n || '')}</div>`).join('');
+            ${calUrlAttr(e)} title="${esc((e.i || '') + ' ' + (e.n || ''))}${calUrl(e) ? ' — 클릭하면 Trello 카드가 열립니다' : ''}">${e.isStart ? esc(e.i || '') + ' ' : ''}${esc(e.n || '')}</div>`).join('');
     return `<div class="cal-d${mini ? ' mini' : ''}${d.getMonth() !== m ? ' out' : ''}${ymd === tY ? ' today' : ''}">
       <div class="n">${d.getDate()}</div>${shown}${evs.length > maxEv ? `<div class="cal-more">+${evs.length - maxEv}</div>` : ''}</div>`;
   }).join('');
@@ -4804,14 +4807,28 @@ function upRowHtml(e, late) {
   const label = span ? `${d.getMonth() + 1}/${d.getDate()}~${end.getMonth() + 1}/${end.getDate()}`
                      : `${d.getMonth() + 1}/${d.getDate()} (${wd})`;
   const lateDays = late ? Math.round((new Date(today() + 'T00:00:00') - d) / 86400000) : 0;
-  return `<div class="up-row${late ? ' late' : ''}">
+  return `<div class="up-row${late ? ' late' : ''}" ${calUrlAttr(e)}>
     <span class="dt">${label}</span>
     ${late ? `<span class="bd-badge" style="background:#dc2626;color:#fff">${lateDays}일 지연</span>` : ''}
     <span class="ic">${esc(e.i || '📌')}</span>
     <span class="nm" title="${esc(e.n || '')}">${esc(e.n || '')}</span></div>`;
 }
+/* 일정의 Trello 카드 링크. 미러(u)에 https 만 들어오지만 화면에서 한 번 더 거른다. */
+function calUrl(e) {
+  const u = String((e && e.u) || '');
+  return /^https:\/\//i.test(u) ? u : '';
+}
+function calUrlAttr(e) {
+  const u = calUrl(e);
+  return u ? `data-cal-url="${esc(u)}"` : '';
+}
 function wireCalCommon() {
   document.querySelectorAll('[data-cal-shift]').forEach(b => b.onclick = () => calShift(Number(b.dataset.calShift)));
+  // 일정 클릭 → 해당 Trello 카드 (임원용 홈 캘린더·다가오는 일정과 같은 동작)
+  document.querySelectorAll('[data-cal-url]').forEach(el => el.onclick = ev => {
+    ev.stopPropagation();
+    window.open(el.dataset.calUrl, '_blank', 'noopener');
+  });
 }
 function pageCalendar() {
   const up = calUpcoming(14), late = calOverdue();
