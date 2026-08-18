@@ -2089,3 +2089,115 @@ exports.backfillStaffClaims = functions
     console.log('[STAFF CLAIM] ' + msg);
     return { ok: true, total: snap.size, changed: changed, skipped: skipped, failed: missing, message: msg };
   });
+
+
+// =============================================================================
+// v2.17 — AI 중계 (직원용 ERP 에서 Claude / Gemini 사용)
+// =============================================================================
+// 직원용은 백엔드가 없는 정적 앱이다. 브라우저에 API 키를 두면 활성 직원이 콘솔에서
+// 그대로 꺼내 갈 수 있다(Trello 토큰과 같은 문제). 그래서 서버가 대신 부른다.
+//   · 키는 Firestore 에만 있고 클라이언트로 내려가지 않는다.
+//   · 호출자는 임원(users) 또는 직원(staff_users) 이어야 한다.
+//   · 프롬프트·응답 길이에 상한을 둔다 — 사고나 실수로 비용이 폭주하지 않게.
+// =============================================================================
+
+const AI_MAX_PROMPT = 12000;     // 글자
+const AI_MAX_TOKENS = 2000;      // 응답 토큰 상한
+
+async function _aiSharedKey(name) {
+  const snap = await admin.firestore().doc('shared/' + name).get();
+  if (!snap.exists) return '';
+  const raw = snap.data().value;
+  if (typeof raw !== 'string') return '';
+  try { const v = JSON.parse(raw); return typeof v === 'string' ? v : ''; }
+  catch (_) { return raw; }          // 옛 저장분이 JSON 이 아닐 수 있다
+}
+
+exports.aiRelay = functions
+  .region(REGION)
+  .runWith({ timeoutSeconds: 120, memory: '256MB' })
+  .https.onCall(async (data, context) => {
+    if (!context.auth) throw new functions.https.HttpsError('unauthenticated', '로그인이 필요합니다.');
+    const uid = context.auth.uid;
+
+    // 임원 또는 직원이면 통과 — 둘 다 아니면 거부
+    const [ex, st] = await Promise.all([
+      admin.firestore().doc('users/' + uid).get().catch(() => null),
+      admin.firestore().doc('staff_users/' + uid).get().catch(() => null),
+    ]);
+    const okExec = ex && ex.exists && ex.data().status === '활성';
+    const okStaff = st && st.exists && st.data().active !== false;
+    if (!okExec && !okStaff) {
+      throw new functions.https.HttpsError('permission-denied', '승인된 사용자만 사용할 수 있습니다.');
+    }
+
+    const provider = String((data && data.provider) || '').toLowerCase();
+    const prompt = String((data && data.prompt) || '').trim();
+    const system = String((data && data.system) || '').trim();
+    const maxTokens = Math.min(AI_MAX_TOKENS, Math.max(256, Number(data && data.maxTokens) || 1200));
+    if (!prompt) throw new functions.https.HttpsError('invalid-argument', '요청 내용이 비어 있습니다.');
+    if (prompt.length > AI_MAX_PROMPT) {
+      throw new functions.https.HttpsError('invalid-argument', '요청이 너무 깁니다 (' + AI_MAX_PROMPT + '자 이내).');
+    }
+    if (provider !== 'claude' && provider !== 'gemini') {
+      throw new functions.https.HttpsError('invalid-argument', 'provider 는 claude 또는 gemini 여야 합니다.');
+    }
+
+    const keyName = provider === 'claude' ? 'claude_api_key' : 'gemini_api_key';
+    const apiKey = await _aiSharedKey(keyName);
+    if (!apiKey) {
+      throw new functions.https.HttpsError('failed-precondition',
+        (provider === 'claude' ? 'Claude' : 'Gemini') + ' API Key 가 등록되지 않았습니다. 임원용 ERP 설정에서 먼저 등록하세요.');
+    }
+
+    console.log('[AI RELAY] ' + provider + ' by ' + (okStaff ? 'staff' : 'exec') + ':' + uid.slice(0, 8) + ' len=' + prompt.length);
+
+    try {
+      if (provider === 'claude') {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-5',
+            max_tokens: maxTokens,
+            system: system || undefined,
+            messages: [{ role: 'user', content: prompt }],
+          }),
+        });
+        const j = await res.json();
+        if (!res.ok) {
+          throw new functions.https.HttpsError('internal',
+            'Claude 오류: ' + ((j && j.error && j.error.message) || res.status));
+        }
+        const text = (j.content || []).map(c => (c && c.text) || '').join('\n').trim();
+        return { ok: true, provider: provider, text: text };
+      }
+
+      // Gemini
+      const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='
+        + encodeURIComponent(apiKey);
+      const body = {
+        contents: [{ parts: [{ text: (system ? system + '\n\n' : '') + prompt }] }],
+        generationConfig: { maxOutputTokens: maxTokens },
+      };
+      const res = await fetch(url, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        throw new functions.https.HttpsError('internal',
+          'Gemini 오류: ' + ((j && j.error && j.error.message) || res.status));
+      }
+      const text = (((j.candidates || [])[0] || {}).content || {}).parts
+        ? j.candidates[0].content.parts.map(p => (p && p.text) || '').join('\n').trim() : '';
+      return { ok: true, provider: provider, text: text };
+    } catch (err) {
+      if (err && err.code && err.httpErrorCode) throw err;     // 이미 HttpsError
+      console.error('[AI RELAY] 실패:', err);
+      throw new functions.https.HttpsError('internal', 'AI 호출 실패: ' + (err && err.message));
+    }
+  });

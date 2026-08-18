@@ -421,6 +421,13 @@ tr:last-child td { border-bottom:none; }
 .np-tabs .t { border:1px solid var(--line); background:var(--line-soft); color:var(--ink-soft); border-radius:8px;
   padding:8px 15px; font-size:13px; font-weight:700; cursor:pointer; }
 .np-tabs .t.on { background:#0f172a; border-color:#0f172a; color:#fff; }
+.ai-row { display:flex; gap:8px; flex-wrap:wrap; margin:2px 0 8px; }
+.ai-btn { flex:1; min-width:130px; border-radius:8px; padding:8px 14px; font-size:12.5px; font-weight:700; cursor:pointer; border:1px solid; }
+.ai-claude { background:linear-gradient(135deg,#fff7ed 0%,#fed7aa 100%); color:#9a3412; border-color:#fdba74; }
+.ai-gemini { background:linear-gradient(135deg,#eef2ff 0%,#e0e7ff 100%); color:#4338ca; border-color:#c7d2fe; }
+.ai-btn:disabled { opacity:.6; cursor:default; }
+.ai-out { border:1px dashed var(--line); border-radius:9px; padding:10px 12px; font-size:12.5px; line-height:1.7;
+  white-space:pre-wrap; background:var(--line-soft); margin-bottom:10px; max-height:260px; overflow:auto; }
 .tl-wrap { overflow-x:auto; }
 .tl { min-width:760px; }
 .tl-head { display:grid; font-size:11px; color:var(--ink-mute); font-weight:700; border-bottom:1px solid var(--line); padding-bottom:5px; margin-bottom:8px; }
@@ -1270,8 +1277,10 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
+import { getFunctions, httpsCallable }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.58.0';
+const STAFF_VERSION = 'v0.59.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1290,6 +1299,8 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
+// AI 는 Cloud Function 이 서버에서 대신 부른다 — 브라우저에 API 키를 두지 않는다
+const fns = getFunctions(app, 'asia-northeast3');
 const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: 'select_account' });
 
@@ -4661,6 +4672,88 @@ let _npDraft = {};
 function npStash() {   // 탭을 옮겨도 입력값이 날아가지 않게 임시 보관
   document.querySelectorAll('#np-m-body [data-np-f]').forEach(el => { _npDraft[el.dataset.npF] = el.value; });
 }
+
+/* ═══════════ AI (v0.59.0) ═══════════
+   ⚠️ API 키를 브라우저에 두지 않는다. Cloud Function(aiRelay)이 서버에서 대신 부른다.
+      직원 계정이 콘솔에서 키를 꺼낼 수 없고, 임원·직원이 같은 키를 쓴다. */
+async function aiAsk(provider, prompt, system) {
+  if (DEMO) throw new Error('데모 모드에서는 AI를 쓸 수 없습니다');
+  const call = httpsCallable(fns, 'aiRelay');
+  const r = await call({ provider: provider, prompt: prompt, system: system || '', maxTokens: 1400 });
+  const t = (r && r.data && r.data.text) || '';
+  if (!t) throw new Error('AI가 빈 응답을 보냈습니다');
+  return t;
+}
+function aiCtx() {
+  const d = _npDraft || {};
+  const line = (k, v) => v ? k + ': ' + String(v).slice(0, 400) + '\n' : '';
+  return line('프로젝트명', d.name) + line('타겟', d.target) + line('USP/강점', d.usp)
+       + line('제형', d.formulation) + line('용기·패키지', d.packaging)
+       + line('주요 성분', d.mainIngredients) + line('부성분', d.subIngredients);
+}
+const AI_JOBS = {
+  names: {
+    system: '당신은 한국 화장품 브랜드의 네이밍 전문가입니다. 간결하고 실무적으로 답하세요.',
+    build: () => `아래 신제품 정보를 보고 한국 시장에 맞는 제품명 후보를 10개 제안해 주세요.
+각 후보마다 한 줄 설명을 붙이고, 상표 검색이 필요해 보이면 표시해 주세요.
+
+${aiCtx() || '(입력된 정보가 아직 적습니다 — 일반적인 스킨케어 신제품 기준으로 제안해 주세요)'}`,
+    field: 'productNames',
+  },
+  market: {
+    system: '당신은 화장품 시장 분석가입니다. 근거를 함께 제시하고, 모르는 것은 모른다고 하세요.',
+    build: () => `아래 신제품의 시장성을 분석해 주세요.
+1) 타겟 고객과 시장 규모 감각  2) 경쟁 제품·차별점  3) 가격대 제안  4) 채널 전략  5) 위험 요인
+
+${aiCtx() || '(입력된 정보가 아직 적습니다)'}`,
+    field: 'marketAnalysis',
+  },
+};
+let _aiBusy = false;
+async function aiRun(job, provider) {
+  if (_aiBusy) return;
+  const spec = AI_JOBS[job];
+  if (!spec) return;
+  const out = $('ai-out-' + job);
+  const btns = document.querySelectorAll('[data-ai-job="' + job + '"]');
+  _aiBusy = true;
+  btns.forEach(b => b.disabled = true);
+  if (out) { out.style.display = ''; out.textContent = (provider === 'claude' ? '🧠 클로드' : '✨ 제미나이') + '가 생각하는 중…'; }
+  try {
+    const text = await aiAsk(provider, spec.build(), spec.system);
+    if (out) out.textContent = text;
+    const btn = $('ai-apply-' + job);
+    if (btn) { btn.style.display = ''; btn._text = text; }
+  } catch (e) {
+    if (out) out.textContent = '❌ ' + (e && e.message || e);
+  } finally {
+    _aiBusy = false;
+    btns.forEach(b => b.disabled = false);
+  }
+}
+function aiBoxHtml(job, label) {
+  return `<div class="ai-row">
+      <button type="button" class="ai-btn ai-claude" data-ai-job="${job}" data-ai-prov="claude">🧠 클로드야!</button>
+      <button type="button" class="ai-btn ai-gemini" data-ai-job="${job}" data-ai-prov="gemini">✨ 제미나이야!</button>
+      <button type="button" class="btn btn-sm" id="ai-apply-${job}" style="display:none;flex:0 0 auto">⬇ ${label}에 넣기</button>
+    </div>
+    <div class="ai-out" id="ai-out-${job}" style="display:none"></div>`;
+}
+function wireAi() {
+  document.querySelectorAll('[data-ai-job]').forEach(b => b.onclick = () => aiRun(b.dataset.aiJob, b.dataset.aiProv));
+  Object.keys(AI_JOBS).forEach(job => {
+    const btn = $('ai-apply-' + job);
+    if (!btn) return;
+    btn.onclick = () => {
+      const f = AI_JOBS[job].field;
+      const ta = document.querySelector('[data-np-f="' + f + '"]');
+      if (!ta || !btn._text) return;
+      ta.value = (ta.value ? ta.value.replace(/\s*$/, '') + '\n\n' : '') + btn._text;
+      _npDraft[f] = ta.value;
+      toast('내용을 넣었습니다');
+    };
+  });
+}
 function npRenderBody() {
   const tab = NP_TABS.find(t => t.key === NP_TAB) || NP_TABS[0];
   const v = k => esc(_npDraft[k] == null ? '' : _npDraft[k]);
@@ -4678,10 +4771,15 @@ function npRenderBody() {
       <div class="np-fld"><label>출시 예정일</label><input class="fi" type="date" data-np-f="launchDate" value="${v('launchDate')}"></div>
     </div>`;
   }
-  html += tab.fields.map(([k, label]) =>
-    `<div class="np-fld"><label>${label}</label><textarea class="fi" rows="${k === 'marketAnalysis' ? 8 : 3}"
-       style="resize:vertical" data-np-f="${k}">${v(k)}</textarea></div>`).join('');
+  html += tab.fields.map(([k, label]) => {
+    // 제품명 후보·시장 분석은 임원용과 같이 AI 버튼을 붙인다
+    const ai = k === 'productNames' ? aiBoxHtml('names', '제품명')
+             : k === 'marketAnalysis' ? aiBoxHtml('market', '시장 분석') : '';
+    return `<div class="np-fld"><label>${label}</label>${ai}<textarea class="fi" rows="${k === 'marketAnalysis' ? 8 : 3}"
+       style="resize:vertical" data-np-f="${k}">${v(k)}</textarea></div>`;
+  }).join('');
   $('np-m-body').innerHTML = html;
+  wireAi();
 }
 function openNpModal(id) {
   const p = id ? npFind(id) : null;
