@@ -77,6 +77,7 @@ Google 로그인
 | `partners_coop` / `partners_seller` / `partners_shop` | 거래처 — 협력사(직원 직접입력) / 판매업체 / 쇼핑몰. `{id, company, ...}` |
 | `accounts` | **임원용 미러** — 외부 계정 원본. `{id, cat, name, loginId, pw, email, url, note}` |
 | `accounts_staff` | 직원이 등록한 계정. 임원용에는 읽기 전용으로 표시된다 |
+| `mylinks` | **내 업무 폴더 / 내 업무 트렐로** `[{id, uid, kind:'drive'\|'trello', name, url, desc, by, createdAt, updatedAt}]`. 화면에서 `uid === ME.uid` 로 걸러 자기 것만 보인다 — **프라이버시 구분이지 보안 경계가 아니다**(문서 자체는 직원 공용) |
 | `trello` | **직원 전용 Trello 계정 자격증명** `{key, token, updatedAt, by}`. 임원용 사용자 관리 → 🔄 직원용 Trello 계정 에서 저장. 비어 있으면 직접 동기화가 꺼지고 `inbox_wfsync` 요청 방식으로 폴백 |
 
 ### 임원용 → 직원용 데이터 흐름 (v0.18~0.19 · 기획서 p10·p11·p13·p14)
@@ -172,6 +173,31 @@ Google 로그인
 
 - 직원용이 API 를 부르려면 보드 ID 가 필요해 `_staffWfPayload()` 가 `boardId` 를 같이 실어 보낸다.
   미러가 한 번도 안 돌았으면 `boardId` 가 없어 '임원용에서 한 번 동기화해 주세요' 로 안내한다.
+
+#### 파일 업로드 (v0.38.0)
+
+직원용엔 업로드가 아예 없었다(아바타만 캔버스로 줄인 dataURL). Firebase Storage 를 배선했다.
+
+- **경로는 `staff/<uid>/<ts>_<파일명>` 하나뿐이다.** `upToStorage()` 가 유일한 창구.
+  `storage.rules` 가 이 접두어를 보고 직원 업로드를 구분하므로 **경로를 바꾸면 규칙도 같이 바꿀 것.**
+- 허용: 이미지(jpg·jpeg·png·webp·gif) + 문서(pdf·xlsx·xls·csv·docx·doc·pptx·ppt·hwp·hwpx·txt), 개당 20MB.
+- base64 를 Firestore 에 인라인하지 않는다 — 임원용에서 반복된 '첨부 유실 클래스'(1MB/doc 초과)를 피한다.
+  Firestore 에는 `{name, url, size}` 만 남는다.
+- **서식 툴바는 모든 편집기가 공유하는 하나의 컴포넌트다**(`RT_BTNS` + `buildRtToolbars`).
+  🖼 버튼을 여기 한 번 넣어서 게시판·업무 일지·자료 등록·업무 상세에 동시에 생겼다.
+  업로드가 비동기라 캐럿이 날아가므로 `_rtSaveRange()` 로 누른 순간의 Range 를 잡아 뒀다 복원한다.
+- `_rtSanitize()` 는 `<img>` 를 지우지 않는다(script/iframe/on* 만 제거). 그래서 본문 이미지가 살아남는다.
+
+##### Storage 권한의 한계 (알고 있을 것)
+
+`storage.rules` v2 에서 **list 를 전면 차단**했다(코드에 `listAll()` 이 한 곳도 없어 회귀 없음).
+이제 경로를 정확히 알아야만 파일에 닿는다.
+
+⚠️ 하지만 **경로를 아는 직원 계정은 임원용 첨부를 여전히 읽고 덮어쓸 수 있다.**
+Storage 규칙은 Firestore 를 읽지 못해서(`get()`/`exists()` 는 Firestore 전용)
+'이 uid 가 `staff_users` 에 있는가' 를 규칙 안에서 판별할 수단이 없다. 완전 분리는
+① Cloud Functions 로 커스텀 클레임(`staff:true`) → `request.auth.token.staff` 분기 (권장)
+② 임원 이메일 화이트리스트를 규칙에 박기 (인원 바뀔 때마다 재배포) 둘 중 하나가 필요하다.
 
 #### 자료실 = 미러가 아니다 (v0.27.0)
 

@@ -185,6 +185,16 @@ tr:last-child td { border-bottom:none; }
 .rt-editor td, .rt-editor th, .rt-view td, .rt-view th { border:1px solid #c9d2e0; padding:6px 9px; min-width:44px; text-align:left; }
 .rt-editor ul, .rt-editor ol, .rt-view ul, .rt-view ol { padding-left:22px; }
 .rt-view { line-height:1.65; }
+.rt-editor img, .rt-view img { max-width:100%; height:auto; border-radius:8px; display:block; margin:6px 0; }
+.up-list { display:flex; flex-direction:column; gap:5px; margin-bottom:8px; }
+.up-item { display:flex; align-items:center; gap:8px; border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:12.5px; background:#fff; }
+.up-item a { flex:1; color:var(--brand-deep); text-decoration:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.up-item .sz { font-size:11px; color:var(--ink-mute); white-space:nowrap; }
+.up-item .x { border:0; background:none; cursor:pointer; color:var(--ink-mute); font-size:13px; padding:0 2px; }
+.up-item .x:hover { color:var(--bad); }
+.up-chips { display:flex; flex-wrap:wrap; gap:5px; margin-top:5px; }
+.up-chip { display:inline-flex; align-items:center; gap:4px; border:1px solid var(--line); border-radius:7px; padding:2px 7px; font-size:11.5px; color:var(--brand-deep); text-decoration:none; background:#fff; }
+.up-chip:hover { border-color:var(--brand); }
 #ovl-task { z-index:95; }   /* 팀 보기 모달 위에 겹쳐 열린다 (v0.14.0) */
 .tv-task { display:flex; align-items:center; gap:10px; padding:11px 13px; border:1px solid var(--line); border-radius:10px; margin-bottom:7px; cursor:pointer; transition:all .15s; }
 .tv-task:hover { border-color:var(--brand); background:var(--brand-soft); }
@@ -664,7 +674,12 @@ tr:last-child td { border-bottom:none; }
       <div class="fld"><label>제목</label><input class="fi" id="lib-title"></div>
       <div class="fld"><label>내용 / 링크</label>
         <div class="rt-toolbar" data-for="lib-content"></div>
-        <div class="rt-editor fi" id="lib-content" contenteditable="true" style="min-height:180px"></div></div>
+        <div class="rt-editor fi" id="lib-content" contenteditable="true" style="min-height:180px"></div>
+        <div class="hint">본문 중간에 이미지를 넣으려면 툴바의 🖼 이미지 버튼을 쓰세요.</div></div>
+      <div class="fld"><label>첨부 파일</label>
+        <div class="up-list" id="lib-files"></div>
+        <button type="button" class="btn btn-sm" id="btn-lib-file">📎 파일 첨부</button>
+        <div class="hint">이미지 · PDF · 오피스 문서(xlsx·docx·pptx·hwp) · 개당 20MB</div></div>
     </div>
     <div class="modal-f"><button class="btn" data-close="ovl-lib">취소</button><button class="btn btn-p" id="btn-lib-save">등록</button></div>
   </div>
@@ -849,6 +864,23 @@ tr:last-child td { border-bottom:none; }
   </div>
 </div>
 
+<!-- ═══════ 모달: 내 업무 폴더 / 내 업무 트렐로 (v0.38.0) ═══════ -->
+<div class="ovl" id="ovl-myl">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-h"><span class="t" id="myl-m-t">📁 폴더 등록</span><button class="modal-x" data-close="ovl-myl">✕</button></div>
+    <div class="modal-b">
+      <div class="fld"><label>이름</label><input class="fi" id="myl-f-name" placeholder="예: 8월 상세페이지"></div>
+      <div class="fld"><label id="myl-f-ul">링크</label><input class="fi" id="myl-f-url" placeholder="https://…">
+        <div class="hint" id="myl-f-uh"></div></div>
+      <div class="fld"><label>메모</label><textarea class="fi" id="myl-f-desc" rows="2" style="resize:vertical"></textarea></div>
+      <div class="hint">내 화면에만 보이는 목록입니다. 다만 저장은 직원 공용 문서에 되므로,
+        <b>남에게 보이면 안 되는 링크는 넣지 마세요.</b></div>
+    </div>
+    <div class="modal-f"><button class="btn btn-bad" id="btn-myl-del" style="margin-right:auto;display:none">삭제</button>
+      <button class="btn" data-close="ovl-myl">취소</button><button class="btn btn-p" id="btn-myl-save">저장</button></div>
+  </div>
+</div>
+
 <!-- 외부 계정 상세 · 안내 (v0.21.0) -->
 <div class="ovl" id="ovl-accv">
   <div class="modal" style="max-width:540px">
@@ -904,8 +936,10 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
-const STAFF_VERSION = 'v0.37.0';
+const STAFF_VERSION = 'v0.38.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -923,6 +957,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: 'select_account' });
 
@@ -932,6 +967,9 @@ let USERS = [];             // staff_users 전체 (아바타·담당자 표시�
 let TEAMS = [];             // staff_data/teams
 let LEAVES = [];            // staff_data/leaves
 let LIBRARY = [];           // staff_data/library
+let MYL = [];               // staff_data/mylinks    — 내 업무 폴더/트렐로 (uid 로 걸러 자기 것만 표시)
+let LIB_FILES = [];         // 자료 등록 모달에서 편집 중인 첨부 목록
+let MYL_EDIT = null, MYL_KIND = 'drive';
 let POLICY = null;          // staff_data/leave_policy
 let ATT = [];               // staff_data/attendance_YYYY-MM (이번 달 출퇴근 — 실시간 구독)
 const ATT_MONTHS = {};      // 다른 달 캐시 { 'YYYY-MM': [records] } — 필요할 때만 읽는다
@@ -1428,6 +1466,8 @@ function subscribeData() {
     e => console.warn('[policy]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'library'), s => { LIBRARY = parseCol(s, []); rerender(); },
     e => console.warn('[library]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'mylinks'), s => { MYL = parseCol(s, []); rerender(); },
+    e => console.warn('[mylinks]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', _attDocId()), s => { ATT = parseCol(s, []); rerender(); },
     e => console.warn('[attendance]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'journal_' + today().slice(0, 7)), s => { JR = parseCol(s, []); rerender(); },
@@ -2701,6 +2741,56 @@ async function decideLeave(id, status) {
 }
 
 /* 외부 링크 열기 — 등록 안 됐거나 형식이 틀리면 알려준다 (추측해서 열지 않는다) */
+/* ═══════ 파일 업로드 (v0.38.0) ═══════
+   업로드는 전부 staff/<uid>/ 아래로만 간다 — storage.rules 가 이 접두어로
+   직원 업로드를 구분한다. 경로를 바꾸면 규칙도 같이 바꿔야 한다. */
+const UP_MAX_MB = 20;
+const UP_IMG_EXT = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+const UP_DOC_EXT = ['pdf', 'xlsx', 'xls', 'csv', 'docx', 'doc', 'pptx', 'ppt', 'hwp', 'hwpx', 'txt'];
+function upExt(name) { return String(name || '').split('.').pop().toLowerCase(); }
+function upIcon(name) {
+  const e = upExt(name);
+  if (UP_IMG_EXT.indexOf(e) >= 0) return '🖼️';
+  if (e === 'pdf') return '📕';
+  if (e === 'xlsx' || e === 'xls' || e === 'csv') return '📗';
+  if (e === 'pptx' || e === 'ppt') return '📙';
+  return '📄';
+}
+function upSize(n) {
+  const b = Number(n) || 0;
+  return b >= 1048576 ? (b / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(b / 1024)) + 'KB';
+}
+async function upToStorage(file, imageOnly) {
+  if (DEMO) throw new Error('데모 모드에서는 업로드할 수 없습니다');
+  const ok = imageOnly ? UP_IMG_EXT : UP_IMG_EXT.concat(UP_DOC_EXT);
+  const e = upExt(file.name);
+  if (ok.indexOf(e) < 0) throw new Error('허용되지 않는 형식입니다 (.' + e + ')');
+  if (file.size > UP_MAX_MB * 1024 * 1024) throw new Error('파일이 너무 큽니다 (최대 ' + UP_MAX_MB + 'MB)');
+  const safe = String(file.name || 'file').replace(/[^\w.\-가-힣]/g, '_').slice(-60);
+  const path = 'staff/' + ((ME && ME.uid) || 'anon') + '/' + Date.now() + '_' + safe;
+  await uploadBytes(sRef(storage, path), file, { contentType: file.type || 'application/octet-stream' });
+  return await getDownloadURL(sRef(storage, path));
+}
+/* 파일 선택 → 업로드. 성공하면 {name,url,size} 를 돌려준다. */
+function upPick(imageOnly, done) {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = imageOnly ? 'image/*' : UP_IMG_EXT.concat(UP_DOC_EXT).map(x => '.' + x).join(',');
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    toast('올리는 중… ' + f.name);
+    try { done({ name: f.name, url: await upToStorage(f, imageOnly), size: f.size }); }
+    catch (err) { toast('업로드 실패: ' + (err && err.message || err), true); }
+  };
+  inp.click();
+}
+function upChips(files) {
+  const a = Array.isArray(files) ? files.filter(f => f && /^https:\/\//i.test(String(f.url || ''))) : [];
+  return a.length ? `<div class="up-chips">${a.map(f =>
+    `<a class="up-chip" href="${esc(f.url)}" target="_blank" rel="noopener">${upIcon(f.name)} ${esc(f.name)}</a>`).join('')}</div>` : '';
+}
+
 function _openLink(url, what) {
   const u = String(url || '').trim();
   if (!u) { toast(what + ' 링크가 등록되지 않았습니다 — 팀 수정에서 등록하세요', true); return; }
@@ -2836,7 +2926,23 @@ const RT_BTNS = `
   <button type="button" data-cmd="insertOrderedList" title="번호 목록">1. 목록</button>
   <span class="sep"></span>
   <button type="button" data-table title="표 삽입">⊞ 표</button>
+  <button type="button" data-img title="이미지 삽입">🖼 이미지</button>
   <button type="button" data-cmd="removeFormat" title="서식 지우기">지우기</button>`;
+/* 업로드가 끝날 때쯤엔 캐럿이 날아가 있다 — 누르는 순간의 위치를 잡아 뒀다 되돌린다. */
+function _rtSaveRange(ed) {
+  const s = window.getSelection();
+  if (s && s.rangeCount) {
+    const r = s.getRangeAt(0);
+    if (ed.contains(r.commonAncestorContainer)) return r.cloneRange();
+  }
+  return null;
+}
+function _rtInsert(ed, range, html) {
+  ed.focus();
+  const s = window.getSelection();
+  if (range) { s.removeAllRanges(); s.addRange(range); }
+  document.execCommand('insertHTML', false, html);
+}
 function buildRtToolbars() {
   document.querySelectorAll('.rt-toolbar[data-for]').forEach(tb => {
   if (tb.dataset.rtReady === '1') return;      // 이미 배선됨
@@ -2848,6 +2954,13 @@ function buildRtToolbars() {
     ed.focus();
     document.execCommand(b.dataset.cmd, false, null);
   });
+  tb.querySelector('[data-img]').onclick = () => {
+    const range = _rtSaveRange(ed);
+    upPick(true, f => {
+      _rtInsert(ed, range, '<img src="' + f.url + '" alt="' + esc(f.name) + '"><p><br></p>');
+      toast('이미지를 넣었습니다');
+    });
+  };
   tb.querySelector('[data-table]').onclick = () => {
     const r = Math.min(Math.max(parseInt(prompt('행 수 (1~10)', '3') || 0, 10) || 0, 1), 10);
     if (!r) return;
@@ -2949,6 +3062,7 @@ function pageMy(sec) {
         </div>`).join('')}</div>`
       : `<div class="ph"><div class="big">🗂️</div><h3>배정된 업무가 없습니다</h3>
          <p>관리자가 <b>직원 업무 관리</b>에서 업무를 배정하면 여기에 나타납니다.</p></div>`;
+    body += mylSection('drive') + mylSection('trello');
   } else if (sec === 'my-leave') {
     body = `<div class="kpis">
         <div class="kpi"><div class="k">남은 월차 (이번 달)</div><div class="v">${s.monthLeft}<small> / ${s.monthly}일</small></div></div>
@@ -2969,6 +3083,66 @@ function pageMy(sec) {
     ${body}
   </div>`;
 }
+/* ═══════ 내 업무 폴더 / 내 업무 트렐로 (v0.38.0) ═══════
+   staff_data/mylinks 한 문서에 kind 로 구분해 담고 uid 로 걸러 자기 것만 보여준다.
+   ⚠️ 화면 필터는 프라이버시 구분이지 보안 경계가 아니다(문서 자체는 직원 공용). */
+const MYL_META = {
+  drive:  { ico: '📁', color: '#16a34a', title: '내 업무 폴더', kindName: 'Google Drive 폴더',
+            sub: '내가 쓰는 구글 드라이브 폴더를 한곳에', btn: '+ 폴더 등록',
+            urlLabel: 'Google Drive 폴더 링크', urlHint: '드라이브에서 폴더 우클릭 → 링크 생성/복사',
+            ph: '등록된 폴더가 없습니다' },
+  trello: { ico: '🗂️', color: '#2563eb', title: '내 업무 트렐로', kindName: 'Trello 보드',
+            sub: '내가 쓰는 Trello 보드를 한곳에', btn: '+ 보드 등록',
+            urlLabel: 'Trello 보드 링크', urlHint: 'Trello 보드 주소창의 https://trello.com/b/… 를 그대로',
+            ph: '등록된 보드가 없습니다' },
+};
+function mylOf(kind) {
+  return (MYL || []).filter(x => x && x.kind === kind && String(x.uid) === String(ME.uid))
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+}
+function mylCardHtml(x) {
+  const m = MYL_META[x.kind] || MYL_META.drive;
+  return `<div class="df-card" style="border-top-color:${m.color}">
+    <div class="n">${m.ico} <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.name)}</span></div>
+    <div class="c">${esc(m.kindName)}</div>
+    <div class="d">${esc(x.desc || '')}</div>
+    <div class="b">
+      <button class="btn btn-sm btn-p" style="flex:1" data-myl-open="${esc(x.url || '')}">OPEN ↗</button>
+      <button class="btn btn-sm" data-myl-edit="${esc(x.id)}" title="수정">✏️</button>
+    </div></div>`;
+}
+function mylSection(kind) {
+  const m = MYL_META[kind], list = mylOf(kind);
+  return `<div class="card" style="margin-top:16px"><div class="card-h">${m.ico} ${m.title}
+      <span class="acc-badge" style="background:#eef2ff;color:#4338ca">${list.length}개</span>
+      <span class="sub">${m.sub} · 나에게만 보입니다</span>
+      <button class="btn btn-sm btn-p" style="margin-left:auto" data-myl-new="${kind}">${m.btn}</button></div>
+    <div class="card-b">${list.length ? `<div class="df-grid">${list.map(mylCardHtml).join('')}</div>`
+      : `<div class="ph" style="padding:26px 20px"><div class="big">${m.ico}</div><h3>${m.ph}</h3>
+         <p>${m.btn} 버튼으로 자주 쓰는 ${m.kindName}를 모아보세요.</p></div>`}</div></div>`;
+}
+function wireMyl() {
+  document.querySelectorAll('[data-myl-open]').forEach(b => b.onclick = () => _openLink(b.dataset.mylOpen, '링크'));
+  document.querySelectorAll('[data-myl-new]').forEach(b => b.onclick = () => openMylModal(b.dataset.mylNew, null));
+  document.querySelectorAll('[data-myl-edit]').forEach(b => b.onclick = () => {
+    const x = (MYL || []).find(v => String(v.id) === String(b.dataset.mylEdit));
+    if (x) openMylModal(x.kind, x);
+  });
+}
+function openMylModal(kind, x) {
+  MYL_KIND = MYL_META[kind] ? kind : 'drive';
+  MYL_EDIT = x ? x.id : null;
+  const m = MYL_META[MYL_KIND];
+  $('myl-m-t').textContent = `${m.ico} ${x ? m.title + ' 수정' : m.btn.replace('+ ', '')}`;
+  $('myl-f-name').value = x ? (x.name || '') : '';
+  $('myl-f-url').value = x ? (x.url || '') : '';
+  $('myl-f-desc').value = x ? (x.desc || '') : '';
+  $('myl-f-ul').textContent = m.urlLabel;
+  $('myl-f-uh').textContent = m.urlHint;
+  $('btn-myl-del').style.display = x ? '' : 'none';
+  $('ovl-myl').classList.add('on');
+}
+
 function leaveTable(list, withName) {
   if (!list.length) return '<div class="empty">신청 내역이 없습니다</div>';
   const chip = s => s === '승인' ? '<span class="chip ok">승인</span>'
@@ -2985,6 +3159,7 @@ function leaveTable(list, withName) {
   </tbody></table>`;
 }
 function wireMy() {
+  wireMyl();
   document.querySelectorAll('[data-my-open]').forEach(el => el.onclick = () => {
     const [tid, kid] = el.dataset.myOpen.split('|');
     openTaskModal(tid, kid, false);   // 직원은 열람 (업무는 관리자가 관리 — p9)
@@ -3134,7 +3309,7 @@ function pageLibrary() {
       <thead><tr><th>제목</th><th>내용</th><th>등록자</th><th>등록일</th><th></th></tr></thead><tbody>
       ${list.map(x => `<tr>
         <td style="font-weight:700">${esc(x.title)}</td>
-        <td class="rt-view" style="max-width:340px;font-size:12.5px;color:var(--ink-soft);word-break:break-all">${linkify(x.content)}</td>
+        <td class="rt-view" style="max-width:340px;font-size:12.5px;color:var(--ink-soft);word-break:break-all">${linkify(x.content)}${upChips(x.files)}</td>
         <td style="white-space:nowrap">${avaHtml(x.avatar || '', 20)} ${esc(x.by || '-')}</td>
         <td style="white-space:nowrap">${fmtD(new Date(x.createdAt || 0).toISOString())}</td>
         <td>${(x.uid === ME.uid || ME.mode === 'admin') ? `<button class="btn btn-sm btn-bad" data-lib-del="${esc(x.id)}">삭제</button>` : ''}</td>
@@ -3192,6 +3367,41 @@ $('btn-df-del').onclick = async () => {
   try { await saveCol('drive', arr); DRIVE = arr; $('ovl-df').classList.remove('on'); toast('삭제했습니다'); rerender(); }
   catch (e) { toast('삭제 실패: ' + e.message, true); }
 };
+$('btn-myl-save').onclick = async () => {
+  const name = $('myl-f-name').value.trim();
+  const url = $('myl-f-url').value.trim();
+  if (!name) { toast('이름을 입력해 주세요', true); return; }
+  if (!/^https?:\/\//i.test(url)) { toast('링크를 https:// 로 시작하게 입력해 주세요', true); return; }
+  const data = { kind: MYL_KIND, name, url, desc: $('myl-f-desc').value.trim(), updatedAt: Date.now() };
+  const arr = (MYL || []).slice();
+  const i = arr.findIndex(x => String(x.id) === String(MYL_EDIT));
+  if (i >= 0) arr[i] = Object.assign({}, arr[i], data);
+  else arr.push(Object.assign({ id: 'M' + Date.now(), uid: ME.uid, by: ME.name, createdAt: Date.now() }, data));
+  try { await saveCol('mylinks', arr); MYL = arr; $('ovl-myl').classList.remove('on'); toast('저장했습니다'); rerender(); }
+  catch (e) { toast('저장 실패: ' + e.message, true); }
+};
+$('btn-myl-del').onclick = async () => {
+  if (!MYL_EDIT || !confirm('내 목록에서 지울까요? (드라이브 폴더나 Trello 보드 자체는 지워지지 않습니다)')) return;
+  const arr = (MYL || []).filter(x => String(x.id) !== String(MYL_EDIT));
+  try { await saveCol('mylinks', arr); MYL = arr; $('ovl-myl').classList.remove('on'); toast('삭제했습니다'); rerender(); }
+  catch (e) { toast('삭제 실패: ' + e.message, true); }
+};
+/* 자료 등록 모달의 첨부 목록 */
+function renderLibFiles() {
+  const el = $('lib-files');
+  if (!el) return;
+  el.innerHTML = LIB_FILES.length ? LIB_FILES.map((f, i) =>
+    `<div class="up-item"><span>${upIcon(f.name)}</span>
+      <a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.name)}</a>
+      <span class="sz">${upSize(f.size)}</span>
+      <button type="button" class="x" data-up-del="${i}" title="빼기">✕</button></div>`).join('')
+    : '<div class="hint" style="margin:0 0 2px">첨부된 파일이 없습니다</div>';
+  el.querySelectorAll('[data-up-del]').forEach(b => b.onclick = () => {
+    LIB_FILES.splice(Number(b.dataset.upDel), 1); renderLibFiles();
+  });
+}
+$('btn-lib-file').onclick = () => upPick(false, f => { LIB_FILES.push(f); renderLibFiles(); toast('첨부했습니다'); });
+
 function renderGdTypes() {
   $('gd-f-types').innerHTML = GD_TYPES.map(t =>
     `<button type="button" class="bd-chip ${GD_TYPE === t.key ? 'on' : ''}" data-gd-type="${t.key}">${t.label}</button>`).join('');
@@ -3251,7 +3461,11 @@ function wireLibrary() {
       $('ovl-gdview').classList.add('on');
     } else _openLink(d.url, '문서');
   });
-  $('btn-lib-open').onclick = () => { $('lib-title').value = ''; $('lib-content').innerHTML = ''; $('ovl-lib').classList.add('on'); };
+  $('btn-lib-open').onclick = () => {
+    $('lib-title').value = ''; $('lib-content').innerHTML = '';
+    LIB_FILES = []; renderLibFiles();
+    $('ovl-lib').classList.add('on');
+  };
   document.querySelectorAll('[data-lib-del]').forEach(b => b.onclick = async () => {
     if (!confirm('이 자료를 삭제할까요?')) return;
     LIBRARY = LIBRARY.filter(x => x.id !== b.dataset.libDel);
@@ -3261,7 +3475,7 @@ function wireLibrary() {
 $('btn-lib-save').onclick = async () => {
   const title = $('lib-title').value.trim();
   if (!title) { toast('제목을 입력해 주세요', true); return; }
-  LIBRARY.push({ id: 'B' + Date.now(), title, content: _rtSanitize($('lib-content').innerHTML),
+  LIBRARY.push({ id: 'B' + Date.now(), title, files: LIB_FILES.slice(), content: _rtSanitize($('lib-content').innerHTML),
     uid: ME.uid, by: ME.name, avatar: ME.avatar, createdAt: Date.now() });
   try { await saveCol('library', LIBRARY); $('ovl-lib').classList.remove('on'); toast('등록했습니다'); }
   catch (e) { LIBRARY.pop(); toast('등록 실패: ' + e.message, true); }
