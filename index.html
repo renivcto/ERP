@@ -6338,7 +6338,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.676';
+const ERP_VERSION = 'v2.3.677';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29455,29 +29455,13 @@ function _stockWhCells(item, isOem){
   const stock = Number(item&&item.stock)||0;
   const eff = _itemWhEffective(item);
   const keys = Object.keys(eff);
-  // v2.3.634: 최근 7일 창고이동 증감 — 르니브 창고는 파생값이라 변화가 안 보이던 문제 해결
-  const delta = {};
-  try {
-    const cut = new Date(Date.now() - 7*24*3600*1000).toISOString().slice(0,10);
-    (DB.stockHistory||[]).forEach(h=>{
-      if (!h || h.type !== 'move' || String(h.itemId) !== String(item.id)) return;
-      if (String(h.date||'') < cut) return;
-      const q = Number(h.qty)||0;
-      if (h.fromWh) delta[h.fromWh] = (delta[h.fromWh]||0) - q;
-      if (h.toWh)   delta[h.toWh]   = (delta[h.toWh]||0)   + q;
-    });
-  } catch(_){}
-  const dHtml = k => {
-    const d = delta[k]||0;
-    if (!d) return '';
-    const up = d > 0;
-    return `<span title="최근 7일 창고이동" style="margin-left:5px;font-size:10.5px;font-weight:700;color:${up?'#16a34a':'#dc2626'}">${up?'▲':'▼'}${fmt(Math.abs(d))}</span>`;
-  };
+  // v2.3.677: 최근 7일 증감 배지(▲/▼) 제거 — 재고 수치 옆에 붙어 실제 수량과 헷갈렸다.
+  //   증감은 입출고 내역·창고 패널 히스토리에서 본다.
   const names = [], qtys = [];
   keys.forEach(k=>{
     if (k === '__un__') return;
     names.push({ t:_whEsc(_whName(k)), muted:false });
-    qtys.push({ t:fmt(eff[k]) + dHtml(k), muted:false });
+    qtys.push({ t:fmt(eff[k]), muted:false });
   });
   if (eff['__un__'] != null && eff['__un__'] !== 0) { names.push({ t:'미지정', muted:true }); qtys.push({ t:fmt(eff['__un__']), muted:true }); }
   if (names.length === 0) return `<td style="${tdBase}"><span style="color:var(--gray-300)">-</span></td><td style="${tdBase}"><span style="color:var(--gray-300)">-</span></td>`;
