@@ -902,7 +902,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.35.0';
+const STAFF_VERSION = 'v0.36.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -964,6 +964,15 @@ let SMV = [];               // staff_data/inbox_stockmoves — 직원이 올린 
 let WHI = [];               // staff_data/inbox_warehouses — 직원이 올린 창고 추가·수정
 let SM_KIND = 'move';       // 요청 모달 종류: in | out | move
 let TRELLO = null;          // staff_data/trello — 직원 전용 Trello 계정 자격증명 (없으면 요청 방식)
+/* 워크플로우 보드 ID. 자격증명이 아니라 Trello 주소에 그대로 보이는 공개값이다
+   (trello.com/b/SMzNZ6Hw). 볼 수 있는 범위는 토큰 계정의 보드 멤버십이 정한다.
+   미러(WF[].boardId)가 있으면 그걸 쓰고, 없을 때 이 표로 폴백한다.
+   ⚠️ 신제품 개발 보드는 임원용 전용 — 여기 넣지 말 것. */
+const WF_BOARD_IDS = {
+  ops:      'SMzNZ6Hw',                  // 🏢 르니브 운영 본부
+  pharmacy: '6a3b4638d74fc3a3db435a22',  // 💊 약국 영업
+  homeshop: '6a265289013bf1794beda236',  // 🏠 홈쇼핑 준비
+};
 let ADS = [];               // staff_data/ads        — 광고비 미러
 let ADI = [];               // staff_data/inbox_ads  — 직원이 올린 광고비 등록 요청
 let CONS = [];              // staff_data/consign    — 위탁 재고이동 (읽기 전용)
@@ -4684,8 +4693,9 @@ async function wfSync(btn) {
   const prev = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 동기화 중…'; }
   try {
-    const boards = (WF || []).filter(b => b && b.boardId);
-    if (!boards.length) { toast('보드 정보가 없습니다 — 임원용에서 한 번 동기화해 주세요', true); return; }
+    const boards = (WF || []).map(b => b && (b.boardId ? b : Object.assign({}, b, { boardId: WF_BOARD_IDS[b.key] })))
+      .filter(b => b && b.boardId);
+    if (!boards.length) { toast('동기화할 보드가 없습니다', true); return; }
     const bust = '&_=' + Date.now();
     const out = [];
     for (const b of boards) {
