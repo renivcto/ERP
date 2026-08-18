@@ -2029,10 +2029,10 @@ try{
       <div id="stock-current">
         <div style="display:flex;gap:0;flex-wrap:wrap;align-items:flex-end;margin:10px 0 10px" id="stock-type-chips">
           <!-- v2.3.541: 품목 현황과 동일한 순서(완제품 먼저 · 전체는 오른쪽)·완제품 다크레드 -->
-          <div onclick="setStockFilter('완제품',this)" class="pg-chip" style="background:#fbeded;color:#8b2222;border-color:#e0b9b9">완제품</div>
+          <div onclick="setStockFilter('완제품',this)" class="pg-chip active" style="background:#8b2222;color:#fff;border-color:#8b2222">완제품</div>
           <div onclick="setStockFilter('원자재',this)" class="pg-chip" style="background:#eefbf2;color:#2d7a4a;border-color:#b8e8c8">원자재</div>
           <div onclick="setStockFilter('부자재',this)" class="pg-chip" style="background:#f6f0ff;color:#7c4dbd;border-color:#d4bfee">부자재</div>
-          <div onclick="setStockFilter('전체',this)" class="pg-chip active" style="background:#7bb8d6;color:#fff;border-color:#7bb8d6">전체</div>
+          <div onclick="setStockFilter('전체',this)" class="pg-chip" style="background:#eaf4f9;color:#3c7a99;border-color:#bcdcea">전체</div>
           <div onclick="setStockFilter('아카이브',this)" class="pg-chip" style="background:#f1f3f5;color:#6b7280;border-color:#d1d5db">아카이브</div>
           <div style="width:14px"></div>
           <button class="btn btn-sm pg-topbar-btn" style="background:#0f172a;color:#fff;border:1px solid #0f172a;margin-right:6px;font-weight:700" onclick="if(requireWrite())openModal('stock-in-modal')">📥 입고 처리</button>
@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.698';
+const ERP_VERSION = 'v2.3.699';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -31017,7 +31017,8 @@ function renderStock() {
   renderLotTable();
 }
 
-let _stockTypeFilter = '전체';
+// v2.3.699: 페이지를 열면 완제품 탭부터 — 실무에서 가장 많이 보는 분류다
+let _stockTypeFilter = '완제품';
 
 function setStockFilter(type, el) {
   _stockTypeFilter = type;
@@ -31196,7 +31197,11 @@ function renderStockTable() {
     filtered = filtered.filter(i => _extractProductLine(i.code) === window.stockProductLineFilter);
   }
   let items = searchQ ? filtered.filter(i => (i.name||'').toLowerCase().includes(searchQ) || (i.code||'').toLowerCase().includes(searchQ)) : filtered;
-  items = items.slice().sort(sortByCode);
+  // v2.3.699: 전체 탭에서는 아카이브를 맨 아래로 내린다(현재 재고를 먼저 본다)
+  items = items.slice().sort((a, b) => {
+    const av = a && a._archived ? 1 : 0, bv = b && b._archived ? 1 : 0;
+    return av !== bv ? av - bv : sortByCode(a, b);
+  });
   // v1.9.384: 총 재고평가액 — 현재 표 합계와 일치하도록 검색·라인 필터 모두 반영된 items 기준
   // v2.3.116: OEM 제외 (제조 발주는 실재고 아님)
   // v2.3.117: 외주가공도 제외 (가공 서비스)
