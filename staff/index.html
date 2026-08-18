@@ -408,7 +408,15 @@ tr:last-child td { border-bottom:none; }
 .ap-line b { color:var(--ink); }
 .ap-amt { text-align:right; font-weight:800; white-space:nowrap; }
 /* 신제품 개발 (v0.31.0) */
-.np-cols { display:grid; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); gap:14px; align-items:start; }
+.np-cols { display:grid; grid-template-columns:repeat(3,minmax(260px,1fr)); gap:14px; align-items:start; }
+@media(max-width:900px){ .np-cols { grid-template-columns:1fr; } }
+.np-top { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+.np-top .fi { width:auto; min-width:130px; height:34px; padding:6px 10px; font-size:12.5px; }
+.btn.np-drop { background:#fff; color:#dc2626; border-color:#fca5a5; font-weight:700; }
+.btn.np-drop:hover { background:#fef2f2; }
+.btn.np-done { background:#fff; color:#92400e; border-color:#fcd34d; font-weight:700; }
+.btn.np-done:hover { background:#fffbeb; }
+.np-badge { background:#92400e; color:#fff; border-radius:99px; padding:1px 8px; font-size:11px; font-weight:700; margin-left:6px; }
 .np-col { border:1px solid var(--line); border-top:3px solid; border-radius:12px; background:var(--panel); padding:12px; }
 .np-col .h { display:flex; align-items:center; gap:7px; font-size:13.5px; font-weight:800; margin-bottom:10px; }
 .np-col .h .n { margin-left:auto; background:var(--line-soft); border-radius:99px; padding:1px 9px; font-size:11px; }
@@ -1058,6 +1066,14 @@ tr:last-child td { border-bottom:none; }
 </div>
 
 <!-- 1차 결재 처리 (직원용 관리자 모드) -->
+<div class="ovl" id="ovl-nplist">
+  <div class="modal" style="max-width:720px">
+    <div class="modal-h"><span class="t" id="nplist-t">목록</span><button class="modal-x" data-close="ovl-nplist">✕</button></div>
+    <div class="modal-b" id="nplist-body"></div>
+    <div class="modal-f"><button class="btn" data-close="ovl-nplist">닫기</button></div>
+  </div>
+</div>
+
 <div class="ovl" id="ovl-item">
   <div class="modal" style="max-width:720px">
     <div class="modal-h"><span class="t" id="item-m-t">🧴 품목 상세</span><button class="modal-x" data-close="ovl-item">✕</button></div>
@@ -1232,7 +1248,7 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
 import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
-const STAFF_VERSION = 'v0.56.0';
+const STAFF_VERSION = 'v0.57.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -4379,32 +4395,66 @@ function npAll() {
   return out.concat(Object.keys(inbox).map(k => Object.assign({}, inbox[k], { src: 'staff' })));
 }
 function npFind(id) { return npAll().find(p => String(p.id) === String(id)); }
+/* 임원용 보드와 같은 구성 — 보드에는 3열만, DROP 과 개발 완료는 버튼으로 뺀다 */
+const NP_BOARD_STAGES = ['idea', 'develop', 'developing'];
+let NP_STATUS = '';
+function npIsDrop(p) { return String(p && p.status || '').toUpperCase() === 'DROP'; }
+function npIsDone(p) { return String(p && p.stage || '') === 'done'; }
+function npBoardCards(all) {
+  return all.filter(p => !npIsDrop(p) && !npIsDone(p))
+            .filter(p => !NP_STATUS || String(p.status || 'DOING').toUpperCase() === NP_STATUS);
+}
+function npCardHtml(p) {
+  return `<div class="np-card" data-np-open="${esc(p.id)}">
+    <div class="t">${esc(p.name || '(이름 없음)')}</div>
+    <div class="m">
+      <span class="chip ${p.status === 'DONE' ? 'ok' : npIsDrop(p) ? 'bad' : 'wait'}">${esc(p.status || 'DOING')}</span>
+      <span class="np-bar"><i style="width:${Math.max(0, Math.min(100, Number(p.progress) || 0))}%"></i></span>
+      <span>${Number(p.progress) || 0}%</span>
+      ${p.src === 'staff' && !p.applied ? `<span class="chip wait">${p._edited ? '수정 대기' : '전달 대기'}</span>` : ''}
+    </div>
+    ${p.launchDate ? `<div class="m">🚀 출시 ${esc(p.launchDate)}</div>` : ''}
+  </div>`;
+}
+function openNpList(kind) {
+  const all = npAll();
+  const list = kind === 'drop' ? all.filter(npIsDrop) : all.filter(p => npIsDone(p) && !npIsDrop(p));
+  $('nplist-t').textContent = kind === 'drop' ? '🗑 DROP LIST' : '🚀 신제품 개발 완료';
+  $('nplist-body').innerHTML = list.length
+    ? `<div class="np-cols" style="grid-template-columns:repeat(2,1fr)">${list.map(npCardHtml).join('')}</div>`
+    : `<div class="hint" style="margin:0">${kind === 'drop' ? 'DROP 된 프로젝트가 없습니다.' : '개발 완료된 프로젝트가 없습니다.'}</div>`;
+  $('ovl-nplist').classList.add('on');
+  $('nplist-body').querySelectorAll('[data-np-open]').forEach(b => b.onclick = () => {
+    $('ovl-nplist').classList.remove('on'); openNpModal(b.dataset.npOpen);
+  });
+}
 function pageNewProduct() {
   const all = npAll();
-  const known = NP_STAGES.map(s => s.key);
-  // 임원용에 새 단계가 생겨도 열이 사라지지 않게, 데이터에 있는 낯선 키도 열로 만든다
-  const stages = known.concat(
-    Array.from(new Set(all.map(p => p.stage).filter(s => s && known.indexOf(s) < 0))));
+  const board = npBoardCards(all);
+  const drops = all.filter(npIsDrop).length;
+  const dones = all.filter(p => npIsDone(p) && !npIsDrop(p)).length;
+  const stages = NP_BOARD_STAGES.concat(
+    Array.from(new Set(all.map(p => p.stage).filter(x => x && x !== 'done' && NP_BOARD_STAGES.indexOf(x) < 0))));
   return `<div class="pg on">
-    <div class="pg-h"><h1>신제품 개발<sup class="sync" style="font-size:13px" title="임원용과 읽기·쓰기 모두 연동됩니다"> ⓘ</sup></h1>
-      <button class="btn btn-p" id="btn-np-new" style="margin-left:auto">＋ 신제품 추가</button></div>
-    <div class="pg-sub">${all.length}개 프로젝트 · 임원용 ERP와 양방향 연동 · <b>수익성(원가) 정보는 표시되지 않습니다</b></div>
+    <div class="pg-h"><h1>신제품 개발<sup class="sync" style="font-size:13px" title="임원용과 읽기·쓰기 모두 연동됩니다"> ⓘ</sup></h1></div>
+    <div class="pg-sub">${board.length}개 프로젝트 · 임원용 ERP와 양방향 연동 · <b>수익성(원가) 정보는 표시되지 않습니다</b></div>
+    <div class="np-top">
+      <select class="fi" id="np-status">
+        <option value=""${NP_STATUS === '' ? ' selected' : ''}>전체 상태</option>
+        <option value="DOING"${NP_STATUS === 'DOING' ? ' selected' : ''}>DOING</option>
+        <option value="DONE"${NP_STATUS === 'DONE' ? ' selected' : ''}>DONE</option>
+        <option value="HOLD"${NP_STATUS === 'HOLD' ? ' selected' : ''}>HOLD</option>
+      </select>
+      <button class="btn btn-p" id="btn-np-new">＋ 신제품 추가</button>
+      <button class="btn np-drop" id="btn-np-drop">🗑 DROP LIST${drops ? ` <span class="np-badge" style="background:#dc2626">${drops}</span>` : ''}</button>
+      <button class="btn np-done" id="btn-np-done">🚀 신제품 개발 완료${dones ? ` <span class="np-badge">${dones}</span>` : ''}</button>
+    </div>
     ${all.length ? `<div class="np-cols">${stages.map(st => {
-      const cards = all.filter(p => (p.stage || 'idea') === st);
+      const cards = board.filter(p => (p.stage || 'idea') === st);
       const m = npStage(st);
       return `<div class="np-col" style="border-top-color:${m.color}">
         <div class="h" style="color:${m.color}">${m.icon} ${esc(m.label)}<span class="n">${cards.length}</span></div>
-        ${cards.map(p => `<div class="np-card" data-np-open="${esc(p.id)}">
-          <div class="t">${esc(p.name || '(이름 없음)')}</div>
-          <div class="m">
-            <span class="chip ${p.status === 'DONE' ? 'ok' : 'wait'}">${esc(p.status || 'DOING')}</span>
-            <span class="np-bar"><i style="width:${Math.max(0, Math.min(100, Number(p.progress) || 0))}%"></i></span>
-            <span>${Number(p.progress) || 0}%</span>
-            ${p.src === 'staff' && !p.applied
-              ? `<span class="chip wait">${p._edited ? '수정 대기' : '전달 대기'}</span>` : ''}
-          </div>
-          ${p.launchDate ? `<div class="m">🚀 출시 ${esc(p.launchDate)}</div>` : ''}
-        </div>`).join('') || '<div style="font-size:12px;color:var(--ink-mute);padding:6px 2px">비어 있음</div>'}
+        ${cards.map(npCardHtml).join('') || '<div style="font-size:12px;color:var(--ink-mute);padding:6px 2px">비어 있음</div>'}
       </div>`;
     }).join('')}</div>`
       : dpEmpty('신제품')}
@@ -4499,6 +4549,10 @@ $('btn-np-del').onclick = async () => {
 function wireNewProduct() {
   const nb = $('btn-np-new'); if (nb) nb.onclick = () => openNpModal(null);
   document.querySelectorAll('[data-np-open]').forEach(b => b.onclick = () => openNpModal(b.dataset.npOpen));
+  // v0.57.0 — 상태 필터 · DROP LIST · 개발 완료 (임원용 보드와 같은 구성)
+  const ns = $('np-status'); if (ns) ns.onchange = () => { NP_STATUS = ns.value; renderPage(); };
+  const nd = $('btn-np-drop'); if (nd) nd.onclick = () => openNpList('drop');
+  const ndn = $('btn-np-done'); if (ndn) ndn.onclick = () => openNpList('done');
 }
 
 /* ═══════════ 약국 관리 (v0.30.0 · 기획서(2) 슬라이드 5) ═══════════
