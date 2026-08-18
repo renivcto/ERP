@@ -6338,7 +6338,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.677';
+const ERP_VERSION = 'v2.3.678';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58863,6 +58863,23 @@ async function _staffInboxStock(verbose) {
       if (touched) await window._firestoreSetDoc(ref, { data: JSON.stringify(list), ts: Date.now() });
     }
   } catch (e) { console.warn('📥 [직원 재고요청] 실패:', e && e.message); }
+  // ── 직원이 올린 Trello 동기화 요청 ──
+  //   직원용엔 Trello API 키가 없다(settings/ 는 관리자 전용 read). 요청만 받아 여기서 대신 돌린다.
+  try {
+    const ref = window._firestoreDoc(window._firebaseDb, 'staff_data', 'inbox_wfsync');
+    const snap = await window._firestoreGetDoc(ref);
+    if (snap && snap.exists()) {
+      const r = JSON.parse(snap.data().data || 'null') || {};
+      if (r.at && Number(r.at) > Number(r.handledAt || 0)) {
+        r.handledAt = Date.now();
+        await window._firestoreSetDoc(ref, { data: JSON.stringify(r), ts: Date.now() });
+        try { showNotif('🔄 직원용 ERP에서 Trello 동기화를 요청했습니다 — 지금 불러옵니다', 'info'); } catch(_){}
+        // loadTrelloCards() 끝에서 _staffMirrorWorkflow() 가 돌아 결과가 직원용으로 되돌아간다
+        try { if (typeof loadTrelloCards === 'function') loadTrelloCards(); } catch(_){}
+      }
+    }
+  } catch (e) { console.warn('📥 [직원 Trello 동기화 요청] 실패:', e && e.message); }
+
   // ── 창고 추가·수정 ──
   let whN = 0;
   try {
