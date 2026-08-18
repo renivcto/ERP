@@ -3641,7 +3641,7 @@ try{
               <option value="thisYear">올해</option>
             </select>
             <!-- v2.3.142: 액션 버튼 — 페이지 하단에서 이력 헤더로 이동 -->
-            <button type="button" onclick="toggleAdProjectManage()" id="ads-project-manage-btn" style="background:#fff;color:#475569;border:1px solid #cbd5e1;padding:7px 12px;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap">📂 프로젝트 관리</button>
+            <button type="button" onclick="toggleAdProjectManage()" id="ads-project-manage-btn" style="background:#fff;color:#475569;border:1px solid #cbd5e1;padding:7px 12px;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap">📂 프로젝트 관리 <span id="ads-project-arrow">▼</span></button>
             <button type="button" onclick="openAdProjectModal()" style="background:#fff;color:#7c3aed;border:1px solid #ddd6fe;padding:7px 12px;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap">+ 프로젝트 추가</button>
             <button type="button" onclick="openExpenseModalForAd(null)" style="background:#be185d;color:#fff;border:none;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">+ 지출결의서 작성</button>
           </div>
@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.695';
+const ERP_VERSION = 'v2.3.696';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -23478,12 +23478,15 @@ function toggleAdProjectManage() {
   // 현재 보이는 상태 판단 (getComputedStyle 로 정확히)
   const computed = window.getComputedStyle(sec).display;
   const isVisible = (computed !== 'none');
+  const arw = document.getElementById('ads-project-arrow');   // v2.3.696: 열림/닫힘 표시
   if (isVisible) {
     sec.style.display = 'none';
     if (btn) { btn.style.background = '#fff'; btn.style.color = '#475569'; btn.style.borderColor = '#cbd5e1'; }
+    if (arw) arw.textContent = '▼';
   } else {
     sec.style.display = 'block';
     if (btn) { btn.style.background = '#eef2ff'; btn.style.color = '#4338ca'; btn.style.borderColor = '#c7d2fe'; }
+    if (arw) arw.textContent = '▲';
     renderAdProjectManageCards();
   }
 }
@@ -59192,6 +59195,13 @@ async function _staffInboxAdProjects(verbose) {
     if (!Array.isArray(DB.adProjects)) DB.adProjects = [];
     list.forEach(r => {
       if (!r || r.applied) return;
+      // v2.3.696: 직원용에서 올린 삭제 요청
+      if (r._del) {
+        const i = DB.adProjects.findIndex(p => p && String(p.id) === String(r.id));
+        if (i >= 0) { DB.adProjects.splice(i, 1); done++; }
+        r.applied = true; r.appliedAt = Date.now(); r.result = 'ok'; touched = true;
+        return;
+      }
       if (!DB.adProjects.some(p => p && String(p.id) === String(r.id))) {
         DB.adProjects.push({ id: r.id, name: r.name || '', shopId: r.shopId || '', shopName: r.shopName || '',
           startDate: r.startDate || '', endDate: r.endDate || '', budget: Number(r.budget) || 0,
