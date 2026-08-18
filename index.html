@@ -6338,7 +6338,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.675';
+const ERP_VERSION = 'v2.3.676';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29495,6 +29495,39 @@ function _ensureOverlay(id){
   if (!o){ o = document.createElement('div'); o.className='overlay'; o.id='overlay-'+id; document.body.appendChild(o); }
   return o;
 }
+// v2.3.676: 창고별 수량 직접 수정 — 차이를 증가/차감 이력으로 남긴다(사유 필수).
+//   whStock 재구성은 _applyStockMove 와 같은 규칙을 쓴다(기본창고·미지정은 잔여로).
+function _applyStockAdjust(it, whKey, newQty, reason){
+  if(!it) return {ok:false, err:'품목을 찾을 수 없습니다'};
+  const rs = String(reason||'').trim();
+  if(!rs) return {ok:false, err:'수정 이유를 입력하세요'};
+  const nq = Number(newQty);
+  if(!isFinite(nq) || nq < 0) return {ok:false, err:'수량을 올바르게 입력하세요'};
+  const eff = _itemWhEffective(it);
+  const cur = Number(eff[whKey])||0;
+  const diff = Math.round((nq - cur)*10000)/10000;
+  if(diff === 0) return {ok:false, err:'수량이 지금과 같습니다'};
+  eff[whKey] = nq;
+  it.stock = Math.round(((Number(it.stock)||0) + diff)*10000)/10000;
+  const dw = (it.defaultWh && _whById(it.defaultWh)) ? String(it.defaultWh) : null;
+  const newWh = {};
+  Object.keys(eff).forEach(k=>{ if(k==='__un__') return; if(dw && k===dw) return;
+    const q=Number(eff[k])||0; if(q!==0) newWh[k]=q; });
+  it.whStock = newWh;
+  it.updatedAt = Date.now();
+  const wn = (whKey==='__un__') ? '미지정' : (_whName(whKey)||whKey);
+  DB.stockHistory = DB.stockHistory || [];
+  const rec = { id: nextId('stock'), itemId: it.id, type: (diff>0?'in':'out'), adjust: true,
+    qty: Math.abs(diff), price: it.price||0,
+    fromWh: (diff>0?'':whKey), toWh: (diff>0?whKey:''),
+    date: new Date().toISOString().slice(0,10), lot: it.lot||'',
+    note: '재고 수정('+wn+'): '+fmt(cur)+' → '+fmt(nq)+' · '+rs };
+  DB.stockHistory.push(rec);
+  try{ if(typeof _whMoveVaultAdd==='function') _whMoveVaultAdd(Object.assign({ _vts: Date.now() }, rec)); }catch(_){}
+  try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(_){}
+  return {ok:true, diff:diff, wn:wn, cur:cur, nq:nq};
+}
+
 // ── 창고 관리 모달 ──
 async function openWarehouseManager(){
   if (typeof requireWrite==='function' && !requireWrite()) return;
@@ -30556,7 +30589,19 @@ function _renderItemWhPanel(itemId){
   Object.keys(eff).forEach(k=>{ if(k==='__un__') return; const q=Number(eff[k])||0; if(q===0) return;
     const opts=(window._WH.list||[]).map(w=>`<option value="${w.id}" ${String(w.id)===String(k)?'selected':''}>${_whEsc(w.name)}</option>`).join('')+`<option value="__un__">미지정 (기본 재고)</option>`;
     const sel=`<select onchange="_iwpChangeWh(${it.id}, '${k}', this.value)" title="다른 창고로 변경(전량 이동)" style="font-size:13px;color:#334155;font-weight:600;border:1px solid #e2e8f0;border-radius:6px;padding:3px 6px;background:#fff;cursor:pointer;max-width:220px">${opts}</select>`;
-    distParts.push(`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid #f1f5f9">${sel}<b style="font-size:14px;color:#4338ca">${fmt(q)}</b></div>`);
+    // v2.3.676: 수량 클릭 → 인라인 수정(사유 필수)
+    const right = (_iwpEditKey===String(k))
+      ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+           <input class="fi" id="iwp-aq" type="number" min="0" value="${q}" style="width:92px;height:30px;text-align:right;font-size:13px">
+           <input class="fi" id="iwp-ar" placeholder="수정 이유 (필수)" style="width:170px;height:30px;font-size:12px">
+           <button class="btn btn-primary btn-sm" style="height:30px" onclick="_iwpSaveQty(${it.id}, '${k}')">저장</button>
+           <button class="btn btn-outline btn-sm" style="height:30px" onclick="_iwpEditQty(${it.id}, null)">취소</button>
+         </div>`
+      : `<div style="display:flex;align-items:center;gap:6px">
+           <b style="font-size:14px;color:#4338ca">${fmt(q)}</b>
+           <button class="btn btn-outline btn-sm" title="수량 수정 (사유 입력)" style="padding:2px 7px;font-size:11px;line-height:1.3" onclick="_iwpEditQty(${it.id}, '${k}')">✏️</button>
+         </div>`;
+    distParts.push(`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid #f1f5f9">${sel}${right}</div>`);
   });
   if(eff['__un__']!=null && eff['__un__']!==0){
     const un=Number(eff['__un__'])||0;
@@ -30565,19 +30610,36 @@ function _renderItemWhPanel(itemId){
     const assignSel = canAssign
       ? `<select onchange="_iwpAssignUn(${it.id}, this.value); this.value='';" title="이 미지정 재고를 선택한 창고로 지정" style="font-size:11px;padding:3px 6px;border:1px solid #c7d2fe;border-radius:6px;color:#4338ca;background:#eef2ff;cursor:pointer;font-weight:600"><option value="">🏭 창고로 지정 ▾</option>${(window._WH.list||[]).map(w=>`<option value="${w.id}">${_whEsc(w.name)}</option>`).join('')}</select>`
       : '';
-    distParts.push(`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid #f1f5f9"><span style="font-size:13px;color:#64748b">미지정 (기본 재고)</span><div style="display:flex;align-items:center;gap:10px">${assignSel}<b style="font-size:14px;color:#64748b">${fmt(un)}</b></div></div>`);
+    const unRight = (_iwpEditKey==='__un__')
+      ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+           <input class="fi" id="iwp-aq" type="number" min="0" value="${un}" style="width:92px;height:30px;text-align:right;font-size:13px">
+           <input class="fi" id="iwp-ar" placeholder="수정 이유 (필수)" style="width:170px;height:30px;font-size:12px">
+           <button class="btn btn-primary btn-sm" style="height:30px" onclick="_iwpSaveQty(${it.id}, '__un__')">저장</button>
+           <button class="btn btn-outline btn-sm" style="height:30px" onclick="_iwpEditQty(${it.id}, null)">취소</button>
+         </div>`
+      : `${assignSel}<b style="font-size:14px;color:#64748b">${fmt(un)}</b>
+         <button class="btn btn-outline btn-sm" title="수량 수정 (사유 입력)" style="padding:2px 7px;font-size:11px;line-height:1.3" onclick="_iwpEditQty(${it.id}, '__un__')">✏️</button>`;
+    distParts.push(`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid #f1f5f9"><span style="font-size:13px;color:#64748b">미지정 (기본 재고)</span><div style="display:flex;align-items:center;gap:10px">${unRight}</div></div>`);
   }
   if(!distParts.length) distParts.push('<div style="padding:12px;text-align:center;color:#94a3b8;font-size:12px">재고 없음</div>');
   // ③ 이동 히스토리
-  const hist=(DB.stockHistory||[]).filter(h=>h && String(h.itemId)===String(it.id) && h.type==='move').slice().reverse();
+  // v2.3.676: 이동뿐 아니라 수량 수정(증가/차감) 이력도 함께 보여준다
+  const hist=(DB.stockHistory||[]).filter(h=>h && String(h.itemId)===String(it.id) && (h.type==='move' || h.adjust)).slice().reverse();
   const histRows = hist.length ? hist.map(h=>{
+    if(h.adjust){
+      const up = h.type==='in';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid #f1f5f9;font-size:12px">
+        <span style="color:#94a3b8;white-space:nowrap;font-variant-numeric:tabular-nums">${_whEsc(h.date||'-')}</span>
+        <span style="flex:1;color:#334155"><span style="font-weight:700;color:${up?'#15803d':'#b91c1c'}">${up?'증가':'차감'}</span> <span style="color:#64748b">${_whEsc(h.note||'')}</span></span>
+        <b style="white-space:nowrap;color:${up?'#15803d':'#b91c1c'}">${up?'+':'-'}${fmt(h.qty)}개</b></div>`;
+    }
     const fn=(h.fromWh==='__un__')?'미지정':(_whName(h.fromWh)||h.fromWh||'-');
     const tn=(h.toWh==='__un__')?'미지정':(_whName(h.toWh)||h.toWh||'-');
     return `<div style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid #f1f5f9;font-size:12px">
       <span style="color:#94a3b8;white-space:nowrap;font-variant-numeric:tabular-nums">${_whEsc(h.date||'-')}</span>
       <span style="flex:1;color:#334155">${_whEsc(fn)} <span style="color:#94a3b8">→</span> ${_whEsc(tn)}</span>
       <b style="white-space:nowrap;color:#0f172a">${fmt(h.qty)}개</b></div>`;
-  }).join('') : '<div style="padding:14px;text-align:center;color:#94a3b8;font-size:12px">이동 기록이 없습니다</div>';
+  }).join('') : '<div style="padding:14px;text-align:center;color:#94a3b8;font-size:12px">이동·수정 기록이 없습니다</div>';
   body.innerHTML = `
     <div style="font-size:12px;font-weight:700;color:#475569;margin-bottom:6px">📦 현재 창고별 재고</div>
     <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:16px">${distParts.join('')}</div>
@@ -30594,7 +30656,7 @@ function _renderItemWhPanel(itemId){
       <div id="iwp-avail" style="font-size:11px;color:#64748b;margin-top:6px"></div>
     </div>
 
-    <div style="font-size:12px;font-weight:700;color:#475569;margin-bottom:6px">🕘 이동 히스토리 <span style="font-size:11px;color:#94a3b8;font-weight:500">(${hist.length}건)</span></div>
+    <div style="font-size:12px;font-weight:700;color:#475569;margin-bottom:6px">🕘 이동·수정 히스토리 <span style="font-size:11px;color:#94a3b8;font-weight:500">(${hist.length}건)</span></div>
     <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;max-height:220px;overflow-y:auto">${histRows}</div>`;
   // v2.3.373: 출발 창고 = 현재 재고가 가장 많은 창고(현재 창고)로 기본 선택. 도착은 '창고를 선택하세요' 유지.
   const fromSel=document.getElementById('iwp-from');
@@ -30604,6 +30666,25 @@ function _renderItemWhPanel(itemId){
     fromSel.value=primary;
   }
   _iwpAvail(it.id);
+}
+// v2.3.676: 인라인 수량 수정 상태
+let _iwpEditKey = null;
+function _iwpEditQty(itemId, key){ _iwpEditKey = (key==null) ? null : String(key); _renderItemWhPanel(itemId); }
+async function _iwpSaveQty(itemId, whKey){
+  if (typeof requireWrite==='function' && !requireWrite()) return;
+  const it=(DB.items||[]).find(i=>String(i.id)===String(itemId));
+  const q=(document.getElementById('iwp-aq')||{}).value;
+  const rs=(document.getElementById('iwp-ar')||{}).value;
+  const r=_applyStockAdjust(it, whKey, q, rs);
+  if(!r.ok){ showNotif(r.err,'warning'); return; }
+  _iwpEditKey=null;
+  _renderItemWhPanel(itemId);
+  if(typeof renderStock==='function') renderStock();
+  if(typeof renderStockHistory==='function') try{ renderStockHistory(); }catch(_){}
+  showNotif('재고 수정 저장 중…','info');
+  try{ if(typeof saveDataNow==='function') await saveDataNow(); else await _doSaveData();
+    showNotif(`${r.wn} 재고 ${r.diff>0?'증가':'차감'} ${fmt(Math.abs(r.diff))}개 (${fmt(r.cur)} → ${fmt(r.nq)})`,'success'); }
+  catch(e){ showNotif('⚠️ 재고 수정 저장 실패: '+(e&&e.message||e),'error'); }
 }
 function _iwpWhOptionsTo(){
   return '<option value="">창고를 선택하세요.</option><option value="__un__">미지정 (기본 재고)</option>' + (window._WH.list||[]).map(w=>`<option value="${w.id}">${_whEsc(w.name)}</option>`).join('');
@@ -31139,10 +31220,11 @@ function renderStockHistory() {
     const item = getItem(h.itemId);
     const total = h.qty * h.price;
     const _isMove = h.type==='move';
+    const _isAdj = !!h.adjust;   // v2.3.676: 수량 수정(증가/차감)
     return `<tr>
       <td>${h.date||'-'}</td>
       <td class="lnk" style="font-size:14px" onclick="showItemDetail(${h.itemId})">${item.name||'-'}</td>
-      <td style="text-align:center"><span class="badge ${_isMove?'purple':(h.type==='in'?'green':'red')}" style="font-size:11px">${_isMove?'🔁 이동':(h.type==='in'?'📥 입고':'🚚 출고')}</span></td>
+      <td style="text-align:center"><span class="badge ${_isMove?'purple':(h.type==='in'?'green':'red')}" style="font-size:11px">${_isMove?'🔁 이동':(_isAdj?(h.type==='in'?'📊 증가':'📊 차감'):(h.type==='in'?'📥 입고':'🚚 출고'))}</span></td>
       <td style="text-align:center;color:${_isMove?'#7c3aed':(h.type==='in'?'var(--green-600)':'var(--red-600)')}"><strong>${_isMove?'':(h.type==='in'?'+':'-')}${fmt(h.qty)}</strong></td>
       <td style="text-align:center">${_isMove?'-':fmtW(h.price)}</td>
       <td style="text-align:center">${_isMove?'-':fmtW(total)}</td>
