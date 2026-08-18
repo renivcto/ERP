@@ -3207,7 +3207,7 @@ try{
       <div class="card">
         <div class="card-hdr"><span class="card-title">🧾 위탁 재고이동 목록</span><span id="consign-count" style="margin-left:8px;font-size:12px;color:var(--gray-400)"></span></div>
         <div class="card-body" style="overflow-x:auto">
-          <table class="tbl" style="text-align:center"><thead><tr><th style="width:100px">출고일</th><th>판매업체</th><th>입고 창고</th><th>품목</th><th style="width:120px">합계금액</th><th style="width:200px">명세서</th><th style="width:56px">관리</th></tr></thead><tbody id="consign-table"></tbody></table>
+          <table class="tbl" style="text-align:center"><thead><tr><th style="width:100px">출고일</th><th>판매업체</th><th>입고 창고</th><th>품목</th><th style="width:120px">합계금액</th><th style="width:130px">거래처 명세서</th><th style="width:130px">3PL용 명세서</th><th style="width:56px">관리</th></tr></thead><tbody id="consign-table"></tbody></table>
         </div>
       </div>
     </div>
@@ -6338,7 +6338,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.673';
+const ERP_VERSION = 'v2.3.674';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30258,7 +30258,10 @@ function _consignAmounts(sh){
   return { rows, supplySum, taxSum, total: supplySum+taxSum };
 }
 // 표준 거래명세서 HTML
-function _consignStatementHtml(sh){
+//   opts.hidePrice = true 이면 3PL 인수용 — 금액 칸을 전부 비운다(단가·총액·합계·합계금액).
+//   ⚠️ 하나만 비우면 곱셈·나눗셈으로 복원된다. 금액 칸은 같이 비워야 한다.
+function _consignStatementHtml(sh, opts){
+  const _hidePrice = !!(opts && opts.hidePrice);
   const ci = DB._companyInfo || {};
   const A = _consignAmounts(sh);
   const esc = s => escapeHtml(s==null?'':String(s));
@@ -30279,8 +30282,8 @@ function _consignStatementHtml(sh){
     return '<tr><td class="c">'+(i+1)+'</td><td>'+esc(r.ln.name)+'</td>'
     +'<td class="c" style="font-size:10.5px;color:#555">'+esc(r.ln.barcode||'')+'</td>'
     +'<td class="c">'+(Number(r.ln.qty)||0).toLocaleString()+'</td>'
-    +'<td class="r">'+won(unitIncl)+'</td>'
-    +'<td class="r">'+won(lineIncl)+'</td>'
+    +'<td class="r">'+(_hidePrice?'&nbsp;':won(unitIncl))+'</td>'
+    +'<td class="r">'+(_hidePrice?'&nbsp;':won(lineIncl))+'</td>'
     +'<td class="c" style="font-size:10.5px;color:#334155">'+esc(_stockIdOf(r.ln))+'</td></tr>';
   }).join('');
   const emptyRows = Array.from({length: Math.max(0, 6 - A.rows.length)}).map(()=>'<tr><td class="c">&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('');
@@ -30305,21 +30308,22 @@ function _consignStatementHtml(sh){
   + '</tr></table>'
   + '<table class="items"><thead><tr><th style="width:34px">No.</th><th>품목명</th><th style="width:110px">바코드</th><th style="width:64px">수량(ea)</th><th style="width:95px">공급단가<br>(VAT포함)</th><th style="width:110px">총액<br>(VAT포함)</th><th style="width:95px">재고ID<br>('+esc(sh.sellerName||'위탁처')+')</th></tr></thead>'
   + '<tbody>'+rowsHtml+emptyRows+'</tbody>'
-  + '<tfoot><tr><td colspan="5" class="r" style="font-weight:800">합계</td><td class="r" style="font-weight:800">'+won(A.total)+'</td><td></td></tr>'
-  + '<tr><td colspan="5" class="r" style="font-weight:900;background:#fffbe6">합계금액 (VAT 포함)</td><td colspan="2" class="r" style="font-weight:900;background:#fffbe6;font-size:14px">'+won(A.total)+'</td></tr></tfoot></table>'
+  + '<tfoot><tr><td colspan="5" class="r" style="font-weight:800">합계</td><td class="r" style="font-weight:800">'+(_hidePrice?'&nbsp;':won(A.total))+'</td><td></td></tr>'
+  + '<tr><td colspan="5" class="r" style="font-weight:900;background:#fffbe6">합계금액 (VAT 포함)</td><td colspan="2" class="r" style="font-weight:900;background:#fffbe6;font-size:14px">'+(_hidePrice?'&nbsp;':won(A.total))+'</td></tr></tfoot></table>'
   + '<div class="foot"><div>인수자 (입고 창고): _______________________ (서명/인)</div><div style="text-align:right">'+esc(sh.whToName||'')+' · '+esc(sh.recvManager||'')+'</div></div>'
   + '</div>';
 }
 const _CONSIGN_PRINT_CSS = '@page{size:A4;margin:14mm}*{box-sizing:border-box;font-family:"Malgun Gothic",sans-serif}.stmt{color:#0f172a}h1{text-align:center;font-size:24px;letter-spacing:8px;margin:0 0 16px}table{border-collapse:collapse;width:100%}.hdr{margin-bottom:10px}.hdr>tbody>tr>td.party{width:50%;border:1px solid #333;padding:0;vertical-align:top}.pt{background:#f1f5f9;font-weight:800;text-align:center;padding:5px;border-bottom:1px solid #333;font-size:12px}.pinfo{width:100%}.pinfo th{background:#f8fafc;border:1px solid #e2e8f0;padding:5px 7px;font-size:11px;color:#475569;width:74px;text-align:left;font-weight:700}.pinfo td{border:1px solid #e2e8f0;padding:5px 8px;font-size:11.5px}.items th{background:#e2e8f0;border:1px solid #333;padding:6px 4px;font-size:11.5px}.items td{border:1px solid #333;padding:5px 6px;font-size:11.5px}.items .c{text-align:center}.items .r{text-align:right}.items tfoot td{border:1px solid #333;padding:6px}.foot{margin-top:22px;display:flex;justify-content:space-between;font-size:12px;color:#334155}';
-function _consignPrint(shId){
+function _consignPrint(shId, mode){
+  const _3pl = (mode === '3pl');
   const sh=(window._consign.shipments||[]).find(x=>x&&String(x.id)===String(shId));
   if(!sh){ showNotif('명세서를 찾을 수 없습니다','warning'); return; }
   const w=window.open('','_blank');
   if(!w){ alert('팝업이 차단되었습니다. 팝업을 허용해 주세요.'); return; }
-  w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>거래명세서 '+escapeHtml(sh.sellerName)+' '+escapeHtml(sh.date)+'</title><style>'+_CONSIGN_PRINT_CSS
+  w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>'+(_3pl?'3PL용 명세서 ':'거래명세서 ')+escapeHtml(sh.sellerName)+' '+escapeHtml(sh.date)+'</title><style>'+_CONSIGN_PRINT_CSS
     +'.bar{position:fixed;top:0;left:0;right:0;background:#0f172a;color:#fff;padding:8px;text-align:center;z-index:9}@media print{.bar{display:none}}</style></head><body>'
     +'<div class="bar"><button onclick="window.print()" style="padding:6px 16px;font-weight:700;cursor:pointer">🖨 인쇄 / PDF 저장</button></div><div style="height:44px"></div>'
-    + _consignStatementHtml(sh)
+    + _consignStatementHtml(sh, { hidePrice: _3pl })
     +'<script>setTimeout(function(){try{window.focus();window.print();}catch(e){}},400);<\/script></body></html>');
   w.document.close();
 }
@@ -30479,6 +30483,9 @@ function _consignDetail(shId){
     +'</div>'
     +'<div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid #f1f5f9;background:#fafbfc">'
     +  '<button class="btn btn-outline btn-sm" onclick="_consignPrint(\''+sh.id+'\')">🖨 명세서 발행</button>'
+    +  '<button class="btn btn-outline btn-sm" style="border-color:#c7d2fe;color:#4338ca"'
+    +  ' onclick="_consignPrint(\''+sh.id+'\',\'3pl\')"'
+    +  ' title="3PL 인수용 — 공급단가·총액 빈칸">🖨 3PL 명세서</button>'
     +  '<button class="btn btn-outline btn-sm" onclick="_consignEmail(\''+sh.id+'\')">✉ 이메일</button>'
     +  '<button class="btn btn-outline btn-sm" onclick="document.getElementById(\'consign-detail-overlay\').remove();openConsignShip(\''+sh.id+'\')">✏️ 수정</button>'
     +  '<button class="btn btn-outline btn-sm" onclick="document.getElementById(\'consign-detail-overlay\').remove()">닫기</button>'
@@ -30487,10 +30494,10 @@ function _consignDetail(shId){
 }
 async function renderConsignPage(){
   const tb=document.getElementById('consign-table'); if(!tb) return;
-  if(!window._consign.loaded){ tb.innerHTML='<tr><td colspan="7" style="padding:24px;color:var(--gray-400)">불러오는 중…</td></tr>'; await _consignLoad(true); }
+  if(!window._consign.loaded){ tb.innerHTML='<tr><td colspan="8" style="padding:24px;color:var(--gray-400)">불러오는 중…</td></tr>'; await _consignLoad(true); }
   const list=(window._consign.shipments||[]).slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||( (b.createdAt||0)-(a.createdAt||0) ));
   const cnt=document.getElementById('consign-count'); if(cnt) cnt.textContent='총 '+list.length+'건';
-  if(!list.length){ tb.innerHTML='<tr><td colspan="7" style="padding:28px;color:var(--gray-400)">아직 위탁 재고이동 기록이 없습니다. 상단 “＋ 위탁 재고이동 추가” 로 등록하세요.</td></tr>'; return; }
+  if(!list.length){ tb.innerHTML='<tr><td colspan="8" style="padding:28px;color:var(--gray-400)">아직 위탁 재고이동 기록이 없습니다. 상단 “＋ 위탁 재고이동 추가” 로 등록하세요.</td></tr>'; return; }
   tb.innerHTML=list.map(sh=>{
     const A=_consignAmounts(sh);
     const lines=sh.lines||[];
@@ -30503,9 +30510,14 @@ async function renderConsignPage(){
       +'<td style="text-align:left;cursor:pointer" onclick="_consignDetail(\''+sh.id+'\')" title="클릭하면 상세 내역 팝업">'
       +  '<span style="color:var(--sky-700);font-weight:600">'+itemsTxt+'</span> <span style="color:var(--gray-400);font-size:11px">('+qtySum.toLocaleString()+'개)</span></td>'
       +'<td style="text-align:right;font-weight:700;color:#0f766e">₩'+A.total.toLocaleString()+'</td>'
-      +'<td style="white-space:nowrap"><div style="display:flex;gap:4px;justify-content:center;flex-wrap:nowrap">'
-      +'<button class="btn btn-outline btn-sm" style="padding:3px 9px;font-size:11.5px" onclick="_consignPrint(\''+sh.id+'\')">🖨 명세서 발행</button>'
-      +'<button class="btn btn-outline btn-sm" style="padding:3px 9px;font-size:11.5px" onclick="_consignEmail(\''+sh.id+'\')">✉ 이메일</button>'
+      +'<td style="white-space:nowrap"><div style="display:flex;flex-direction:column;gap:4px;align-items:center">'
+      +'<button class="btn btn-outline btn-sm" style="padding:3px 9px;font-size:11.5px;width:112px" onclick="_consignPrint(\''+sh.id+'\')">🖨 명세서 발행</button>'
+      +'<button class="btn btn-outline btn-sm" style="padding:3px 9px;font-size:11.5px;width:112px" onclick="_consignEmail(\''+sh.id+'\')">✉ 이메일</button>'
+      +'</div></td>'
+      +'<td style="white-space:nowrap"><div style="display:flex;justify-content:center">'
+      +'<button class="btn btn-outline btn-sm" style="padding:3px 9px;font-size:11.5px;width:112px;border-color:#c7d2fe;color:#4338ca"'
+      + ' onclick="_consignPrint(\''+sh.id+'\',\'3pl\')"'
+      + ' title="3PL 인수용 — 공급단가·총액이 빈칸으로 인쇄됩니다">🖨 3PL 명세서</button>'
       +'</div></td>'
       +'<td><div style="display:flex;flex-direction:column;gap:3px;align-items:center">'
       +'<button class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:11px;line-height:1.3;min-width:30px" onclick="openConsignShip(\''+sh.id+'\')" title="수정">✏️</button>'
