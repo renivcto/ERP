@@ -1229,7 +1229,7 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
 import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
-const STAFF_VERSION = 'v0.55.0';
+const STAFF_VERSION = 'v0.55.1';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -5435,9 +5435,23 @@ function wireApproval() {
    ⚠️ 원가·재고평가액·고객정보는 화면에서 숨기는 게 아니라 미러에 아예 없다.
       임원용 _staffItemsPayload / _staffOrdersPayload 가 넣지 않는다. */
 function whName(id) { const w = (WHS || []).find(x => String(x.id) === String(id)); return w ? w.name : ''; }
+/* v0.55.1: 창고별 재고를 여기서 직접 계산한다 — 임원용 _itemWhEffective 와 같은 규칙.
+   ⚠️ 미러가 whStock 원본만 갖고 있어도 화면은 맞아야 한다. 배정 합계와 총재고의 차이(잔여)를
+      기본창고(defaultWh)에 몰아 준다. 기본창고가 없으면 '미지정' 으로 남긴다.
+      임원용이 화면에 쓰는 계산과 같아서 두 화면의 숫자가 어긋나지 않는다. */
 function itemWhRows(it) {
-  const ws = it && it.whStock ? it.whStock : {};
-  return Object.keys(ws).filter(k => Number(ws[k])).map(k => ({ name: whName(k) || '미지정', qty: Number(ws[k]) }));
+  const ws = (it && it.whStock && typeof it.whStock === 'object') ? it.whStock : {};
+  const eff = {};
+  Object.keys(ws).forEach(k => { const v = Number(ws[k]) || 0; if (v) eff[k] = v; });
+  const total = Number(it && it.stock) || 0;
+  const assigned = Object.keys(eff).reduce((sum, k) => sum + eff[k], 0);
+  const rem = Math.round((total - assigned) * 10000) / 10000;
+  if (rem !== 0) {
+    const key = (it && it.defaultWh && whName(it.defaultWh)) ? String(it.defaultWh) : '__un__';
+    eff[key] = Math.round(((eff[key] || 0) + rem) * 10000) / 10000;
+    if (eff[key] === 0) delete eff[key];
+  }
+  return Object.keys(eff).map(k => ({ name: whName(k) || '미지정', qty: eff[k] }));
 }
 function dpFilter(list, q, fields) {
   const s = String(q || '').trim().toLowerCase();
