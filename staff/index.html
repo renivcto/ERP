@@ -202,6 +202,18 @@ tr:last-child td { border-bottom:none; }
 .ap-vt { padding:3px 9px; font-size:10.5px; border-radius:5px; cursor:pointer; border:1px solid var(--line); background:var(--line-soft); color:var(--ink-soft); font-weight:600; }
 .ap-vt.on { background:#0f172a; color:#fff; border-color:#0f172a; }
 .ap-l1 { font-size:11px; font-weight:700; border-radius:6px; padding:2px 7px; white-space:nowrap; }
+.ap-sheet { border:1px solid var(--line); border-radius:12px; padding:20px 22px; background:#fff; }
+.ap-sheet h2 { font-size:19px; font-weight:800; text-align:center; letter-spacing:6px; margin:0 0 16px; }
+.ap-sheet table { width:100%; border-collapse:collapse; font-size:13px; }
+.ap-sheet th, .ap-sheet td { border:1px solid #cbd5e1; padding:7px 10px; text-align:left; vertical-align:top; }
+.ap-sheet th { background:#f1f5f9; font-weight:700; white-space:nowrap; width:110px; }
+.ap-sheet .body { white-space:pre-wrap; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12.5px; line-height:1.65; }
+.ap-boxes { display:flex; gap:0; justify-content:flex-end; margin-bottom:14px; }
+.ap-box { border:1px solid #cbd5e1; width:96px; text-align:center; }
+.ap-box .h { background:#f1f5f9; font-size:11px; font-weight:700; padding:3px 0; border-bottom:1px solid #cbd5e1; }
+.ap-box .s { height:62px; display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--ink-mute); }
+.ap-box .s img { max-width:88px; max-height:56px; }
+.ap-box .n { font-size:10.5px; padding:2px 0 3px; border-top:1px solid #e2e8f0; color:var(--ink-soft); }
 #ovl-task { z-index:95; }   /* 팀 보기 모달 위에 겹쳐 열린다 (v0.14.0) */
 .tv-task { display:flex; align-items:center; gap:10px; padding:11px 13px; border:1px solid var(--line); border-radius:10px; margin-bottom:7px; cursor:pointer; transition:all .15s; }
 .tv-task:hover { border-color:var(--brand); background:var(--brand-soft); }
@@ -926,10 +938,23 @@ tr:last-child td { border-bottom:none; }
 
 <!-- 1차 결재 처리 (직원용 관리자 모드) -->
 <div class="ovl" id="ovl-ap1">
-  <div class="modal" style="max-width:520px">
-    <div class="modal-h"><span class="t">🖋️ 1차 결재</span><button class="modal-x" data-close="ovl-ap1">✕</button></div>
+  <div class="modal" style="max-width:760px">
+    <div class="modal-h"><span class="t" id="ap1-t">🖋️ 1차 결재</span><button class="modal-x" data-close="ovl-ap1">✕</button></div>
     <div class="modal-b">
-      <div id="ap1-info" style="background:var(--line-soft);border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.8;margin-bottom:12px"></div>
+      <div id="ap1-sheet"></div>
+      <div class="fld" style="margin-top:14px">
+        <label>✍️ 1차 결재자 서명 <span class="hint" style="display:inline">· 승인하려면 서명이 있어야 합니다</span></label>
+        <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+          <canvas id="ap1-sign" width="320" height="110"
+            style="border:1px dashed var(--line);border-radius:9px;background:#fff;touch-action:none;cursor:crosshair"></canvas>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <button type="button" class="btn btn-sm" id="btn-ap1-signclear">지우기</button>
+            <button type="button" class="btn btn-sm" id="btn-ap1-signload">📚 저장된 사인</button>
+            <button type="button" class="btn btn-sm" id="btn-ap1-signsave">💾 이 사인 저장</button>
+          </div>
+        </div>
+        <div class="hint">사인은 이 브라우저에 저장됩니다. 승인하면 문서에 찍혀 임원용 ERP까지 함께 갑니다.</div>
+      </div>
       <div class="fld"><label>의견 <span class="hint" style="display:inline">· 반려 시 필수</span></label>
         <textarea class="fi" id="ap1-note" rows="3" style="resize:vertical"></textarea></div>
       <div class="hint">승인하면 이 문서가 임원용 ERP 결재함으로 넘어가 2차(본부장 전결) 결재를 받습니다.</div>
@@ -1060,7 +1085,7 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
 import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
-const STAFF_VERSION = 'v0.40.0';
+const STAFF_VERSION = 'v0.41.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -4828,17 +4853,85 @@ async function apn2Save() {
 }
 
 /* ── 1차 결재 (직원용 관리자 모드) ── */
+/* 결재 시트 — 임원용 결재 시트와 같은 구성(제목·결재란·본문·첨부) */
+function ap1SheetHtml(kind, r) {
+  const isExp = kind === 'exp';
+  const box = (h, n, sign) => `<div class="ap-box"><div class="h">${h}</div>
+    <div class="s">${sign ? `<img src="${esc(sign)}" alt="">` : ''}</div><div class="n">${esc(n || '')}</div></div>`;
+  const row = (k, v) => `<tr><th>${k}</th><td>${v || '-'}</td></tr>`;
+  const money = (n, c) => (c && c !== 'KRW' ? c + ' ' : '₩') + (Number(n) || 0).toLocaleString('ko-KR');
+  const files = Array.isArray(r.attachments) ? r.attachments : [];
+  return `<div class="ap-sheet">
+    <div class="ap-boxes">
+      ${box('1차', r.l1Name || '', r.l1Sign)}
+      ${box('2차 본부장', AP_L2, '')}
+      ${box('3차 대표이사', AP_L3, '')}
+    </div>
+    <h2>${isExp ? '지 출 결 의 서' : '품 의 서'}</h2>
+    <table>
+      ${row('분류', esc(apCatLabel(r.category)))}
+      ${row('제목', '<b>' + esc(r.title || '') + '</b>')}
+      ${row('기안자', esc(r._byName || '-') + ' · ' + apWhen(r.createdAt))}
+      ${isExp ? row('지급처', esc(r.vendor || '')) : ''}
+      ${isExp ? row('금액', '<b style="font-size:15px">' + money(r.amountForeign || r.amount, r.currency) + '</b>') : ''}
+      ${isExp ? row('지급 요청일', esc(r.dueDate || '')) : row('요청일', esc(r.date || ''))}
+      ${isExp ? row('지급 방법', esc(r.payMethod || '') + ' / 증빙 ' + esc(r.proofType || '')) : ''}
+      ${isExp && r.account ? row('입금 계좌', esc(r.account) + (r.accountHolder ? ' (' + esc(r.accountHolder) + ')' : '')) : ''}
+      ${!isExp && r.phase ? row('단계', r.phase === 'planning' ? '📋 사전 품의' : '🚀 실행 기안') : ''}
+      ${(r.urgent || r.priority === 'urgent' || r.payNow || r.approveNow)
+        ? row('구분', '<span style="color:#b91c1c;font-weight:800">'
+            + [(r.urgent || r.priority === 'urgent') ? '🚨 응급' : '', (r.payNow || r.approveNow) ? '⚡ 즉시' : ''].filter(Boolean).join(' · ')
+            + '</span>') : ''}
+      ${isExp && r.category === 'ad' ? row('광고 집행',
+          esc(r.adPlatform || '') + ' · ' + esc(r.adStartDate || '') + ' ~ ' + esc(r.adEndDate || '')) : ''}
+      <tr><th>${isExp ? '비고 / 상세' : '상세 내용'}</th><td class="body">${esc(r.note || '')}</td></tr>
+      ${files.length ? row('첨부', files.map(f =>
+        `<a href="${esc(f.url)}" target="_blank" rel="noopener" style="color:var(--brand-deep)">${upIcon(f.name)} ${esc(f.name)}</a>`).join('<br>')) : ''}
+    </table>
+  </div>`;
+}
 function openAp1(kind, id) {
   const list = kind === 'exp' ? APX : APN;
   const r = (list || []).find(x => String(x.id) === String(id));
   if (!r) return;
   AP1_REF = { kind, id };
-  $('ap1-info').innerHTML = `<b>${esc(r.title || '-')}</b><br>
-    작성 ${esc(r._byName || '-')} · ${apWhen(r.createdAt)}<br>
-    ${kind === 'exp' ? '금액 ' + fmtMoney(r.amountForeign || r.amount || 0) + ' ' + esc(r.currency || 'KRW') + '<br>' : ''}
-    1차 결재자 <b>${esc(r.l1Name || '-')}</b>`;
+  $('ap1-t').textContent = '🖋️ 1차 결재 — ' + (r.l1Name || '');
+  $('ap1-sheet').innerHTML = ap1SheetHtml(kind, r);
   $('ap1-note').value = r.l1Note || '';
+  ap1SignInit();
+  if (r.l1Sign) ap1SignDraw(r.l1Sign);
   $('ovl-ap1').classList.add('on');
+}
+
+/* ── 서명 캔버스 ── */
+let _ap1Ctx = null, _ap1Drawing = false, _ap1Dirty = false;
+function ap1SignInit() {
+  const c = $('ap1-sign');
+  _ap1Ctx = c.getContext('2d');
+  _ap1Ctx.clearRect(0, 0, c.width, c.height);
+  _ap1Ctx.lineWidth = 2.2; _ap1Ctx.lineCap = 'round'; _ap1Ctx.lineJoin = 'round'; _ap1Ctx.strokeStyle = '#0f172a';
+  _ap1Dirty = false;
+  if (c.dataset.ready === '1') return;
+  c.dataset.ready = '1';
+  const pos = e => {
+    const b = c.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return [(p.clientX - b.left) * (c.width / b.width), (p.clientY - b.top) * (c.height / b.height)];
+  };
+  const down = e => { e.preventDefault(); _ap1Drawing = true; _ap1Dirty = true; const [x, y] = pos(e); _ap1Ctx.beginPath(); _ap1Ctx.moveTo(x, y); };
+  const move = e => { if (!_ap1Drawing) return; e.preventDefault(); const [x, y] = pos(e); _ap1Ctx.lineTo(x, y); _ap1Ctx.stroke(); };
+  const up = () => { _ap1Drawing = false; };
+  c.addEventListener('pointerdown', down); c.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+function ap1SignDraw(dataUrl) {
+  const c = $('ap1-sign'), img = new Image();
+  img.onload = () => { _ap1Ctx.clearRect(0, 0, c.width, c.height); _ap1Ctx.drawImage(img, 0, 0, c.width, c.height); _ap1Dirty = true; };
+  img.src = dataUrl;
+}
+function ap1SignData() {
+  if (!_ap1Dirty) return '';
+  try { return $('ap1-sign').toDataURL('image/png'); } catch (_) { return ''; }
 }
 async function ap1Decide(ok) {
   if (!AP1_REF) return;
@@ -4848,8 +4941,11 @@ async function ap1Decide(ok) {
   const arr = (kind === 'exp' ? APX : APN).slice();
   const r = arr.find(x => String(x.id) === String(id));
   if (!r) return;
+  const sign = ap1SignData();
+  if (ok && !sign) { toast('승인하려면 서명을 해주세요', true); return; }
   r.l1Status = ok ? 'approved' : 'rejected';
   r.l1At = Date.now(); r.l1By = ME.name; r.l1Note = note; r.updatedAt = Date.now();
+  if (ok) r.l1Sign = sign;
   try {
     await saveCol(kind === 'exp' ? 'inbox_expenses' : 'inbox_approvals', arr);
     if (kind === 'exp') APX = arr; else APN = arr;
@@ -4879,6 +4975,18 @@ $('apx-proof').onchange = apxPmHint;
 $('btn-apx-file').onclick = () => upPick(false, f => { APX_FILES.push(f); apRenderFiles('apx'); });
 $('btn-apn2-file').onclick = () => upPick(false, f => { APN2_FILES.push(f); apRenderFiles('apn2'); });
 $('btn-ap1-ok').onclick = () => ap1Decide(true);
+$('btn-ap1-signclear').onclick = () => ap1SignInit();
+$('btn-ap1-signsave').onclick = () => {
+  const d = ap1SignData();
+  if (!d) { toast('먼저 서명을 그려주세요', true); return; }
+  try { localStorage.setItem('reniv_staff_sign', d); toast('이 브라우저에 사인을 저장했습니다'); }
+  catch (_) { toast('저장 실패 (저장 공간 부족)', true); }
+};
+$('btn-ap1-signload').onclick = () => {
+  const d = localStorage.getItem('reniv_staff_sign');
+  if (!d) { toast('저장된 사인이 없습니다 — 그린 뒤 [이 사인 저장]을 눌러주세요', true); return; }
+  ap1SignDraw(d);
+};
 $('btn-ap1-reject').onclick = () => ap1Decide(false);
 $('btn-apx-del').onclick = async () => {
   if (!APX_EDIT || !confirm('이 지출 결의서를 삭제할까요?')) return;
@@ -4900,15 +5008,17 @@ function pageApproval() {
   const waiting = list.filter(r => !r.applied).length;
   return `<div class="pg on">
     <div class="pg-h"><h1>결재 관리<sup class="sync" style="font-size:13px" title="여기서 작성한 문서가 임원용 ERP 결재함으로 전달됩니다"> ⓘ</sup></h1>
-      <button class="btn btn-p" id="btn-ap-new" style="margin-left:auto">＋ ${isExp ? '지출 결의서' : '일반 결재'} 작성</button></div>
-    <div class="pg-sub">1차 결재는 <b>여기(관리자 모드)</b>에서, 2차 본부장 전결부터는 <b>임원용 ERP</b>에서 진행됩니다 · 1차가 승인해야 임원용으로 넘어갑니다${waiting ? ` · <b style="color:var(--warn)">진행 중 ${waiting}건</b>` : ''}</div>
+      ${ME.mode === 'admin' ? '' : `<button class="btn btn-p" id="btn-ap-new" style="margin-left:auto">＋ ${isExp ? '지출 결의서' : '일반 결재'} 작성</button>`}</div>
+    <div class="pg-sub">${ME.mode === 'admin'
+        ? '직원이 올린 문서의 <b>1차 결재</b>를 합니다. 승인하면 임원용 ERP로 넘어가 2차(본부장 전결) 결재를 받습니다.'
+        : '작성한 문서는 1차 결재를 거쳐 임원용 ERP로 넘어갑니다.'}${waiting ? ` · <b style="color:var(--warn)">진행 중 ${waiting}건</b>` : ''}</div>
     <div class="tabs">
       <button class="tab ${isExp ? 'on' : ''}" data-ap-tab="exp">💳 지출 결의서 (${(APX || []).filter(r => ME.mode === 'admin' || r._byUid === ME.uid).length})</button>
       <button class="tab ${!isExp ? 'on' : ''}" data-ap-tab="gen">📝 일반 결재 (${(APN || []).filter(r => ME.mode === 'admin' || r._byUid === ME.uid).length})</button>
     </div>
     ${list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb" style="min-width:${isExp ? 940 : 760}px">
       <thead><tr><th>작성일</th><th>분류</th>${isExp ? '<th>업체</th>' : ''}<th>제목</th>
-        ${isExp ? '<th>금액</th><th>지급예정일</th>' : ''}<th>결재라인</th><th>작성자</th><th>상태</th><th>관리</th></tr></thead><tbody>
+        ${isExp ? '<th>금액</th><th>지급예정일</th>' : ''}<th>결재자</th><th>작성자</th><th>상태</th><th>관리</th></tr></thead><tbody>
       ${list.map(r => `<tr>
         <td style="white-space:nowrap">${apWhen(r.createdAt)}</td>
         <td><span class="dp-chip">${esc(apCatLabel(r.category))}</span>${(r.priority === 'urgent' || r.urgent) ? ' <span class="ap-l1" style="background:#fee2e2;color:#b91c1c">응급</span>' : ''}</td>
@@ -4916,15 +5026,15 @@ function pageApproval() {
         <td class="nm">${esc(r.title || '-')}</td>
         ${isExp ? `<td class="ap-amt">${r.amount ? '₩' + Number(r.amount).toLocaleString() : '-'}</td>
                    <td style="white-space:nowrap">${esc(r.dueDate || '-')}</td>` : ''}
-        <td class="ap-line">1차 <b>${esc(r.l1Name || (r.line && r.line.first) || '-')}</b><br>2차 ${AP_L2} · 3차 ${AP_L3}</td>
+        <td class="ap-line"><b>${esc(r.l1Name || (r.line && r.line.first) || '-')}</b></td>
         <td style="white-space:nowrap">${esc(r._byName || r._by || '-')}</td>
         <td>${apL1Chip(r)}<br>${apStatus(r)}</td>
         <td style="white-space:nowrap">${ME.mode === 'admin' && !r.applied && (r.l1Status || 'pending') !== 'approved'
           ? `<button class="btn btn-sm btn-p" data-ap1="${esc(r.id)}">🖋️ 1차 결재</button><br>` : ''}${
-          (!r.applied && (r.l1Status || 'pending') !== 'approved' && apMine(r))
+          (ME.mode !== 'admin' && !r.applied && (r.l1Status || 'pending') !== 'approved' && apMine(r))
           ? `<button class="btn btn-sm" data-ap-edit="${esc(r.id)}">수정</button>
              <button class="btn btn-sm btn-bad" data-ap-del="${esc(r.id)}">삭제</button>`
-          : `<span style="font-size:11px;color:var(--ink-mute)">${r.applied ? '임원용에서 진행 중' : '1차 승인됨'}</span>`}</td></tr>`).join('')}
+          : `<span style="font-size:11px;color:var(--ink-mute)">${r.applied ? '임원용에서 진행 중' : ((r.l1Status||'pending') === 'approved' ? '1차 승인됨' : '')}</span>`}</td></tr>`).join('')}
       </tbody></table></div></div>`
       : `<div class="ph"><div class="big">🖋️</div><h3>작성한 ${isExp ? '지출 결의서' : '일반 결재'}가 없습니다</h3>
           <p>위 <b>작성</b> 버튼으로 올리면 임원용 ERP 결재함으로 전달됩니다.

@@ -2853,6 +2853,7 @@ try{
         <div class="card"><div class="card-body" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
           <button class="btn btn-outline btn-sm" onclick="staffTransfer('sellers')">🛒 판매업체 넘기기</button>
           <button class="btn btn-outline btn-sm" onclick="staffTransfer('shops')">🏪 쇼핑몰 넘기기</button>
+          <button class="btn btn-outline btn-sm" onclick="staffInboxNow()">📥 직원용 결재 지금 가져오기</button>
           <button class="btn btn-outline btn-sm" onclick="staffMirrorAccountsNow()">🔑 외부 계정 지금 동기화</button>
           <button class="btn btn-outline btn-sm" onclick="openStaffTrelloModal()">🔄 직원용 Trello 계정</button>
           <div style="flex-basis:100%;font-size:11.5px;color:var(--gray-400);line-height:1.7">
@@ -6338,7 +6339,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.686';
+const ERP_VERSION = 'v2.3.687';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -37906,7 +37907,19 @@ function _dedupPoExpensesSafe(skipSave) {  // v2.3.335: skipSave — COUNT-GUARD
   } catch(e){ console.warn('_dedupPoExpensesSafe:', e); return 0; }
 }
 
+/* v2.3.687: 결재 페이지를 열 때 직원용 인박스를 당겨온다.
+   종전에는 홈 진입 시 10분 스로틀뿐이라, 직원용에서 방금 1차 승인한 문서가
+   임원용 결재함에 한동안 나타나지 않았다(실제 발생). 여기선 60초만 스로틀한다. */
+function _staffInboxOnApproval() {
+  try {
+    const last = Number(sessionStorage.getItem('reniv_staff_inbox_ap') || 0);
+    if (Date.now() - last < 60 * 1000) return;
+    sessionStorage.setItem('reniv_staff_inbox_ap', String(Date.now()));
+    setTimeout(() => { _staffInboxDrain().catch(() => {}); }, 300);
+  } catch (_) {}
+}
 function renderApprovalPage() {
+  _staffInboxOnApproval();
   // v2.2.73: Firestore 머지 완료 전엔 절대 stale 데이터 표시 안 함 — 타임아웃 없이 무한 대기
   //   v2.2.71 의 800ms 타임아웃은 fast-path stale 데이터가 잠깐 표시되는 문제 발생 → 제거
   if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) {
@@ -59032,6 +59045,10 @@ async function _staffInboxDrain(verbose) {
       const list = JSON.parse(snap.data().data || '[]') || [];
       seen.boxes.push(box.label + ' ' + list.length + '건');
       seen.pending += list.filter(r => r && !r.applied).length;
+      if (box.requireL1) {
+        const _wait = list.filter(r => r && !r.applied && String(r.l1Status || 'pending') !== 'approved').length;
+        if (_wait) seen.boxes[seen.boxes.length - 1] += '(1차 대기 ' + _wait + ')';
+      }
       seen.done += list.filter(r => r && r.applied).length;
       if (!list.length) continue;
       if (!Array.isArray(DB[box.arr])) DB[box.arr] = [];
