@@ -1229,7 +1229,7 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
 import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
-const STAFF_VERSION = 'v0.54.0';
+const STAFF_VERSION = 'v0.55.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1279,6 +1279,8 @@ let ITEMS = [];             // staff_data/items_fin   — 완제품 품목 (원�
 let WHS = [];               // staff_data/warehouses  — 창고 목록
 let ORDERS = [];            // staff_data/orders      — 주문 (고객정보 없음)
 let ORDI = [];              // staff_data/inbox_orders — 직원이 올린 주문 수정 요청
+let SHIST = [];             // staff_data/stock_history  — 입출고 내역 (단가·금액 없음)
+let STOCK_TAB = 'now';      // 재고 관리 탭: now(재고 현황) | hist(입출고 내역)
 let SUPP = [];              // staff_data/supply_partners — 판매업체+쇼핑몰 (가격행 드롭다운)
 let ITMI = [];              // staff_data/inbox_items    — 직원이 올린 판매업체 가격 수정 요청
 let CSM = null;             // staff_data/consign_meta — 위탁 기준정보(판매업체·공급단가)
@@ -1460,6 +1462,9 @@ if (DEMO) {
                contact: '김담당', phone: '02-1234-5678', email: 'kim@example.com', address: '세종시', note: '' }];
   PT.seller = [{ id: 's1', company: '바로팜', bizno: '', ceo: '', contact: '이담당', phone: '02-2222-3333',
                  email: '', address: '', channel: '약국 B2B', note: '입점 15개 약국' }];
+  SHIST = [{ id: 'h1', date: '2026-08-18', itemId: 'i1', itemName: '3중 장벽 20층 리뉴 크림 30ml', type: 'in', qty: 164, adjust: true, fromWh: '', toWh: 'w1', note: '재고 수정(르니브 창고): 1,760 → 1,924 · 실사' },
+           { id: 'h2', date: '2026-08-13', itemId: 'i2', itemName: '글로우샷 30ml', type: 'out', qty: 5, fromWh: 'w3', toWh: '', note: '바로팜 자동차감 [37314378]' },
+           { id: 'h3', date: '2026-08-12', itemId: 'i1', itemName: '3중 장벽 20층 리뉴 크림 30ml', type: 'move', qty: 100, fromWh: 'w1', toWh: 'w2', note: '위탁 재고이동' }];
   SUPP = [{ id: 'sl1', name: '바로팜' }, { id: 'shop:h1', name: '쿠팡' }, { id: 'shop:h2', name: '스마트스토어' }];
   ADP = [{ id: 'ap1', name: '와디즈 320 크림 펀딩', shopName: '와디즈', startDate: '2026-03-30', endDate: '2026-04-30', budget: 3000000 },
          { id: 'ap2', name: '와디즈 나드 엑소좀 글로우샷 펀딩', shopName: '와디즈', startDate: '2026-05-01', endDate: '2026-05-20', budget: 2000000 }];
@@ -1797,6 +1802,8 @@ function subscribeData() {
     e => console.warn('[trello]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'ads'), s => { ADS = parseCol(s, []); rerender(); },
     e => console.warn('[ads]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'stock_history'), s => { SHIST = parseCol(s, []); rerender(); },
+    e => console.warn('[stock_history]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'supply_partners'), s => { SUPP = parseCol(s, []); rerender(); },
     e => console.warn('[supply_partners]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_items'), s => { ITMI = parseCol(s, []); rerender(); },
@@ -5479,7 +5486,50 @@ function pageItems() {
 }
 
 /* ── 재고 관리 — 재고 현황 (재고평가액 없음) ── */
+/* 입출고 내역 — 임원용 미러. ⚠️ 단가·금액은 원가라 넘어오지 않는다. */
+function histRows() {
+  const q = String(STOCK_Q || '').trim().toLowerCase();
+  return (SHIST || []).filter(h => !q || String(h.itemName || '').toLowerCase().includes(q));
+}
+const HIST_KIND = {
+  in:  ['📥 입고', '#dcfce7', '#166534', '+'],
+  out: ['📤 출고', '#fee2e2', '#b91c1c', '-'],
+  move:['🔁 이동', '#e0e7ff', '#4338ca', ''],
+};
+function pageStockHist() {
+  const list = histRows();
+  return `<div class="pg on">
+    <div class="pg-h"><h1>재고 관리<sup class="sync" style="font-size:13px" title="임원용 ERP와 연동됩니다"> ⓘ</sup></h1>
+      <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${dpSearch('dp-q-stock', '품목명 검색')}</span></div>
+    <div class="pg-sub">최근 ${(SHIST || []).length}건 · 단가와 금액은 표시되지 않습니다 ${DP_RO}</div>
+    ${stockTabsHtml()}
+    ${list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb" style="min-width:820px">
+      <thead><tr><th>일자</th><th>품목명</th><th>구분</th><th>수량</th><th>출발</th><th>도착</th><th>비고</th></tr></thead><tbody>
+      ${list.map(h => {
+        const k = HIST_KIND[h.type] || ['기타', 'var(--line-soft)', 'var(--ink-soft)', ''];
+        const sign = h.adjust ? (h.type === 'in' ? '증가 +' : '차감 -') : k[3];
+        return `<tr>
+          <td style="white-space:nowrap">${esc(h.date || '-')}</td>
+          <td class="nm">${esc(h.itemName || '-')}</td>
+          <td><span class="dp-chip" style="background:${k[1]};color:${k[2]}">${h.adjust ? '📊 재고 수정' : k[0]}</span></td>
+          <td style="text-align:right;font-weight:800;color:${k[2]}">${sign}${Number(h.qty || 0).toLocaleString()}</td>
+          <td style="font-size:12px">${esc(whName(h.fromWh) || (h.fromWh ? '미지정' : '-'))}</td>
+          <td style="font-size:12px">${esc(whName(h.toWh) || (h.toWh ? '미지정' : '-'))}</td>
+          <td class="pt-note" style="font-size:12px">${esc(h.note || '')}</td></tr>`;
+      }).join('')}</tbody></table></div></div>`
+      : ((SHIST || []).length ? '<div class="empty">검색 결과가 없습니다</div>'
+         : `<div class="ph"><div class="big">📋</div><h3>입출고 내역이 아직 없습니다</h3>
+             <p>임원용 ERP를 한 번 열면 자동으로 넘어옵니다. 즉시 반영이 필요하면 임원용 콘솔에서
+                <b>staffMirrorNow()</b> 를 실행하세요.</p></div>`)}
+  </div>`;
+}
+function stockTabsHtml() {
+  const t = [['now', '📦 재고 현황', (ITEMS || []).length], ['hist', '📋 입출고 내역', (SHIST || []).length]];
+  return `<div class="tabs">${t.map(([k, l, n]) =>
+    `<button class="tab ${STOCK_TAB === k ? 'on' : ''}" data-stock-tab="${k}">${l} (${n})</button>`).join('')}</div>`;
+}
 function pageStock() {
+  if (STOCK_TAB === 'hist') return pageStockHist();
   const list = dpFilter(ITEMS || [], STOCK_Q, ['name', 'code']);
   const low = (ITEMS || []).filter(i => i.minStock && Number(i.stock) < Number(i.minStock)).length;
   return `<div class="pg on">
@@ -5488,6 +5538,13 @@ function pageStock() {
     <div class="pg-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       완제품 ${(ITEMS || []).length}건${low ? ` · <b style="color:var(--bad)">안전재고 미만 ${low}건</b>` : ''} ·
       재고평가액은 표시되지 않습니다 ${DP_RO}</div>
+    ${stockTabsHtml()}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn btn-sm btn-p" data-sm-new="in">📥 입고</button>
+      <button class="btn btn-sm btn-p" data-sm-new="out">📤 출고</button>
+      <button class="btn btn-sm btn-p" data-sm-new="move">🔁 재고 이동</button>
+      <button class="btn btn-sm" id="btn-wh-open">🏭 창고 관리</button>
+    </div>
     ${list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb">
       <thead><tr><th>분류</th><th>품목코드</th><th>품목명</th><th>용량</th><th>재고 위치</th><th>재고 수량</th><th>합계</th><th>안전재고</th></tr></thead><tbody>
       ${list.map(i => {
@@ -5527,11 +5584,7 @@ function smCardHtml() {
   const wait = list.filter(r => !r.applied).length;
   return `<div class="card" style="margin-top:18px"><div class="card-h">🔁 재고 요청
       <span class="sub">${list.length}건${wait ? ` · 반영 대기 ${wait}건` : ''}</span>
-      <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn btn-sm btn-p" data-sm-new="in">📥 입고</button>
-        <button class="btn btn-sm btn-p" data-sm-new="out">📤 출고</button>
-        <button class="btn btn-sm btn-p" data-sm-new="move">🔁 재고 이동</button>
-        <button class="btn btn-sm" id="btn-wh-open">🏭 창고 관리</button></span></div>
+      </div>
     <div class="card-b" style="padding:${list.length ? '0 18px' : '16px'}">
     ${list.length ? `<table class="dp-tb" style="min-width:820px">
       <thead><tr><th>요청일</th><th>종류</th><th>품목</th><th>출발</th><th>도착</th><th>수량</th><th>메모</th><th>요청자</th><th>상태</th></tr></thead><tbody>
@@ -5848,6 +5901,7 @@ function wireDataPage() {
     const c = $('apx-cat'); if (c) { c.value = 'ad'; c.dispatchEvent(new Event('change')); }
   };
   document.querySelectorAll('[data-item-open]').forEach(b => b.onclick = () => openItemModal(b.dataset.itemOpen));
+  document.querySelectorAll('[data-stock-tab]').forEach(b => b.onclick = () => { STOCK_TAB = b.dataset.stockTab; renderPage(); });
   [['dp-q-item', v => ITEM_Q = v], ['dp-q-stock', v => STOCK_Q = v], ['dp-q-ord', v => ORD_Q = v]].forEach(([id, set]) => {
     const el = $(id);
     if (!el) return;

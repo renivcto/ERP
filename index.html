@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.699';
+const ERP_VERSION = 'v2.3.700';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58838,7 +58838,10 @@ function _staffItemsPayload() {
     id: String(i.id), code: i.code || '', name: i.name || '', spec: i.spec || '',
     channels: Array.isArray(i.channels) ? i.channels : (i.channels ? [i.channels] : []),
     image: _staffPubImg(i.image || i.thumb), stock: Number(i.stock) || 0,
-    whStock: (i.whStock && typeof i.whStock === 'object') ? i.whStock : {},
+    // v2.3.700: 화면에 보이는 값과 같아야 한다 — 기본창고 잔여까지 반영된 실효 배정을 넘긴다.
+    //   whStock 원본만 넘기면 '르니브 창고' 같은 잔여분이 통째로 빠진다.
+    whStock: (typeof _itemWhEffective === 'function') ? _itemWhEffective(i)
+             : ((i.whStock && typeof i.whStock === 'object') ? i.whStock : {}),
     defaultWh: i.defaultWh || '', minStock: Number(i.minStock) || 0,
     salePrice: Number(i.actualSalePrice || i.salePrice) || 0,
     // v2.3.698: 임원용 품목 현황과 같은 정보를 넘긴다.
@@ -58872,9 +58875,41 @@ window._staffMirrorSupplyPartners = _staffMirrorSupplyPartners;
 // 창고 목록 (이름만)
 function _staffWhPayload() {
   const list = (window._WH && Array.isArray(window._WH.list)) ? window._WH.list : [];
-  return list.map(w => ({ id: String(w.id), name: w.name || '' }));
+  // v2.3.700: 직원용은 완제품만 다룬다 — 부자재·원자재에서만 쓰는 창고는 넘기지 않는다.
+  //   (바이오코스텍·내추럴솔루션 같은 자재 창고가 직원 창고 목록에 섞이던 문제)
+  const used = k => new Set();
+  const fin = new Set(), other = new Set();
+  (DB.items || []).forEach(i => {
+    if (!i) return;
+    const bag = (i.type === '완제품') ? fin : other;
+    Object.keys((i.whStock && typeof i.whStock === 'object') ? i.whStock : {}).forEach(k => bag.add(String(k)));
+    if (i.defaultWh) bag.add(String(i.defaultWh));
+  });
+  return list
+    .filter(w => w && !(other.has(String(w.id)) && !fin.has(String(w.id))))
+    .map(w => ({ id: String(w.id), name: w.name || '' }));
 }
 async function _staffMirrorWarehouses() { return _staffPush('warehouses', _staffWhPayload()); }
+
+/* v2.3.700 — 입출고 내역. 완제품 건만, 최신 400건.
+   ⚠️ 단가(price)·합계는 원가다 — 넣지 않는다. 수량·창고·사유만 넘긴다. */
+function _staffStockHistPayload() {
+  const fin = {};
+  (DB.items || []).forEach(i => { if (i && i.type === '완제품') fin[String(i.id)] = i.name || ''; });
+  return (DB.stockHistory || [])
+    .filter(h => h && fin[String(h.itemId)] != null)
+    .slice()
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || ((b.id || 0) - (a.id || 0)))
+    .slice(0, 400)
+    .map(h => ({
+      id: String(h.id), date: h.date || '', itemId: String(h.itemId), itemName: fin[String(h.itemId)] || '',
+      type: h.type || '', qty: Number(h.qty) || 0,
+      fromWh: h.fromWh || '', toWh: h.toWh || '',
+      adjust: !!h.adjust, note: String(h.note || '').slice(0, 200)
+    }));
+}
+async function _staffMirrorStockHist() { return _staffPush('stock_history', _staffStockHistPayload()); }
+window._staffMirrorStockHist = _staffMirrorStockHist;
 
 // 주문 — 고객정보 없는 필드만. 최신순으로 담아 용량 초과 시 오래된 것부터 잘린다.
 const _STAFF_ORDER_FIELDS = ['id','orderNo','orderDate','shopId','shopName','productName','qty',
@@ -59685,6 +59720,7 @@ window.staffMirrorNow = async function() {
   try { await _staffMirrorAdProjects(); } catch(_) {}
   try { await _staffMirrorConsignMeta(); } catch(_) {}
   try { await _staffMirrorSupplyPartners(); } catch(_) {}
+  try { await _staffMirrorStockHist(); } catch(_) {}
   const consign = await _staffMirrorConsign();
   try { localStorage.setItem('reniv_staff_cal_push', String(Date.now())); } catch(_) {}
   console.log('👥 직원용 미러 재동기:', { board, calendar, accounts, workflow, items, warehouses, orders, pharmacies, cs, newproducts, ads, consign });
