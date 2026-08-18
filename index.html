@@ -6338,7 +6338,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.685';
+const ERP_VERSION = 'v2.3.686';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -59007,8 +59007,10 @@ window._staffMirrorCs = _staffMirrorCs;
    ⚠️ 합친 뒤 인박스에서 삭제하지 않는다 — 삭제했다가 임원용 저장이 실패하면 그 문서는 증발한다.
       applied 표시만 하고 남겨 둔다(직원 화면의 '전달됨' 표시도 이 값을 본다). */
 const _STAFF_INBOX = [
-  { doc: 'inbox_expenses',  arr: 'expenses',  label: '지출결의서' },
-  { doc: 'inbox_approvals', arr: 'approvals', label: '일반결재' },
+  // v2.3.686: requireL1 — 직원용 1차 결재가 승인해야 넘어온다.
+  //   승인 전 문서를 당겨오면 임원 결재함에 1차 없는 문서가 섞인다.
+  { doc: 'inbox_expenses',  arr: 'expenses',  label: '지출결의서', requireL1: true },
+  { doc: 'inbox_approvals', arr: 'approvals', label: '일반결재', requireL1: true },
   // upsert: 같은 id 가 이미 있으면 '직원이 더 나중에 고쳤을 때만' 덮어쓴다 (임원 수정본 보호)
   { doc: 'inbox_cs',        arr: 'cs',        label: '약사 CS', upsert: true },
   // 신제품: 직원도 쓰기 가능(기획서 슬라이드 7). 수익성 필드는 직원 사본에 없지만
@@ -59037,6 +59039,16 @@ async function _staffInboxDrain(verbose) {
       let touched = false;
       list.forEach(r => {
         if (!r || r.applied) return;
+        // 1차 대기·반려는 건너뛴다. applied 도 찍지 않는다 — 나중에 승인되면 그때 들어온다.
+        if (box.requireL1 && String(r.l1Status || 'pending') !== 'approved') return;
+        // 1차 결재 흔적을 본문 맨 위에 남긴다 — 임원용 결재 시트에서 바로 보인다
+        if (box.requireL1 && r.l1By && String(r.note || '').indexOf('[1차 결재 완료]') < 0) {
+          const _d = new Date(Number(r.l1At) || Date.now());
+          r.note = '[1차 결재 완료] ' + (r.l1Name || r.l1By) + ' · '
+            + _d.getFullYear() + '-' + String(_d.getMonth() + 1).padStart(2, '0') + '-' + String(_d.getDate()).padStart(2, '0')
+            + (r.l1Note ? ' · ' + r.l1Note : '')
+            + '\n(직원용 ERP 상신 — 작성자 ' + (r._byName || '-') + ')\n\n' + String(r.note || '');
+        }
         if (!have.has(String(r.id))) {
           DB[box.arr].push(Object.assign({}, r, { applied: undefined })); added++;
         } else if (box.upsert) {

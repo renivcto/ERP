@@ -174,6 +174,29 @@ Google 로그인
 - 직원용이 API 를 부르려면 보드 ID 가 필요해 `_staffWfPayload()` 가 `boardId` 를 같이 실어 보낸다.
   미러가 한 번도 안 돌았으면 `boardId` 가 없어 '임원용에서 한 번 동기화해 주세요' 로 안내한다.
 
+#### 결재 3단계 (v0.40.0 / 임원용 v2.3.686)
+
+지출결의서·일반결재 폼을 임원용(`ape-*`/`apn-*`)에서 그대로 옮겼다. 분류별 기본 포맷,
+지급처 탭(전체/판매업체/쇼핑몰), 지급방법×증빙 안내, 응급·즉시지급 필, 단계(사전 품의/실행 기안),
+파일 첨부까지 같은 구성이다.
+
+**⚠️ 저장 레코드는 임원용 `expenses`/`approvals` 와 같은 필드명을 쓴다.**
+받은편지함이 레코드를 그대로 복사해 넣기 때문에, 이름이 다르면 임원용에서 빈 칸이 된다
+(`amount`/`currency`/`payMethod`/`proofType`/`taxInvoice`/`paidStatus`/`priority`/`phase` …).
+지출결의서 `category` 는 한글이 아니라 **임원용 코드값**(`other|ad|photography|travel|cash_reimburse|sample|trademark`)이다.
+
+결재 라인:
+
+| 단계 | 누가 | 어디서 |
+|---|---|---|
+| 1차 | 작성자가 지정 (`l1Name`) | **직원용 관리자 모드** — `openAp1()` |
+| 2차 | 이주연 본부장 전결 | 임원용 (`_nonPoCanSign('director')`) |
+| 3차 | 대표이사 (필요 시 요청) | 임원용 (`ceoApproval='requested'`) |
+
+⚠️ **1차가 승인해야 임원용으로 넘어간다.** 임원용 `_STAFF_INBOX` 의 `requireL1:true` 가
+`l1Status !== 'approved'` 인 문서를 건너뛴다(`applied` 도 찍지 않아서, 나중에 승인되면 그때 들어온다).
+넘어갈 때 `note` 맨 위에 `[1차 결재 완료] 이름 · 날짜` 를 붙여 임원용 결재 시트에서 바로 보이게 한다.
+
 #### 파일 업로드 (v0.38.0)
 
 직원용엔 업로드가 아예 없었다(아바타만 캔버스로 줄인 dataURL). Firebase Storage 를 배선했다.
