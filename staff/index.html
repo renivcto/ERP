@@ -218,8 +218,12 @@ tr:last-child td { border-bottom:none; }
 .ord-kpi .t { font-size:11.5px; font-weight:700; color:var(--ink-soft); }
 .ord-kpi .v { font-size:21px; font-weight:800; margin-top:3px; letter-spacing:-.4px; }
 .ord-kpi .s { font-size:11px; color:var(--ink-mute); }
-.sales-period { display:inline-flex; align-items:center; gap:7px; font-size:12.5px; font-weight:700; color:var(--ink-soft); margin-bottom:12px; }
-.sales-period select { width:auto; min-width:140px; padding:6px 10px; font-size:12.5px; }
+.sales-period { display:flex; align-items:center; gap:5px; flex-wrap:wrap; margin-bottom:12px; }
+.sales-period > span { font-size:13px; color:var(--ink-mute); }
+.sales-period .fi { width:auto; height:32px; padding:5px 10px; font-size:12.5px; }
+.sales-period .pd-mode { width:84px; }
+.sales-period input.fi { width:146px; }
+.sales-period .tilde { color:var(--ink-mute); }
 .ord-chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
 .ord-chip { border:1px solid var(--line); background:#fff; border-radius:999px; padding:4px 12px; font-size:12px; font-weight:700; cursor:pointer; color:var(--ink-soft); }
 .ord-chip.on { background:var(--brand); border-color:var(--brand); color:#fff; }
@@ -1188,7 +1192,7 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
 import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
-const STAFF_VERSION = 'v0.49.0';
+const STAFF_VERSION = 'v0.50.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -5508,29 +5512,65 @@ $('btn-ord-save').onclick = async () => {
   } catch (e) { toast('실패: ' + e.message, true); }
 };
 
-/* ═══════════ 기간 조회 (v0.47.0) ═══════════
-   판매 관리 3탭이 같은 컨트롤을 쓴다. 값은 'YYYY-MM' | 'YYYY' | '' (전체). */
-let SALES_PERIOD = (function () { const d = new Date();
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); })();
-function periodHtml() {
-  const now = new Date(), months = [], years = [];
-  for (let i = 0; i < 18; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'));
+/* ═══════════ 기간 조회 (v0.50.0) ═══════════
+   임원용 주문 관리와 같은 구성 — [모드 · 날짜 · 🔍 조회].
+   판매 관리 3탭이 같은 컨트롤을 쓰고, 결과는 {start,end} 범위로 비교한다. */
+const _pd2 = n => String(n).padStart(2, '0');
+let SALES_PD = (function () { const d = new Date();
+  return { mode: 'month', month: d.getFullYear() + '-' + _pd2(d.getMonth() + 1),
+           week: '', day: '', from: '', to: '' }; })();
+function periodRange() {
+  const p = SALES_PD;
+  if (p.mode === 'all') return { start: '', end: '' };
+  if (p.mode === 'day') return { start: p.day, end: p.day };
+  if (p.mode === 'range') return { start: p.from, end: p.to };
+  if (p.mode === 'week') {
+    if (!p.week) return { start: '', end: '' };
+    const [ys, ws] = p.week.split('-W');
+    const jan4 = new Date(Number(ys), 0, 4);
+    const mon = new Date(jan4); mon.setDate(jan4.getDate() - ((jan4.getDay() + 6) % 7) + (Number(ws) - 1) * 7);
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+    const f = d => d.getFullYear() + '-' + _pd2(d.getMonth() + 1) + '-' + _pd2(d.getDate());
+    return { start: f(mon), end: f(sun) };
   }
-  for (let y = now.getFullYear(); y >= now.getFullYear() - 3; y--) years.push(String(y));
-  const opt = (v, l) => `<option value="${v}"${SALES_PERIOD === v ? ' selected' : ''}>${l}</option>`;
-  return `<div class="sales-period">📅 기간
-    <select class="fi" id="sales-period">
-      ${months.map(m => opt(m, m.replace('-', '년 ') + '월')).join('')}
-      <optgroup label="연도별">${years.map(y => opt(y, y + '년 전체')).join('')}</optgroup>
-      ${opt('', '전체 기간')}
-    </select></div>`;
+  if (!p.month) return { start: '', end: '' };
+  const [y, m] = p.month.split('-').map(Number);
+  return { start: p.month + '-01', end: p.month + '-' + _pd2(new Date(y, m, 0).getDate()) };
 }
-/* 날짜 문자열(YYYY-MM-DD)이 선택 기간에 드는가 */
 function inPeriod(d) {
-  if (!SALES_PERIOD) return true;
-  return String(d || '').slice(0, SALES_PERIOD.length) === SALES_PERIOD;
+  const r = periodRange();
+  if (!r.start && !r.end) return true;
+  const v = String(d || '');
+  if (!v) return false;
+  return (!r.start || v >= r.start) && (!r.end || v <= r.end);
+}
+function periodHtml() {
+  const p = SALES_PD;
+  const show = k => p.mode === k ? '' : 'display:none;';
+  const opt = (v, l) => `<option value="${v}"${p.mode === v ? ' selected' : ''}>${l}</option>`;
+  return `<div class="sales-period">
+    <span>📅</span>
+    <select class="fi pd-mode">${opt('month', '월별')}${opt('week', '주별')}${opt('day', '일별')}${opt('range', '기간별')}${opt('all', '전체')}</select>
+    <input class="fi pd-month" type="month" value="${esc(p.month)}" style="${show('month')}">
+    <input class="fi pd-week"  type="week"  value="${esc(p.week)}"  style="${show('week')}">
+    <input class="fi pd-day"   type="date"  value="${esc(p.day)}"   style="${show('day')}">
+    <input class="fi pd-from"  type="date"  value="${esc(p.from)}"  style="${show('range')}">
+    <span class="tilde" style="${show('range')}">~</span>
+    <input class="fi pd-to"    type="date"  value="${esc(p.to)}"    style="${show('range')}">
+    <button class="btn btn-p btn-sm pd-go">🔍 조회</button>
+  </div>`;
+}
+function wirePeriod() {
+  const box = document.querySelector('.sales-period');
+  if (!box) return;
+  const g = c => box.querySelector(c);
+  // 모드만 즉시 반영(입력칸 노출이 바뀌어야 하므로). 나머지는 [🔍 조회] 로 확정한다.
+  g('.pd-mode').onchange = () => { SALES_PD.mode = g('.pd-mode').value; renderPage(); };
+  g('.pd-go').onclick = () => {
+    SALES_PD.month = g('.pd-month').value; SALES_PD.week = g('.pd-week').value;
+    SALES_PD.day = g('.pd-day').value; SALES_PD.from = g('.pd-from').value; SALES_PD.to = g('.pd-to').value;
+    renderPage();
+  };
 }
 function pageSales() {
   if (SALES_TAB === 'consign') return pageSalesConsign();
@@ -5574,7 +5614,7 @@ function wireDataPage() {
   document.querySelectorAll('[data-sm-new]').forEach(b => b.onclick = () => openSmModal(b.dataset.smNew));
   const wo = $('btn-wh-open'); if (wo) wo.onclick = openWhModal;
   document.querySelectorAll('[data-sales-tab]').forEach(b => b.onclick = () => { SALES_TAB = b.dataset.salesTab; renderPage(); });
-  const sp = $('sales-period'); if (sp) sp.onchange = () => { SALES_PERIOD = sp.value; renderPage(); };
+  wirePeriod();
   document.querySelectorAll('[data-ord-shop]').forEach(b => b.onclick = () => { ORD_SHOP = b.dataset.ordShop; renderPage(); });
   document.querySelectorAll('[data-ord-edit]').forEach(b => b.onclick = () => openOrdModal(b.dataset.ordEdit));
   const cn = $('btn-cg-new'); if (cn) cn.onclick = openCgModal;

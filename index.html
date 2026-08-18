@@ -3204,8 +3204,20 @@ try{
     <div class="page" id="page-consign">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
         <button class="btn" style="background:#0f766e;color:#fff;border:1px solid #0f766e;font-weight:700;font-size:13px;padding:8px 18px;border-radius:8px" onclick="openConsignShip()">＋ 위탁 재고이동 추가</button>
-        <span style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:#475569">📅 기간
-          <select class="fs" id="consign-period" onchange="_consignSetPeriod(this.value)" style="width:auto;min-width:150px;padding:7px 10px;font-size:12.5px;height:34px"></select></span>
+<!-- v2.3.695: 주문 관리와 같은 기간 필터 (공용 _periodInit/_periodComputeRange 재사용) -->
+        <div class="period-filter" data-prefix="cg" style="display:flex;gap:5px;align-items:center;flex-wrap:nowrap">
+          <span style="font-size:12px;color:var(--gray-500);font-weight:500;flex-shrink:0">📅</span>
+          <select class="fs period-mode" onchange="_periodOnChange('cg')" style="width:80px;font-size:12px;height:32px;padding:5px 8px;flex-shrink:0">
+            <option value="month">월별</option><option value="week">주별</option><option value="day">일별</option><option value="range">기간별</option><option value="all">전체</option>
+          </select>
+          <input class="fi period-month" type="month" onchange="_periodOnChange('cg')" style="width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
+          <input class="fi period-week"  type="week"  onchange="_periodOnChange('cg')" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
+          <input class="fi period-day"   type="date"  onchange="_periodOnChange('cg')" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
+          <input class="fi period-from"  type="date"  onchange="_periodOnChange('cg')" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
+          <span class="period-tilde" style="display:none;color:var(--gray-400);font-size:12px;flex-shrink:0">~</span>
+          <input class="fi period-to"    type="date"  onchange="_periodOnChange('cg')" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
+          <button class="btn btn-primary btn-sm" onclick="_periodOnChange('cg')" style="height:32px;padding:5px 12px;font-size:12px;flex-shrink:0;white-space:nowrap">🔍 조회</button>
+        </div>
         <button class="btn btn-outline btn-sm" onclick="staffConsignNow()" title="직원용 ERP에서 올라온 위탁 출고를 지금 반영합니다">📥 직원 출고 가져오기</button>
         <span style="font-size:12px;color:var(--gray-400)">르니브 창고 → 위탁 판매처 창고 재고이동 + 거래명세서 발행</span>
       </div>
@@ -6342,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.694';
+const ERP_VERSION = 'v2.3.695';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -20179,6 +20191,7 @@ function _periodOnChange(prefix) {
   else if (prefix === 'po' && typeof renderOrderTable === 'function') renderOrderTable();
   else if (prefix === 'ap' && typeof renderApprovalPage === 'function') renderApprovalPage();
   else if (prefix === 'ad' && typeof renderAdsPage === 'function') renderAdsPage();  // v2.3.138
+  else if (prefix === 'cg' && typeof renderConsignPage === 'function') renderConsignPage();  // v2.3.695 위탁
 }
 
 function _periodComputeRange(prefix) {
@@ -30513,30 +30526,13 @@ function _consignDetail(shId){
     +'</div></div>';
   document.body.appendChild(ov);
 }
-/* v2.3.694 — 기간 조회. 'YYYY-MM' | 'YYYY' | '' (전체) */
-window._consignPeriod = (window._consignPeriod === undefined)
-  ? (new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0'))
-  : window._consignPeriod;
-function _consignSetPeriod(v){ window._consignPeriod = v; renderConsignPage(); }
+/* v2.3.695 — 기간 조회. 주문 관리와 같은 공용 필터를 쓴다(_periodComputeRange). */
 function _consignInPeriod(d){
-  const p = window._consignPeriod;
-  if (!p) return true;
-  return String(d || '').slice(0, p.length) === p;
-}
-function _consignPeriodOptions(){
-  const sel = document.getElementById('consign-period'); if (!sel) return;
-  const now = new Date(), cur = window._consignPeriod, out = [];
-  for (let i = 0; i < 18; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const v = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-    out.push('<option value="' + v + '"' + (cur === v ? ' selected' : '') + '>' + v.replace('-', '년 ') + '월</option>');
-  }
-  out.push('<optgroup label="연도별">');
-  for (let y = now.getFullYear(); y >= now.getFullYear() - 3; y--)
-    out.push('<option value="' + y + '"' + (cur === String(y) ? ' selected' : '') + '>' + y + '년 전체</option>');
-  out.push('</optgroup>');
-  out.push('<option value=""' + (cur === '' ? ' selected' : '') + '>전체 기간</option>');
-  sel.innerHTML = out.join('');
+  const r = (typeof _periodComputeRange === 'function') ? _periodComputeRange('cg') : { start:'', end:'' };
+  if (!r.start && !r.end) return true;
+  const v = String(d || '');
+  if (!v) return false;
+  return (!r.start || v >= r.start) && (!r.end || v <= r.end);
 }
 async function renderConsignPage(){
   const tb=document.getElementById('consign-table'); if(!tb) return;
@@ -30550,7 +30546,7 @@ async function renderConsignPage(){
     }
   } catch(_) {}
   if(!window._consign.loaded){ tb.innerHTML='<tr><td colspan="8" style="padding:24px;color:var(--gray-400)">불러오는 중…</td></tr>'; await _consignLoad(true); }
-  _consignPeriodOptions();
+  try { if (typeof _periodInit === 'function') _periodInit('cg'); } catch(_) {}
   const all=(window._consign.shipments||[]).slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||( (b.createdAt||0)-(a.createdAt||0) ));
   const list=all.filter(sh=>_consignInPeriod(sh && sh.date));
   const cnt=document.getElementById('consign-count'); if(cnt) cnt.textContent='총 '+list.length+'건'+(all.length!==list.length?' / 전체 '+all.length+'건':'');
