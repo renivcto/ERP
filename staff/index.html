@@ -1192,7 +1192,7 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
 import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
-const STAFF_VERSION = 'v0.50.0';
+const STAFF_VERSION = 'v0.51.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -5160,7 +5160,9 @@ function pageApproval() {
   const waiting = list.filter(r => !r.applied).length;
   return `<div class="pg on">
     <div class="pg-h"><h1>결재 관리<sup class="sync" style="font-size:13px" title="여기서 작성한 문서가 임원용 ERP 결재함으로 전달됩니다"> ⓘ</sup></h1>
-      ${ME.mode === 'admin' ? '' : `<button class="btn btn-p" id="btn-ap-new" style="margin-left:auto">＋ ${isExp ? '지출 결의서' : '일반 결재'} 작성</button>`}</div>
+      ${ME.mode === 'admin'
+        ? `<button class="btn" id="btn-ap-clean" style="margin-left:auto" title="임원용으로 전달이 끝난 문서를 직원용 목록에서 한꺼번에 지웁니다">🧹 전달 완료 정리 (${all.filter(r => r.applied).length})</button>`
+        : `<button class="btn btn-p" id="btn-ap-new" style="margin-left:auto">＋ ${isExp ? '지출 결의서' : '일반 결재'} 작성</button>`}</div>
     <div class="pg-sub">${ME.mode === 'admin'
         ? '직원이 올린 문서의 <b>1차 결재</b>를 합니다. 승인하면 임원용 ERP로 넘어가 2차(본부장 전결) 결재를 받습니다.'
         : '작성한 문서는 1차 결재를 거쳐 임원용 ERP로 넘어갑니다.'}${waiting ? ` · <b style="color:var(--warn)">진행 중 ${waiting}건</b>` : ''}</div>
@@ -5186,7 +5188,12 @@ function pageApproval() {
           (ME.mode !== 'admin' && !r.applied && (r.l1Status || 'pending') !== 'approved' && apMine(r))
           ? `<button class="btn btn-sm" data-ap-edit="${esc(r.id)}">수정</button>
              <button class="btn btn-sm btn-bad" data-ap-del="${esc(r.id)}">삭제</button>`
-          : `<span style="font-size:11px;color:var(--ink-mute)">${ME.mode === 'admin' ? '' : (r.applied ? '임원용에서 진행 중' : ((r.l1Status||'pending') === 'approved' ? '1차 승인 후 수정 불가' : ''))}</span>`}</td></tr>`).join('')}
+          : ME.mode === 'admin'
+            /* v0.51.0: 관리자는 어느 상태든 '목록에서 지우기' 로 정리할 수 있다.
+               지난 버전에서 관리자 수정·삭제를 통째로 숨겼더니 1차 승인·전달 완료 건을
+               치울 방법이 전혀 없었다. 임원용 문서는 건드리지 않는다는 점을 확인 문구로 알린다. */
+            ? `<button class="btn btn-sm btn-bad" data-ap-del="${esc(r.id)}" title="직원용 목록에서만 지웁니다">🗑 목록에서 지우기</button>`
+            : `<span style="font-size:11px;color:var(--ink-mute)">${r.applied ? '임원용에서 진행 중' : ((r.l1Status||'pending') === 'approved' ? '1차 승인 후 수정 불가' : '')}</span>`}</td></tr>`).join('')}
       </tbody></table></div></div>`
       : `<div class="ph"><div class="big">🖋️</div><h3>작성한 ${isExp ? '지출 결의서' : '일반 결재'}가 없습니다</h3>
           <p>위 <b>작성</b> 버튼으로 올리면 임원용 ERP 결재함으로 전달됩니다.
@@ -5205,11 +5212,26 @@ function wireApproval() {
   document.querySelectorAll('[data-ap1]').forEach(b => b.onclick = () => openAp1(AP_TAB, b.dataset.ap1));
   document.querySelectorAll('[data-ap-view]').forEach(b => b.onclick = () => openApView(AP_TAB, b.dataset.apView));
   document.querySelectorAll('[data-ap-del]').forEach(b => b.onclick = async () => {
-    if (!confirm('이 문서를 삭제할까요?')) return;
+    const r = apList().find(x => String(x.id) === String(b.dataset.apDel));
+    const msg = (r && r.applied)
+      ? '이 문서를 직원용 목록에서 지울까요?\n\n⚠️ 이미 임원용 ERP 결재함으로 전달된 문서입니다.\n'
+        + '여기서 지워도 임원용 문서는 남아 있습니다 — 그쪽은 임원용 결재 관리에서 따로 지우세요.'
+      : '이 문서를 삭제할까요?';
+    if (!confirm(msg)) return;
     const arr = apList().filter(x => String(x.id) !== String(b.dataset.apDel));
     try { await saveCol(apDoc(), arr); apSetList(arr); toast('삭제했습니다'); rerender(); }
     catch (e) { toast('삭제 실패: ' + e.message, true); }
   });
+  const cb = $('btn-ap-clean');
+  if (cb) cb.onclick = async () => {
+    const done = apList().filter(r => r && r.applied);
+    if (!done.length) { toast('전달이 끝난 문서가 없습니다'); return; }
+    if (!confirm('임원용으로 전달이 끝난 ' + done.length + '건을 직원용 목록에서 지울까요?\n\n'
+      + '임원용 ERP 결재함의 문서는 그대로 남습니다.')) return;
+    const arr = apList().filter(r => r && !r.applied);
+    try { await saveCol(apDoc(), arr); apSetList(arr); toast(done.length + '건을 정리했습니다'); rerender(); }
+    catch (e) { toast('정리 실패: ' + e.message, true); }
+  };
 }
 
 /* ═══════════ 임원용 연동 데이터 — 1단계 읽기 전용 (v0.28.0) ═══════════
