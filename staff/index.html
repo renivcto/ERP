@@ -234,6 +234,14 @@ tr:last-child td { border-bottom:none; }
 .ph-sum .b { border:1px solid var(--line); border-radius:11px; padding:11px 13px; text-align:center; }
 .ph-sum .b .k { font-size:11.5px; color:var(--ink-mute); font-weight:700; }
 .ph-sum .b .v { font-size:17px; font-weight:800; margin-top:3px; }
+.dp-tb .nm a { color:var(--brand-deep); font-weight:700; cursor:pointer; }
+.dp-tb .nm a:hover { text-decoration:underline; }
+.sp-row { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px; background:#fff; }
+.sp-row .g { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:7px; }
+.sp-row .g4 { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:8px; }
+.sp-row .lb { font-size:11px; color:var(--ink-mute); font-weight:700; display:block; margin-bottom:3px; }
+.sp-lock { background:repeating-linear-gradient(45deg,#f1f5f9,#f1f5f9 6px,#e2e8f0 6px,#e2e8f0 12px);
+  color:var(--ink-mute); border-radius:6px; padding:2px 10px; font-size:11.5px; font-weight:700; display:inline-block; }
 .ap-sheet-tb th, .ap-sheet-tb td { border:1px solid var(--line); padding:8px 11px; text-align:left; }
 .ap-sheet-tb th { background:var(--line-soft); width:96px; white-space:nowrap; font-weight:700; }
 .ord-chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
@@ -1047,6 +1055,15 @@ tr:last-child td { border-bottom:none; }
 </div>
 
 <!-- 1차 결재 처리 (직원용 관리자 모드) -->
+<div class="ovl" id="ovl-item">
+  <div class="modal" style="max-width:720px">
+    <div class="modal-h"><span class="t" id="item-m-t">🧴 품목 상세</span><button class="modal-x" data-close="ovl-item">✕</button></div>
+    <div class="modal-b" id="item-m-body"></div>
+    <div class="modal-f"><button class="btn" data-close="ovl-item">닫기</button>
+      <button class="btn btn-p" id="btn-item-save" style="display:none">판매업체 가격 저장</button></div>
+  </div>
+</div>
+
 <div class="ovl" id="ovl-ph">
   <div class="modal" style="max-width:760px">
     <div class="modal-h"><span class="t" id="ph-m-t">💊 약국 상세</span><button class="modal-x" data-close="ovl-ph">✕</button></div>
@@ -1212,7 +1229,7 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
 import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
-const STAFF_VERSION = 'v0.53.0';
+const STAFF_VERSION = 'v0.54.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1262,6 +1279,8 @@ let ITEMS = [];             // staff_data/items_fin   — 완제품 품목 (원�
 let WHS = [];               // staff_data/warehouses  — 창고 목록
 let ORDERS = [];            // staff_data/orders      — 주문 (고객정보 없음)
 let ORDI = [];              // staff_data/inbox_orders — 직원이 올린 주문 수정 요청
+let SUPP = [];              // staff_data/supply_partners — 판매업체+쇼핑몰 (가격행 드롭다운)
+let ITMI = [];              // staff_data/inbox_items    — 직원이 올린 판매업체 가격 수정 요청
 let CSM = null;             // staff_data/consign_meta — 위탁 기준정보(판매업체·공급단가)
 let CGI = [];               // staff_data/inbox_consign — 직원이 올린 위탁 출고 요청
 let ADP = [];               // staff_data/adprojects   — 광고 프로젝트 미러
@@ -1441,6 +1460,7 @@ if (DEMO) {
                contact: '김담당', phone: '02-1234-5678', email: 'kim@example.com', address: '세종시', note: '' }];
   PT.seller = [{ id: 's1', company: '바로팜', bizno: '', ceo: '', contact: '이담당', phone: '02-2222-3333',
                  email: '', address: '', channel: '약국 B2B', note: '입점 15개 약국' }];
+  SUPP = [{ id: 'sl1', name: '바로팜' }, { id: 'shop:h1', name: '쿠팡' }, { id: 'shop:h2', name: '스마트스토어' }];
   ADP = [{ id: 'ap1', name: '와디즈 320 크림 펀딩', shopName: '와디즈', startDate: '2026-03-30', endDate: '2026-04-30', budget: 3000000 },
          { id: 'ap2', name: '와디즈 나드 엑소좀 글로우샷 펀딩', shopName: '와디즈', startDate: '2026-05-01', endDate: '2026-05-20', budget: 2000000 }];
   CSM = { sellers: [{ id: 'sl1', name: '바로팜' }, { id: 'sl2', name: '온누리약국체인' }],
@@ -1526,7 +1546,9 @@ if (DEMO) {
   WHS = [{ id: 'w1', name: '르니브 창고' }, { id: 'w2', name: '쿠팡 창고' }, { id: 'w3', name: '바로팜 창고' }];
   ITEMS = [
     { id: 'i1', code: 'P-3X-02', name: '3중 장벽 20층 리뉴 크림 30ml', spec: '30mL / NET WT. 1.06 OZ',
-      channels: ['온라인'], image: '', stock: 1985, whStock: { w2: 225, w1: 1760 }, defaultWh: 'w1',
+      channels: ['온라인'], image: '', stock: 1985, whStock: { w2: 225, w1: 1760 }, defaultWh: 'w1', nameEn: '3X BARRIER 20-VEIL RENEW CREAM', consumerPrice: 42000, vendorName: '한국콜마',
+      supplyPrices: [{ sellerId: 'shop:h1', sellerName: '쿠팡', itemName: '320 크림', salePrice: 27900, price: 21000, vat: 'include', stockId: '' },
+                     { sellerId: 'sl1', sellerName: '바로팜', itemName: '320 리뉴 크림', salePrice: 27900, price: 19500, vat: 'include', stockId: '' }],
       minStock: 100, salePrice: 27900, supply: [{ seller: '쿠팡 Wing', price: 27900 }], note: '' },
     { id: 'i2', code: 'P-3X-03', name: '3중 장벽 20층 리뉴 크림 60ml', spec: '60mL / NET WT. 2.13 OZ',
       channels: ['약국'], image: '', stock: 3443, whStock: { w3: 157, w1: 3286 }, defaultWh: 'w1',
@@ -1775,6 +1797,10 @@ function subscribeData() {
     e => console.warn('[trello]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'ads'), s => { ADS = parseCol(s, []); rerender(); },
     e => console.warn('[ads]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'supply_partners'), s => { SUPP = parseCol(s, []); rerender(); },
+    e => console.warn('[supply_partners]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_items'), s => { ITMI = parseCol(s, []); rerender(); },
+    e => console.warn('[inbox_items]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'consign_meta'), s => { CSM = parseCol(s, null); rerender(); },
     e => console.warn('[consign_meta]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_consign'), s => { CGI = parseCol(s, []); rerender(); },
@@ -4533,6 +4559,107 @@ function pagePharmacy() {
 }
 /* 약국 상세 — 약국은 영업 대상이라 직원도 봐야 한다(사용자 확인).
    임원용 고객카드와 같은 구성: 요약 + 연락처·주소 + 최근 주문 내역. */
+
+/* ═══════════ 품목 상세 (v0.54.0) ═══════════
+   임원용 품목 현황과 같은 정보를 보여준다.
+   ⚠️ 원가(단가)·재고평가액은 미러에 아예 없다 — 화면에도 '비공개' 로 표시만 한다.
+   직원이 고칠 수 있는 것은 판매업체별 판매가·공급가 하나뿐이다. */
+let ITEM_OPEN = null, ITEM_SP = [];
+/* 전달 대기 중인 수정본을 미러 위에 덮어 보여준다 */
+function itemSupply(i) {
+  const p = (ITMI || []).filter(r => r && !r.applied && String(r.id) === String(i.id)).pop();
+  const arr = p ? p.supplyPrices : i.supplyPrices;
+  return Array.isArray(arr) ? arr : [];
+}
+function itemPending(i) {
+  return (ITMI || []).some(r => r && !r.applied && String(r.id) === String(i.id));
+}
+function openItemModal(id) {
+  const i = (ITEMS || []).find(x => String(x.id) === String(id));
+  if (!i) return;
+  ITEM_OPEN = i.id;
+  ITEM_SP = JSON.parse(JSON.stringify(itemSupply(i)));
+  const row = (k, v) => v ? `<tr><th>${k}</th><td>${v}</td></tr>` : '';
+  const w = n => '₩' + Number(n || 0).toLocaleString();
+  const whs = itemWhRows(i);
+  $('item-m-t').textContent = '🧴 ' + (i.name || '품목');
+  $('item-m-body').innerHTML = `
+    ${i.image ? `<div style="text-align:center;margin-bottom:14px"><img src="${esc(i.image)}" style="max-width:180px;max-height:180px;border-radius:12px;border:1px solid var(--line)"></div>` : ''}
+    <table class="ap-sheet-tb" style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px">
+      ${row('품목코드', esc(i.code || ''))}
+      ${row('품목명', '<b>' + esc(i.name || '') + '</b>')}
+      ${row('영문명', esc(i.nameEn || ''))}
+      ${row('용량 / 규격', esc(i.spec || ''))}
+      ${row('판매채널', (i.channels || []).map(c => `<span class="dp-chip" style="background:#fee2e2;color:#b91c1c">${esc(c)}</span>`).join(' '))}
+      ${row('바코드', esc(i.barcode || ''))}
+      ${row('제조/공급처', esc(i.vendorName || ''))}
+      ${row('소비자가', i.consumerPrice ? w(i.consumerPrice) : '')}
+      ${row('대표 판매가', i.salePrice ? w(i.salePrice) : '')}
+      <tr><th>원가 (단가)</th><td><span class="sp-lock">🔒 비공개</span>
+        <span style="font-size:11.5px;color:var(--ink-mute);margin-left:6px">원가는 직원용에 넘어오지 않습니다</span></td></tr>
+      <tr><th>재고</th><td>${whs.length
+        ? whs.map(x => esc(x.name) + ' <b>' + x.qty.toLocaleString() + '</b>').join(' · ')
+          + ' · 합계 <b>' + Number(i.stock || 0).toLocaleString() + '</b>'
+        : '<b>' + Number(i.stock || 0).toLocaleString() + '</b>'}
+        ${i.minStock ? ` <span style="font-size:11.5px;color:var(--ink-mute)">(안전재고 ${Number(i.minStock).toLocaleString()})</span>` : ''}</td></tr>
+      ${row('비고', esc(i.note || ''))}
+    </table>
+    <div class="card-h" style="border:0;padding:0 0 8px;font-size:14px">🏷 판매업체별 판매가 · 공급가
+      <span class="sub">여기만 직원용에서 수정할 수 있습니다${itemPending(i) ? ' · <b style="color:var(--warn)">반영 대기 중</b>' : ''}</span></div>
+    <div id="item-sp-list"></div>
+    <button type="button" class="btn btn-sm" id="btn-sp-add">+ 거래처 추가</button>`;
+  renderItemSp();
+  $('btn-item-save').style.display = '';
+  $('ovl-item').classList.add('on');
+}
+function renderItemSp() {
+  const el = $('item-sp-list');
+  if (!el) return;
+  const opts = v => '<option value="">— 거래처 선택 —</option>'
+    + (SUPP || []).map(p => `<option value="${esc(p.id)}"${String(p.id) === String(v) ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
+  el.innerHTML = ITEM_SP.length ? ITEM_SP.map((r, i) => `
+    <div class="sp-row">
+      <div class="g">
+        <div><span class="lb">판매업체</span><select class="fi" data-sp-seller="${i}">${opts(r.sellerId)}</select></div>
+        <div><span class="lb">판매업체 품목명 (명세서 표기)</span><input class="fi" data-sp-name="${i}" value="${esc(r.itemName || '')}"></div>
+      </div>
+      <div class="g4">
+        <div><span class="lb">판매가</span><input class="fi" type="number" min="0" data-sp-sale="${i}" value="${r.salePrice === '' || r.salePrice == null ? '' : r.salePrice}"></div>
+        <div><span class="lb">공급가</span><input class="fi" type="number" min="0" data-sp-price="${i}" value="${r.price === '' || r.price == null ? '' : r.price}"></div>
+        <div><span class="lb">부가세</span><select class="fi" data-sp-vat="${i}">
+          <option value="include"${r.vat === 'include' ? ' selected' : ''}>포함</option>
+          <option value="exclude"${r.vat !== 'include' ? ' selected' : ''}>별도</option></select></div>
+        <div><span class="lb">재고ID</span><input class="fi" data-sp-stock="${i}" value="${esc(r.stockId || '')}"></div>
+      </div>
+      <div style="text-align:right;margin-top:6px"><button type="button" class="btn btn-sm btn-bad" data-sp-del="${i}">✕ 행 삭제</button></div>
+    </div>`).join('') : '<div class="hint" style="margin:0 0 8px">등록된 거래처 가격이 없습니다.</div>';
+  const bind = (sel, key, num) => el.querySelectorAll('[' + sel + ']').forEach(x => x.oninput = x.onchange = () => {
+    const i = Number(x.getAttribute(sel));
+    ITEM_SP[i][key] = num ? (x.value === '' ? '' : Number(x.value) || 0) : x.value;
+  });
+  bind('data-sp-seller', 'sellerId'); bind('data-sp-name', 'itemName');
+  bind('data-sp-sale', 'salePrice', true); bind('data-sp-price', 'price', true);
+  bind('data-sp-vat', 'vat'); bind('data-sp-stock', 'stockId');
+  el.querySelectorAll('[data-sp-del]').forEach(x => x.onclick = () => { ITEM_SP.splice(Number(x.dataset.spDel), 1); renderItemSp(); });
+}
+/* + 거래처 추가 버튼은 모달을 그릴 때마다 새로 생긴다 — 문서 위임으로 한 번만 배선한다 */
+document.addEventListener('click', e => {
+  if (e.target && e.target.id === 'btn-sp-add') {
+    ITEM_SP.push({ sellerId: '', itemName: '', salePrice: '', price: '', vat: 'include', stockId: '' });
+    renderItemSp();
+  }
+});
+$('btn-item-save').onclick = async () => {
+  if (!ITEM_OPEN) return;
+  const rows = ITEM_SP.filter(r => r && r.sellerId);
+  const arr = (ITMI || []).filter(r => r && (r.applied || String(r.id) !== String(ITEM_OPEN)));
+  arr.push({ id: ITEM_OPEN, supplyPrices: rows, _by: ME.name, _byUid: ME.uid, createdAt: Date.now() });
+  try {
+    await saveCol('inbox_items', arr); ITMI = arr;
+    $('ovl-item').classList.remove('on');
+    toast('수정 요청을 올렸습니다 — 임원용 ERP를 열면 반영됩니다'); rerender();
+  } catch (e) { toast('실패: ' + e.message, true); }
+};
 function openPhModal(key) {
   const p = (PHARM || []).find(x => String(x.key || x.name) === String(key));
   if (!p) return;
@@ -5336,14 +5463,15 @@ function pageItems() {
         <td><span class="dp-chip">완제품</span></td>
         <td style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px">${esc(i.code || '-')}</td>
         <td>${(i.channels || []).map(c => `<span class="dp-chip" style="background:#fee2e2;color:#b91c1c">${esc(c)}</span>`).join(' ') || '-'}</td>
-        <td class="nm">${esc(i.name)}</td>
+        <td class="nm"><a data-item-open="${esc(i.id)}" title="클릭하면 품목 상세가 열립니다">${esc(i.name)}</a></td>
         <td>${i.image ? `<img class="dp-img" src="${esc(i.image)}" alt="">` : '<span style="color:var(--ink-mute)">-</span>'}</td>
         <td style="font-size:12px">${esc(i.spec || '-')}</td>
         <td class="dp-wh">${itemWhRows(i).map(w => `${esc(w.name)} <b>${w.qty.toLocaleString()}</b>`).join('<br>')
+          + (itemWhRows(i).length > 1 ? `<br><span style="color:var(--ink-mute)">합계 ${Number(i.stock || 0).toLocaleString()}</span>` : '')
           || `<b>${Number(i.stock || 0).toLocaleString()}</b>`}</td>
-        <td style="font-size:12px">${(i.supply || []).map(sp => esc(sp.seller)).join('<br>') || '-'}</td>
-        <td style="white-space:nowrap">${(i.supply || []).length
-          ? i.supply.map(sp => '₩' + Number(sp.price || 0).toLocaleString()).join('<br>')
+        <td style="font-size:12px">${itemSupply(i).map(sp => esc(sp.sellerName)).join('<br>') || '-'}</td>
+        <td style="white-space:nowrap">${itemSupply(i).length
+          ? itemSupply(i).map(sp => sp.salePrice !== '' && sp.salePrice != null ? '₩' + Number(sp.salePrice).toLocaleString() : '-').join('<br>')
           : (i.salePrice ? '₩' + Number(i.salePrice).toLocaleString() : '-')}</td></tr>`).join('')}
       </tbody></table></div></div>`
       : ((ITEMS || []).length ? '<div class="empty">검색 결과가 없습니다</div>' : dpEmpty('품목'))}
@@ -5719,6 +5847,7 @@ function wireDataPage() {
     openApxModal(null);
     const c = $('apx-cat'); if (c) { c.value = 'ad'; c.dispatchEvent(new Event('change')); }
   };
+  document.querySelectorAll('[data-item-open]').forEach(b => b.onclick = () => openItemModal(b.dataset.itemOpen));
   [['dp-q-item', v => ITEM_Q = v], ['dp-q-stock', v => STOCK_Q = v], ['dp-q-ord', v => ORD_Q = v]].forEach(([id, set]) => {
     const el = $(id);
     if (!el) return;

@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.697';
+const ERP_VERSION = 'v2.3.698';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58836,12 +58836,33 @@ function _staffItemsPayload() {
     whStock: (i.whStock && typeof i.whStock === 'object') ? i.whStock : {},
     defaultWh: i.defaultWh || '', minStock: Number(i.minStock) || 0,
     salePrice: Number(i.actualSalePrice || i.salePrice) || 0,
+    // v2.3.698: 임원용 품목 현황과 같은 정보를 넘긴다.
+    //   ⚠️ 원가(price)·재고평가액은 넣지 않는다. 공급가는 원가가 아니라 판매업체에 파는 값이라 넣는다.
+    nameEn: i.nameEn || '', consumerPrice: Number(i.consumerPrice) || 0,
+    barcode: i.barcode || '', vendorName: i.vendorName || i.vendor || '',
+    supplyPrices: (Array.isArray(i.supplyPrices) ? i.supplyPrices : []).map(p => ({
+      sellerId: String((p && p.sellerId) != null ? p.sellerId : ''),
+      sellerName: (typeof _itemSupplyPartnerName === 'function') ? _itemSupplyPartnerName(p && p.sellerId) : '',
+      itemName: (p && p.itemName) || '', price: (p && p.price) === '' ? '' : (Number(p && p.price) || 0),
+      salePrice: (p && p.salePrice) === '' ? '' : (Number(p && p.salePrice) || 0),
+      vat: (p && p.vat) === 'include' ? 'include' : 'exclude', stockId: (p && p.stockId) || ''
+    })).filter(p => p.sellerId),
     supply: (Array.isArray(i.supplyPrices) ? i.supplyPrices : []).map(p => ({
       seller: sellers[String(p && p.sellerId)] || '', price: Number(p && p.price) || 0 })).filter(p => p.seller),
     note: i.note || ''
   }));
 }
 async function _staffMirrorItems() { return _staffPush('items_fin', _staffItemsPayload()); }
+
+/* v2.3.698 — 판매업체별 가격 편집에 쓸 거래처 후보(판매업체 + 쇼핑몰). 임원용 드롭다운과 같은 값. */
+function _staffSupplyPartnersPayload() {
+  const out = [];
+  (DB.sellers || []).forEach(s => { if (s && (s.company || s.name)) out.push({ id: String(s.id), name: s.company || s.name }); });
+  (DB.shops || []).forEach(s => { if (s && s.active !== false && s.name) out.push({ id: 'shop:' + s.id, name: s.name }); });
+  return out;
+}
+async function _staffMirrorSupplyPartners() { return _staffPush('supply_partners', _staffSupplyPartnersPayload()); }
+window._staffMirrorSupplyPartners = _staffMirrorSupplyPartners;
 
 // 창고 목록 (이름만)
 function _staffWhPayload() {
@@ -59085,6 +59106,47 @@ async function _staffInboxConsign(verbose) {
   return done;
 }
 window.staffConsignNow = function() { return _staffInboxConsign(true); };
+
+
+/* v2.3.698 — 직원이 올린 판매업체별 판매가·공급가 수정 요청.
+   ⚠️ supplyPrices 한 필드만 덮어쓴다. 품목 레코드를 통째로 assign 하면
+      직원용에 없는 원가·BOM·첨부가 빈 값으로 날아간다. */
+async function _staffInboxItems(verbose) {
+  if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return 0;
+  let done = 0, failed = 0;
+  try {
+    const ref = window._firestoreDoc(window._firebaseDb, 'staff_data', 'inbox_items');
+    const snap = await window._firestoreGetDoc(ref);
+    if (!snap || !snap.exists()) { if (verbose) console.log('📥 [직원 품목수정] 요청 없음'); return 0; }
+    const list = JSON.parse(snap.data().data || '[]') || [];
+    let touched = false;
+    list.forEach(r => {
+      if (!r || r.applied) return;
+      const it = (DB.items || []).find(x => x && String(x.id) === String(r.id));
+      if (!it) { r.applied = true; r.appliedAt = Date.now(); r.result = 'fail'; r.error = '품목을 찾을 수 없습니다'; failed++; touched = true; return; }
+      it.supplyPrices = (Array.isArray(r.supplyPrices) ? r.supplyPrices : []).map(x => ({
+        sellerId: x.sellerId, itemName: String(x.itemName || '').trim(),
+        price: (x.price === '' || x.price == null) ? '' : (Number(x.price) || 0),
+        salePrice: (x.salePrice === '' || x.salePrice == null) ? '' : (Number(x.salePrice) || 0),
+        vat: x.vat === 'include' ? 'include' : 'exclude',
+        stockId: String(x.stockId || '').trim()
+      })).filter(x => x.sellerId);
+      it.updatedAt = Date.now();
+      r.applied = true; r.appliedAt = Date.now(); r.result = 'ok'; delete r.error;
+      done++; touched = true;
+    });
+    if (touched) await window._firestoreSetDoc(ref, { data: JSON.stringify(list), ts: Date.now() });
+  } catch (e) { console.warn('📥 [직원 품목수정] 실패:', e && e.message); }
+  if (done || failed) {
+    try { if (typeof saveDataNow === 'function') await saveDataNow(); else saveData(); } catch(_){}
+    try { if (typeof renderItems === 'function') renderItems(); } catch(_){}
+    try { showNotif('📥 직원용 품목(판매업체 가격) ' + done + '건 반영' + (failed ? ' · ' + failed + '건 실패' : ''),
+      failed ? 'warning' : 'info'); } catch(_){}
+    try { _staffMirrorItems(); } catch(_){}
+  } else if (verbose) { console.log('📥 [직원 품목수정] 처리할 요청이 없습니다'); }
+  return done;
+}
+window.staffItemsNow = function() { return _staffInboxItems(true); };
 
 async function _staffInboxStock(verbose) {
   if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return 0;
@@ -59403,6 +59465,7 @@ function _staffInboxThrottled() {
       _staffInboxOrders().catch(() => {});  // v2.3.689
       _staffInboxAdProjects().catch(() => {});  // v2.3.691
       _staffInboxConsign().catch(() => {});     // v2.3.692
+      _staffInboxItems().catch(() => {});       // v2.3.698
       _staffInboxAds().catch(() => {});     // v2.3.672
     }, 6000);
   } catch(_) {}
@@ -59616,6 +59679,7 @@ window.staffMirrorNow = async function() {
   const ads = await _staffMirrorAds();
   try { await _staffMirrorAdProjects(); } catch(_) {}
   try { await _staffMirrorConsignMeta(); } catch(_) {}
+  try { await _staffMirrorSupplyPartners(); } catch(_) {}
   const consign = await _staffMirrorConsign();
   try { localStorage.setItem('reniv_staff_cal_push', String(Date.now())); } catch(_) {}
   console.log('👥 직원용 미러 재동기:', { board, calendar, accounts, workflow, items, warehouses, orders, pharmacies, cs, newproducts, ads, consign });
