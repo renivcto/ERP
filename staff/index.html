@@ -902,7 +902,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const STAFF_VERSION = 'v0.34.0';
+const STAFF_VERSION = 'v0.35.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -963,6 +963,7 @@ let NP_EDIT = null, NP_TAB = 'over';
 let SMV = [];               // staff_data/inbox_stockmoves — 직원이 올린 재고 요청
 let WHI = [];               // staff_data/inbox_warehouses — 직원이 올린 창고 추가·수정
 let SM_KIND = 'move';       // 요청 모달 종류: in | out | move
+let TRELLO = null;          // staff_data/trello — 직원 전용 Trello 계정 자격증명 (없으면 요청 방식)
 let ADS = [];               // staff_data/ads        — 광고비 미러
 let ADI = [];               // staff_data/inbox_ads  — 직원이 올린 광고비 등록 요청
 let CONS = [];              // staff_data/consign    — 위탁 재고이동 (읽기 전용)
@@ -1428,6 +1429,8 @@ function subscribeData() {
     e => console.warn('[calendar]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'workflow'), s => { WF = parseCol(s, []); rerender(); },
     e => console.warn('[workflow]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'trello'), s => { TRELLO = parseCol(s, null); rerender(); },
+    e => console.warn('[trello]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'ads'), s => { ADS = parseCol(s, []); rerender(); },
     e => console.warn('[ads]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_ads'), s => { ADI = parseCol(s, []); rerender(); },
@@ -4632,7 +4635,7 @@ function pageWorkflow() {
         <div class="wf-bh">
           <span class="t" style="color:${c}">${esc(b.icon || '📋')} ${esc(b.name)}</span>
           ${b.url ? `<button class="btn btn-sm" data-wf-url="${esc(b.url)}">📋 Trello 열기</button>` : ''}
-          <button class="btn btn-sm" data-wf-sync="1" title="임원용 ERP에 Trello 재동기화를 요청합니다">🔄 Trello 동기화</button>
+          <button class="btn btn-sm" data-wf-sync="1" title="${(TRELLO && TRELLO.key && TRELLO.token) ? 'Trello 에서 바로 다시 불러옵니다' : '임원용 ERP에 Trello 재동기화를 요청합니다'}">🔄 Trello 동기화</button>
           <span class="o">${b.owner ? '담당자 <b>' + esc(b.owner) + '</b>' : ''}</span>
           <span class="right">
             <button class="btn btn-sm ${open ? '' : 'btn-p'}" data-wf-open="${esc(b.key)}">${open ? '▼ 접기' : '▶ 펼치기'}</button>
@@ -4662,13 +4665,58 @@ function wireWorkflow() {
       if (el) try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
     }, 60);
   });
-  // Trello 동기화 — 직원용엔 API 키가 없다. 임원용에 요청을 올린다.
-  document.querySelectorAll('[data-wf-sync]').forEach(b => b.onclick = async () => {
+  document.querySelectorAll('[data-wf-sync]').forEach(b => b.onclick = () => wfSync(b));
+}
+/* Trello 동기화.
+   직원 전용 계정 자격증명(staff_data/trello)이 있으면 여기서 바로 Trello 를 부른다.
+   없으면 종전처럼 임원용에 요청만 올린다.
+   ⚠️ 자격증명은 파일이 아니라 staff_data 에만 둔다 — 이 파일은 공개 저장소다. */
+async function wfSync(btn) {
+  const cred = TRELLO && TRELLO.key && TRELLO.token ? TRELLO : null;
+  if (!cred) {
     try {
       await saveCol('inbox_wfsync', { at: Date.now(), by: ME.name, byUid: ME.uid });
       toast('동기화를 요청했습니다 — 임원용 ERP를 열면 Trello를 다시 불러옵니다');
     } catch (e) { toast('요청 실패: ' + e.message, true); }
-  });
+    return;
+  }
+  if (DEMO) { toast('데모 모드 — 실제 동기화는 하지 않습니다'); return; }
+  const prev = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 동기화 중…'; }
+  try {
+    const boards = (WF || []).filter(b => b && b.boardId);
+    if (!boards.length) { toast('보드 정보가 없습니다 — 임원용에서 한 번 동기화해 주세요', true); return; }
+    const bust = '&_=' + Date.now();
+    const out = [];
+    for (const b of boards) {
+      const base = 'https://api.trello.com/1/boards/' + encodeURIComponent(b.boardId);
+      const auth = '?key=' + encodeURIComponent(cred.key) + '&token=' + encodeURIComponent(cred.token);
+      const lr = await fetch(base + '/lists' + auth + '&filter=open' + bust, { cache: 'no-store' });
+      if (!lr.ok) throw new Error(b.name + ' 접근 실패 (' + lr.status + ')');
+      const lists = await lr.json();
+      const cr = await fetch(base + '/cards' + auth + '&fields=all&filter=visible' + bust, { cache: 'no-store' });
+      const cards = await cr.json();
+      out.push(Object.assign({}, b, {
+        lists: (lists || []).map(l => ({ id: String(l.id), name: String(l.name || '') })),
+        cards: (cards || []).map(c => ({
+          id: String(c.id), idList: String(c.idList || ''), name: String(c.name || '').slice(0, 200),
+          url: c.shortUrl || c.url || b.url, due: c.due || '', start: c.start || '',
+          done: !!(c.dueComplete || (c.badges && c.badges.dueComplete) || c.isComplete),
+          labels: (Array.isArray(c.labels) ? c.labels : []).map(l => l && l.color).filter(Boolean).slice(0, 6),
+          cover: (c.cover && c.cover.color) || ''
+        }))
+      }));
+    }
+    await saveCol('workflow', out);   // 임원용 미러와 같은 문서·같은 모양
+    WF = out;
+    const n = out.reduce((s, b) => s + b.cards.length, 0);
+    toast('Trello 동기화 완료 — 카드 ' + n + '장');
+    rerender();
+  } catch (e) {
+    toast('동기화 실패: ' + (e && e.message || e), true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = prev; }
+  }
 }
 
 /* ═══════════ 르니브 업무 일정 (v0.18.0 · 기획서 p11) ═══════════

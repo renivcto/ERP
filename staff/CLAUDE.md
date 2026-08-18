@@ -77,6 +77,7 @@ Google 로그인
 | `partners_coop` / `partners_seller` / `partners_shop` | 거래처 — 협력사(직원 직접입력) / 판매업체 / 쇼핑몰. `{id, company, ...}` |
 | `accounts` | **임원용 미러** — 외부 계정 원본. `{id, cat, name, loginId, pw, email, url, note}` |
 | `accounts_staff` | 직원이 등록한 계정. 임원용에는 읽기 전용으로 표시된다 |
+| `trello` | **직원 전용 Trello 계정 자격증명** `{key, token, updatedAt, by}`. 임원용 사용자 관리 → 🔄 직원용 Trello 계정 에서 저장. 비어 있으면 직접 동기화가 꺼지고 `inbox_wfsync` 요청 방식으로 폴백 |
 
 ### 임원용 → 직원용 데이터 흐름 (v0.18~0.19 · 기획서 p10·p11·p13·p14)
 
@@ -148,8 +149,29 @@ Google 로그인
 - 워크플로우: `_STAFF_WF_BOARDS` 가 대상 보드 목록이다. 여기에만 이름을 넣으면 된다.
 - 캘린더: `_staffCalPayload()` 가 `board !== '신제품'` 으로 거른다.
   직원 앱도 `calRows()` 에서 한 번 더 거른다 — 미러가 갱신되기 전에도 화면에서 즉시 빠지게.
-- 직원용은 **읽기 전용**이다. Trello 쓰기는 API 키가 필요한데 그 키는 `settings/`(관리자 전용 read)에 있다.
-  카드 클릭은 Trello 링크를 열 뿐이다.
+- 직원용은 **읽기 전용**이다. 카드 클릭은 Trello 링크를 열 뿐이다.
+
+##### 🔄 Trello 동기화 — 직원 전용 계정 (v0.35.0 / 임원용 v2.3.679)
+
+임원 토큰은 `settings/`(관리자 전용 read)에 있어 직원이 못 읽는다. 그래서 처음엔
+직원이 `inbox_wfsync` 에 요청만 올리고 임원용이 열릴 때 `loadTrelloCards()` 가 돌았다.
+
+이제 **직원 전용 Trello 계정**을 쓴다.
+
+- 그 계정을 **3개 보드에만 초대**하고, 그 계정으로 발급한 key/token 을 `staff_data/trello` 에 넣는다.
+- 있으면 직원용 `wfSync()` 가 `api.trello.com` 을 직접 호출해 `staff_data/workflow` 를 갱신한다
+  (임원용 미러와 **같은 문서·같은 모양** — `_staffWfPayload()` 를 그대로 따라간다).
+- 없으면 종전 요청 방식으로 폴백한다.
+
+⚠️ **이 토큰은 활성 직원이면 콘솔에서 꺼내 볼 수 있다.** 그래서 반드시 별도 계정이어야 한다 —
+유출돼도 이미 보고 있는 3개 보드가 전부다. 임원 본인 토큰을 넣으면 신제품 개발 보드까지 열린다.
+저장 모달의 `testStaffTrello()` 가 신제품 보드 접근을 일부러 시도해서, 열리면 경고를 띄운다.
+
+⚠️ **파일에 하드코딩 금지.** `staff/index.html` 은 공개 저장소라 로그인 없이 `curl` 로 읽힌다.
+자격증명은 `staff_data/trello`(활성 직원·임원만 read) 에만 둔다.
+
+- 직원용이 API 를 부르려면 보드 ID 가 필요해 `_staffWfPayload()` 가 `boardId` 를 같이 실어 보낸다.
+  미러가 한 번도 안 돌았으면 `boardId` 가 없어 '임원용에서 한 번 동기화해 주세요' 로 안내한다.
 
 #### 자료실 = 미러가 아니다 (v0.27.0)
 
