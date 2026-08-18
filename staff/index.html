@@ -417,6 +417,29 @@ tr:last-child td { border-bottom:none; }
 .btn.np-done { background:#fff; color:#92400e; border-color:#fcd34d; font-weight:700; }
 .btn.np-done:hover { background:#fffbeb; }
 .np-badge { background:#92400e; color:#fff; border-radius:99px; padding:1px 8px; font-size:11px; font-weight:700; margin-left:6px; }
+.np-tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+.np-tabs .t { border:1px solid var(--line); background:var(--line-soft); color:var(--ink-soft); border-radius:8px;
+  padding:8px 15px; font-size:13px; font-weight:700; cursor:pointer; }
+.np-tabs .t.on { background:#0f172a; border-color:#0f172a; color:#fff; }
+.tl-wrap { overflow-x:auto; }
+.tl { min-width:760px; }
+.tl-head { display:grid; font-size:11px; color:var(--ink-mute); font-weight:700; border-bottom:1px solid var(--line); padding-bottom:5px; margin-bottom:8px; }
+.tl-row { display:grid; align-items:center; gap:0; padding:6px 0; border-bottom:1px solid var(--line-soft); }
+.tl-name { font-size:12.5px; font-weight:700; padding-right:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tl-track { position:relative; height:20px; }
+.tl-bar { position:absolute; top:3px; height:14px; border-radius:99px; font-size:10px; color:#fff; font-weight:700;
+  display:flex; align-items:center; justify-content:center; white-space:nowrap; overflow:hidden; }
+.tl-tick { position:absolute; top:0; bottom:0; border-left:1px dashed var(--line); }
+.pm-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:12px; }
+.pm-card { border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:13px 15px; }
+.pm-card .h { font-size:13.5px; font-weight:800; margin-bottom:7px; display:flex; align-items:center; gap:6px; }
+.pm-tag { display:inline-block; background:var(--brand-soft); color:var(--brand-deep); border-radius:99px; padding:2px 9px; font-size:11.5px; font-weight:700; margin:0 4px 4px 0; }
+.ins-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:12px; }
+.ins-card { border:1px solid var(--line); border-radius:12px; background:var(--panel); overflow:hidden; }
+.ins-card img { width:100%; height:150px; object-fit:cover; display:block; background:var(--line-soft); }
+.ins-card .b { padding:11px 13px; }
+.ins-card .t { font-size:13.5px; font-weight:700; line-height:1.4; }
+.ins-card .m { font-size:11.5px; color:var(--ink-mute); margin-top:5px; line-height:1.6; }
 .np-col { border:1px solid var(--line); border-top:3px solid; border-radius:12px; background:var(--panel); padding:12px; }
 .np-col .h { display:flex; align-items:center; gap:7px; font-size:13.5px; font-weight:800; margin-bottom:10px; }
 .np-col .h .n { margin-left:auto; background:var(--line-soft); border-radius:99px; padding:1px 9px; font-size:11px; }
@@ -1248,7 +1271,7 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
 import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
-const STAFF_VERSION = 'v0.57.0';
+const STAFF_VERSION = 'v0.58.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1298,6 +1321,10 @@ let ITEMS = [];             // staff_data/items_fin   — 완제품 품목 (원�
 let WHS = [];               // staff_data/warehouses  — 창고 목록
 let ORDERS = [];            // staff_data/orders      — 주문 (고객정보 없음)
 let ORDI = [];              // staff_data/inbox_orders — 직원이 올린 주문 수정 요청
+let INS = [];               // staff_data/insights   — 인사이트 보드
+let PMAP = null;            // staff_data/productmap — 제품 포트폴리오
+let FPT = null;             // staff_data/fptimeline — 완제품 생산 타임라인
+let NP_TOPTAB = 'board';    // 신제품 개발 상단 탭: board | timeline | portfolio | insight
 let SHIST = [];             // staff_data/stock_history  — 입출고 내역 (단가·금액 없음)
 let STOCK_TAB = 'now';      // 재고 관리 탭: now(재고 현황) | hist(입출고 내역)
 let SUPP = [];              // staff_data/supply_partners — 판매업체+쇼핑몰 (가격행 드롭다운)
@@ -1481,6 +1508,12 @@ if (DEMO) {
                contact: '김담당', phone: '02-1234-5678', email: 'kim@example.com', address: '세종시', note: '' }];
   PT.seller = [{ id: 's1', company: '바로팜', bizno: '', ceo: '', contact: '이담당', phone: '02-2222-3333',
                  email: '', address: '', channel: '약국 B2B', note: '입점 15개 약국' }];
+  INS = [{ id: 'in1', title: '경쟁사 A 리쥬브 크림', category: '경쟁사', brand: 'A브랜드', price: 38000,
+           note: '3중 장벽 소구 · 올리브영 1위', url: 'https://example.com', thumb: '' },
+         { id: 'in2', title: '엑소좀 원료 트렌드', category: '원료', note: '2026 상반기 엑소좀 함량 경쟁 심화' }];
+  PMAP = { skinConcerns: ['주름', '미백', '수분'], productTypes: ['크림', '세럼', '패치'],
+           channels: ['약국', '온라인', '홈쇼핑'] };
+  FPT = { updatedAt: 0, milestones: { '320 리뉴 크림': [{ name: '320 리뉴 크림 생산', start: '2026-08-01', end: '2026-09-15', stage: '생산' }] } };
   SHIST = [{ id: 'h1', date: '2026-08-18', itemId: 'i1', itemName: '3중 장벽 20층 리뉴 크림 30ml', type: 'in', qty: 164, adjust: true, fromWh: '', toWh: 'w1', note: '재고 수정(르니브 창고): 1,760 → 1,924 · 실사' },
            { id: 'h2', date: '2026-08-13', itemId: 'i2', itemName: '글로우샷 30ml', type: 'out', qty: 5, fromWh: 'w3', toWh: '', note: '바로팜 자동차감 [37314378]' },
            { id: 'h3', date: '2026-08-12', itemId: 'i1', itemName: '3중 장벽 20층 리뉴 크림 30ml', type: 'move', qty: 100, fromWh: 'w1', toWh: 'w2', note: '위탁 재고이동' }];
@@ -1821,6 +1854,12 @@ function subscribeData() {
     e => console.warn('[trello]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'ads'), s => { ADS = parseCol(s, []); rerender(); },
     e => console.warn('[ads]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'insights'), s => { INS = parseCol(s, []); rerender(); },
+    e => console.warn('[insights]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'productmap'), s => { PMAP = parseCol(s, null); rerender(); },
+    e => console.warn('[productmap]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'fptimeline'), s => { FPT = parseCol(s, null); rerender(); },
+    e => console.warn('[fptimeline]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'stock_history'), s => { SHIST = parseCol(s, []); rerender(); },
     e => console.warn('[stock_history]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'supply_partners'), s => { SUPP = parseCol(s, []); rerender(); },
@@ -4395,6 +4434,148 @@ function npAll() {
   return out.concat(Object.keys(inbox).map(k => Object.assign({}, inbox[k], { src: 'staff' })));
 }
 function npFind(id) { return npAll().find(p => String(p.id) === String(id)); }
+
+/* ═══════════ 신제품 개발 — 타임라인 · 포트폴리오 · 인사이트 (v0.58.0) ═══════════
+   임원용 4탭 구성 그대로. ⚠️ 원가·마진·수익성은 미러에 아예 없다. */
+function npTabsHtml() {
+  const t = [['board', '🌱 프로젝트'], ['timeline', '📅 타임라인'],
+             ['portfolio', '📦 제품 포트폴리오'], ['insight', '💡 인사이트 보드']];
+  return `<div class="np-tabs">${t.map(([k, l]) =>
+    `<button class="t ${NP_TOPTAB === k ? 'on' : ''}" data-np-top="${k}">${l}</button>`).join('')}</div>`;
+}
+/* ── 타임라인 ── */
+function tlMonths(items) {
+  const ds = [];
+  items.forEach(x => { if (x.start) ds.push(x.start); if (x.end) ds.push(x.end); });
+  if (!ds.length) { const t = today(); ds.push(t); }
+  ds.sort();
+  const a = new Date(ds[0] + 'T00:00:00'), b = new Date(ds[ds.length - 1] + 'T00:00:00');
+  const out = [];
+  const cur = new Date(a.getFullYear(), a.getMonth(), 1);
+  const last = new Date(b.getFullYear(), b.getMonth(), 1);
+  while (cur <= last && out.length < 36) {
+    out.push(cur.getFullYear() + '-' + String(cur.getMonth() + 1).padStart(2, '0'));
+    cur.setMonth(cur.getMonth() + 1);
+  }
+  return out.length ? out : [today().slice(0, 7)];
+}
+function tlHtml(title, items, color) {
+  if (!items.length) return '';
+  const months = tlMonths(items);
+  const first = new Date(months[0] + '-01T00:00:00');
+  const lastM = months[months.length - 1].split('-').map(Number);
+  const end = new Date(lastM[0], lastM[1], 0);
+  const span = Math.max(1, (end - first) / 86400000);
+  const pos = d => {
+    const x = new Date(String(d) + 'T00:00:00');
+    if (isNaN(x.getTime())) return null;
+    return Math.max(0, Math.min(100, ((x - first) / 86400000) / span * 100));
+  };
+  const grid = 'grid-template-columns:190px 1fr';
+  return `<div class="card" style="margin-bottom:14px"><div class="card-h">${title}
+      <span class="sub">${items.length}건 · ${months[0]} ~ ${months[months.length - 1]}</span></div>
+    <div class="card-b tl-wrap"><div class="tl">
+      <div class="tl-head" style="${grid}"><div>이름</div>
+        <div style="display:grid;grid-template-columns:repeat(${months.length},1fr)">
+          ${months.map(m => `<div style="text-align:center">${m.slice(2).replace('-', '.')}</div>`).join('')}</div></div>
+      ${items.map(it => {
+        const s = pos(it.start), e = pos(it.end || it.start);
+        const l = s == null ? 0 : s, w = (s == null || e == null) ? 0 : Math.max(1.5, e - l);
+        return `<div class="tl-row" style="${grid}">
+          <div class="tl-name" title="${esc(it.name)}">${esc(it.name)}</div>
+          <div class="tl-track">
+            ${months.map((m, i) => i ? `<span class="tl-tick" style="left:${(i / months.length * 100).toFixed(2)}%"></span>` : '').join('')}
+            ${w ? `<div class="tl-bar" style="left:${l.toFixed(2)}%;width:${w.toFixed(2)}%;background:${it.color || color}"
+                title="${esc(it.name)} · ${esc(it.start || '')}${it.end ? ' ~ ' + esc(it.end) : ''}">${esc(it.label || '')}</div>` : ''}
+          </div></div>`;
+      }).join('')}
+    </div></div></div>`;
+}
+function pageNpTimeline() {
+  const np = npAll().filter(p => !npIsDrop(p)).map(p => ({
+    name: p.name || '(이름 없음)',
+    start: p.startDate || p.createdDate || (p.launchDate || '').slice(0, 10),
+    end: p.launchDate || p.endDate || p.startDate || '',
+    label: p.status || '', color: npStage(p.stage).color,
+  })).filter(x => x.start);
+  const fp = [];
+  const ms = (FPT && FPT.milestones) ? FPT.milestones : {};
+  Object.keys(ms).forEach(k => {
+    const v = ms[k];
+    (Array.isArray(v) ? v : [v]).forEach(x => {
+      if (!x || !(x.start || x.date)) return;
+      fp.push({ name: x.name || x.title || k, start: x.start || x.date, end: x.end || x.start || x.date,
+                label: x.stage || '', color: x.color || '#0f766e' });
+    });
+  });
+  return `${npTabsHtml()}
+    ${np.length || fp.length ? tlHtml('📅 신제품 타임라인', np, '#7c3aed') + tlHtml('🏭 완제품 생산 타임라인', fp, '#0f766e')
+      : `<div class="ph"><div class="big">📅</div><h3>타임라인에 표시할 일정이 없습니다</h3>
+          <p>프로젝트에 시작일·출시일이 들어가면 여기에 막대로 나옵니다.
+             임원용 데이터가 아직이면 임원용 콘솔에서 <b>staffMirrorNow()</b> 를 실행하세요.</p></div>`}`;
+}
+/* ── 제품 포트폴리오 ── */
+function pageNpPortfolio() {
+  const d = PMAP || {};
+  const groups = [['skinConcerns', '🎯 피부 고민'], ['productTypes', '🧴 제형 · 제품 유형'], ['channels', '🛒 판매 채널']];
+  const has = groups.some(([k]) => Array.isArray(d[k]) && d[k].length);
+  const cell = v => {
+    if (v == null) return '';
+    if (typeof v === 'string') return `<span class="pm-tag">${esc(v)}</span>`;
+    const nm = v.name || v.label || v.title || '';
+    const items = v.items || v.products || v.list;
+    return `<div class="pm-card"><div class="h">${esc(nm)}</div>
+      ${Array.isArray(items) && items.length
+        ? items.map(x => `<span class="pm-tag">${esc(typeof x === 'string' ? x : (x && (x.name || x.title)) || '')}</span>`).join('')
+        : '<div class="hint" style="margin:0">등록된 항목이 없습니다</div>'}</div>`;
+  };
+  return `${npTabsHtml()}
+    ${has ? groups.map(([k, label]) => {
+      const arr = Array.isArray(d[k]) ? d[k] : [];
+      if (!arr.length) return '';
+      return `<div class="card" style="margin-bottom:14px"><div class="card-h">${label}
+          <span class="sub">${arr.length}개</span></div>
+        <div class="card-b">${arr.every(x => typeof x === 'string')
+          ? arr.map(cell).join('')
+          : `<div class="pm-grid">${arr.map(cell).join('')}</div>`}</div></div>`;
+    }).join('')
+    : `<div class="ph"><div class="big">📦</div><h3>제품 포트폴리오 데이터가 아직 없습니다</h3>
+        <p>임원용 ERP를 한 번 열면 자동으로 넘어옵니다. 즉시 반영은 임원용 콘솔에서 <b>staffMirrorNow()</b>.</p></div>`}`;
+}
+/* ── 인사이트 보드 ── */
+let INS_CAT = '';
+function insCats() {
+  const m = {};
+  (INS || []).forEach(x => { const c = (x && (x.category || x.cat)) || '기타'; m[c] = (m[c] || 0) + 1; });
+  return Object.keys(m).sort().map(k => ({ k, n: m[k] }));
+}
+function pageNpInsight() {
+  const all = (INS || []).filter(x => x && (!INS_CAT || (x.category || x.cat || '기타') === INS_CAT));
+  const thumb = x => {
+    const t = x.thumb || (Array.isArray(x.thumbs) ? x.thumbs[0] : '');
+    return (typeof t === 'string' && t.indexOf('http') === 0) ? t : '';
+  };
+  return `${npTabsHtml()}
+    <div class="ord-chips">
+      <button class="ord-chip ${INS_CAT ? '' : 'on'}" data-ins-cat="">전체 ${(INS || []).length}</button>
+      ${insCats().map(c => `<button class="ord-chip ${INS_CAT === c.k ? 'on' : ''}" data-ins-cat="${esc(c.k)}">${esc(c.k)} ${c.n}</button>`).join('')}
+    </div>
+    ${all.length ? `<div class="ins-grid">${all.map(x => `
+      <div class="ins-card">
+        ${thumb(x) ? `<img src="${esc(thumb(x))}" alt="">` : ''}
+        <div class="b">
+          <div class="t">${esc(x.title || x.name || '(제목 없음)')}</div>
+          <div class="m">
+            ${x.category || x.cat ? `<span class="dp-chip">${esc(x.category || x.cat)}</span> ` : ''}
+            ${x.brand ? esc(x.brand) + ' · ' : ''}${x.price ? '₩' + Number(x.price).toLocaleString() : ''}
+            ${x.note || x.memo ? `<div style="margin-top:5px;color:var(--ink-soft)">${esc(String(x.note || x.memo).slice(0, 160))}</div>` : ''}
+            ${x.url ? `<div style="margin-top:6px"><a href="${esc(x.url)}" target="_blank" rel="noopener" style="color:var(--brand-deep)">🔗 링크 열기</a></div>` : ''}
+          </div>
+        </div>
+      </div>`).join('')}</div>`
+      : `<div class="ph"><div class="big">💡</div><h3>인사이트가 아직 없습니다</h3>
+          <p>임원용 ERP를 한 번 열면 자동으로 넘어옵니다. 즉시 반영은 임원용 콘솔에서 <b>staffMirrorNow()</b>.</p></div>`}`;
+}
 /* 임원용 보드와 같은 구성 — 보드에는 3열만, DROP 과 개발 완료는 버튼으로 뺀다 */
 const NP_BOARD_STAGES = ['idea', 'develop', 'developing'];
 let NP_STATUS = '';
@@ -4429,6 +4610,14 @@ function openNpList(kind) {
   });
 }
 function pageNewProduct() {
+  if (NP_TOPTAB !== 'board') {
+    const body = NP_TOPTAB === 'timeline' ? pageNpTimeline()
+               : NP_TOPTAB === 'portfolio' ? pageNpPortfolio() : pageNpInsight();
+    return `<div class="pg on">
+      <div class="pg-h"><h1>신제품 개발<sup class="sync" style="font-size:13px" title="임원용과 연동됩니다"> ⓘ</sup></h1></div>
+      <div class="pg-sub">임원용 ERP와 연동 · <b>수익성(원가) 정보는 표시되지 않습니다</b></div>
+      ${body}</div>`;
+  }
   const all = npAll();
   const board = npBoardCards(all);
   const drops = all.filter(npIsDrop).length;
@@ -4438,6 +4627,7 @@ function pageNewProduct() {
   return `<div class="pg on">
     <div class="pg-h"><h1>신제품 개발<sup class="sync" style="font-size:13px" title="임원용과 읽기·쓰기 모두 연동됩니다"> ⓘ</sup></h1></div>
     <div class="pg-sub">${board.length}개 프로젝트 · 임원용 ERP와 양방향 연동 · <b>수익성(원가) 정보는 표시되지 않습니다</b></div>
+    ${npTabsHtml()}
     <div class="np-top">
       <select class="fi" id="np-status">
         <option value=""${NP_STATUS === '' ? ' selected' : ''}>전체 상태</option>
@@ -4553,6 +4743,8 @@ function wireNewProduct() {
   const ns = $('np-status'); if (ns) ns.onchange = () => { NP_STATUS = ns.value; renderPage(); };
   const nd = $('btn-np-drop'); if (nd) nd.onclick = () => openNpList('drop');
   const ndn = $('btn-np-done'); if (ndn) ndn.onclick = () => openNpList('done');
+  document.querySelectorAll('[data-np-top]').forEach(b => b.onclick = () => { NP_TOPTAB = b.dataset.npTop; renderPage(); });
+  document.querySelectorAll('[data-ins-cat]').forEach(b => b.onclick = () => { INS_CAT = b.dataset.insCat; renderPage(); });
 }
 
 /* ═══════════ 약국 관리 (v0.30.0 · 기획서(2) 슬라이드 5) ═══════════

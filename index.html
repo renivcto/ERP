@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.703';
+const ERP_VERSION = 'v2.3.704';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -59006,6 +59006,56 @@ function _staffNpPayload() {
   });
 }
 async function _staffMirrorNp() { return _staffPush('newproducts', _staffNpPayload()); }
+
+/* ══════════ v2.3.704 — 신제품 개발 나머지 3탭 데이터 미러 ══════════
+   ⚠️ 원가·마진·수익성만 뺀다(사용자 지시). 인사이트의 '가격' 은 경쟁사 시장가라 남긴다.
+   ⚠️ base64 이미지는 넣지 않는다 — 공개 URL 만. 문서 1MB 한도를 지킨다. */
+const _STAFF_INS_DENY = ['cost', 'bomCost', 'margin', 'marginRate', 'profit', 'netMargin', 'roas'];
+function _staffPubOnly(v) {
+  if (Array.isArray(v)) return v.filter(x => typeof x === 'string' && x.indexOf('http') === 0);
+  return (typeof v === 'string' && v.indexOf('http') === 0) ? v : '';
+}
+function _staffInsightsPayload() {
+  return (DB.insights || []).filter(Boolean).map(it => {
+    const out = {};
+    Object.keys(it).forEach(k => {
+      if (_STAFF_INS_DENY.indexOf(k) >= 0) return;
+      if (k.charAt(0) === '_') return;
+      let v = it[k];
+      if (/thumb|img|image|photo/i.test(k)) v = _staffPubOnly(v);
+      if (typeof v === 'string' && v.length > 4000) v = v.slice(0, 4000);
+      out[k] = v;
+    });
+    return out;
+  });
+}
+async function _staffMirrorInsights() { return _staffPush('insights', _staffInsightsPayload()); }
+
+/* 제품 포트폴리오 — 원본은 shared/product_map. 지연 로드라 못 읽었으면 밀지 않는다. */
+async function _staffMirrorProductMap() {
+  try { if (!window._productMapData && typeof _pmLoad === 'function') await _pmLoad(); } catch (_) {}
+  const d = window._productMapData;
+  if (!d || typeof d !== 'object') {
+    console.warn('[미러] 제품 포트폴리오를 아직 못 읽었습니다 — 건너뜁니다');
+    return 0;
+  }
+  return _staffPush('productmap', d);
+}
+
+/* 완제품 생산 타임라인 — 원본은 settings/fp_milestones(관리자 전용 read)라 직원은 못 읽는다. */
+async function _staffMirrorFpTimeline() {
+  try { if (!window._fpMilestoneData && typeof _fpLoad === 'function') await _fpLoad(); } catch (_) {}
+  const d = window._fpMilestoneData;
+  if (!d || typeof d !== 'object' || !d.milestones) {
+    console.warn('[미러] 완제품 타임라인을 아직 못 읽었습니다 — 건너뜁니다');
+    return 0;
+  }
+  return _staffPush('fptimeline', { updatedAt: d.updatedAt || 0, milestones: d.milestones });
+}
+window._staffMirrorInsights = _staffMirrorInsights;
+window._staffMirrorProductMap = _staffMirrorProductMap;
+window._staffMirrorFpTimeline = _staffMirrorFpTimeline;
+
 window._staffMirrorNp = _staffMirrorNp;
 
 /* ══════════ v2.3.671 — 직원 재고 요청 처리 (기획서(2) 슬라이드 8) ══════════
@@ -59598,6 +59648,9 @@ function _staffMirrorCalendarThrottled() {
       _staffMirrorConsignMeta().catch(() => {});    // v2.3.692 위탁 기준정보(판매업체·공급단가)
       _staffMirrorSupplyPartners().catch(() => {}); // v2.3.698 거래처 후보
       _staffMirrorStockHist().catch(() => {});      // v2.3.700 입출고 내역
+      _staffMirrorInsights().catch(() => {});       // v2.3.704 인사이트 보드
+      _staffMirrorProductMap().catch(() => {});     // v2.3.704 제품 포트폴리오
+      _staffMirrorFpTimeline().catch(() => {});     // v2.3.704 완제품 생산 타임라인
     }, 4000);
   } catch(_) {}
 }
@@ -59758,6 +59811,9 @@ window.staffMirrorNow = async function() {
   try { await _staffMirrorConsignMeta(); } catch(_) {}
   try { await _staffMirrorSupplyPartners(); } catch(_) {}
   try { await _staffMirrorStockHist(); } catch(_) {}
+  try { await _staffMirrorInsights(); } catch(_) {}
+  try { await _staffMirrorProductMap(); } catch(_) {}
+  try { await _staffMirrorFpTimeline(); } catch(_) {}
   const consign = await _staffMirrorConsign();
   try { localStorage.setItem('reniv_staff_cal_push', String(Date.now())); } catch(_) {}
   console.log('👥 직원용 미러 재동기:', { board, calendar, accounts, workflow, items, warehouses, orders, pharmacies, cs, newproducts, ads, consign });
