@@ -6339,7 +6339,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.691';
+const ERP_VERSION = 'v2.3.692';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58959,6 +58959,76 @@ async function _staffInboxOrders(verbose) {
 }
 window.staffOrdersNow = function() { return _staffInboxOrders(true); };
 
+
+/* v2.3.692 — 위탁 출고에 필요한 기준정보(판매업체·공급단가)를 직원용에 넘긴다.
+   공급단가는 원가가 아니라 공급가다(판매업체에 파는 값) — 영업 실무에 필요하다. */
+function _staffConsignMetaPayload() {
+  return {
+    sellers: (DB.sellers || []).filter(Boolean).map(s => ({ id: String(s.id), name: s.company || s.name || '' })),
+    prices: Object.assign({}, (window._consign && window._consign.prices) || {}),
+  };
+}
+async function _staffMirrorConsignMeta() { return _staffPush('consign_meta', _staffConsignMetaPayload()); }
+window._staffMirrorConsignMeta = _staffMirrorConsignMeta;
+
+/* 직원이 올린 위탁 출고 요청 — 재고 이동은 _applyStockMove 로 임원용 규칙을 그대로 쓴다.
+   ⚠️ 실패는 조용히 넘기지 않는다. result:'fail' + error 로 되돌려 직원 화면에 사유를 띄운다. */
+async function _staffInboxConsign(verbose) {
+  if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return 0;
+  let done = 0, failed = 0;
+  try {
+    const ref = window._firestoreDoc(window._firebaseDb, 'staff_data', 'inbox_consign');
+    const snap = await window._firestoreGetDoc(ref);
+    if (!snap || !snap.exists()) { if (verbose) console.log('📥 [직원 위탁출고] 요청 없음'); return 0; }
+    const list = JSON.parse(snap.data().data || '[]') || [];
+    if (!list.some(r => r && !r.applied)) { if (verbose) console.log('📥 [직원 위탁출고] 처리할 요청이 없습니다'); return 0; }
+    try { if (typeof _consignLoad === 'function') await _consignLoad(true); } catch(_) {}
+    try { if (typeof _whEnsureLoaded === 'function') await _whEnsureLoaded(); } catch(_) {}
+    window._consign = window._consign || {};
+    if (!Array.isArray(window._consign.shipments)) window._consign.shipments = [];
+    let touched = false, saved = false;
+    for (const r of list) {
+      if (!r || r.applied) continue;
+      const errs = [], moved = [];
+      (Array.isArray(r.lines) ? r.lines : []).forEach(ln => {
+        const it = (DB.items || []).find(i => i && String(i.id) === String(ln.itemId));
+        if (!it) { errs.push((ln.name || ln.itemId) + ': 품목을 찾을 수 없습니다'); return; }
+        const res = _applyStockMove(it, r.whFromId, r.whToId, Number(ln.qty) || 0);
+        if (!res.ok) errs.push((ln.name || it.name) + ': ' + res.err);
+        else moved.push({ itemId: String(it.id), name: it.name || ln.name || '', spec: ln.spec || it.spec || '',
+                          qty: Number(ln.qty) || 0, price: Number(ln.price) || 0 });
+      });
+      r.applied = true; r.appliedAt = Date.now();
+      if (!moved.length) {
+        r.result = 'fail'; r.error = errs.join(' / ') || '이동된 품목이 없습니다';
+        failed++; touched = true; continue;
+      }
+      let sid; do { sid = Date.now() * 1000 + Math.floor(Math.random() * 1000); }
+      while (window._consign.shipments.some(x => x && x.id === sid));
+      window._consign.shipments.push({
+        id: sid, sellerId: r.sellerId, sellerName: r.sellerName || '', date: r.date || '',
+        vatMode: r.vatMode || '', whFromId: r.whFromId, whFromName: r.whFromId === '__un__' ? '미지정' : _whName(r.whFromId),
+        whToId: r.whToId, whToName: _whName(r.whToId), lines: moved,
+        note: r.note || '', createdAt: Date.now(), createdBy: (r._by || '') + ' (직원용 ERP)'
+      });
+      r.result = errs.length ? 'partial' : 'ok';
+      if (errs.length) r.error = errs.join(' / '); else delete r.error;
+      done++; touched = true; saved = true;
+    }
+    if (saved) { try { await _consignSaveShipments(); } catch (e) { console.warn('[CONSIGN] 저장 실패', e); } }
+    if (touched) await window._firestoreSetDoc(ref, { data: JSON.stringify(list), ts: Date.now() });
+  } catch (e) { console.warn('📥 [직원 위탁출고] 실패:', e && e.message); }
+  if (done || failed) {
+    try { if (typeof saveDataNow === 'function') await saveDataNow(); else saveData(); } catch(_){}
+    try { if (typeof renderStock === 'function') renderStock(); } catch(_){}
+    try { showNotif('📥 직원용 위탁 출고 ' + done + '건 반영' + (failed ? ' · ' + failed + '건 실패' : ''),
+      failed ? 'warning' : 'info'); } catch(_){}
+    try { _staffMirrorConsign(); _staffMirrorItems(); } catch(_){}
+  }
+  return done;
+}
+window.staffConsignNow = function() { return _staffInboxConsign(true); };
+
 async function _staffInboxStock(verbose) {
   if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return 0;
   let done = 0, failed = 0;
@@ -59268,6 +59338,7 @@ function _staffInboxThrottled() {
       _staffInboxStock().catch(() => {});   // v2.3.671
       _staffInboxOrders().catch(() => {});  // v2.3.689
       _staffInboxAdProjects().catch(() => {});  // v2.3.691
+      _staffInboxConsign().catch(() => {});     // v2.3.692
       _staffInboxAds().catch(() => {});     // v2.3.672
     }, 6000);
   } catch(_) {}
@@ -59480,6 +59551,7 @@ window.staffMirrorNow = async function() {
   const newproducts = await _staffMirrorNp();
   const ads = await _staffMirrorAds();
   try { await _staffMirrorAdProjects(); } catch(_) {}
+  try { await _staffMirrorConsignMeta(); } catch(_) {}
   const consign = await _staffMirrorConsign();
   try { localStorage.setItem('reniv_staff_cal_push', String(Date.now())); } catch(_) {}
   console.log('👥 직원용 미러 재동기:', { board, calendar, accounts, workflow, items, warehouses, orders, pharmacies, cs, newproducts, ads, consign });

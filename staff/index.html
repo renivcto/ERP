@@ -740,6 +740,34 @@ tr:last-child td { border-bottom:none; }
   </div>
 </div>
 
+<!-- 위탁 출고 등록 (v0.46.0) -->
+<div class="ovl" id="ovl-cg">
+  <div class="modal" style="max-width:720px">
+    <div class="modal-h"><span class="t">🚚 위탁 출고 등록</span><button class="modal-x" data-close="ovl-cg">✕</button></div>
+    <div class="modal-b">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fld"><label>판매업체 *</label><select class="fi" id="cg-f-seller"></select></div>
+        <div class="fld"><label>출고일 *</label><input class="fi" id="cg-f-date" type="date"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div class="fld"><label>출고 창고 *</label><select class="fi" id="cg-f-from"></select></div>
+        <div class="fld"><label>입고 창고 *</label><select class="fi" id="cg-f-to"></select></div>
+        <div class="fld"><label>부가세</label><select class="fi" id="cg-f-vat">
+          <option value="">별도 (공급가 + 10%)</option><option value="include">포함 (단가에 VAT 포함)</option></select></div>
+      </div>
+      <div class="fld"><label>품목 *</label>
+        <div id="cg-lines"></div>
+        <button type="button" class="btn btn-sm" id="btn-cg-addline" style="margin-top:6px">+ 품목 추가</button></div>
+      <div class="fld"><label>메모</label><textarea class="fi" id="cg-f-note" rows="2" style="resize:vertical"></textarea></div>
+      <div id="cg-sum" class="hint" style="font-size:12.5px"></div>
+      <div class="hint">저장하면 임원용 ERP를 열 때 <b>재고가 실제로 이동</b>하고 명세서가 만들어집니다.
+        재고가 모자라면 그 품목만 실패로 되돌아오며 사유가 표시됩니다.</div>
+    </div>
+    <div class="modal-f"><button class="btn" data-close="ovl-cg">취소</button>
+      <button class="btn btn-p" id="btn-cg-save">출고 등록</button></div>
+  </div>
+</div>
+
 <!-- 광고 프로젝트 등록 (v0.45.0) -->
 <div class="ovl" id="ovl-adp">
   <div class="modal" style="max-width:520px">
@@ -1150,7 +1178,7 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
 import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
-const STAFF_VERSION = 'v0.45.0';
+const STAFF_VERSION = 'v0.46.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1200,6 +1228,8 @@ let ITEMS = [];             // staff_data/items_fin   — 완제품 품목 (원�
 let WHS = [];               // staff_data/warehouses  — 창고 목록
 let ORDERS = [];            // staff_data/orders      — 주문 (고객정보 없음)
 let ORDI = [];              // staff_data/inbox_orders — 직원이 올린 주문 수정 요청
+let CSM = null;             // staff_data/consign_meta — 위탁 기준정보(판매업체·공급단가)
+let CGI = [];               // staff_data/inbox_consign — 직원이 올린 위탁 출고 요청
 let ADP = [];               // staff_data/adprojects   — 광고 프로젝트 미러
 let ADPI = [];              // staff_data/inbox_adprojects — 직원이 올린 프로젝트 등록 요청
 let ITEM_Q = '', STOCK_Q = '', ORD_Q = '';
@@ -1377,6 +1407,8 @@ if (DEMO) {
                contact: '김담당', phone: '02-1234-5678', email: 'kim@example.com', address: '세종시', note: '' }];
   PT.seller = [{ id: 's1', company: '바로팜', bizno: '', ceo: '', contact: '이담당', phone: '02-2222-3333',
                  email: '', address: '', channel: '약국 B2B', note: '입점 15개 약국' }];
+  CSM = { sellers: [{ id: 'sl1', name: '바로팜' }, { id: 'sl2', name: '온누리약국체인' }],
+          prices: { 'sl1|i1': 12000, 'sl1|i2': 9800 } };
   PT.shop = [{ id: 'h1', company: '쿠팡', channel: '오픈마켓', manager: '김서연', settlement: '주 1회', note: '' },
              { id: 'h2', company: '스마트스토어', channel: '오픈마켓', manager: '김서연', settlement: '월 2회', note: '' }];
   ACC = [{ id: 'a1', cat: '쇼핑몰', name: '쿠팡 윙', loginId: 'reniv', pw: 'demo1234',
@@ -1705,6 +1737,10 @@ function subscribeData() {
     e => console.warn('[trello]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'ads'), s => { ADS = parseCol(s, []); rerender(); },
     e => console.warn('[ads]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'consign_meta'), s => { CSM = parseCol(s, null); rerender(); },
+    e => console.warn('[consign_meta]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_consign'), s => { CGI = parseCol(s, []); rerender(); },
+    e => console.warn('[inbox_consign]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'adprojects'), s => { ADP = parseCol(s, []); rerender(); },
     e => console.warn('[adprojects]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'inbox_adprojects'), s => { ADPI = parseCol(s, []); rerender(); },
@@ -5489,6 +5525,7 @@ function wireDataPage() {
   document.querySelectorAll('[data-sales-tab]').forEach(b => b.onclick = () => { SALES_TAB = b.dataset.salesTab; renderPage(); });
   document.querySelectorAll('[data-ord-shop]').forEach(b => b.onclick = () => { ORD_SHOP = b.dataset.ordShop; renderPage(); });
   document.querySelectorAll('[data-ord-edit]').forEach(b => b.onclick = () => openOrdModal(b.dataset.ordEdit));
+  const cn = $('btn-cg-new'); if (cn) cn.onclick = openCgModal;
   document.querySelectorAll('[data-cons-print]').forEach(b => b.onclick = () => consPrint(b.dataset.consPrint, 'seller'));
   document.querySelectorAll('[data-cons-3pl]').forEach(b => b.onclick = () => consPrint(b.dataset.cons3pl, '3pl'));
   const an = $('btn-ad-new'); if (an) an.onclick = openAdModal;
@@ -5595,10 +5632,164 @@ function consPrint(id, mode) {
   w.document.write(consStatementHtml(sh, mode === '3pl'));
   w.document.close();
 }
+
+/* ═══════════ 위탁 출고 등록 (v0.46.0) ═══════════
+   위탁 출고는 직원 업무다. 다만 **재고 계산은 임원용 _applyStockMove 를 그대로 쓴다** —
+   재고 규칙이 두 벌이 되면 갈라진다. 여기서는 요청을 올리고 결과를 받아 표시한다. */
+let CG_LINES = [];
+function cgMeta() { return CSM || { sellers: [], prices: {} }; }
+function cgPrice(sellerId, itemId) {
+  const v = (cgMeta().prices || {})[String(sellerId) + '|' + String(itemId)];
+  return (v == null || v === '') ? 0 : Number(v);
+}
+/* 전달 대기 중인 출고 요청을 목록 위에 덮어 보여준다 */
+function consAll() {
+  const pend = (CGI || []).filter(r => r && !r.applied).map(r => ({
+    id: r.id, date: r.date, seller: r.sellerName, wh: r.whToName || '',
+    items: (r.lines || []).length ? (r.lines[0].name + ((r.lines.length > 1) ? ' 외 ' + (r.lines.length - 1) + '종' : '')) : '',
+    qty: (r.lines || []).reduce((s, l) => s + (Number(l.qty) || 0), 0),
+    total: (r.lines || []).reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.price) || 0), 0),
+    _pending: true, _err: r.result === 'fail' ? r.error : '',
+  }));
+  const failed = (CGI || []).filter(r => r && r.applied && r.result === 'fail').map(r => ({
+    id: r.id, date: r.date, seller: r.sellerName, wh: r.whToName || '', items: '(등록 실패)',
+    qty: 0, total: 0, _pending: true, _err: r.error || '실패',
+  }));
+  return pend.concat(failed).concat(CONS || []);
+}
+function cgRenderLines() {
+  const items = (ITEMS || []).filter(Boolean);
+  const sellerId = ($('cg-f-seller') || {}).value || '';
+  $('cg-lines').innerHTML = CG_LINES.map((l, i) => `
+    <div style="display:grid;grid-template-columns:1fr 78px 110px 30px;gap:6px;margin-bottom:6px;align-items:center">
+      <select class="fi" data-cg-item="${i}">
+        <option value="">— 품목 선택 —</option>
+        ${items.map(it => `<option value="${esc(it.id)}"${String(l.itemId) === String(it.id) ? ' selected' : ''}>${esc(it.name || '')}</option>`).join('')}
+      </select>
+      <input class="fi" type="number" min="1" placeholder="수량" value="${l.qty || ''}" data-cg-qty="${i}">
+      <input class="fi" type="number" min="0" placeholder="공급단가" value="${l.price || ''}" data-cg-price="${i}">
+      <button type="button" class="btn btn-sm btn-bad" data-cg-del="${i}" style="padding:4px 7px">✕</button>
+    </div>`).join('') || '<div class="hint" style="margin:0">품목을 추가해 주세요</div>';
+  $('cg-lines').querySelectorAll('[data-cg-item]').forEach(el => el.onchange = () => {
+    const i = Number(el.dataset.cgItem);
+    CG_LINES[i].itemId = el.value;
+    const it = items.find(x => String(x.id) === String(el.value));
+    CG_LINES[i].name = it ? (it.name || '') : '';
+    CG_LINES[i].spec = it ? (it.spec || '') : '';
+    if (!CG_LINES[i].price) CG_LINES[i].price = cgPrice(sellerId, el.value);
+    cgRenderLines();
+  });
+  $('cg-lines').querySelectorAll('[data-cg-qty]').forEach(el => el.oninput = () => {
+    CG_LINES[Number(el.dataset.cgQty)].qty = Number(el.value) || 0; cgSum();
+  });
+  $('cg-lines').querySelectorAll('[data-cg-price]').forEach(el => el.oninput = () => {
+    CG_LINES[Number(el.dataset.cgPrice)].price = Number(el.value) || 0; cgSum();
+  });
+  $('cg-lines').querySelectorAll('[data-cg-del]').forEach(el => el.onclick = () => {
+    CG_LINES.splice(Number(el.dataset.cgDel), 1); cgRenderLines();
+  });
+  cgSum();
+}
+function cgSum() {
+  const inc = $('cg-f-vat').value === 'include';
+  const line = CG_LINES.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.price) || 0), 0);
+  const supply = inc ? Math.round(line / 1.1) : line;
+  const tax = inc ? (line - supply) : Math.round(line * 0.1);
+  $('cg-sum').innerHTML = `공급가액 <b>₩${supply.toLocaleString()}</b> · 세액 ₩${tax.toLocaleString()}
+    · 합계 <b style="color:var(--brand-deep)">₩${(supply + tax).toLocaleString()}</b>`;
+}
+function openCgModal() {
+  const sellers = cgMeta().sellers || [];
+  if (!sellers.length) { toast('판매업체 정보가 아직 넘어오지 않았습니다 — 임원용에서 staffMirrorNow() 를 한 번 실행해 주세요', true); return; }
+  if (!(WHS || []).length) { toast('창고 정보가 아직 넘어오지 않았습니다', true); return; }
+  $('cg-f-seller').innerHTML = sellers.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+  const whOpts = (WHS || []).map(w => `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');
+  $('cg-f-from').innerHTML = '<option value="__un__">미지정(잔여)</option>' + whOpts;
+  $('cg-f-to').innerHTML = whOpts;
+  $('cg-f-date').value = today();
+  $('cg-f-vat').value = '';
+  $('cg-f-note').value = '';
+  CG_LINES = [{ itemId: '', name: '', spec: '', qty: 0, price: 0 }];
+  cgRenderLines();
+  $('cg-f-seller').onchange = () => { CG_LINES.forEach(l => { if (l.itemId) l.price = cgPrice($('cg-f-seller').value, l.itemId); }); cgRenderLines(); };
+  $('cg-f-vat').onchange = cgSum;
+  $('ovl-cg').classList.add('on');
+}
+$('btn-cg-addline').onclick = () => { CG_LINES.push({ itemId: '', name: '', spec: '', qty: 0, price: 0 }); cgRenderLines(); };
+$('btn-cg-save').onclick = async () => {
+  const lines = CG_LINES.filter(l => l.itemId && (Number(l.qty) || 0) > 0);
+  if (!lines.length) { toast('품목과 수량을 입력해 주세요', true); return; }
+  const from = $('cg-f-from').value, to = $('cg-f-to').value;
+  if (!to) { toast('입고 창고를 선택해 주세요', true); return; }
+  if (from === to) { toast('출고 창고와 입고 창고가 같습니다', true); return; }
+  const sellerId = $('cg-f-seller').value;
+  const arr = (CGI || []).slice();
+  arr.push({
+    id: 'CS' + Date.now(), sellerId,
+    sellerName: (cgMeta().sellers.find(s => String(s.id) === String(sellerId)) || {}).name || '',
+    date: $('cg-f-date').value || today(), vatMode: $('cg-f-vat').value,
+    whFromId: from, whToId: to, whToName: whName(to),
+    lines: lines.map(l => ({ itemId: l.itemId, name: l.name, spec: l.spec,
+      qty: Number(l.qty) || 0, price: Number(l.price) || 0 })),
+    note: $('cg-f-note').value.trim(), _by: ME.name, _byUid: ME.uid, createdAt: Date.now(),
+  });
+  try {
+    await saveCol('inbox_consign', arr); CGI = arr;
+    $('ovl-cg').classList.remove('on');
+    toast('출고를 등록했습니다 — 임원용 ERP를 열면 재고가 이동합니다'); rerender();
+  } catch (e) { toast('실패: ' + e.message, true); }
+};
+
+/* ═══════════ 일별 광고비·매출 추세 (v0.46.0) ═══════════
+   막대 = 광고비, 선 = 매출. 원가가 필요한 값은 그리지 않는다. */
+function adTrendHtml(list) {
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+  const days = new Date(y, m + 1, 0).getDate();
+  const key = d => y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  const spend = new Array(days).fill(0), rev = new Array(days).fill(0);
+  list.forEach(a => {
+    const s = String(a.startDate || ''), e = String(a.endDate || s);
+    if (!s) return;
+    for (let d = 1; d <= days; d++) { const k = key(d); if (k >= s && k <= e) { /* 기간 배분 */ } }
+    const from = new Date(s + 'T00:00:00'), to = new Date((e || s) + 'T00:00:00');
+    const n = Math.max(1, Math.round((to - from) / 86400000) + 1);
+    const per = (Number(a.cost) || 0) / n;
+    for (let d = 1; d <= days; d++) { const k = key(d); if (k >= s && k <= (e || s)) spend[d - 1] += per; }
+  });
+  (ORDERS || []).forEach(o => {
+    const d = String(o.orderDate || '');
+    if (d.slice(0, 7) !== y + '-' + String(m + 1).padStart(2, '0')) return;
+    const i = Number(d.slice(8, 10)) - 1;
+    if (i >= 0 && i < days) rev[i] += Number(o.paymentAmount) || 0;
+  });
+  const maxS = Math.max(1, ...spend), maxR = Math.max(1, ...rev);
+  const W = 720, H = 190, PAD = 26, bw = (W - PAD * 2) / days;
+  const bars = spend.map((v, i) => {
+    const h = Math.round(v / maxS * (H - 40));
+    return `<rect x="${(PAD + i * bw + 1).toFixed(1)}" y="${H - 20 - h}" width="${Math.max(1, bw - 2).toFixed(1)}" height="${h}"
+      fill="#f9a8d4"><title>${key(i + 1)} 광고비 ₩${Math.round(v).toLocaleString()}</title></rect>`;
+  }).join('');
+  const pts = rev.map((v, i) => `${(PAD + i * bw + bw / 2).toFixed(1)},${(H - 20 - v / maxR * (H - 40)).toFixed(1)}`).join(' ');
+  const ticks = [1, 8, 15, 22, days].map(d =>
+    `<text x="${(PAD + (d - 1) * bw + bw / 2).toFixed(1)}" y="${H - 6}" font-size="9" fill="#94a3b8" text-anchor="middle">${m + 1}/${d}</text>`).join('');
+  return `<div class="card" style="margin-bottom:14px"><div class="card-h">📈 일별 광고비·매출 추세
+      <span class="sub">${y}. ${String(m + 1).padStart(2, '0')} · <span style="color:#db2777">■ 광고비</span>
+      <span style="color:#16a34a">— 매출</span> · 기간 광고비는 일수로 나눠 배분</span></div>
+    <div class="card-b" style="overflow-x:auto">
+      <svg viewBox="0 0 ${W} ${H}" width="100%" style="min-width:560px;display:block">
+        <line x1="${PAD}" y1="${H - 20}" x2="${W - PAD}" y2="${H - 20}" stroke="#e2e8f0"/>
+        ${bars}
+        <polyline points="${pts}" fill="none" stroke="#16a34a" stroke-width="2"/>
+        ${ticks}
+        <text x="${PAD}" y="14" font-size="10" fill="#db2777">광고비 최대 ₩${Math.round(maxS).toLocaleString()}</text>
+        <text x="${W - PAD}" y="14" font-size="10" fill="#16a34a" text-anchor="end">매출 최대 ₩${Math.round(maxR).toLocaleString()}</text>
+      </svg></div></div>`;
+}
 function pageSalesConsign() {
-  const list = CONS || [];
+  const list = consAll();
   return `<div class="pg on">
-    <div class="pg-h"><h1>판매 관리<sup class="sync" style="font-size:13px"> ⓘ</sup></h1></div>
+    <div class="pg-h"><h1>판매 관리<sup class="sync" style="font-size:13px"> ⓘ</sup></h1>
+      <button class="btn btn-p" id="btn-cg-new" style="margin-left:auto">🚚 위탁 출고 등록</button></div>
     <div class="pg-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       바로팜 등 위탁 판매처로 보낸 재고입니다 ${DP_RO}</div>
     ${salesTabsHtml()}
@@ -5612,14 +5803,18 @@ function pageSalesConsign() {
         <td class="pt-note">${esc(c.items || '-')}</td>
         <td style="text-align:right;font-weight:700">${Number(c.qty || 0).toLocaleString()}</td>
         <td class="ap-amt">₩${Number(c.total || 0).toLocaleString()}</td>
-        <td><button class="btn btn-sm cons-b1" data-cons-print="${esc(c.id)}">🧾 명세서 발행</button></td>
-        <td><button class="btn btn-sm cons-b2" data-cons-3pl="${esc(c.id)}">🚚 3PL 명세서</button></td></tr>`).join('')}
+        ${c._pending
+          ? `<td colspan="2">${c._err ? `<span class="chip bad" title="${esc(c._err)}">실패 — ${esc(c._err)}</span>`
+              : '<span class="chip wait">재고 이동 대기 · 임원용 ERP를 열면 반영됩니다</span>'}</td>`
+          : `<td><button class="btn btn-sm cons-b1" data-cons-print="${esc(c.id)}">🧾 명세서 발행</button></td>
+             <td><button class="btn btn-sm cons-b2" data-cons-3pl="${esc(c.id)}">🚚 3PL 명세서</button></td>`}</tr>`).join('')}
       </tbody></table></div></div>` : dpEmpty('위탁 재고이동')}
     <div class="hint" style="margin-top:14px;line-height:1.8">
       🧾 <b>거래처 명세서</b>는 공급단가·공급가액·세액이 모두 들어간 정식 거래명세서입니다.<br>
       🚚 <b>3PL용 명세서</b>는 물류사가 박스에 넣는 인수용으로, <b>금액을 전부 비웁니다</b>
          — 단가만 지우면 합계÷수량으로 복원되기 때문에 단가·공급가액·세액·합계를 함께 비웁니다.<br>
-      위탁 출고 등록 자체는 임원용 ERP에서 하고, 여기서는 넘어온 건의 명세서를 발행합니다.</div>
+      🚚 <b>위탁 출고 등록</b>은 여기서 합니다. 저장하면 임원용 ERP를 열 때 재고가 실제로 이동하고
+         명세서가 만들어집니다 — 재고 계산은 임원용 규칙을 그대로 쓰기 때문입니다.</div>
   </div>`;
 }
 
@@ -5707,6 +5902,7 @@ function pageSalesAds() {
     <div class="pg-sub">집행 광고비 ${list.length}건 · 합계 ₩${sum.toLocaleString()}${wait ? ` · <b style="color:var(--warn)">반영 대기 ${wait}건</b>` : ''}</div>
     ${salesTabsHtml()}
     ${adsKpiHtml(list)}
+    ${adTrendHtml(list)}
     ${adProjectsHtml(list)}
     ${list.length ? `<div class="card"><div class="card-h">📢 광고비 이력 <span class="sub">${list.length}건</span></div>
       <div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb" style="min-width:760px">
