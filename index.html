@@ -6339,7 +6339,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.687';
+const ERP_VERSION = 'v2.3.688';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -40444,7 +40444,7 @@ function renderApprovalExpenseTable() {
     return `${_payNow && e.id === _firstPayNowId ? _payNowHeader : ''}<tr style="${_expRowBg}">
       <td style="text-align:center">${catBadge}</td>
       <td style="text-align:center;font-weight:400">${e.vendor||'-'}</td>
-      <td style="text-align:center;padding:8px 10px"><div style="font-size:12.5px;font-weight:400;cursor:pointer;color:var(--sky-700);max-width:240px;margin:0 auto;white-space:normal;word-break:break-word;overflow-wrap:anywhere;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden" class="po-item-link" title="클릭하면 지출결의서 PDF 열기" onclick="openExpenseApprovalForm(${e.id})">${itemName}</div></td>
+      <td style="text-align:center;padding:8px 10px"><div style="font-size:12.5px;font-weight:400;cursor:pointer;color:var(--sky-700);max-width:240px;margin:0 auto;white-space:normal;word-break:break-word;overflow-wrap:anywhere;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden" class="po-item-link" title="클릭하면 문서가 열립니다" onclick="openApprovalSheet('exp',${JSON.stringify(e.id)})">${itemName}</div></td>
       <td style="text-align:center;font-weight:400;color:${paid?'#0f172a':'#b91c1c'}${_poAdjustable?';cursor:pointer':''}" ${_poAdjustable?`onclick="_openExpenseAmountOverride(${e.id})" title="클릭해 실지급 금액·사유 입력"`:''}>${_fmtExpenseAmount(e)}</td>
       <td style="text-align:center">${dueCell}</td>
       <td style="text-align:center">${closingCell}</td>
@@ -47849,6 +47849,63 @@ function _numberToKoreanWon(num) {
 //     - po_balance : 발주서(잔금 %) → 집행내역 = 발주서 rows
 //     - sample     : 샘플 구매 → 집행내역 = 샘플 rows
 //     - other      : 기타 → 제목을 집행내역 1줄로
+
+/* v2.3.688 — 제목 클릭 시 화면 안에서 문서 보기.
+   종전에는 곧바로 새 창(PDF)을 열었는데 팝업이 차단되면 아무 일도 일어나지 않았다.
+   먼저 모달로 보여주고, 인쇄가 필요하면 거기서 기존 PDF 창을 연다. */
+function _apSheetBox(h, name, sign) {
+  return '<div style="border:1px solid #cbd5e1;width:104px;text-align:center">'
+    + '<div style="background:#f1f5f9;font-size:11px;font-weight:700;padding:3px 0;border-bottom:1px solid #cbd5e1">' + h + '</div>'
+    + '<div style="height:64px;display:flex;align-items:center;justify-content:center">'
+    + (sign ? '<img src="' + sign + '" style="max-width:94px;max-height:58px">' : '') + '</div>'
+    + '<div style="font-size:10.5px;padding:2px 0 3px;border-top:1px solid #e2e8f0;color:#64748b">' + escapeHtml(name || '') + '</div></div>';
+}
+function openApprovalSheet(kind, id) {
+  const isExp = kind === 'exp';
+  const list = isExp ? (DB.expenses || []) : (DB.approvals || []);
+  const r = list.find(x => x && (x.id === id || String(x.id) === String(id)));
+  if (!r) { showNotif('문서를 찾을 수 없습니다', 'warning'); return; }
+  const catLabels = { other:'기타', ad:'광고비', photography:'촬영비', travel:'출장비',
+    cash_reimburse:'현금 환급', sample:'샘플 구매', trademark:'상표/특허',
+    po_prepay:'발주 선급금', po_balance:'발주 잔금' };
+  const row = (k, v) => v ? '<tr><th style="background:#f1f5f9;border:1px solid #cbd5e1;padding:7px 10px;text-align:left;width:118px;white-space:nowrap;font-weight:700">'
+    + k + '</th><td style="border:1px solid #cbd5e1;padding:7px 10px">' + v + '</td></tr>' : '';
+  const money = n => '₩' + (Number(n) || 0).toLocaleString('ko-KR');
+  const files = (Array.isArray(r.attachments) ? r.attachments : []).filter(f => f && /^https?:/i.test(String(f.url || '')));
+  const o = _ensureOverlay('ap-sheet-modal');
+  o.innerHTML = '<div class="modal" style="width:780px;max-width:96vw">'
+    + '<div class="modal-hdr"><span class="modal-ttl">' + (isExp ? '💳 ' : '📝 ') + escapeHtml(r.title || '문서')
+    + '</span><button class="modal-x" onclick="closeModal(\'ap-sheet-modal\')">✕</button></div>'
+    + '<div class="modal-body"><div style="border:1px solid #e2e8f0;border-radius:12px;padding:20px 22px;background:#fff">'
+    + '<div style="display:flex;justify-content:flex-end;margin-bottom:14px">'
+    +   _apSheetBox('1차', r.l1Name || '', r.l1Sign)
+    +   _apSheetBox('2차 본부장', '이주연', (r.directorSign || ''))
+    +   _apSheetBox('3차 대표이사', '이재호', (r.ceoSign || ''))
+    + '</div>'
+    + '<h2 style="font-size:19px;font-weight:800;text-align:center;letter-spacing:6px;margin:0 0 16px">'
+    + (isExp ? '지 출 결 의 서' : '품 의 서') + '</h2>'
+    + '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+    +   row('분류', escapeHtml(catLabels[r.category] || r.category || '기타'))
+    +   row('제목', '<b>' + escapeHtml(r.title || '') + '</b>')
+    +   row('기안자', escapeHtml(r.authorName || r._byName || '-'))
+    +   (isExp ? row('지급처', escapeHtml(r.vendor || '')) : '')
+    +   (isExp ? row('금액', '<b style="font-size:15px">' + money(r.amount) + '</b>') : '')
+    +   (isExp ? row('지급 요청일', escapeHtml(r.dueDate || '')) : row('요청일', escapeHtml(r.date || '')))
+    +   (isExp ? row('지급 방법', escapeHtml((r.payMethod || '') + ' / 증빙 ' + (r.proofType || ''))) : '')
+    +   (isExp && r.account ? row('입금 계좌', escapeHtml(r.account + (r.accountHolder ? ' (' + r.accountHolder + ')' : ''))) : '')
+    +   (!isExp && r.phase ? row('단계', r.phase === 'planning' ? '📋 사전 품의' : '🚀 실행 기안') : '')
+    +   '<tr><th style="background:#f1f5f9;border:1px solid #cbd5e1;padding:7px 10px;text-align:left;width:118px;font-weight:700">'
+    +   (isExp ? '비고 / 상세' : '상세 내용') + '</th><td style="border:1px solid #cbd5e1;padding:7px 10px;white-space:pre-wrap;'
+    +   'font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.65">' + escapeHtml(r.note || '') + '</td></tr>'
+    +   (files.length ? row('첨부', files.map(f => '<a href="' + escapeHtml(f.url) + '" target="_blank" rel="noopener" style="color:#2563eb">📎 '
+        + escapeHtml(f.name || '첨부') + '</a>').join('<br>')) : '')
+    + '</table></div></div>'
+    + '<div class="modal-ft">'
+    + (isExp ? '<button class="btn btn-outline" onclick="closeModal(\'ap-sheet-modal\');openExpenseApprovalForm(' + JSON.stringify(r.id) + ')">🖨 인쇄용 PDF</button>' : '')
+    + '<button class="btn btn-outline" onclick="closeModal(\'ap-sheet-modal\')">닫기</button></div></div>';
+  openModal('ap-sheet-modal');
+}
+
 async function openExpenseApprovalForm(expenseId) {
   const e = DB.expenses.find(x => x && (x.id === expenseId || Number(x.id) === Number(expenseId)));
   if (!e) { showNotif('지출결의서를 찾을 수 없습니다', 'warning'); return; }

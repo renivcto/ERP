@@ -202,6 +202,12 @@ tr:last-child td { border-bottom:none; }
 .ap-vt { padding:3px 9px; font-size:10.5px; border-radius:5px; cursor:pointer; border:1px solid var(--line); background:var(--line-soft); color:var(--ink-soft); font-weight:600; }
 .ap-vt.on { background:#0f172a; color:#fff; border-color:#0f172a; }
 .ap-l1 { font-size:11px; font-weight:700; border-radius:6px; padding:2px 7px; white-space:nowrap; }
+.ap-tb th, .ap-tb td { padding-left:8px; padding-right:8px; }
+.ap-tb .c-date, .ap-tb .c-cat, .ap-tb .c-amt, .ap-tb .c-due, .ap-tb .c-l1, .ap-tb .c-by { white-space:nowrap; width:1%; }
+.ap-tb .c-ttl { width:auto; min-width:220px; }
+.ap-tb .c-ttl a { color:var(--brand-deep); font-weight:800; text-decoration:none; cursor:pointer; }
+.ap-tb .c-ttl a:hover { text-decoration:underline; }
+.ap-tb .c-vd { max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ap-sheet { border:1px solid var(--line); border-radius:12px; padding:20px 22px; background:#fff; }
 .ap-sheet h2 { font-size:19px; font-weight:800; text-align:center; letter-spacing:6px; margin:0 0 16px; }
 .ap-sheet table { width:100%; border-collapse:collapse; font-size:13px; }
@@ -937,6 +943,15 @@ tr:last-child td { border-bottom:none; }
 </div>
 
 <!-- 1차 결재 처리 (직원용 관리자 모드) -->
+<div class="ovl" id="ovl-apv">
+  <div class="modal" style="max-width:760px">
+    <div class="modal-h"><span class="t" id="apv-t">📄 문서 보기</span><button class="modal-x" data-close="ovl-apv">✕</button></div>
+    <div class="modal-b"><div id="apv-sheet"></div>
+      <div class="hint" id="apv-hint" style="margin-top:12px"></div></div>
+    <div class="modal-f"><button class="btn" data-close="ovl-apv">닫기</button></div>
+  </div>
+</div>
+
 <div class="ovl" id="ovl-ap1">
   <div class="modal" style="max-width:760px">
     <div class="modal-h"><span class="t" id="ap1-t">🖋️ 1차 결재</span><button class="modal-x" data-close="ovl-ap1">✕</button></div>
@@ -1085,7 +1100,7 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
 import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
-const STAFF_VERSION = 'v0.41.0';
+const STAFF_VERSION = 'v0.42.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -4890,6 +4905,19 @@ function ap1SheetHtml(kind, r) {
     </table>
   </div>`;
 }
+/* 제목 클릭 — 읽기 전용 문서 보기 (1차 결재 모달과 같은 서식) */
+function openApView(kind, id) {
+  const r = ((kind === 'exp' ? APX : APN) || []).find(x => String(x.id) === String(id));
+  if (!r) return;
+  $('apv-t').textContent = (kind === 'exp' ? '💳 ' : '📝 ') + (r.title || '문서');
+  $('apv-sheet').innerHTML = ap1SheetHtml(kind, r);
+  const s = r.l1Status || 'pending';
+  $('apv-hint').innerHTML = r.applied ? '임원용 ERP 결재함으로 전달되어 2차 결재 진행 중입니다.'
+    : s === 'approved' ? '1차 승인 완료 — 임원용 ERP로 전달됩니다. <b>이 시점부터는 수정·삭제할 수 없습니다.</b>'
+    : s === 'rejected' ? ('1차 반려' + (r.l1Note ? ' — ' + esc(r.l1Note) : '') + '. 수정해서 다시 올릴 수 있습니다.')
+    : '1차 결재 대기 중입니다. <b>승인 전까지는 작성자가 수정·삭제할 수 있습니다.</b>';
+  $('ovl-apv').classList.add('on');
+}
 function openAp1(kind, id) {
   const list = kind === 'exp' ? APX : APN;
   const r = (list || []).find(x => String(x.id) === String(id));
@@ -5016,25 +5044,25 @@ function pageApproval() {
       <button class="tab ${isExp ? 'on' : ''}" data-ap-tab="exp">💳 지출 결의서 (${(APX || []).filter(r => ME.mode === 'admin' || r._byUid === ME.uid).length})</button>
       <button class="tab ${!isExp ? 'on' : ''}" data-ap-tab="gen">📝 일반 결재 (${(APN || []).filter(r => ME.mode === 'admin' || r._byUid === ME.uid).length})</button>
     </div>
-    ${list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb" style="min-width:${isExp ? 940 : 760}px">
-      <thead><tr><th>작성일</th><th>분류</th>${isExp ? '<th>업체</th>' : ''}<th>제목</th>
-        ${isExp ? '<th>금액</th><th>지급예정일</th>' : ''}<th>결재자</th><th>작성자</th><th>상태</th><th>관리</th></tr></thead><tbody>
+    ${list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb ap-tb" style="min-width:${isExp ? 860 : 700}px">
+      <thead><tr><th class="c-date">작성일</th><th class="c-cat">분류</th>${isExp ? '<th class="c-vd">업체</th>' : ''}<th class="c-ttl">제목</th>
+        ${isExp ? '<th class="c-amt">금액</th><th class="c-due">지급예정일</th>' : ''}<th class="c-l1">결재자</th><th class="c-by">작성자</th><th>상태</th><th>관리</th></tr></thead><tbody>
       ${list.map(r => `<tr>
         <td style="white-space:nowrap">${apWhen(r.createdAt)}</td>
         <td><span class="dp-chip">${esc(apCatLabel(r.category))}</span>${(r.priority === 'urgent' || r.urgent) ? ' <span class="ap-l1" style="background:#fee2e2;color:#b91c1c">응급</span>' : ''}</td>
-        ${isExp ? `<td>${esc(r.vendor || '-')}</td>` : ''}
-        <td class="nm">${esc(r.title || '-')}</td>
+        ${isExp ? `<td class="c-vd" title="${esc(r.vendor || '')}">${esc(r.vendor || '-')}</td>` : ''}
+        <td class="c-ttl"><a data-ap-view="${esc(r.id)}" title="클릭하면 문서가 열립니다">${esc(r.title || '-')}</a></td>
         ${isExp ? `<td class="ap-amt">${r.amount ? '₩' + Number(r.amount).toLocaleString() : '-'}</td>
                    <td style="white-space:nowrap">${esc(r.dueDate || '-')}</td>` : ''}
-        <td class="ap-line"><b>${esc(r.l1Name || (r.line && r.line.first) || '-')}</b></td>
-        <td style="white-space:nowrap">${esc(r._byName || r._by || '-')}</td>
+        <td class="ap-line c-l1"><b>${esc(r.l1Name || (r.line && r.line.first) || '-')}</b></td>
+        <td class="c-by">${esc(r._byName || r._by || '-')}</td>
         <td>${apL1Chip(r)}<br>${apStatus(r)}</td>
         <td style="white-space:nowrap">${ME.mode === 'admin' && !r.applied && (r.l1Status || 'pending') !== 'approved'
           ? `<button class="btn btn-sm btn-p" data-ap1="${esc(r.id)}">🖋️ 1차 결재</button><br>` : ''}${
           (ME.mode !== 'admin' && !r.applied && (r.l1Status || 'pending') !== 'approved' && apMine(r))
           ? `<button class="btn btn-sm" data-ap-edit="${esc(r.id)}">수정</button>
              <button class="btn btn-sm btn-bad" data-ap-del="${esc(r.id)}">삭제</button>`
-          : `<span style="font-size:11px;color:var(--ink-mute)">${r.applied ? '임원용에서 진행 중' : ((r.l1Status||'pending') === 'approved' ? '1차 승인됨' : '')}</span>`}</td></tr>`).join('')}
+          : `<span style="font-size:11px;color:var(--ink-mute)">${ME.mode === 'admin' ? '' : (r.applied ? '임원용에서 진행 중' : ((r.l1Status||'pending') === 'approved' ? '1차 승인 후 수정 불가' : ''))}</span>`}</td></tr>`).join('')}
       </tbody></table></div></div>`
       : `<div class="ph"><div class="big">🖋️</div><h3>작성한 ${isExp ? '지출 결의서' : '일반 결재'}가 없습니다</h3>
           <p>위 <b>작성</b> 버튼으로 올리면 임원용 ERP 결재함으로 전달됩니다.
@@ -5051,6 +5079,7 @@ function wireApproval() {
     if (AP_TAB === 'exp') openApxModal(r); else openApn2Modal(r);
   });
   document.querySelectorAll('[data-ap1]').forEach(b => b.onclick = () => openAp1(AP_TAB, b.dataset.ap1));
+  document.querySelectorAll('[data-ap-view]').forEach(b => b.onclick = () => openApView(AP_TAB, b.dataset.apView));
   document.querySelectorAll('[data-ap-del]').forEach(b => b.onclick = async () => {
     if (!confirm('이 문서를 삭제할까요?')) return;
     const arr = apList().filter(x => String(x.id) !== String(b.dataset.apDel));
