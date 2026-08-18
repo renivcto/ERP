@@ -6339,7 +6339,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.683';
+const ERP_VERSION = 'v2.3.684';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -59141,6 +59141,23 @@ function _staffMirrorCalendarThrottled() {
 /* v2.3.679 — 직원 전용 Trello 계정 자격증명 (staff_data/trello).
    ⚠️ 임원 본인 토큰을 넣지 말 것 — 활성 직원이면 콘솔에서 꺼낼 수 있고, 그러면
       신제품 개발 보드까지 열린다. 3개 보드에만 초대한 별도 계정의 토큰만 넣는다. */
+/* v2.3.684 — 이미 있는 직원 계정에 staff 표식을 심는다(Storage 분리용).
+   콘솔에서 staffClaimBackfill() 로 한 번만 실행하면 된다. 멱등. */
+window.staffClaimBackfill = async function() {
+  if (!window._firebaseFunctions || !window._httpsCallable) {
+    console.warn('Functions 미초기화 — 새로고침 후 다시 시도하세요'); return;
+  }
+  try {
+    const r = await window._httpsCallable(window._firebaseFunctions, 'backfillStaffClaims')({});
+    console.log('✅ ' + (r.data && r.data.message));
+    showNotif('✅ ' + (r.data && r.data.message), 'success');
+    return r.data;
+  } catch (e) {
+    console.error('실패:', e);
+    showNotif('실패: ' + (e && e.message), 'error');
+  }
+};
+
 window.openStaffTrelloModal = async function() {
   let cur = {};
   try {

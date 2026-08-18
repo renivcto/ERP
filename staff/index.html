@@ -939,7 +939,7 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
 import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
-const STAFF_VERSION = 'v0.38.0';
+const STAFF_VERSION = 'v0.39.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1291,6 +1291,12 @@ onAuthStateChanged(auth, async user => {
   _unsubs = [];
   ME = null;
   if (!user) { show('scr-login'); return; }
+
+  // v0.39.0: 직원 표식(커스텀 클레임)을 즉시 당겨온다.
+  //   Cloud Functions(syncStaffClaim)가 심어 준 staff:true 는 **새 토큰부터** 붙고,
+  //   storage.rules 가 그 표식으로 임원용 경로를 막는다. 갱신하지 않으면 최대 1시간
+  //   동안 옛 토큰이 임원용 경로까지 열린 채로 남는다.
+  try { await user.getIdToken(true); } catch (_) {}
 
   // v0.1.1: 임원·직원 확인을 병렬로 — 순차 두 번 조회하던 왕복 지연 제거.
   //   직원 계정은 users/{uid} 읽기가 권한 오류로 떨어지므로 catch → null 이 정상 경로다.

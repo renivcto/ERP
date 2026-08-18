@@ -2004,3 +2004,88 @@ exports.manualFetchPlusclStock = functions
       throw new functions.https.HttpsError('internal', err.message);
     }
   });
+
+
+// =============================================================================
+// v2.16 — 직원 계정 표식(커스텀 클레임)
+// =============================================================================
+// Storage 보안규칙은 Firestore 를 읽지 못한다(get()/exists() 는 Firestore 전용).
+// 그래서 '이 uid 가 직원인가' 를 규칙 안에서 판별할 수단이 없었고, 경로를 아는
+// 직원 계정이 임원용 첨부(견적서·영수증·발주 PDF)를 읽거나 덮어쓸 수 있었다.
+// 토큰에 staff:true 를 심어 storage.rules 가 request.auth.token.staff 로 가른다.
+//
+// ⚠️ 클레임은 새로 발급되는 ID 토큰부터 반영된다. 이미 로그인 중인 계정은
+//    최대 1시간(토큰 수명) 뒤 자동 반영되고, 직원 앱은 로그인 직후
+//    getIdToken(true) 로 즉시 당겨온다.
+// ⚠️ setCustomUserClaims 는 클레임 전체를 덮어쓴다 — 기존 클레임을 읽어 병합한다.
+// =============================================================================
+
+async function _setStaffClaim(uid, on) {
+  // 안전장치: 활성 임원 계정에는 절대 표식을 심지 않는다.
+  //   심는 순간 그 사람이 임원용 첨부(영수증·발주 PDF)에서 잠긴다.
+  //   임원용 앱이 이중 계정을 막고 있지만, 남은 문서 하나로 사고가 날 수 있는 자리다.
+  if (on) {
+    const ex = await admin.firestore().doc('users/' + uid).get();
+    if (ex.exists && ex.data().status === '활성') {
+      console.warn('[STAFF CLAIM] 활성 임원 계정이라 건너뜀: ' + uid);
+      return false;
+    }
+  }
+  let cur = {};
+  try {
+    const u = await admin.auth().getUser(uid);
+    cur = u.customClaims || {};
+  } catch (err) {
+    // Auth 계정이 없는 uid (문서만 남은 경우) — 조용히 넘어간다
+    if (err && err.code === 'auth/user-not-found') return false;
+    throw err;
+  }
+  if (!!cur.staff === !!on) return false;          // 이미 같은 상태면 건드리지 않는다
+  const next = Object.assign({}, cur);
+  if (on) next.staff = true; else delete next.staff;
+  await admin.auth().setCustomUserClaims(uid, next);
+  console.log('[STAFF CLAIM] ' + uid + ' → staff=' + (on ? 'true' : '(제거)'));
+  return true;
+}
+
+// staff_users 문서가 생기면 표식을 심고, 지워지면 회수한다
+exports.syncStaffClaim = functions
+  .region(REGION)
+  .firestore.document('staff_users/{uid}')
+  .onWrite(async (change, context) => {
+    const uid = context.params.uid;
+    try {
+      await _setStaffClaim(uid, change.after.exists);
+    } catch (err) {
+      console.error('[STAFF CLAIM] 실패:', uid, err);
+    }
+    return null;
+  });
+
+// 이미 존재하는 직원 계정 전체에 표식을 심는다 (임원용 콘솔: staffClaimBackfill())
+// 멱등 — 이미 표식이 있는 계정은 건너뛴다.
+exports.backfillStaffClaims = functions
+  .region(REGION)
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', '로그인이 필요합니다.');
+    }
+    const userDoc = await admin.firestore().doc('users/' + context.auth.uid).get();
+    if (!userDoc.exists || userDoc.data().isAdmin !== true) {
+      throw new functions.https.HttpsError('permission-denied', '관리자 권한이 필요합니다.');
+    }
+    const snap = await admin.firestore().collection('staff_users').get();
+    let changed = 0, skipped = 0, missing = 0;
+    for (const d of snap.docs) {
+      try {
+        if (await _setStaffClaim(d.id, true)) changed++; else skipped++;
+      } catch (err) {
+        console.error('[STAFF CLAIM] backfill 실패:', d.id, err);
+        missing++;
+      }
+    }
+    const msg = '직원 계정 ' + snap.size + '개 — 새로 심음 ' + changed
+      + ' · 이미 있음 ' + skipped + (missing ? ' · 실패 ' + missing : '');
+    console.log('[STAFF CLAIM] ' + msg);
+    return { ok: true, total: snap.size, changed: changed, skipped: skipped, failed: missing, message: msg };
+  });

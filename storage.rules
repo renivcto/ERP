@@ -18,22 +18,34 @@ rules_version = '2';
 //   · 직원용 업로드는 staff/<uid>/… 로만 간다(staff/index.html 의 upToStorage).
 //     경로가 나뉘어 있어야 나중에 권한을 더 좁힐 때 기준이 생긴다.
 //
-// ⚠️ 아직 못 막은 것 — 정확한 경로를 아는 직원 계정은 임원용 파일을 읽거나
-//    덮어쓸 수 있다. Storage 규칙은 Firestore 를 읽지 못해서(get()/exists() 는
-//    Firestore 전용) '이 uid 가 staff_users 에 있는가' 를 규칙 안에서 판별할
-//    방법이 없다. 완전히 나누려면 둘 중 하나가 필요하다:
-//      ① Cloud Functions 로 직원 계정에 커스텀 클레임(staff:true)을 심고
-//         규칙에서 request.auth.token.staff 로 분기  ← 권장
-//      ② 임원 계정 이메일을 규칙에 화이트리스트로 박기 (인원 바뀔 때마다 재배포)
+// ── v3 (2026-08-18) — 직원/임원 완전 분리 (커스텀 클레임)
+//
+// Storage 규칙은 Firestore 를 읽지 못한다(get()/exists() 는 Firestore 전용).
+// 그래서 '이 uid 가 staff_users 에 있는가' 를 규칙 안에서 판별할 수 없었고,
+// v2 까지는 경로를 아는 직원 계정이 임원용 첨부를 읽거나 덮어쓸 수 있었다.
+//
+// 이제 Cloud Functions(syncStaffClaim)가 직원 계정 토큰에 staff:true 를 심고,
+// 여기서 그 표식으로 가른다. 직원은 staff/ 안에서만 움직인다.
+//
+// ⚠️ 클레임은 새로 발급되는 ID 토큰부터 붙는다(기존 토큰 최대 1시간).
+//    직원 앱은 로그인 직후 getIdToken(true) 로 즉시 당겨온다(v0.39.0).
+// ⚠️ 표식이 없는 계정 = 임원으로 본다. 새 직원 계정이 생기면 함수가 자동으로
+//    심고, 이미 있던 계정은 임원용 콘솔에서 staffClaimBackfill() 로 한 번 심는다.
 //
 // 배포: firebase deploy --only storage
 
 service firebase.storage {
   match /b/{bucket}/o {
 
+    // 표식이 없으면 없는 대로 false — 'in' 으로 먼저 확인해 오류로 전체 거부되는 일을 막는다.
+    function isStaff() {
+      return request.auth != null
+             && 'staff' in request.auth.token
+             && request.auth.token.staff == true;
+    }
+
     // 직원용 ERP 업로드 — 자료실 첨부·본문 이미지 (v0.38.0)
-    // 크기 상한은 앱(upToStorage)에서도 막지만 여기서 한 번 더 둔다.
-    // 아래 전체 match 가 같은 경로를 함께 허용하므로 이 상한은 보조 수단이다.
+    // 직원도 임원도 볼 수 있다. 직원이 쓸 수 있는 유일한 경로.
     match /staff/{allPaths=**} {
       allow get: if request.auth != null;
       // 삭제 요청에는 request.resource 가 없다 — 크기 조건에 걸리지 않게 먼저 통과시킨다.
@@ -42,11 +54,11 @@ service firebase.storage {
                        || request.resource.size < 20 * 1024 * 1024);
     }
 
-    // 기존 경로 — erp/ 오프로드, 댓글·영수증·피드 첨부 등
+    // 임원용 경로 — erp/ 오프로드, 댓글·영수증·피드 첨부 등. 직원은 접근 불가.
     // read 대신 get 만 준다. read = get + list 라서 read 를 쓰면 목록 조회가 열린다.
     match /{allPaths=**} {
-      allow get: if request.auth != null;
-      allow write: if request.auth != null;
+      allow get: if request.auth != null && !isStaff();
+      allow write: if request.auth != null && !isStaff();
     }
   }
 }
