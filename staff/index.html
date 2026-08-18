@@ -225,6 +225,17 @@ tr:last-child td { border-bottom:none; }
 .sales-period input.fi { width:146px; }
 .sales-period .tilde { color:var(--ink-mute); }
 .btn.adp-on { background:#eef2ff; border-color:#c7d2fe; color:#4338ca; }
+.ph-tb th, .ph-tb td { text-align:center !important; vertical-align:middle; }
+.ph-tb .nm a { color:var(--brand-deep); font-weight:800; cursor:pointer; }
+.ph-tb .nm a:hover { text-decoration:underline; }
+.ph-row { cursor:pointer; }
+.ph-row:hover { background:#f8fbff; }
+.ph-sum { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; margin-bottom:14px; }
+.ph-sum .b { border:1px solid var(--line); border-radius:11px; padding:11px 13px; text-align:center; }
+.ph-sum .b .k { font-size:11.5px; color:var(--ink-mute); font-weight:700; }
+.ph-sum .b .v { font-size:17px; font-weight:800; margin-top:3px; }
+.ap-sheet-tb th, .ap-sheet-tb td { border:1px solid var(--line); padding:8px 11px; text-align:left; }
+.ap-sheet-tb th { background:var(--line-soft); width:96px; white-space:nowrap; font-weight:700; }
 .ord-chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
 .ord-chip { border:1px solid var(--line); background:#fff; border-radius:999px; padding:4px 12px; font-size:12px; font-weight:700; cursor:pointer; color:var(--ink-soft); }
 .ord-chip.on { background:var(--brand); border-color:var(--brand); color:#fff; }
@@ -1036,6 +1047,14 @@ tr:last-child td { border-bottom:none; }
 </div>
 
 <!-- 1차 결재 처리 (직원용 관리자 모드) -->
+<div class="ovl" id="ovl-ph">
+  <div class="modal" style="max-width:760px">
+    <div class="modal-h"><span class="t" id="ph-m-t">💊 약국 상세</span><button class="modal-x" data-close="ovl-ph">✕</button></div>
+    <div class="modal-b" id="ph-m-body"></div>
+    <div class="modal-f"><button class="btn" data-close="ovl-ph">닫기</button></div>
+  </div>
+</div>
+
 <div class="ovl" id="ovl-apv">
   <div class="modal" style="max-width:760px">
     <div class="modal-h"><span class="t" id="apv-t">📄 문서 보기</span><button class="modal-x" data-close="ovl-apv">✕</button></div>
@@ -1193,7 +1212,7 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot }
 import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
-const STAFF_VERSION = 'v0.52.0';
+const STAFF_VERSION = 'v0.53.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -4497,20 +4516,59 @@ function pagePharmacy() {
       : (cs.length ? '<div class="empty">검색 결과가 없습니다</div>'
          : `<div class="ph"><div class="big">💊</div><h3>약사 CS 기록이 없습니다</h3>
              <p>＋ CS 등록으로 남기면 임원용 ERP의 약사 CS로 전달됩니다.</p></div>`))
-    : (list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb">
+    : (list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb ph-tb">
       <thead><tr><th>등급</th><th>약국 / 약사</th><th>연락처</th><th>주소</th><th>총 구매액</th><th>주문</th><th>최근 주문일</th></tr></thead><tbody>
-      ${list.map(p => `<tr>
+      ${list.map(p => `<tr class="ph-row" data-ph-open="${esc(p.key || p.name)}" title="클릭하면 약국 상세가 열립니다">
         <td>${(PH_TIER[p.tier] || PH_TIER.normal)[0]} <span style="font-size:11px;color:var(--ink-mute)">${(PH_TIER[p.tier] || PH_TIER.normal)[1]}</span></td>
-        <td class="nm">${esc(p.name || '-')}</td>
+        <td class="nm"><a>${esc(p.name || '-')}</a></td>
         <td style="white-space:nowrap;font-size:12px">${esc(p.phone || '-')}</td>
-        <td class="pt-note" style="font-size:12px">${esc(p.address || '-')}</td>
+        <td style="font-size:12px">${esc(p.address || '-')}</td>
         <td class="ap-amt">₩${Number(p.totalSpent || 0).toLocaleString()}</td>
-        <td style="text-align:right">${Number(p.orders || 0).toLocaleString()}건</td>
+        <td>${Number(p.orders || 0).toLocaleString()}건</td>
         <td style="white-space:nowrap;font-size:12px">${esc(p.lastDate || '-')}</td></tr>`).join('')}
       </tbody></table></div></div>
       <div class="pg-sub" style="margin-top:10px">${DP_RO} — 약국 리스트는 주문에서 자동 집계됩니다</div>`
       : ((PHARM || []).length ? '<div class="empty">검색 결과가 없습니다</div>' : dpEmpty('약국')))}
   </div>`;
+}
+/* 약국 상세 — 약국은 영업 대상이라 직원도 봐야 한다(사용자 확인).
+   임원용 고객카드와 같은 구성: 요약 + 연락처·주소 + 최근 주문 내역. */
+function openPhModal(key) {
+  const p = (PHARM || []).find(x => String(x.key || x.name) === String(key));
+  if (!p) return;
+  const tier = PH_TIER[p.tier] || PH_TIER.normal;
+  const w = n => '₩' + Number(n || 0).toLocaleString();
+  const hist = Array.isArray(p.history) ? p.history : [];
+  const addrs = Array.isArray(p.addresses) && p.addresses.length ? p.addresses : (p.address ? [p.address] : []);
+  const row = (k, v) => v ? `<tr><th>${k}</th><td>${v}</td></tr>` : '';
+  $('ph-m-t').textContent = tier[0] + ' ' + (p.name || '약국');
+  $('ph-m-body').innerHTML = `
+    <div class="ph-sum">
+      <div class="b"><div class="k">등급</div><div class="v">${tier[0]} ${esc(tier[1])}</div></div>
+      <div class="b"><div class="k">총 구매액</div><div class="v" style="color:var(--brand-deep)">${w(p.totalSpent)}</div></div>
+      <div class="b"><div class="k">주문</div><div class="v">${Number(p.orders || 0).toLocaleString()}건</div></div>
+      <div class="b"><div class="k">최근 주문일</div><div class="v" style="font-size:14px">${esc(p.lastDate || '-')}</div></div>
+    </div>
+    <table class="ap-sheet-tb" style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px">
+      ${row('약국명', '<b>' + esc(p.name || '') + '</b>')}
+      ${row('연락처', esc(p.phone || ''))}
+      ${row('이메일', esc(p.email || ''))}
+      ${row('주소', addrs.map(a => esc(a)).join('<br>'))}
+    </table>
+    <div class="card-h" style="border:0;padding:0 0 8px;font-size:14px">🧾 최근 주문 내역
+      <span class="sub">${hist.length}건${Number(p.orders || 0) > hist.length ? ' (최근 ' + hist.length + '건만 표시)' : ''}</span></div>
+    ${hist.length ? `<div class="dp-wrap"><table class="dp-tb ph-tb" style="min-width:560px">
+      <thead><tr><th>주문일</th><th>쇼핑몰</th><th>품목</th><th>수량</th><th>금액</th><th>상태</th></tr></thead><tbody>
+      ${hist.map(o => `<tr>
+        <td style="white-space:nowrap">${esc(o.date || '-')}</td>
+        <td>${esc(o.shop || '-')}</td>
+        <td class="nm" style="text-align:left !important">${esc(o.product || '-')}</td>
+        <td>${Number(o.qty || 0).toLocaleString()}</td>
+        <td class="ap-amt">${w(o.amount)}</td>
+        <td>${o.status ? `<span class="chip ok">${esc(o.status)}</span>` : '-'}</td></tr>`).join('')}
+      </tbody></table></div>`
+      : '<div class="hint" style="margin:0">주문 내역이 아직 넘어오지 않았습니다 — 임원용에서 staffMirrorNow() 를 한 번 실행해 주세요.</div>'}`;
+  $('ovl-ph').classList.add('on');
 }
 function openCsModal(id) {
   const c = id ? csAll().find(x => String(x.id) === String(id)) : null;
@@ -4568,6 +4626,7 @@ function wirePharmacy() {
   document.querySelectorAll('[data-ph-tab]').forEach(b => b.onclick = () => { PH_TAB = b.dataset.phTab; PH_Q = ''; renderPage(); });
   const nb = $('btn-cs-new'); if (nb) nb.onclick = () => openCsModal(null);
   document.querySelectorAll('[data-cs-edit]').forEach(b => b.onclick = () => openCsModal(b.dataset.csEdit));
+  document.querySelectorAll('[data-ph-open]').forEach(b => b.onclick = () => openPhModal(b.dataset.phOpen));
   document.querySelectorAll('[data-cs-del]').forEach(b => b.onclick = async () => {
     if (!confirm('이 CS 기록을 삭제할까요?')) return;
     const arr = (CSI || []).filter(x => String(x.id) !== String(b.dataset.csDel));

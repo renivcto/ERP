@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.696';
+const ERP_VERSION = 'v2.3.697';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58872,14 +58872,28 @@ window._staffMirrorItems = _staffMirrorItems;
       '일반 고객' 은 여전히 넘기지 않는다 — 소비자 CS·고객 리스트·클레임은 미러에 없다. */
 function _staffPharmPayload() {
   if (typeof _aggregateCustomers !== 'function' || typeof _isPharmacyCustomer !== 'function') return [];
-  return _aggregateCustomers('').filter(_isPharmacyCustomer).map(c => ({
-    key: String(c.key || ''), name: c.name || '', phone: c.phone || '', email: c.email || '',
-    address: (c.addresses && c.addresses.size) ? Array.from(c.addresses)[0] : '',
-    totalSpent: Number(c.totalSpent) || 0,
-    orders: Array.isArray(c.orders) ? c.orders.length : 0,
-    lastDate: c.lastDate || '',
-    tier: (typeof _pharmacyTier === 'function') ? _pharmacyTier(c) : ''
-  }));
+  // v2.3.697: 약국은 영업 대상이라 직원도 상세를 봐야 한다 — 주소·주문 내역까지 넘긴다.
+  //   ⚠️ 대상은 여전히 약국 고객뿐이다(_isPharmacyCustomer). 일반 소비자는 넘기지 않는다.
+  const shopNm = sid => ((DB.shops || []).find(s => s && s.id === sid) || {}).name || '';
+  return _aggregateCustomers('').filter(_isPharmacyCustomer).map(c => {
+    const addrs = (c.addresses && c.addresses.size) ? Array.from(c.addresses).filter(Boolean) : [];
+    const ords = (Array.isArray(c.orders) ? c.orders : []).slice()
+      .sort((a, b) => String(b.orderDate || '').localeCompare(String(a.orderDate || '')))
+      .slice(0, 30)     // 문서 용량 — 약국당 최근 30건이면 영업에 충분하다
+      .map(o => ({ date: o.orderDate || '', no: o.orderNo || '',
+                   product: String(o.productName || '').slice(0, 80),
+                   qty: Number(o.qty) || 0, amount: Number(o.paymentAmount) || 0,
+                   shop: o.shopName || shopNm(o.shopId), status: o.status || '' }));
+    return {
+      key: String(c.key || ''), name: c.name || '', phone: c.phone || '', email: c.email || '',
+      address: addrs[0] || '', addresses: addrs.slice(0, 5),
+      totalSpent: Number(c.totalSpent) || 0,
+      orders: Array.isArray(c.orders) ? c.orders.length : 0,
+      lastDate: c.lastDate || '',
+      tier: (typeof _pharmacyTier === 'function') ? _pharmacyTier(c) : '',
+      history: ords
+    };
+  });
 }
 async function _staffMirrorPharm() { return _staffPush('pharmacies', _staffPharmPayload()); }
 
