@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.711';
+const ERP_VERSION = 'v2.3.712';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58773,13 +58773,31 @@ async function saveSharedSetting(key, value) {
       이 미러는 문서를 통째로 덮어쓰므로 직원이 쓴 글이 날아간다. */
 const _STAFF_MIRROR_MAX = 700 * 1024;   // Firestore 1MB 한도 여유분
 
-async function _staffPush(docId, arr) {
+async function _staffPush(docId, payload, opt) {
   if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return false;
-  let list = Array.isArray(arr) ? arr : [];
+  // ⚠️ v2.3.712 — 배열이 아닌 것(제품 포트폴리오·타임라인)은 객체 그대로 넘긴다.
+  //    전에는 Array.isArray 가 아니면 [] 로 바꿔 버려서, 객체 미러가 늘 빈 배열로 저장됐다.
+  const isArr = Array.isArray(payload);
+  const isObj = !isArr && payload && typeof payload === 'object';
+  let list = isArr ? payload : (isObj ? payload : []);
+  /* ⚠️ 빈 데이터는 기존 문서를 덮지 않는다.
+     임원용 데이터(shopOrders·stockHistory·위탁·창고…)는 IDB → Firestore 순으로
+     비동기 복원된다. 복원 전에 미러가 돌면 빈 배열이 직원용 목록을 통째로 지운다.
+     실제로 위탁·창고·주문에서 났던 사고다. 정말 비우려면 {allowEmpty:true}. */
+  const isEmpty = isArr ? !payload.length : (isObj ? !Object.keys(payload).length : true);
+  if (isEmpty && !(opt && opt.allowEmpty)) {
+    const had = await _staffDocCount(docId);
+    if (had !== 0) {     // 0 = 원래 비어 있음(밀어도 잃을 게 없다). 그 외(-1 포함)는 밀지 않는다.
+      console.warn('👥 [직원용 미러] ' + docId + ': 보낼 데이터가 비어 있어 건너뜁니다'
+        + (had > 0 ? ' (기존 ' + had + '건 유지)' : ' (기존 문서를 확인하지 못했습니다)')
+        + '. 임원용 데이터가 아직 로드되지 않았을 수 있습니다.');
+      return false;
+    }
+  }
   let json = JSON.stringify(list);
   let dropped = 0;
   // 한도 초과 시 뒤(=오래된/먼 미래)부터 덜어낸다. 호출부가 중요한 것을 앞에 둔다.
-  while (json.length > _STAFF_MIRROR_MAX && list.length > 1) {
+  while (isArr && json.length > _STAFF_MIRROR_MAX && list.length > 1) {
     list = list.slice(0, list.length - 1); dropped++; json = JSON.stringify(list);
   }
   if (dropped) console.warn('👥 [직원용 미러] ' + docId + ': 용량 초과로 ' + dropped + '건 제외');
@@ -58787,9 +58805,24 @@ async function _staffPush(docId, arr) {
     await window._firestoreSetDoc(
       window._firestoreDoc(window._firebaseDb, 'staff_data', docId),
       { data: json, ts: Date.now() });
-    console.log('👥 [직원용 미러] ' + docId + ': ' + list.length + '건 (' + Math.round(json.length / 1024) + 'KB)');
+    console.log('👥 [직원용 미러] ' + docId + ': ' + (isArr ? list.length + '건' : '객체')
+      + ' (' + Math.round(json.length / 1024) + 'KB)');
     return true;
   } catch(e) { console.warn('👥 [직원용 미러] ' + docId + ' 실패:', e && e.message); return false; }
+}
+
+/* 직원용 문서에 지금 몇 건이 들어 있나 — 빈 배열 덮어쓰기 방어용.
+   읽지 못하면 -1 (모르면 덮지 않는 쪽이 안전하지만, 읽기 실패로 미러가 멈추면 그것도 곤란해
+   0 이 아닌 -1 을 돌려주고 호출부는 '기존이 있다'로 보지 않는다). */
+async function _staffDocCount(docId) {
+  try {
+    if (!window._firestoreGetDoc) return -1;
+    const snap = await window._firestoreGetDoc(
+      window._firestoreDoc(window._firebaseDb, 'staff_data', docId));
+    if (!snap.exists()) return 0;
+    const v = JSON.parse(snap.data().data || '[]');
+    return Array.isArray(v) ? v.length : (v ? 1 : 0);
+  } catch (_) { return -1; }
 }
 
 // 운영 업무 공유 → 직원 게시판. base64 이미지는 빼고 공개 URL 만 넘긴다(용량).
@@ -59039,7 +59072,14 @@ function _staffOrdersPayload() {
     return _staffStripPii(r);
   }).sort((a, b) => String(b.orderDate || '').localeCompare(String(a.orderDate || '')));
 }
-async function _staffMirrorOrders() { return _staffPush('orders', _staffOrdersPayload()); }
+async function _staffMirrorOrders() {
+  // ⚠️ shopOrders 는 IDB 오프로드 대상이다 — 복원 전이면 미러를 미룬다.
+  if (DB._shopOrdersInIdb === true) {
+    console.warn('👥 [직원용 미러] orders: 주문이 아직 IDB 에서 복원되지 않았습니다 — 건너뜁니다');
+    return false;
+  }
+  return _staffPush('orders', _staffOrdersPayload());
+}
 window._staffMirrorItems = _staffMirrorItems;
 
 /* v2.3.669 — 약국 관리 미러 (기획서(2) 슬라이드 5).
