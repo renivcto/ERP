@@ -190,6 +190,10 @@ tr:last-child td { border-bottom:none; }
 .rt-editor td, .rt-editor th, .rt-view td, .rt-view th { border:1px solid #c9d2e0; padding:6px 9px; min-width:44px; text-align:left; }
 .rt-editor ul, .rt-editor ol, .rt-view ul, .rt-view ol { padding-left:22px; }
 .rt-view { line-height:1.65; }
+.lib-t { font-weight:700; color:var(--ink); cursor:pointer; }
+.lib-t:hover { color:var(--brand-deep); text-decoration:underline; }
+.lib-tag { display:inline-block; margin-left:5px; font-size:10.5px; font-weight:700; border-radius:99px;
+  padding:1px 7px; background:var(--brand-soft); color:var(--brand-deep); white-space:nowrap; }
 .rt-editor img, .rt-view img { max-width:100%; height:auto; border-radius:8px; display:block; margin:6px 0; }
 .up-list { display:flex; flex-direction:column; gap:5px; margin-bottom:8px; }
 .up-item { display:flex; align-items:center; gap:8px; border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:12.5px; background:#fff; }
@@ -1282,6 +1286,22 @@ tr:last-child td { border-bottom:none; }
   </div>
 </div>
 
+<!-- 자료실: 등록 자료 보기 — 목록은 요약만, 이미지·본문은 여기서 (v0.67.0) -->
+<div class="ovl" id="ovl-libview">
+  <div class="modal" style="max-width:760px">
+    <div class="modal-h"><span class="t" id="libv-t">자료</span><button class="modal-x" data-close="ovl-libview">✕</button></div>
+    <div class="modal-b">
+      <div class="hint" id="libv-m" style="margin:0 0 13px"></div>
+      <div class="rt-view" id="libv-b" style="font-size:14px"></div>
+      <div id="libv-f"></div>
+    </div>
+    <div class="modal-f">
+      <button class="btn btn-bad" id="btn-libv-del" style="margin-right:auto">삭제</button>
+      <button class="btn" data-close="ovl-libview">닫기</button>
+    </div>
+  </div>
+</div>
+
 <!-- 자료실: 드라이브 폴더 등록/수정 -->
 <div class="ovl" id="ovl-df">
   <div class="modal" style="max-width:520px">
@@ -1377,7 +1397,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.66.0';
+const STAFF_VERSION = 'v0.67.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1567,7 +1587,11 @@ if (DEMO) {
       approver: '송희강 이사', status: '승인', decidedBy: '송희강 이사', createdAt: Date.now() - 86400000 * 4 },
   ];
   LIBRARY = [ { id: 'b1', title: '신입 온보딩 가이드', content: '온보딩 자료 링크: https://drive.google.com/…',
-                uid: 'd2', by: '박지훈', avatar: '🐻', createdAt: Date.now() - 86400000 } ];
+                uid: 'd2', by: '박지훈', avatar: '🐻', createdAt: Date.now() - 86400000 },
+              // 본문에 큰 이미지가 든 케이스 — 목록이 밀리지 않는지 확인용(v0.67.0)
+              { id: 'b2', title: '제품 컷 정리', content: '<p>신제품 촬영 원본입니다.</p><img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MDAiIGhlaWdodD0iOTAwIj48cmVjdCB3aWR0aD0iNzAwIiBoZWlnaHQ9IjkwMCIgZmlsbD0iI2NkYThhMCIvPjwvc3ZnPg==">',
+                files: [{ name: '촬영본.zip', url: 'https://example.com/a.zip', size: 1024 }],
+                uid: 'd1', by: '김서연', avatar: '🦊', createdAt: Date.now() - 3600000 } ];
   ATT = [
     { id: 'a1', uid: 'd1', type: 'in',  date: today(), time: '09:02:11', ts: Date.now() - 4 * 3600e3, ip: '121.140.22.10', ua: 'demo' },
     { id: 'a2', uid: 'd2', type: 'in',  date: today(), time: '08:55:47', ts: Date.now() - 4.2 * 3600e3, ip: '175.223.10.4', ua: 'demo' },
@@ -4039,8 +4063,8 @@ function pageLibrary() {
     ${list.length ? `<div class="card"><div class="card-b" style="padding:0 18px"><table>
       <thead><tr><th>제목</th><th>내용</th><th>등록자</th><th>등록일</th><th></th></tr></thead><tbody>
       ${list.map(x => `<tr>
-        <td style="font-weight:700">${esc(x.title)}</td>
-        <td class="rt-view" style="max-width:340px;font-size:12.5px;color:var(--ink-soft);word-break:break-all">${linkify(x.content)}${upChips(x.files)}</td>
+        <td><a class="lib-t" data-lib-open="${esc(x.id)}">${esc(x.title)}</a></td>
+        <td style="font-size:12.5px;color:var(--ink-soft)">${libSummary(x)}</td>
         <td style="white-space:nowrap">${avaHtml(x.avatar || '', 20)} ${esc(x.by || '-')}</td>
         <td style="white-space:nowrap">${fmtD(new Date(x.createdAt || 0).toISOString())}</td>
         <td>${(x.uid === ME.uid || ME.mode === 'admin') ? `<button class="btn btn-sm btn-bad" data-lib-del="${esc(x.id)}">삭제</button>` : ''}</td>
@@ -4051,6 +4075,40 @@ function pageLibrary() {
 function linkify(s) {
   if (/[<>]/.test(String(s || ''))) return _rtSanitize(s);   // 서식 문서는 정화 후 그대로
   return esc(s).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--brand-deep)">$1</a>');
+}
+/* 목록용 한 줄 요약 — 본문에서 글자만 뽑고, 이미지·첨부는 개수로 (v0.67.0).
+   서식 문서를 목록에 그대로 넣으면 원본 크기 이미지가 표를 밀어낸다. */
+function libSummary(x) {
+  const d = document.createElement('div');
+  d.innerHTML = _rtSanitize(String(x.content || ''));
+  const imgs = d.querySelectorAll('img').length;
+  const txt = (d.textContent || '').replace(/\s+/g, ' ').trim();
+  const files = Array.isArray(x.files) ? x.files.length : 0;
+  const tags = (imgs ? `<span class="lib-tag">🖼 이미지 ${imgs}</span>` : '')
+             + (files ? `<span class="lib-tag">📎 첨부 ${files}</span>` : '');
+  const body = txt ? esc(txt.slice(0, 70)) + (txt.length > 70 ? '…' : '') : (tags ? '' : '<span style="color:var(--ink-mute)">내용 없음</span>');
+  return body + (tags ? (body ? ' ' : '') + tags : '');
+}
+/* 상세 보기 — 이미지와 본문은 여기서 온전히 본다 */
+function openLibView(id) {
+  const x = (LIBRARY || []).find(v => String(v.id) === String(id));
+  if (!x) { toast('자료를 찾을 수 없습니다', true); return; }
+  $('libv-t').textContent = '📚 ' + (x.title || '자료');
+  $('libv-m').innerHTML = `${avaHtml(x.avatar || '', 18)} ${esc(x.by || '-')} · ${esc(fmtD(new Date(x.createdAt || 0).toISOString()))}`;
+  $('libv-b').innerHTML = linkify(x.content) || '<span style="color:var(--ink-mute)">내용이 없습니다</span>';
+  $('libv-f').innerHTML = upChips(x.files);
+  const can = x.uid === ME.uid || ME.mode === 'admin';
+  const del = $('btn-libv-del');
+  del.style.display = can ? '' : 'none';
+  del.onclick = () => { $('ovl-libview').classList.remove('on'); libDelete(x.id); };
+  $('ovl-libview').classList.add('on');
+}
+async function libDelete(id) {
+  if (!confirm('이 자료를 삭제할까요?')) return;
+  const keep = LIBRARY.slice();
+  LIBRARY = LIBRARY.filter(x => String(x.id) !== String(id));
+  try { await saveCol('library', LIBRARY); toast('삭제했습니다'); }
+  catch (e) { LIBRARY = keep; toast('실패: ' + e.message, true); rerender(); }
 }
 /* ── 자료실 배선 ── */
 function wireDrive() {
@@ -4197,11 +4255,8 @@ function wireLibrary() {
     LIB_FILES = []; renderLibFiles();
     $('ovl-lib').classList.add('on');
   };
-  document.querySelectorAll('[data-lib-del]').forEach(b => b.onclick = async () => {
-    if (!confirm('이 자료를 삭제할까요?')) return;
-    LIBRARY = LIBRARY.filter(x => x.id !== b.dataset.libDel);
-    try { await saveCol('library', LIBRARY); toast('삭제했습니다'); } catch (e) { toast('실패: ' + e.message, true); }
-  });
+  document.querySelectorAll('[data-lib-open]').forEach(b => b.onclick = () => openLibView(b.dataset.libOpen));
+  document.querySelectorAll('[data-lib-del]').forEach(b => b.onclick = () => libDelete(b.dataset.libDel));
 }
 $('btn-lib-save').onclick = async () => {
   const title = $('lib-title').value.trim();
