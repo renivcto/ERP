@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.710';
+const ERP_VERSION = 'v2.3.711';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58880,16 +58880,67 @@ function _staffStripPii(o) {   // 허용목록으로 만든 뒤 금지목록으�
   Object.keys(o || {}).forEach(k => { if (_STAFF_PII_DENY.indexOf(k) < 0) out[k] = o[k]; });
   return out;
 }
+/* v2.3.711 — 품목 이미지를 직원용으로 넘기기 위한 썸네일.
+   임원용은 이미지를 IDB 로 빼고 '__idb__' 만 남기므로, 그대로 넘기면 직원용은 빈칸이다.
+   원본을 그대로 넣으면 이번엔 미러 레코드가 부푼다(1MB 한계) → 96px JPEG 로 줄인다. */
+const _STAFF_THUMB_MAX = 96;
+window._staffThumbCache = window._staffThumbCache || {};   // itemId → 썸네일 dataURL
+function _staffMakeThumb(dataUrl) {
+  return new Promise(resolve => {
+    try {
+      const im = new Image();
+      im.onload = () => {
+        try {
+          const r = Math.min(1, _STAFF_THUMB_MAX / Math.max(im.width || 1, im.height || 1));
+          const w = Math.max(1, Math.round((im.width || 1) * r));
+          const h = Math.max(1, Math.round((im.height || 1) * r));
+          const c = document.createElement('canvas');
+          c.width = w; c.height = h;
+          const cx = c.getContext('2d');
+          cx.fillStyle = '#fff'; cx.fillRect(0, 0, w, h);
+          cx.drawImage(im, 0, 0, w, h);
+          resolve(c.toDataURL('image/jpeg', 0.72));
+        } catch (_) { resolve(''); }
+      };
+      im.onerror = () => resolve('');
+      im.src = dataUrl;
+    } catch (_) { resolve(''); }
+  });
+}
+/* 품목 하나의 표시용 이미지를 구한다: http URL 이면 그대로, 아니면 IDB → Firestore 순으로 찾아 썸네일 */
+async function _staffItemImg(item) {
+  const raw = (item && typeof item.image === 'string') ? item.image : '';
+  if (raw.indexOf('http') === 0) return raw;                    // Storage URL — 그대로가 가장 가볍다
+  const id = String(item && item.id);
+  if (window._staffThumbCache[id] != null) return window._staffThumbCache[id];
+  let src = '';
+  if (raw.indexOf('data:') === 0) src = raw;
+  if (!src) { try { src = (await idbGet('item_img_' + id)) || ''; } catch (_) {} }
+  if (!src || src === '__idb__') {
+    try { src = (await _loadSharedItemImage(id)) || ''; } catch (_) {}
+  }
+  if (!src || src === '__idb__') { window._staffThumbCache[id] = ''; return ''; }
+  if (src.indexOf('http') === 0) { window._staffThumbCache[id] = src; return src; }
+  const th = await _staffMakeThumb(src);
+  window._staffThumbCache[id] = th;
+  return th;
+}
 function _staffPubImg(v) { return (typeof v === 'string' && v.indexOf('http') === 0) ? v : ''; }
 
 // 완제품 품목 — 원가(price)·재고평가액은 넘기지 않는다
-function _staffItemsPayload() {
+async function _staffItemsPayload() {
+  // ⚠️ 창고 목록을 먼저 읽는다 — _itemWhEffective 가 _whById 로 기본창고를 확인하는데,
+  //    로드 전이면 잔여가 전부 '__un__'(미지정)으로 떨어져 직원용 재고 위치가 통째로 틀어진다.
+  try { if (typeof _whEnsureLoaded === 'function') await _whEnsureLoaded(); } catch (_) {}
+  const imgs = {};
+  const fin = (DB.items || []).filter(i => i && i.type === '완제품' && !i._archivedAt);
+  for (const i of fin) { try { imgs[String(i.id)] = await _staffItemImg(i); } catch (_) { imgs[String(i.id)] = ''; } }
   const sellers = {};
   (DB.sellers || []).forEach(s => { if (s) sellers[String(s.id)] = s.company || ''; });
-  return (DB.items || []).filter(i => i && i.type === '완제품' && !i._archivedAt).map(i => _staffStripPii({
+  return fin.map(i => _staffStripPii({
     id: String(i.id), code: i.code || '', name: i.name || '', spec: i.spec || '',
     channels: Array.isArray(i.channels) ? i.channels : (i.channels ? [i.channels] : []),
-    image: _staffPubImg(i.image || i.thumb), stock: Number(i.stock) || 0,
+    image: imgs[String(i.id)] || _staffPubImg(i.thumb), stock: Number(i.stock) || 0,
     // v2.3.700: 화면에 보이는 값과 같아야 한다 — 기본창고 잔여까지 반영된 실효 배정을 넘긴다.
     //   whStock 원본만 넘기면 '르니브 창고' 같은 잔여분이 통째로 빠진다.
     whStock: (typeof _itemWhEffective === 'function') ? _itemWhEffective(i)
@@ -58912,7 +58963,7 @@ function _staffItemsPayload() {
     note: i.note || ''
   }));
 }
-async function _staffMirrorItems() { return _staffPush('items_fin', _staffItemsPayload()); }
+async function _staffMirrorItems() { return _staffPush('items_fin', await _staffItemsPayload()); }
 
 /* v2.3.698 — 판매업체별 가격 편집에 쓸 거래처 후보(판매업체 + 쇼핑몰). 임원용 드롭다운과 같은 값. */
 function _staffSupplyPartnersPayload() {
