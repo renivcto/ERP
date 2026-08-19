@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.712';
+const ERP_VERSION = 'v2.3.713';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -59369,6 +59369,36 @@ window.migrateBase64 = migrateBase64;
 
 
 /* 제품 포트폴리오 — 원본은 shared/product_map. 지연 로드라 못 읽었으면 밀지 않는다. */
+/* v2.3.713 — 제품 포트폴리오 미러.
+   ⚠️ 원본을 통째로 밀면 안 된다: 제품 사진이 base64 면 문서가 1MB 를 넘고,
+      의견(comments)에는 내부 논의가 들어 있다. 화면에 필요한 것만, 사진은 썸네일로. */
+async function _staffProductMapPayload(d) {
+  const out = {
+    skinConcerns: (d.skinConcerns || []).slice(),
+    productTypes: (d.productTypes || []).slice(),
+    channels: (d.channels || []).map(c => ({ id: c.id, name: c.name || '', color: c.color || '#cbd5e1' })),
+    updatedAt: Number(d.updatedAt) || 0,
+    products: []
+  };
+  for (const p of (d.products || [])) {
+    if (!p) continue;
+    let photo = typeof p.photo === 'string' ? p.photo : '';
+    if (photo && photo.indexOf('http') !== 0) {
+      const key = 'pm:' + p.id;
+      if (window._staffThumbCache[key] == null) {
+        window._staffThumbCache[key] = await _staffMakeThumb(photo);
+      }
+      photo = window._staffThumbCache[key] || '';
+    }
+    out.products.push({
+      id: String(p.id), name: p.name || '', productType: p.productType || '', skinConcern: p.skinConcern || '',
+      channel: p.channel || '', price: p.price == null ? '' : p.price, capacity: p.capacity || '',
+      status: p.status || 'dev', photo: photo,
+      cmt: Array.isArray(p.comments) ? p.comments.length : 0   // 내용은 넘기지 않는다 — 개수만
+    });
+  }
+  return out;
+}
 async function _staffMirrorProductMap() {
   try { if (!window._productMapData && typeof _pmLoad === 'function') await _pmLoad(); } catch (_) {}
   const d = window._productMapData;
@@ -59376,7 +59406,7 @@ async function _staffMirrorProductMap() {
     console.warn('[미러] 제품 포트폴리오를 아직 못 읽었습니다 — 건너뜁니다');
     return 0;
   }
-  return _staffPush('productmap', d);
+  return _staffPush('productmap', await _staffProductMapPayload(d));
 }
 
 /* 완제품 생산 타임라인 — 원본은 settings/fp_milestones(관리자 전용 read)라 직원은 못 읽는다. */
