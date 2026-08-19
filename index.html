@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.706';
+const ERP_VERSION = 'v2.3.707';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -54689,15 +54689,42 @@ function saveNewProduct() {
   } catch(_){}
 
   // v2.3.2: localStorage 동기 즉시 저장 (Firestore 안 끝나도 새로고침 시 유지)
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) { console.warn('localStorage 저장 실패:', e); }
+  // v2.3.707: 쓰기 전에 자리를 만든다 — 안 그러면 QuotaExceededError 로 로컬 캐시가 통째로 실패한다
+  try { if (typeof _lsAutoTidy === 'function') _lsAutoTidy(); } catch(_){}
+  let _lsOk = true;
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }
+  catch(e) { _lsOk = false; console.warn('localStorage 저장 실패:', e); }
   // 전용 백업 (newProducts_backup) 도 즉시 갱신
   try { if (typeof _backupNpIns === 'function') _backupNpIns(); } catch(_){}
-  saveDataNow().catch(e => console.error('신제품 저장 실패:', e));
-  closeModal('add-newproduct');
   renderNewProductKanban();
   // v2.3.47: 타임라인도 즉시 갱신 (새로고침 없이)
   try { if (typeof renderProductTimeline === 'function') renderProductTimeline(); } catch(_){}
-  showNotif(_npEditId ? '수정되었습니다' : '신제품이 추가되었습니다', 'success');
+
+  // v2.3.707: ⚠️ 예전에는 saveDataNow() 를 await 하지 않고 무조건 '수정되었습니다' 를 띄웠다.
+  //   서버 쓰기가 400 으로 실패해도 성공으로 보였고, 새로고침하면 내용이 사라졌다(실제 발생).
+  //   이제 실제 쓰기 여부를 확인하고, 실패하면 모달을 닫지 않는다 — 내용이 화면에 남아야
+  //   다시 시도하거나 복사해 둘 수 있다.
+  showNotif('저장 중…', 'info');
+  (async () => {
+    let ok = true, err = '';
+    try {
+      window._lastFsWriteOk = false;
+      await saveDataNow();
+      ok = (window._lastFsWriteOk !== false);
+    } catch(e) { ok = false; err = (e && e.message) || String(e); console.error('신제품 저장 실패:', e); }
+    if (ok) {
+      closeModal('add-newproduct');
+      showNotif((_npEditId ? '수정되었습니다' : '신제품이 추가되었습니다')
+        + (_lsOk ? '' : ' (로컬 캐시는 용량 부족으로 건너뜀 — 서버 저장은 완료)'), 'success');
+    } else {
+      showNotif('⚠️ 서버 저장에 실패했습니다 — 창을 닫지 마세요', 'error');
+      alert('⚠️ 서버 저장에 실패했습니다.\n\n'
+        + (err ? '오류: ' + err + '\n\n' : '')
+        + '작성한 내용은 아직 화면에 남아 있습니다.\n'
+        + '네트워크를 확인한 뒤 [저장] 을 다시 누르세요.\n'
+        + '급하면 내용을 복사해 두시는 것이 안전합니다.');
+    }
+  })();
 }
 
 // ═══════════════════════════════════════════════════════
