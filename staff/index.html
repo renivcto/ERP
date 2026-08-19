@@ -1407,7 +1407,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.72.0';
+const STAFF_VERSION = 'v0.73.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -3040,6 +3040,12 @@ const MENUS = [
 ];
 /* 세션 내 접기 상태 — 아코디언(한 번에 하나만 열린다). 없는 키 = 닫힘 */
 const _navOpen = {};
+/* 화면 제목은 왼쪽 하위 메뉴 이름과 같아야 한다 — 양쪽에 따로 적어 두면 어긋난다(v0.73.0) */
+function pgTitle(pg) {
+  const id = pg || CUR_PAGE;
+  const it = MENUS.flatMap(g => g.items || [g]).find(x => x && x.id === id);
+  return it ? it.name() : '';
+}
 function _groupOf(pg) {
   for (let i = 0; i < MENUS.length; i++) {
     const m = MENUS[i];
@@ -5113,7 +5119,7 @@ function pageNewProduct() {
     const body = NP_TOPTAB === 'timeline' ? pageNpTimeline()
                : NP_TOPTAB === 'portfolio' ? pageNpPortfolio() : pageNpInsight();
     return `<div class="pg on">
-      <div class="pg-h"><h1>신제품 개발${syncMark('임원용과 연동됩니다', 1)}</h1></div>
+      <div class="pg-h"><h1>${esc(pgTitle())}${syncMark('임원용과 연동됩니다', 1)}</h1></div>
       <div class="pg-sub">신제품 개발 진행 상황입니다 · <b>수익성(원가) 정보는 표시되지 않습니다</b></div>
       ${body}</div>`;
   }
@@ -5124,7 +5130,7 @@ function pageNewProduct() {
   const stages = NP_BOARD_STAGES.concat(
     Array.from(new Set(all.map(p => p.stage).filter(x => x && x !== 'done' && NP_BOARD_STAGES.indexOf(x) < 0))));
   return `<div class="pg on">
-    <div class="pg-h"><h1>신제품 개발${syncMark('임원용과 읽기·쓰기 모두 연동됩니다', 1)}</h1></div>
+    <div class="pg-h"><h1>${esc(pgTitle())}${syncMark('임원용과 읽기·쓰기 모두 연동됩니다', 1)}</h1></div>
     <div class="pg-sub">${board.length}개 프로젝트 · <b>수익성(원가) 정보는 표시되지 않습니다</b></div>
     <div class="np-top">
       <select class="fi" id="np-status">
@@ -6388,7 +6394,7 @@ function pageApproval() {
   const list = ME.mode === 'admin' ? all : all.filter(r => r._byUid === ME.uid);
   const waiting = list.filter(r => !r.applied).length;
   return `<div class="pg on">
-    <div class="pg-h"><h1>결재 관리${syncMark('여기서 작성한 문서가 임원용 ERP 결재함으로 전달됩니다', 1)}</h1>
+    <div class="pg-h"><h1>${esc(pgTitle())}${syncMark('여기서 작성한 문서가 임원용 ERP 결재함으로 전달됩니다', 1)}</h1>
       ${ME.mode === 'admin'
         ? `<button class="btn" id="btn-ap-clean" style="margin-left:auto" title="임원용으로 전달이 끝난 문서를 직원용 목록에서 한꺼번에 지웁니다">🧹 전달 완료 정리 (${all.filter(r => r.applied).length})</button>`
         : `<button class="btn btn-p" id="btn-ap-new" style="margin-left:auto">＋ ${isExp ? '지출 결의서' : '일반 결재'} 작성</button>`}</div>
@@ -6885,7 +6891,7 @@ function pageSales() {
   const list = all.slice(0, 500);
   const pend = ordAll().filter(o => o._pending).length;
   return `<div class="pg on">
-    <div class="pg-h"><h1>판매 관리${syncMark('임원용 ERP와 연동됩니다', 1)}</h1>
+    <div class="pg-h"><h1>${esc(pgTitle())}${syncMark('임원용 ERP와 연동됩니다', 1)}</h1>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${dpSearch('dp-q-ord', '주문번호·품목·쇼핑몰 검색')}</span></div>
     ${dpSub(`주문 ${(ORDERS || []).length}건 · 고객명·연락처·주소는 표시되지 않습니다${pend ? ` · <b style="color:var(--warn)">반영 대기 ${pend}건</b>` : ''}`)}
     ${periodHtml()}
@@ -7189,7 +7195,7 @@ function adTrendHtml(list) {
 function pageSalesConsign() {
   const list = consAll().filter(c => inPeriod(c.date));
   return `<div class="pg on">
-    <div class="pg-h"><h1>판매 관리${syncMark('', 1)}</h1>
+    <div class="pg-h"><h1>${esc(pgTitle())}${syncMark('', 1)}</h1>
       <button class="btn btn-p" id="btn-cg-new" style="margin-left:auto">🚚 위탁 출고 등록</button></div>
     ${dpSub('바로팜 등 위탁 판매처로 보낸 재고입니다 · 출고 등록은 이 화면에서 합니다')}
     ${periodHtml()}
@@ -7302,7 +7308,7 @@ function pageSalesAds() {
   const sum = list.reduce((s, a) => s + (Number(a.cost) || 0), 0);
   const wait = list.filter(a => a.src === 'staff').length;
   return `<div class="pg on">
-    <div class="pg-h"><h1>판매 관리${syncMark('', 1)}</h1>
+    <div class="pg-h"><h1>${esc(pgTitle())}${syncMark('', 1)}</h1>
       <span style="margin-left:auto;display:flex;gap:8px">
         <button class="btn" id="btn-ad-exp">💳 지출결의서 작성</button>
         <button class="btn btn-p" id="btn-ad-new">＋ 광고비 등록</button></span></div>
