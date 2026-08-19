@@ -1377,7 +1377,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.64.1';
+const STAFF_VERSION = 'v0.65.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -3008,6 +3008,13 @@ function _openOnly(group) {
   if (group) _navOpen[group] = true;
 }
 
+/* ⓘ 임원용 연동 표시 — 직원 모드에서는 보이지 않는다(v0.65.0).
+   직원에게는 알 필요 없는 내부 사정이고, 관리자에게는 어느 화면이 물려 있는지가 정보다. */
+function syncMark(t, big) {
+  if (!ME || ME.mode !== 'admin') return '';
+  return '<sup class="sync"' + (big ? ' style="font-size:13px"' : '')
+       + (t ? ' title="' + esc(t) + '"' : '') + '> ⓘ</sup>';
+}
 function renderMenu() {
   const el = $('sb-menu');
   const cntBadge = n => n ? `<span class="badge">${n}</span>` : '';
@@ -3016,7 +3023,7 @@ function renderMenu() {
                 : m.id === 'adm-policy' ? cntBadge(LEAVES.filter(l => l.status === '대기').length)
                 : '';
     return `<div class="mi" data-pg="${m.id}"><span class="ico">${m.ico}</span>`
-         + `<span>${esc(m.name())}${m.sync ? `<sup class="sync" title="${esc(m.sync)}">ⓘ</sup>` : ''}</span>${badge}</div>`;
+         + `<span>${esc(m.name())}${syncMark(m.sync)}</span>${badge}</div>`;
   };
   let html = '';
   MENUS.forEach(m => {
@@ -4610,7 +4617,7 @@ function pageBoard() {
     .map(([k, lb]) => `<button type="button" class="bd-chip ${(BOARD_CAT || '') === k ? 'on' : ''}" data-bd-cat="${k}">${lb}</button>`).join('');
   return `
   <div class="pg on">
-    <div class="pg-h"><h1>운영 업무 게시판<sup class="sync" style="font-size:13px" title="임원용 ERP에서 '직원용 ERP에도 게시'로 체크한 글이 함께 표시됩니다"> ⓘ</sup></h1>
+    <div class="pg-h"><h1>운영 업무 게시판${syncMark('임원용 ERP에서 \'직원용 ERP에도 게시\'로 체크한 글이 함께 표시됩니다', 1)}</h1>
       <button class="btn btn-p" data-board-new="1" style="margin-left:auto">✍️ 새 글 작성</button></div>
     <div class="pg-sub">임원용 ERP에서 공유된 글과 직원이 등록한 글을 함께 봅니다 · 총 ${all.length}건</div>
     <div class="bd-chips">${chips}</div>
@@ -5006,7 +5013,7 @@ function pageNewProduct() {
     const body = NP_TOPTAB === 'timeline' ? pageNpTimeline()
                : NP_TOPTAB === 'portfolio' ? pageNpPortfolio() : pageNpInsight();
     return `<div class="pg on">
-      <div class="pg-h"><h1>신제품 개발<sup class="sync" style="font-size:13px" title="임원용과 연동됩니다"> ⓘ</sup></h1></div>
+      <div class="pg-h"><h1>신제품 개발${syncMark('임원용과 연동됩니다', 1)}</h1></div>
       <div class="pg-sub">임원용 ERP와 연동 · <b>수익성(원가) 정보는 표시되지 않습니다</b></div>
       ${body}</div>`;
   }
@@ -5017,7 +5024,7 @@ function pageNewProduct() {
   const stages = NP_BOARD_STAGES.concat(
     Array.from(new Set(all.map(p => p.stage).filter(x => x && x !== 'done' && NP_BOARD_STAGES.indexOf(x) < 0))));
   return `<div class="pg on">
-    <div class="pg-h"><h1>신제품 개발<sup class="sync" style="font-size:13px" title="임원용과 읽기·쓰기 모두 연동됩니다"> ⓘ</sup></h1></div>
+    <div class="pg-h"><h1>신제품 개발${syncMark('임원용과 읽기·쓰기 모두 연동됩니다', 1)}</h1></div>
     <div class="pg-sub">${board.length}개 프로젝트 · 임원용 ERP와 양방향 연동 · <b>수익성(원가) 정보는 표시되지 않습니다</b></div>
     ${npTabsHtml()}
     <div class="np-top">
@@ -5448,7 +5455,7 @@ function pagePharmacy() {
   const list = isCs ? dpFilter(cs, PH_Q, ['customer', 'content', 'category'])
                     : dpFilter(PHARM || [], PH_Q, ['name', 'phone', 'address']);
   return `<div class="pg on">
-    <div class="pg-h"><h1>약국 관리<sup class="sync" style="font-size:13px" title="약사 CS와 약국 리스트가 임원용과 연동됩니다"> ⓘ</sup></h1>
+    <div class="pg-h"><h1>약국 관리${syncMark('약사 CS와 약국 리스트가 임원용과 연동됩니다', 1)}</h1>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
         <input class="df-search" id="dp-q-ph" placeholder="🔍 ${isCs ? '약국·상담내용 검색' : '약국명·연락처·주소 검색'}" style="width:230px" value="${esc(PH_Q)}">
         ${isCs ? '<button class="btn btn-p" id="btn-cs-new">＋ CS 등록</button>' : ''}</span></div>
@@ -6283,7 +6290,7 @@ function pageApproval() {
   const list = ME.mode === 'admin' ? all : all.filter(r => r._byUid === ME.uid);
   const waiting = list.filter(r => !r.applied).length;
   return `<div class="pg on">
-    <div class="pg-h"><h1>결재 관리<sup class="sync" style="font-size:13px" title="여기서 작성한 문서가 임원용 ERP 결재함으로 전달됩니다"> ⓘ</sup></h1>
+    <div class="pg-h"><h1>결재 관리${syncMark('여기서 작성한 문서가 임원용 ERP 결재함으로 전달됩니다', 1)}</h1>
       ${ME.mode === 'admin'
         ? `<button class="btn" id="btn-ap-clean" style="margin-left:auto" title="임원용으로 전달이 끝난 문서를 직원용 목록에서 한꺼번에 지웁니다">🧹 전달 완료 정리 (${all.filter(r => r.applied).length})</button>`
         : `<button class="btn btn-p" id="btn-ap-new" style="margin-left:auto">＋ ${isExp ? '지출 결의서' : '일반 결재'} 작성</button>`}</div>
@@ -6401,7 +6408,7 @@ function dpEmpty(what) {
 function pageItems() {
   const list = dpFilter(ITEMS || [], ITEM_Q, ['name', 'code', 'spec']);
   return `<div class="pg on">
-    <div class="pg-h"><h1>품목 정보<sup class="sync" style="font-size:13px" title="임원용 ERP에서 단방향으로 연동됩니다"> ⓘ</sup></h1>
+    <div class="pg-h"><h1>품목 정보${syncMark('임원용 ERP에서 단방향으로 연동됩니다', 1)}</h1>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${dpSearch('dp-q-item', '품목명·코드 검색')}</span></div>
     <div class="pg-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       완제품 ${(ITEMS || []).length}건 · 원가와 재고평가액은 표시되지 않습니다 ${DP_RO}</div>
@@ -6441,7 +6448,7 @@ const HIST_KIND = {
 function pageStockHist() {
   const list = histRows();
   return `<div class="pg on">
-    <div class="pg-h"><h1>재고 관리<sup class="sync" style="font-size:13px" title="임원용 ERP와 연동됩니다"> ⓘ</sup></h1>
+    <div class="pg-h"><h1>재고 관리${syncMark('임원용 ERP와 연동됩니다', 1)}</h1>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${dpSearch('dp-q-stock', '품목명 검색')}</span></div>
     <div class="pg-sub">최근 ${(SHIST || []).length}건 · 단가와 금액은 표시되지 않습니다 ${DP_RO}</div>
     ${stockTabsHtml()}
@@ -6475,7 +6482,7 @@ function pageStock() {
   const list = dpFilter(ITEMS || [], STOCK_Q, ['name', 'code']);
   const low = (ITEMS || []).filter(i => i.minStock && Number(i.stock) < Number(i.minStock)).length;
   return `<div class="pg on">
-    <div class="pg-h"><h1>재고 관리<sup class="sync" style="font-size:13px" title="임원용 ERP와 연동됩니다"> ⓘ</sup></h1>
+    <div class="pg-h"><h1>재고 관리${syncMark('임원용 ERP와 연동됩니다', 1)}</h1>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${dpSearch('dp-q-stock', '품목명·코드 검색')}</span></div>
     <div class="pg-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       완제품 ${(ITEMS || []).length}건${low ? ` · <b style="color:var(--bad)">안전재고 미만 ${low}건</b>` : ''} ·
@@ -6787,7 +6794,7 @@ function pageSales() {
   const list = all.slice(0, 500);
   const pend = ordAll().filter(o => o._pending).length;
   return `<div class="pg on">
-    <div class="pg-h"><h1>판매 관리<sup class="sync" style="font-size:13px" title="임원용 ERP와 연동됩니다"> ⓘ</sup></h1>
+    <div class="pg-h"><h1>판매 관리${syncMark('임원용 ERP와 연동됩니다', 1)}</h1>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${dpSearch('dp-q-ord', '주문번호·품목·쇼핑몰 검색')}</span></div>
     <div class="pg-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       주문 ${(ORDERS || []).length}건 · 고객명·연락처·주소는 직원용에 넘어오지 않습니다${pend ? ` · <b style="color:var(--warn)">반영 대기 ${pend}건</b>` : ''}</div>
@@ -7100,7 +7107,7 @@ function adTrendHtml(list) {
 function pageSalesConsign() {
   const list = consAll().filter(c => inPeriod(c.date));
   return `<div class="pg on">
-    <div class="pg-h"><h1>판매 관리<sup class="sync" style="font-size:13px"> ⓘ</sup></h1>
+    <div class="pg-h"><h1>판매 관리${syncMark('', 1)}</h1>
       <button class="btn btn-p" id="btn-cg-new" style="margin-left:auto">🚚 위탁 출고 등록</button></div>
     <div class="pg-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       바로팜 등 위탁 판매처로 보낸 재고입니다 ${DP_RO}</div>
@@ -7215,7 +7222,7 @@ function pageSalesAds() {
   const sum = list.reduce((s, a) => s + (Number(a.cost) || 0), 0);
   const wait = list.filter(a => a.src === 'staff').length;
   return `<div class="pg on">
-    <div class="pg-h"><h1>판매 관리<sup class="sync" style="font-size:13px"> ⓘ</sup></h1>
+    <div class="pg-h"><h1>판매 관리${syncMark('', 1)}</h1>
       <span style="margin-left:auto;display:flex;gap:8px">
         <button class="btn" id="btn-ad-exp">💳 지출결의서 작성</button>
         <button class="btn btn-p" id="btn-ad-new">＋ 광고비 등록</button></span></div>
@@ -7324,7 +7331,7 @@ function pageWorkflow() {
   const boards = Array.isArray(WF) ? WF : [];
   if (!boards.length) {
     return `<div class="pg on">
-      <div class="pg-h"><h1>워크플로우<sup class="sync" style="font-size:13px" title="임원용 ERP의 Trello 보드와 연동됩니다"> ⓘ</sup></h1></div>
+      <div class="pg-h"><h1>워크플로우${syncMark('임원용 ERP의 Trello 보드와 연동됩니다', 1)}</h1></div>
       <div class="ph"><div class="big">🧩</div><h3>아직 넘어온 보드가 없습니다</h3>
         <p>르니브 운영 본부 · 홈쇼핑 준비 · 박은빈MD 보드가 표시됩니다 (신제품 개발은 임원용 전용).<br>
            임원용 ERP에서 <b>워크플로우 → Trello 동기화</b>를 한 번 실행하면 여기에 나타납니다.</p></div></div>`;
@@ -7334,7 +7341,7 @@ function pageWorkflow() {
     gTotal += t; gSoon += s; gProg += (t - s); });
   const sep = '<span style="color:var(--line)">·</span>';
   return `<div class="pg on">
-    <div class="pg-h"><h1>워크플로우<sup class="sync" style="font-size:13px" title="임원용 ERP의 Trello 보드와 연동됩니다"> ⓘ</sup></h1></div>
+    <div class="pg-h"><h1>워크플로우${syncMark('임원용 ERP의 Trello 보드와 연동됩니다', 1)}</h1></div>
     <div class="wf-overall">
       <span class="ttl">📊 워크플로우 현황</span>
       <span>전체 <b>${gTotal}</b>장</span> ${sep}
@@ -7553,7 +7560,7 @@ function pageCalendar() {
   const up = calUpcoming(14), late = calOverdue();
   return `
   <div class="pg on">
-    <div class="pg-h"><h1>르니브 캘린더<sup class="sync" style="font-size:13px" title="임원용 ERP의 업무 일정과 동일하게 연동됩니다"> ⓘ</sup></h1></div>
+    <div class="pg-h"><h1>르니브 캘린더${syncMark('임원용 ERP의 업무 일정과 동일하게 연동됩니다', 1)}</h1></div>
     <div class="pg-sub">임원용 ERP의 업무 일정이 표시됩니다 (신제품 개발 제외) · 총 ${calRows().length}건</div>
     <div class="bd-grid">
       <div class="card">
@@ -7580,7 +7587,7 @@ function pagePlaceholder(id) {
   const p = PH[id] || { ico: '🚧', t: id, d: '' };
   return `
   <div class="pg on">
-    <div class="pg-h"><h1>${p.t}${p.sync ? '<sup class="sync" style="font-size:13px"> ⓘ</sup>' : ''}</h1></div>
+    <div class="pg-h"><h1>${p.t}${p.sync ? syncMark('', 1) : ''}</h1></div>
     <div class="pg-sub">${p.sync ? '임원용 ERP 연동 메뉴' : '직원용 전용 메뉴'}</div>
     <div class="ph">
       <div class="big">${p.ico}</div>
