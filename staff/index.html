@@ -397,6 +397,38 @@ tr:last-child td { border-bottom:none; }
 .dp-tb td, .dp-tb th { padding:8px 7px; }
 .dp-tb .nm { font-weight:700; text-align:left; }
 .dp-img { width:34px; height:34px; border-radius:6px; object-fit:cover; border:1px solid var(--line); }
+/* 휴가 정책 화면 (v0.64.0) — 왼쪽 설정 2열 + 오른쪽 공휴일 달력 */
+.pol-wrap { display:grid; grid-template-columns:minmax(0,1fr) 318px; gap:24px; align-items:start; }
+.pol-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px 22px; align-items:start; }
+.pol-note { background:var(--line-soft); border:1px solid var(--line); border-radius:9px;
+  padding:10px 12px; font-size:12.5px; line-height:1.8; color:var(--ink-soft); }
+.pol-note b { color:var(--ink); }
+@media (max-width:1240px) { .pol-wrap { grid-template-columns:minmax(0,1fr); } }
+@media (max-width:820px)  { .pol-grid { grid-template-columns:minmax(0,1fr); } }
+/* 공휴일 달력 */
+.hc { border:1px solid var(--line); border-radius:11px; padding:12px 13px 13px; background:var(--panel); }
+.hc-top { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px; }
+.hc-ym { font-size:13px; font-weight:800; }
+.hc-nav { display:flex; gap:4px; }
+.hc-nav button { min-width:24px; height:24px; padding:0 5px; border:1px solid var(--line); background:#fff;
+  border-radius:7px; cursor:pointer; color:var(--ink-soft); font-size:11px; line-height:1; font-weight:700; }
+.hc-nav button:hover { border-color:var(--brand); color:var(--brand-deep); background:var(--brand-soft); }
+.hc-g { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
+.hc-w { text-align:center; font-size:10.5px; font-weight:700; color:var(--ink-mute); padding:1px 0 4px; }
+.hcd { text-align:center; font-size:11.5px; padding:5px 0; border-radius:7px; color:var(--ink-soft); }
+.hcd.sat { color:#2563eb; }
+.hcd.sun { color:var(--bad); }
+.hcd.hol { background:var(--bad-soft); color:var(--bad); font-weight:800; }
+.hcd.tod { outline:2px solid var(--brand); outline-offset:-2px; }
+.hc-li { display:flex; align-items:center; gap:6px; font-size:11.5px; padding:5px 0; border-top:1px solid var(--line-soft); }
+.hc-li .d { font-weight:800; width:38px; flex-shrink:0; color:var(--ink); }
+.hc-li .n { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hc-li a { cursor:pointer; color:var(--ink-mute); font-size:10.5px; white-space:nowrap; }
+.hc-li a:hover { color:var(--brand-deep); text-decoration:underline; }
+.hc-li.off .n { text-decoration:line-through; color:var(--ink-mute); }
+.hc-tag { font-size:9.5px; font-weight:800; border-radius:99px; padding:1px 6px; flex-shrink:0; }
+.hc-tag.a { background:var(--brand-soft); color:var(--brand-deep); }
+.hc-tag.c { background:#fff7ed; color:#c2410c; }
 .dp-chip { display:inline-block; border-radius:99px; padding:1px 8px; font-size:10.5px; font-weight:700;
   background:var(--brand-soft); color:var(--brand-deep); }
 .dp-ro { display:inline-flex; align-items:center; gap:6px; background:#f1f5f9; color:#475569; border:1px solid var(--line);
@@ -1345,7 +1377,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.63.0';
+const STAFF_VERSION = 'v0.64.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1514,6 +1546,9 @@ if (DEMO) {
     { uid: 'd3', name: '이하늘', title: '마케터', phone: '010-3456-7890', avatar: '🐱', role: 'staff', active: false, joinDate: '2026-08-15' },
   ];
   USERS = demoStaff;
+  HOL = { auto: { '2026-08-15': '광복절', '2026-08-17': '광복절 대체 휴일', '2026-09-24': '추석 연휴',
+                  '2026-09-25': '추석', '2026-09-26': '추석 연휴', '2026-10-03': '개천절', '2026-10-09': '한글날' },
+          add: { '2026-08-21': '창립기념일' }, remove: ['2026-08-17'], syncedAt: Date.now(), source: 'demo' };
   TEAMS = [
     { id: 't1', name: '국내 영업팀', lead: '권다빈 이사', ai: 'IAN',
       slack: 'https://slack.com/app_redirect?channel=demo', leadSlack: 'https://slack.com/app_redirect?channel=demo',
@@ -2011,6 +2046,26 @@ function defaultTeams() {
   ];
 }
 function pol() { return POLICY || DEFAULT_POLICY; }
+/* ═══════════ 연차 자동 계산 (v0.64.0) ═══════════
+   입사일 기준 만 1년마다 1일. 만 1년 → 1일, 만 2년 → 2일 …
+   부여 주기도 입사 기념일 ~ 다음 기념일 전날 (회계연도가 아니다). */
+function annualEarned(joinDate, refDs) {
+  const join = String(joinDate || '').slice(0, 10);
+  if (!join) return { years: 0, grant: 0, from: '', to: '', reason: '입사일이 등록되지 않았습니다' };
+  const j = new Date(join + 'T00:00:00');
+  if (isNaN(j.getTime())) return { years: 0, grant: 0, from: '', to: '', reason: '입사일 형식이 올바르지 않습니다' };
+  const now = new Date((refDs || today()) + 'T00:00:00');
+  let years = now.getFullYear() - j.getFullYear();
+  const anniv = new Date(now.getFullYear(), j.getMonth(), j.getDate());
+  if (now < anniv) years--;                       // 올해 기념일 전이면 아직 한 해가 덜 찼다
+  if (years < 0) years = 0;
+  const f = new Date(j.getFullYear() + years, j.getMonth(), j.getDate());
+  const t = new Date(j.getFullYear() + years + 1, j.getMonth(), j.getDate());
+  t.setDate(t.getDate() - 1);                     // 다음 기념일 전날까지
+  const ds = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  return { years, grant: years, from: ds(f), to: ds(t),
+           reason: years < 1 ? '근속 1년 미만 — 연차 0일' : '근속 만 ' + years + '년 — 연차 ' + years + '일' };
+}
 /* ═══════════ 월차 자동 계산 (v0.62.0) ═══════════
    전월 만근 → 이번 달 월차 1일. 최대 1일. 입사월은 만근 대상이 아니다.
    만근 = 전월 평일 전부 출근 기록. 승인된 휴가일은 출근으로 인정한다.
@@ -2024,57 +2079,100 @@ function _ymAdd(ym, n) {
 /* ── 공휴일 (v0.63.0) ──
    auto 는 Cloud Function 이 매월 1일 Google 공휴일 캘린더에서 받아 채운다(대체공휴일 포함).
    회사 사정으로 다른 날은 관리자가 add/remove 로 조정한다 — 함수는 auto 만 덮어쓴다. */
-function holYm() { return today().slice(0, 7); }
-function holBoxHtml() {
+let HOLM = '';                // 공휴일 달력이 보고 있는 달 (YYYY-MM, 빈 값이면 이번 달)
+function holYm() { return HOLM || today().slice(0, 7); }
+function _holDs(y, m, d) { return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0'); }
+/* 공휴일 달력 — 관리자 모드 전용. 공휴일만 칠하고 이름을 아래에 적는다. */
+function holCalHtml() {
   if (ME.mode !== 'admin') return '';
   const h = HOL || {};
   const map = holidayMap();
+  const add = h.add || {};
+  const rm = Array.isArray(h.remove) ? h.remove : [];
   const ym = holYm();
-  const thisMonth = Object.keys(map).filter(d => d.slice(0, 7) === ym).sort();
+  const y = +ym.slice(0, 4), m = +ym.slice(5, 7);
+  const last = new Date(y, m, 0).getDate();
+  const lead = new Date(y, m - 1, 1).getDay();
+  const tod = today();
+  let cells = '';
+  for (let i = 0; i < lead; i++) cells += '<div></div>';
+  for (let d = 1; d <= last; d++) {
+    const ds = _holDs(y, m, d), w = new Date(y, m - 1, d).getDay();
+    const nm = map[ds];
+    const c = ['hcd'];
+    if (nm) c.push('hol'); else if (w === 0) c.push('sun'); else if (w === 6) c.push('sat');
+    if (ds === tod) c.push('tod');
+    cells += '<div class="' + c.join(' ') + '"' + (nm ? ' title="' + esc(nm) + '"' : '') + '>' + d + '</div>';
+  }
+  const days = Object.keys(map).filter(d => d.slice(0, 7) === ym).sort();
+  const offs = rm.filter(d => d.slice(0, 7) === ym).sort();
+  const list = days.map(d => `<div class="hc-li"><span class="d">${+d.slice(8)}일</span>
+      <span class="n">${esc(map[d])}</span>
+      <span class="hc-tag ${add[d] ? 'c' : 'a'}">${add[d] ? '회사' : '자동'}</span>
+      <a data-hol-off="${d}" title="이 날은 근무합니다">근무일로</a></div>`).join('')
+    + offs.map(d => `<div class="hc-li off"><span class="d">${+d.slice(8)}일</span>
+      <span class="n">${esc((h.auto || {})[d] || '공휴일')}</span>
+      <span class="hc-tag c">근무</span>
+      <a data-hol-on="${d}">되돌리기</a></div>`).join('');
   const when = h.syncedAt ? new Date(h.syncedAt) : null;
-  return `<div style="margin-top:12px;border:1px solid var(--line);border-radius:10px;padding:11px 13px">
-    <div style="font-size:12.5px;font-weight:800;margin-bottom:7px">🇰🇷 공휴일
-      <span class="hint" style="display:inline;margin:0">${Object.keys(map).length}일 등록${
-        when ? ' · 갱신 ' + when.getFullYear() + '.' + String(when.getMonth() + 1).padStart(2, '0') + '.' + String(when.getDate()).padStart(2, '0') : ''}</span></div>
-    <div class="hint" style="margin:0 0 8px">${thisMonth.length
-      ? '이번 달: ' + thisMonth.map(d => `<b>${d.slice(8)}일</b> ${esc(map[d])}`).join(' · ')
-      : '이번 달에는 공휴일이 없습니다'}</div>
-    <div class="np-row">
-      <input class="fi" id="hol-date" type="date" style="flex:1">
-      <input class="fi" id="hol-name" placeholder="휴무일 이름 (예: 창립기념일)" style="flex:2">
-      <button type="button" class="btn btn-sm btn-p" id="btn-hol-add">+ 휴무일</button>
+  return `<div class="hc">
+    <div class="hc-top">
+      <div class="hc-ym">🇰🇷 ${y}년 ${m}월 공휴일</div>
+      <div class="hc-nav">
+        <button type="button" data-hol-mv="-1" title="이전 달">◀</button>
+        <button type="button" data-hol-mv="0">이번 달</button>
+        <button type="button" data-hol-mv="1" title="다음 달">▶</button>
+      </div>
     </div>
-    ${Object.keys(h.add || {}).length ? `<div class="hint" style="margin:6px 0 0">회사 지정 휴무일: ${
-      Object.keys(h.add).sort().map(d => `<span class="dp-chip">${d} ${esc(h.add[d])}
-        <a data-hol-del="${d}" style="cursor:pointer;color:var(--bad);margin-left:4px">✕</a></span>`).join(' ')}</div>` : ''}
-    <div class="hint" style="margin:6px 0 0">공휴일이지만 근무하는 날은 날짜만 넣고 이름을 <b>비워서</b> 추가하면 제외됩니다.
-      자동 목록은 매월 1일에 갱신됩니다(대체공휴일 포함).</div>
+    <div class="hc-g">${['일','월','화','수','목','금','토'].map(w => `<div class="hc-w">${w}</div>`).join('')}${cells}</div>
+    <div style="margin-top:10px">${list || '<div class="hint" style="margin:8px 0 0">이번 달에는 공휴일이 없습니다</div>'}</div>
+    <div class="np-row" style="margin-top:11px;gap:5px">
+      <input class="fi" id="hol-date" type="date" style="flex:1;min-width:0" value="${ym}-01">
+      <input class="fi" id="hol-name" placeholder="회사 휴무일 이름" style="flex:1;min-width:0">
+      <button type="button" class="btn btn-sm btn-p" id="btn-hol-add">추가</button>
+    </div>
+    <div class="hint" style="margin:7px 0 0">공휴일 목록은 매월 1일 자동 갱신됩니다(대체공휴일 포함).
+      창립기념일 같은 <b>회사 휴무일</b>은 위에서 추가하고, 공휴일이지만 근무하는 날은 <b>근무일로</b>를 누르세요.
+      ${Object.keys(map).length}일 등록${when ? ' · 갱신 ' + when.getFullYear() + '.' + String(when.getMonth() + 1).padStart(2, '0') + '.' + String(when.getDate()).padStart(2, '0') : ''}</div>
   </div>`;
 }
 async function holSave(next) {
   try { await saveCol('holidays', next); HOL = next; rerender(); toast('저장했습니다'); }
   catch (e) { toast('저장 실패: ' + e.message, true); }
 }
+function _holNext() {
+  const h = HOL || {};
+  return { auto: h.auto || {}, add: Object.assign({}, h.add || {}),
+           remove: (Array.isArray(h.remove) ? h.remove : []).slice(),
+           years: h.years || [], source: h.source || '', syncedAt: h.syncedAt || 0 };
+}
 function wireHoliday() {
+  document.querySelectorAll('[data-hol-mv]').forEach(b => b.onclick = () => {
+    const v = +b.dataset.holMv;
+    HOLM = v ? _ymAdd(holYm(), v) : '';
+    renderPage();
+  });
   const b = $('btn-hol-add');
   if (b) b.onclick = () => {
     const d = ($('hol-date').value || '').trim();
-    if (!d) { toast('날짜를 선택해 주세요', true); return; }
     const nm = ($('hol-name').value || '').trim();
-    const h = HOL || {};
-    const next = { auto: h.auto || {}, add: Object.assign({}, h.add || {}),
-                   remove: (Array.isArray(h.remove) ? h.remove : []).slice(),
-                   syncedAt: h.syncedAt || 0, source: h.source || '' };
-    if (nm) { delete next.add[d]; next.add[d] = nm; next.remove = next.remove.filter(x => x !== d); }
-    else { delete next.add[d]; if (next.remove.indexOf(d) < 0) next.remove.push(d); }   // 이름 없이 = 근무일로 되돌림
+    if (!d) { toast('날짜를 선택해 주세요', true); return; }
+    if (!nm) { toast('휴무일 이름을 적어 주세요', true); return; }
+    const next = _holNext();
+    next.add[d] = nm;
+    next.remove = next.remove.filter(x => x !== d);
     holSave(next);
   };
-  document.querySelectorAll('[data-hol-del]').forEach(el => el.onclick = () => {
-    const h = HOL || {};
-    const next = { auto: h.auto || {}, add: Object.assign({}, h.add || {}),
-                   remove: (Array.isArray(h.remove) ? h.remove : []).slice(),
-                   syncedAt: h.syncedAt || 0, source: h.source || '' };
-    delete next.add[el.dataset.holDel];
+  // 공휴일이지만 우리 회사는 근무하는 날
+  document.querySelectorAll('[data-hol-off]').forEach(el => el.onclick = () => {
+    const d = el.dataset.holOff, next = _holNext();
+    if (next.add[d]) delete next.add[d];                                 // 회사 휴무일은 지우면 끝
+    else if (next.remove.indexOf(d) < 0) next.remove.push(d);            // 자동 공휴일은 제외 목록에
+    holSave(next);
+  });
+  document.querySelectorAll('[data-hol-on]').forEach(el => el.onclick = () => {
+    const next = _holNext();
+    next.remove = next.remove.filter(x => x !== el.dataset.holOn);
     holSave(next);
   });
 }
@@ -3209,41 +3307,45 @@ function pageAdmin(sec) {
   const policyCard = `
     <div class="card" style="margin-top:22px"><div class="card-h">⚙️ 휴가 정책 <span class="sub">월차·연차 기준과 결재라인 (기획서 p8)</span></div>
       <div class="card-b">
-        <div class="grid" style="grid-template-columns:repeat(4, 1fr);align-items:start">
-          <div class="fld"><label>월차 (자동)</label>
-            <div style="background:var(--line-soft);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:12.5px;line-height:1.8">
-              <b>전월 만근 → 이번 달 월차 1일</b> (최대 1일)<br>
-              · 만근 = 전월 평일 전부 출근 기록<br>
-              · 승인된 휴가일은 출근으로 인정<br>
-              · 입사한 달은 만근 대상이 아님<br>
-              · 주말과 <b>공휴일</b>은 근무일에서 제외
+        <div class="pol-wrap">
+          <div>
+            <div class="pol-grid">
+              <div class="fld"><label>월차 (자동 계산)</label>
+                <div class="pol-note">
+                  <b>전월 만근 → 이번 달 월차 1일</b> (최대 1일)<br>
+                  · 만근 = 전월 평일 전부 출근 기록<br>
+                  · 승인된 휴가일은 출근으로 인정<br>
+                  · 입사한 달은 만근 대상이 아님<br>
+                  · 주말과 <b>공휴일</b>은 근무일에서 제외
+                </div></div>
+              <div class="fld"><label>연차 (자동 계산)</label>
+                <div class="pol-note">
+                  <b>입사일 기준 만 1년마다 1일</b><br>
+                  · 만 1년 근무 → 다음 1년간 연차 1일<br>
+                  · 만 2년 → 2일, 만 3년 → 3일 …<br>
+                  · 부여 주기는 입사 기념일 ~ 다음 기념일 전날<br>
+                  · 근속 1년 미만은 연차 0일
+                </div></div>
+              <div class="fld"><label>결재라인</label>
+                <div id="pol-approvers">${p.approvers.map((a, i) =>
+                  `<div style="display:flex;gap:6px;margin-bottom:6px">
+                     <input class="fi" data-pol-ap="${i}" value="${esc(a)}">
+                     <button class="iconbtn" data-pol-apdel="${i}">✕</button></div>`).join('')}</div>
+                <button class="btn btn-sm" id="pol-apadd">+ 결재자 추가</button>
+                <div class="hint">휴가 품의서가 이 순서로 올라갑니다</div></div>
+              <div class="fld"><label>점심시간</label>
+                <div style="display:flex;gap:6px;align-items:center">
+                  <input class="fi" type="time" id="pol-lunch-s" value="${p.lunchS || '12:00'}">
+                  <span style="color:var(--ink-mute)">~</span>
+                  <input class="fi" type="time" id="pol-lunch-e" value="${p.lunchE || '13:00'}">
+                </div>
+                <div class="hint">근무 시간에서 겹치는 만큼 차감됩니다. 종료 1시간 뒤(기본 14시)
+                  이후 퇴근은 질문 없이 자동 차감, 그 이전 퇴근만 사용 여부를 묻습니다.</div></div>
             </div>
-            ${holBoxHtml()}
-            <div class="hint">한 달에 쓸 수 있는 월차 일수</div></div>
-          <div class="fld"><label>연차 (년차별 일수)</label>
-            <div id="pol-annual">${Object.keys(p.annual).sort((a,b)=>a-b).map(y =>
-              `<div style="display:flex;gap:6px;margin-bottom:5px;align-items:center">
-                 <span style="font-size:12px;white-space:nowrap">${y}년차</span>
-                 <input class="fi" type="number" min="0" data-pol-y="${y}" value="${p.annual[y]}" style="width:70px">
-                 <button class="iconbtn" data-pol-ydel="${y}">✕</button></div>`).join('')}</div>
-            <button class="btn btn-sm" id="pol-yadd">+ 년차 추가</button>
-            <div class="hint">등록된 최고 년차를 넘으면 마지막 값을 적용합니다</div></div>
-          <div class="fld"><label>결재라인</label>
-            <div id="pol-approvers">${p.approvers.map((a, i) =>
-              `<div style="display:flex;gap:6px;margin-bottom:5px">
-                 <input class="fi" data-pol-ap="${i}" value="${esc(a)}">
-                 <button class="iconbtn" data-pol-apdel="${i}">✕</button></div>`).join('')}</div>
-            <button class="btn btn-sm" id="pol-apadd">+ 결재자 추가</button></div>
-          <div class="fld"><label>점심시간</label>
-            <div style="display:flex;gap:6px;align-items:center">
-              <input class="fi" type="time" id="pol-lunch-s" value="${p.lunchS || '12:00'}">
-              <span style="color:var(--ink-mute)">~</span>
-              <input class="fi" type="time" id="pol-lunch-e" value="${p.lunchE || '13:00'}">
-            </div>
-            <div class="hint">근무 시간에서 겹치는 만큼 차감됩니다. 종료 1시간 뒤(기본 14시)
-              이후 퇴근은 질문 없이 자동 차감, 그 이전 퇴근만 사용 여부를 묻습니다.</div></div>
+            <div style="text-align:right;margin-top:18px"><button class="btn btn-p" id="btn-pol-save">정책 저장</button></div>
+          </div>
+          ${holCalHtml()}
         </div>
-        <div style="text-align:right"><button class="btn btn-p" id="btn-pol-save">정책 저장</button></div>
       </div></div>`;
   const leaveAll = `
     <div class="card"><div class="card-h">📋 전체 휴가 내역</div>
@@ -3314,16 +3416,7 @@ function wireAdmin() {
     openTaskModal(tid, kid, false);              // 보기 → (수정 버튼) → 수정
   });
   // 정책
-  if ($('pol-yadd')) $('pol-yadd').onclick = () => {
-    const y = prompt('몇 년차를 추가할까요? (숫자)'); if (!y || isNaN(+y)) return;
-    const d = prompt(`${y}년차 연차 일수`); if (d === null || isNaN(+d)) return;
-    const p = pol(); p.annual = Object.assign({}, p.annual); p.annual[+y] = +d;
-    POLICY = p; renderPage();
-  };
-  document.querySelectorAll('[data-pol-ydel]').forEach(b => b.onclick = () => {
-    const p = pol(); p.annual = Object.assign({}, p.annual); delete p.annual[b.dataset.polYdel];
-    POLICY = p; renderPage();
-  });
+  // 연차는 입사일에서 자동 계산한다 — 사람이 넣는 값이 아니다(v0.64.0)
   if ($('pol-apadd')) $('pol-apadd').onclick = () => {
     const n = prompt('결재자 이름 (예: 홍길동 이사)'); if (!n || !n.trim()) return;
     const p = pol(); p.approvers = p.approvers.concat([n.trim()]);
@@ -3339,7 +3432,6 @@ function wireAdmin() {
     // 월차는 출퇴근 기록에서 자동 계산한다 — 사람이 넣는 값이 아니다(v0.62.0)
     p.lunchS = ($('pol-lunch-s') && $('pol-lunch-s').value) || '12:00';
     p.lunchE = ($('pol-lunch-e') && $('pol-lunch-e').value) || '13:00';
-    document.querySelectorAll('[data-pol-y]').forEach(i => { p.annual[i.dataset.polY] = +i.value || 0; });
     document.querySelectorAll('[data-pol-ap]').forEach((i, idx) => { p.approvers[idx] = i.value.trim(); });
     p.approvers = p.approvers.filter(Boolean);
     try { await saveCol('leave_policy', p); toast('휴가 정책을 저장했습니다'); }
@@ -3647,18 +3739,18 @@ function myLeaveStats() {
   const p = pol();
   const monthUsed = mine.filter(l => (l.date || '').slice(0, 7) === ym && l.pool === '월차')
                         .reduce((s, l) => s + (+l.days || 0), 0);
-  const yearUsed = mine.filter(l => (l.date || '').slice(0, 4) === yr && l.pool === '연차')
+  // v0.64.0: 연차도 자동 — 입사 기념일 ~ 다음 기념일 전날을 한 주기로 본다
+  const ann = annualEarned(ME.profile && ME.profile.joinDate);
+  const grant = ann.grant;
+  const years = ann.years;
+  const yearUsed = mine.filter(l => l.pool === '연차' && (ann.from
+                         ? ((l.date || '') >= ann.from && (l.date || '') <= ann.to)
+                         : (l.date || '').slice(0, 4) === yr))
                        .reduce((s, l) => s + (+l.days || 0), 0);
-  // 연차 부여일수: 년차 계산 (입사일 기준, 1년차 = 재직 1년 미만)
-  const join = ME.profile && ME.profile.joinDate ? new Date(ME.profile.joinDate) : new Date();
-  const years = Math.max(1, Math.floor((Date.now() - join.getTime()) / (365.25 * 24 * 3600 * 1000)) + 1);
-  const keys = Object.keys(p.annual).map(Number).sort((a, b) => a - b);
-  let grant = 0;
-  keys.forEach(y => { if (years >= y) grant = p.annual[y]; });   // 최고 등록 년차 초과 시 마지막 값
   // v0.62.0: 월차는 정책값이 아니라 전월 만근 여부로 정해진다(최대 1일)
   const earned = monthlyEarned(ME.uid, ME.profile && ME.profile.joinDate, ym);
   const monthly = earned.ok ? 1 : 0;
-  return { monthly, monthUsed, monthLeft: Math.max(0, monthly - monthUsed), earned,
+  return { monthly, monthUsed, monthLeft: Math.max(0, monthly - monthUsed), earned, ann,
            grant, yearUsed, yearLeft: Math.max(0, grant - yearUsed), years };
 }
 function myTasks() {
@@ -3691,7 +3783,10 @@ function pageMy(sec) {
           <div class="hint" style="margin:4px 0 0">${s.earned && s.earned.ok
             ? `✅ ${esc(s.earned.ym)} 만근 — 월차 1일`
             : `${esc((s.earned && s.earned.ym) || '')} ${esc((s.earned && s.earned.reason) || '')} — 월차 0일`}</div></div>
-        <div class="kpi"><div class="k">남은 연차 (올해 · ${s.years}년차)</div><div class="v">${s.yearLeft}<small> / ${s.grant}일</small></div></div>
+        <div class="kpi"><div class="k">남은 연차 (근속 만 ${s.years}년)</div><div class="v">${s.yearLeft}<small> / ${s.grant}일</small></div>
+          <div class="hint" style="margin:4px 0 0">${s.ann && s.ann.from
+            ? `${esc(s.ann.from)} ~ ${esc(s.ann.to)} · ${esc(s.ann.reason)}`
+            : esc((s.ann && s.ann.reason) || '')}</div></div>
         <div class="kpi"><div class="k">결재 대기</div><div class="v">${mine.filter(l => l.status === '대기').length}<small>건</small></div></div>
       </div>
       <div style="margin-bottom:14px"><button class="btn btn-p" id="btn-lv-open">📝 품의서 작성</button></div>
