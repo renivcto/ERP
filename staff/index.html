@@ -1377,7 +1377,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.64.0';
+const STAFF_VERSION = 'v0.64.1';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -2048,7 +2048,9 @@ function defaultTeams() {
 function pol() { return POLICY || DEFAULT_POLICY; }
 /* ═══════════ 연차 자동 계산 (v0.64.0) ═══════════
    입사일 기준 만 1년마다 1일. 만 1년 → 1일, 만 2년 → 2일 …
-   부여 주기도 입사 기념일 ~ 다음 기념일 전날 (회계연도가 아니다). */
+   부여 주기도 입사 기념일 ~ 다음 기념일 전날 (회계연도가 아니다).
+   상한 30일 — 만 30년을 넘겨도 더 늘지 않는다. */
+const ANNUAL_CAP = 30;
 function annualEarned(joinDate, refDs) {
   const join = String(joinDate || '').slice(0, 10);
   if (!join) return { years: 0, grant: 0, from: '', to: '', reason: '입사일이 등록되지 않았습니다' };
@@ -2063,8 +2065,10 @@ function annualEarned(joinDate, refDs) {
   const t = new Date(j.getFullYear() + years + 1, j.getMonth(), j.getDate());
   t.setDate(t.getDate() - 1);                     // 다음 기념일 전날까지
   const ds = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  return { years, grant: years, from: ds(f), to: ds(t),
-           reason: years < 1 ? '근속 1년 미만 — 연차 0일' : '근속 만 ' + years + '년 — 연차 ' + years + '일' };
+  const grant = Math.min(ANNUAL_CAP, years);      // 상한 30일
+  return { years, grant, from: ds(f), to: ds(t),
+           reason: years < 1 ? '근속 1년 미만 — 연차 0일'
+                 : '근속 만 ' + years + '년 — 연차 ' + grant + '일' + (years > ANNUAL_CAP ? ' (상한 ' + ANNUAL_CAP + '일)' : '') };
 }
 /* ═══════════ 월차 자동 계산 (v0.62.0) ═══════════
    전월 만근 → 이번 달 월차 1일. 최대 1일. 입사월은 만근 대상이 아니다.
@@ -3322,7 +3326,7 @@ function pageAdmin(sec) {
                 <div class="pol-note">
                   <b>입사일 기준 만 1년마다 1일</b><br>
                   · 만 1년 근무 → 다음 1년간 연차 1일<br>
-                  · 만 2년 → 2일, 만 3년 → 3일 …<br>
+                  · 만 2년 → 2일, 만 3년 → 3일 … <b>최대 30일</b><br>
                   · 부여 주기는 입사 기념일 ~ 다음 기념일 전날<br>
                   · 근속 1년 미만은 연차 0일
                 </div></div>
