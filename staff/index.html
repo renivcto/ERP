@@ -190,6 +190,12 @@ tr:last-child td { border-bottom:none; }
 .rt-editor td, .rt-editor th, .rt-view td, .rt-view th { border:1px solid #c9d2e0; padding:6px 9px; min-width:44px; text-align:left; }
 .rt-editor ul, .rt-editor ol, .rt-view ul, .rt-view ol { padding-left:22px; }
 .rt-view { line-height:1.65; }
+.lib-tb th:nth-child(3), .lib-tb td:nth-child(3) { width:auto; min-width:260px; }
+.lib-tb th:nth-child(1), .lib-tb td:nth-child(1),
+.lib-tb th:nth-child(2), .lib-tb td:nth-child(2) { width:1%; white-space:nowrap; }
+.lib-tb th:nth-child(4), .lib-tb td:nth-child(4) { width:190px; }
+.lib-sum { font-size:12px; color:var(--ink-mute); margin-top:3px; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; max-width:520px; }
 .lib-t { font-weight:700; color:var(--ink); cursor:pointer; }
 .lib-t:hover { color:var(--brand-deep); text-decoration:underline; }
 .lib-tag { display:inline-block; margin-left:5px; font-size:10.5px; font-weight:700; border-radius:99px;
@@ -856,7 +862,7 @@ tr:last-child td { border-bottom:none; }
 <!-- ═══════ 모달: 자료실 등록 ═══════ -->
 <div class="ovl" id="ovl-lib">
   <div class="modal">
-    <div class="modal-h"><span class="t">📚 자료 등록</span><button class="modal-x" data-close="ovl-lib">✕</button></div>
+    <div class="modal-h"><span class="t" id="lib-mt">📚 자료 등록</span><button class="modal-x" data-close="ovl-lib">✕</button></div>
     <div class="modal-b">
       <div class="fld"><label>제목</label><input class="fi" id="lib-title"></div>
       <div class="fld"><label>내용 / 링크</label>
@@ -868,7 +874,10 @@ tr:last-child td { border-bottom:none; }
         <button type="button" class="btn btn-sm" id="btn-lib-file">📎 파일 첨부</button>
         <div class="hint">이미지 · PDF · 오피스 문서(xlsx·docx·pptx·hwp) · 개당 20MB</div></div>
     </div>
-    <div class="modal-f"><button class="btn" data-close="ovl-lib">취소</button><button class="btn btn-p" id="btn-lib-save">등록</button></div>
+    <div class="modal-f">
+      <button class="btn btn-bad" id="btn-lib-del" style="margin-right:auto">삭제</button>
+      <button class="btn" data-close="ovl-lib">취소</button>
+      <button class="btn btn-p" id="btn-lib-save">등록</button></div>
   </div>
 </div>
 
@@ -1296,7 +1305,7 @@ tr:last-child td { border-bottom:none; }
       <div id="libv-f"></div>
     </div>
     <div class="modal-f">
-      <button class="btn btn-bad" id="btn-libv-del" style="margin-right:auto">삭제</button>
+      <button class="btn" id="btn-libv-edit" style="margin-right:auto">✏️ 수정</button>
       <button class="btn" data-close="ovl-libview">닫기</button>
     </div>
   </div>
@@ -1397,7 +1406,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.67.0';
+const STAFF_VERSION = 'v0.68.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1429,6 +1438,7 @@ let LEAVES = [];            // staff_data/leaves
 let LIBRARY = [];           // staff_data/library
 let MYL = [];               // staff_data/mylinks    — 내 업무 폴더/트렐로 (uid 로 걸러 자기 것만 표시)
 let LIB_FILES = [];         // 자료 등록 모달에서 편집 중인 첨부 목록
+let LIB_EDIT = null;        // 수정 중인 자료 id (null 이면 새 자료)
 let MYL_EDIT = null, MYL_KIND = 'drive';
 let POLICY = null;          // staff_data/leave_policy
 let ATT = [];               // staff_data/attendance_YYYY-MM (이번 달 출퇴근 — 실시간 구독)
@@ -4060,14 +4070,16 @@ function pageLibrary() {
     ${driveCardHtml()}
     <div class="card-h" style="border:0;padding:6px 0 10px;font-size:15px">📚 등록 자료 <span class="sub">${LIBRARY.length}건</span>
       <button class="btn btn-sm btn-p" id="btn-lib-open" style="margin-left:auto">📚 자료 등록</button></div>
-    ${list.length ? `<div class="card"><div class="card-b" style="padding:0 18px"><table>
-      <thead><tr><th>제목</th><th>내용</th><th>등록자</th><th>등록일</th><th></th></tr></thead><tbody>
+    ${list.length ? `<div class="card"><div class="card-b" style="padding:0 18px"><table class="lib-tb">
+      <thead><tr><th>등록일</th><th>등록자</th><th>제목</th><th>첨부파일</th><th></th></tr></thead><tbody>
       ${list.map(x => `<tr>
-        <td><a class="lib-t" data-lib-open="${esc(x.id)}">${esc(x.title)}</a></td>
-        <td style="font-size:12.5px;color:var(--ink-soft)">${libSummary(x)}</td>
-        <td style="white-space:nowrap">${avaHtml(x.avatar || '', 20)} ${esc(x.by || '-')}</td>
         <td style="white-space:nowrap">${fmtD(new Date(x.createdAt || 0).toISOString())}</td>
-        <td>${(x.uid === ME.uid || ME.mode === 'admin') ? `<button class="btn btn-sm btn-bad" data-lib-del="${esc(x.id)}">삭제</button>` : ''}</td>
+        <td style="white-space:nowrap">${avaHtml(x.avatar || '', 20)} ${esc(x.by || '-')}</td>
+        <td><a class="lib-t" data-lib-open="${esc(x.id)}">${esc(x.title)}</a>
+          <div class="lib-sum">${libSummary(x)}</div></td>
+        <td>${libFilesCell(x)}</td>
+        <td style="white-space:nowrap;text-align:right">${libCanEdit(x)
+          ? `<button class="btn btn-sm" data-lib-edit="${esc(x.id)}">✏️ 수정</button>` : ''}</td>
       </tr>`).join('')}</tbody></table></div></div>`
     : `<div class="ph"><div class="big">📚</div><h3>등록된 자료가 없습니다</h3><p>첫 자료를 등록해 보세요.</p></div>`}
   </div>`;
@@ -4083,12 +4095,17 @@ function libSummary(x) {
   d.innerHTML = _rtSanitize(String(x.content || ''));
   const imgs = d.querySelectorAll('img').length;
   const txt = (d.textContent || '').replace(/\s+/g, ' ').trim();
-  const files = Array.isArray(x.files) ? x.files.length : 0;
-  const tags = (imgs ? `<span class="lib-tag">🖼 이미지 ${imgs}</span>` : '')
-             + (files ? `<span class="lib-tag">📎 첨부 ${files}</span>` : '');
-  const body = txt ? esc(txt.slice(0, 70)) + (txt.length > 70 ? '…' : '') : (tags ? '' : '<span style="color:var(--ink-mute)">내용 없음</span>');
-  return body + (tags ? (body ? ' ' : '') + tags : '');
+  const body = txt ? esc(txt.slice(0, 90)) + (txt.length > 90 ? '…' : '') : '';
+  return body + (imgs ? `<span class="lib-tag">🖼 이미지 ${imgs}</span>` : '');
 }
+/* 첨부 칸 — 파일이 여럿이면 첫 개만 이름을 보이고 나머지는 개수로 (제목 칸을 좁히지 않는다) */
+function libFilesCell(x) {
+  const a = Array.isArray(x.files) ? x.files.filter(f => f && f.url) : [];
+  if (!a.length) return '<span style="color:var(--ink-mute);font-size:12px">-</span>';
+  return `<a class="up-chip" href="${esc(a[0].url)}" target="_blank" rel="noopener">${upIcon(a[0].name)} ${esc(a[0].name)}</a>`
+       + (a.length > 1 ? `<span class="lib-tag">+${a.length - 1}</span>` : '');
+}
+function libCanEdit(x) { return x.uid === ME.uid || ME.mode === 'admin'; }
 /* 상세 보기 — 이미지와 본문은 여기서 온전히 본다 */
 function openLibView(id) {
   const x = (LIBRARY || []).find(v => String(v.id) === String(id));
@@ -4097,10 +4114,10 @@ function openLibView(id) {
   $('libv-m').innerHTML = `${avaHtml(x.avatar || '', 18)} ${esc(x.by || '-')} · ${esc(fmtD(new Date(x.createdAt || 0).toISOString()))}`;
   $('libv-b').innerHTML = linkify(x.content) || '<span style="color:var(--ink-mute)">내용이 없습니다</span>';
   $('libv-f').innerHTML = upChips(x.files);
-  const can = x.uid === ME.uid || ME.mode === 'admin';
-  const del = $('btn-libv-del');
-  del.style.display = can ? '' : 'none';
-  del.onclick = () => { $('ovl-libview').classList.remove('on'); libDelete(x.id); };
+  const can = libCanEdit(x);
+  const edit = $('btn-libv-edit');
+  edit.style.display = can ? '' : 'none';
+  edit.onclick = () => { $('ovl-libview').classList.remove('on'); openLibModal(x.id); };
   $('ovl-libview').classList.add('on');
 }
 async function libDelete(id) {
@@ -4250,21 +4267,37 @@ function wireLibrary() {
       $('ovl-gdview').classList.add('on');
     } else _openLink(d.url, '문서');
   });
-  $('btn-lib-open').onclick = () => {
-    $('lib-title').value = ''; $('lib-content').innerHTML = '';
-    LIB_FILES = []; renderLibFiles();
-    $('ovl-lib').classList.add('on');
-  };
+  $('btn-lib-open').onclick = () => openLibModal(null);
+  document.querySelectorAll('[data-lib-edit]').forEach(b => b.onclick = () => openLibModal(b.dataset.libEdit));
   document.querySelectorAll('[data-lib-open]').forEach(b => b.onclick = () => openLibView(b.dataset.libOpen));
-  document.querySelectorAll('[data-lib-del]').forEach(b => b.onclick = () => libDelete(b.dataset.libDel));
 }
+/* 등록·수정 공용 모달 — id 가 있으면 수정, 없으면 새 자료 (v0.68.0) */
+function openLibModal(id) {
+  const x = id ? (LIBRARY || []).find(v => String(v.id) === String(id)) : null;
+  if (id && !x) { toast('자료를 찾을 수 없습니다', true); return; }
+  if (x && !libCanEdit(x)) { toast('본인이 등록한 자료만 수정할 수 있습니다', true); return; }
+  LIB_EDIT = x ? x.id : null;
+  $('lib-mt').textContent = x ? '📚 자료 수정' : '📚 자료 등록';
+  $('lib-title').value = x ? (x.title || '') : '';
+  $('lib-content').innerHTML = x ? _rtSanitize(x.content || '') : '';
+  LIB_FILES = x && Array.isArray(x.files) ? x.files.slice() : [];
+  renderLibFiles();
+  $('btn-lib-save').textContent = x ? '저장' : '등록';
+  $('btn-lib-del').style.display = x ? '' : 'none';    // 삭제는 수정 중일 때만
+  $('ovl-lib').classList.add('on');
+}
+$('btn-lib-del').onclick = () => { $('ovl-lib').classList.remove('on'); libDelete(LIB_EDIT); };
 $('btn-lib-save').onclick = async () => {
   const title = $('lib-title').value.trim();
   if (!title) { toast('제목을 입력해 주세요', true); return; }
-  LIBRARY.push({ id: 'B' + Date.now(), title, files: LIB_FILES.slice(), content: _rtSanitize($('lib-content').innerHTML),
+  const content = _rtSanitize($('lib-content').innerHTML);
+  const keep = LIBRARY.slice();
+  const cur = LIB_EDIT ? LIBRARY.find(v => String(v.id) === String(LIB_EDIT)) : null;
+  if (cur) Object.assign(cur, { title, content, files: LIB_FILES.slice(), editedAt: Date.now(), editedBy: ME.name });
+  else LIBRARY.push({ id: 'B' + Date.now(), title, files: LIB_FILES.slice(), content,
     uid: ME.uid, by: ME.name, avatar: ME.avatar, createdAt: Date.now() });
-  try { await saveCol('library', LIBRARY); $('ovl-lib').classList.remove('on'); toast('등록했습니다'); }
-  catch (e) { LIBRARY.pop(); toast('등록 실패: ' + e.message, true); }
+  try { await saveCol('library', LIBRARY); $('ovl-lib').classList.remove('on'); toast(cur ? '저장했습니다' : '등록했습니다'); }
+  catch (e) { LIBRARY = keep; toast((cur ? '저장' : '등록') + ' 실패: ' + e.message, true); rerender(); }
 };
 
 /* ═══════════ 거래처 정보 · 외부 계정 (v0.19.0 · 기획서 p13·p14) ═══════════
