@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.704';
+const ERP_VERSION = 'v2.3.705';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26647,21 +26647,45 @@ window._itemRawDocs = {};
 window._itemRawDocsDir = '';
 window._rawDocUploading = 0;
 let _rawDocPendingSlot = null;
+
+/* v2.3.705 — MSDS·COA·SPEC(1~3번)은 국문본·영문본을 따로 받는다.
+   슬롯 키를 '<번호>_ko' / '<번호>_en' 로 나눈다. 나머지 서류는 종전대로 '<번호>'. */
+const RAW_DOC_DUAL = { 0: true, 1: true, 2: true };
+const RAW_DOC_LANG = { ko: '한글', en: '영어' };
+function _rawDocLabel(key) {
+  const s = String(key), p = s.split('_');
+  const base = RAW_DOC_TYPES[Number(p[0])] || s;
+  return p[1] ? base + ' (' + (RAW_DOC_LANG[p[1]] || p[1]) + ')' : base;
+}
+/* 옛 저장분('0','1','2')을 한글 칸으로 옮긴다 — 그대로 두면 화면에서 사라진 것처럼 보인다 */
+function _rawDocMigrateDual() {
+  const docs = window._itemRawDocs || {};
+  Object.keys(RAW_DOC_DUAL).forEach(i => {
+    if (docs[i] && !docs[i + '_ko']) { docs[i + '_ko'] = docs[i]; delete docs[i]; }
+  });
+}
 function _renderRawDocList() {
   const box = document.getElementById('i-rawdocs-list');
   if (!box) return;
+  _rawDocMigrateDual();
   const docs = window._itemRawDocs || {};
+  // 첨부된 파일 한 칸 (링크 + 제거)
+  const filed = (key, d, cap) => '<span style="display:inline-flex;align-items:center;gap:5px;flex-shrink:0">'
+    + (cap ? '<span style="font-size:10.5px;color:var(--gray-400);flex-shrink:0">' + cap + '</span>' : '')
+    + '<a href="' + escapeHtml(d.url) + '" target="_blank" rel="noopener noreferrer" style="font-size:11.5px;color:var(--sky-700);text-decoration:underline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px" title="' + escapeHtml(d.name || '') + '">📎 ' + escapeHtml(d.name || '파일') + '</a>'
+    + '<button type="button" onclick="_rawDocRemove(\'' + key + '\')" title="첨부 제거" style="background:none;border:none;color:#dc2626;font-size:11px;cursor:pointer;flex-shrink:0">✕</button></span>';
+  // 빈 칸 (첨부 버튼)
+  const empty = (key, cap) => '<button type="button" class="btn btn-outline btn-sm" style="padding:2px 10px;font-size:11px;flex-shrink:0;min-width:52px" onclick="_rawDocPick(\'' + key + '\')">' + cap + '</button>';
   box.innerHTML = RAW_DOC_TYPES.map((label, i) => {
-    const d = docs[String(i)];
+    const dual = !!RAW_DOC_DUAL[i];
+    const keys = dual ? [[i + '_ko', '한글'], [i + '_en', '영어']] : [[String(i), '첨부']];
+    const any = keys.some(([k]) => docs[k]);
     const left = '<span style="display:inline-flex;align-items:center;min-width:0;flex:1">'
       + '<span style="display:inline-block;width:20px;color:var(--gray-400);font-size:10.5px;text-align:right;margin-right:8px;flex-shrink:0">' + (i + 1) + '</span>'
       + '<span style="font-size:12px;color:var(--gray-700);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(label) + '</span></span>';
-    const right = d
-      ? '<span style="display:inline-flex;align-items:center;gap:6px;flex-shrink:0;max-width:45%">'
-        + '<a href="' + escapeHtml(d.url) + '" target="_blank" rel="noopener noreferrer" style="font-size:11.5px;color:var(--sky-700);text-decoration:underline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px" title="' + escapeHtml(d.name || '') + '">📎 ' + escapeHtml(d.name || '파일') + '</a>'
-        + '<button type="button" onclick="_rawDocRemove(' + i + ')" title="첨부 제거" style="background:none;border:none;color:#dc2626;font-size:11px;cursor:pointer;flex-shrink:0">✕</button></span>'
-      : '<button type="button" class="btn btn-outline btn-sm" style="padding:2px 10px;font-size:11px;flex-shrink:0" onclick="_rawDocPick(' + i + ')">첨부</button>';
-    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;border-bottom:1px solid var(--gray-100);background:' + (d ? '#f6fefb' : '#fff') + '">' + left + right + '</div>';
+    const right = '<span style="display:inline-flex;align-items:center;gap:8px;flex-shrink:0;max-width:56%">'
+      + keys.map(([k, cap]) => docs[k] ? filed(k, docs[k], dual ? cap : '') : empty(k, cap)).join('') + '</span>';
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;border-bottom:1px solid var(--gray-100);background:' + (any ? '#f6fefb' : '#fff') + '">' + left + right + '</div>';
   }).join('');
 }
 function _rawDocPick(idx) {
@@ -26683,7 +26707,8 @@ async function _rawDocFileChosen(input) {
   try {
     const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
     const safe = String(f.name || 'file').replace(/[^\w.\-가-힣]/g, '_').slice(-80);
-    const path = (window._itemRawDocsDir || ('itemDocs/n' + Date.now())) + '/' + idx + '_' + Date.now() + '_' + safe;
+    const path = (window._itemRawDocsDir || ('itemDocs/n' + Date.now())) + '/'
+      + String(idx).replace(/[^\w-]/g, '') + '_' + Date.now() + '_' + safe;
     const url = await window._storageUploadDataUrl(path, dataUrl, f.type || undefined);
     window._itemRawDocs = window._itemRawDocs || {};
     window._itemRawDocs[String(idx)] = { name: f.name, url: url, path: path, ts: Date.now() };
@@ -26699,7 +26724,7 @@ async function _rawDocFileChosen(input) {
 function _rawDocRemove(idx) {
   const d = (window._itemRawDocs || {})[String(idx)];
   if (!d) return;
-  if (!confirm('[' + RAW_DOC_TYPES[idx] + '] 첨부를 제거하시겠습니까?\n(저장 버튼을 눌러야 확정됩니다)')) return;
+  if (!confirm('[' + _rawDocLabel(idx) + '] 첨부를 제거하시겠습니까?\n(저장 버튼을 눌러야 확정됩니다)')) return;
   // Storage 실물은 지우지 않는다 — 저장 전 취소하면 기존 참조가 살아있어야 하므로(깨진 링크 방지)
   delete window._itemRawDocs[String(idx)];
   _renderRawDocList();
