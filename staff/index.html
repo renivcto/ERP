@@ -1345,7 +1345,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.61.0';
+const STAFF_VERSION = 'v0.62.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1878,6 +1878,9 @@ function startApp() {
       else localStorage.removeItem('reniv_staff_account');
     } catch (_) {}
   }
+  // v0.62.0: 월차 계산에 전월 출퇴근이 필요하다 — 미리 한 번 불러둔다(문서 1건).
+  //   이게 없으면 기록을 못 읽어 전원 '만근 아님' 으로 보인다.
+  try { ensureAttMonth(_ymAdd(today().slice(0, 7), -1)); } catch (_) {}
   // v0.6.0: 최근 접속 시간 기록 (5분 스로틀 — 새로고침마다 쓰지 않는다)
   if (!DEMO && ME.mode === 'staff') {
     const last = Number(ME.profile && ME.profile.lastSeen) || 0;
@@ -2005,6 +2008,56 @@ function defaultTeams() {
   ];
 }
 function pol() { return POLICY || DEFAULT_POLICY; }
+/* ═══════════ 월차 자동 계산 (v0.62.0) ═══════════
+   전월 만근 → 이번 달 월차 1일. 최대 1일. 입사월은 만근 대상이 아니다.
+   만근 = 전월 평일 전부 출근 기록. 승인된 휴가일은 출근으로 인정한다.
+   ⚠️ 공휴일 달력이 없어 주말만 제외한다 — 공휴일 목록이 생기면 _isWorkday 만 고치면 된다. */
+function _ymAdd(ym, n) {
+  const [y, m] = String(ym).split('-').map(Number);
+  const d = new Date(y, (m - 1) + n, 1);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+function _isWorkday(d) { const w = d.getDay(); return w !== 0 && w !== 6; }
+/* 승인된 휴가가 덮는 날짜 집합 (시작일부터 days 일) */
+function _leaveDays(uid) {
+  const set = new Set();
+  (LEAVES || []).forEach(l => {
+    if (!l || l.uid !== uid || l.status !== '승인' || !l.date) return;
+    const n = Math.max(1, Math.ceil(Number(l.days) || 1));
+    const d = new Date(l.date + 'T00:00:00');
+    if (isNaN(d.getTime())) return;
+    for (let i = 0; i < n && i < 60; i++) {
+      set.add(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'));
+      d.setDate(d.getDate() + 1);
+    }
+  });
+  return set;
+}
+/* 전월 만근 여부 → { ok, ym, missing: [빠진 날짜], reason } */
+function monthlyEarned(uid, joinDate, ym) {
+  const prev = _ymAdd(ym || today().slice(0, 7), -1);
+  const join = String(joinDate || '').slice(0, 10);
+  if (!join) return { ok: false, ym: prev, missing: [], reason: '입사일이 등록되지 않았습니다' };
+  const joinYm = join.slice(0, 7);
+  if (prev < joinYm) return { ok: false, ym: prev, missing: [], reason: '입사 전입니다' };
+  // 입사월은 근무한 날이 온전하지 않아 만근 대상에서 뺀다(사용자 확정)
+  if (prev === joinYm) return { ok: false, ym: prev, missing: [], reason: '입사한 달은 만근 대상이 아닙니다' };
+
+  const [y, m] = prev.split('-').map(Number);
+  const last = new Date(y, m, 0).getDate();
+  const lv = _leaveDays(uid);
+  const missing = [];
+  for (let day = 1; day <= last; day++) {
+    const d = new Date(y, m - 1, day);
+    if (!_isWorkday(d)) continue;
+    const ds = prev + '-' + String(day).padStart(2, '0');
+    if (lv.has(ds)) continue;                       // 승인 휴가일은 출근으로 인정
+    if (!attPairsOn(uid, ds).inRec) missing.push(ds);
+  }
+  return missing.length
+    ? { ok: false, ym: prev, missing, reason: '출근 기록 없는 평일 ' + missing.length + '일' }
+    : { ok: true, ym: prev, missing: [], reason: '만근' };
+}
 
 /* ═══════ 출퇴근 (v0.6.0) ═══════
    월별 문서로 저장한다 — 매일 쌓이는 데이터를 한 문서에 계속 넣으면
@@ -3083,7 +3136,14 @@ function pageAdmin(sec) {
     <div class="card" style="margin-top:22px"><div class="card-h">⚙️ 휴가 정책 <span class="sub">월차·연차 기준과 결재라인 (기획서 p8)</span></div>
       <div class="card-b">
         <div class="grid" style="grid-template-columns:repeat(4, 1fr);align-items:start">
-          <div class="fld"><label>월차 (한 달 기준)</label><input class="fi" type="number" min="0" step="0.5" id="pol-monthly" value="${p.monthly}">
+          <div class="fld"><label>월차 (자동)</label>
+            <div style="background:var(--line-soft);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:12.5px;line-height:1.8">
+              <b>전월 만근 → 이번 달 월차 1일</b> (최대 1일)<br>
+              · 만근 = 전월 평일 전부 출근 기록<br>
+              · 승인된 휴가일은 출근으로 인정<br>
+              · 입사한 달은 만근 대상이 아님<br>
+              <span style="color:var(--ink-mute)">공휴일 달력이 없어 주말만 제외합니다</span>
+            </div>
             <div class="hint">한 달에 쓸 수 있는 월차 일수</div></div>
           <div class="fld"><label>연차 (년차별 일수)</label>
             <div id="pol-annual">${Object.keys(p.annual).sort((a,b)=>a-b).map(y =>
@@ -3200,7 +3260,7 @@ function wireAdmin() {
   });
   if ($('btn-pol-save')) $('btn-pol-save').onclick = async () => {
     const p = pol();
-    p.monthly = +($('pol-monthly').value || 1);
+    // 월차는 출퇴근 기록에서 자동 계산한다 — 사람이 넣는 값이 아니다(v0.62.0)
     p.lunchS = ($('pol-lunch-s') && $('pol-lunch-s').value) || '12:00';
     p.lunchE = ($('pol-lunch-e') && $('pol-lunch-e').value) || '13:00';
     document.querySelectorAll('[data-pol-y]').forEach(i => { p.annual[i.dataset.polY] = +i.value || 0; });
@@ -3519,7 +3579,10 @@ function myLeaveStats() {
   const keys = Object.keys(p.annual).map(Number).sort((a, b) => a - b);
   let grant = 0;
   keys.forEach(y => { if (years >= y) grant = p.annual[y]; });   // 최고 등록 년차 초과 시 마지막 값
-  return { monthly: p.monthly, monthUsed, monthLeft: Math.max(0, p.monthly - monthUsed),
+  // v0.62.0: 월차는 정책값이 아니라 전월 만근 여부로 정해진다(최대 1일)
+  const earned = monthlyEarned(ME.uid, ME.profile && ME.profile.joinDate, ym);
+  const monthly = earned.ok ? 1 : 0;
+  return { monthly, monthUsed, monthLeft: Math.max(0, monthly - monthUsed), earned,
            grant, yearUsed, yearLeft: Math.max(0, grant - yearUsed), years };
 }
 function myTasks() {
@@ -3548,7 +3611,10 @@ function pageMy(sec) {
     body += mylSection('drive') + mylSection('trello');
   } else if (sec === 'my-leave') {
     body = `<div class="kpis">
-        <div class="kpi"><div class="k">남은 월차 (이번 달)</div><div class="v">${s.monthLeft}<small> / ${s.monthly}일</small></div></div>
+        <div class="kpi"><div class="k">남은 월차 (이번 달)</div><div class="v">${s.monthLeft}<small> / ${s.monthly}일</small></div>
+          <div class="hint" style="margin:4px 0 0">${s.earned && s.earned.ok
+            ? `✅ ${esc(s.earned.ym)} 만근 — 월차 1일`
+            : `${esc((s.earned && s.earned.ym) || '')} ${esc((s.earned && s.earned.reason) || '')} — 월차 0일`}</div></div>
         <div class="kpi"><div class="k">남은 연차 (올해 · ${s.years}년차)</div><div class="v">${s.yearLeft}<small> / ${s.grant}일</small></div></div>
         <div class="kpi"><div class="k">결재 대기</div><div class="v">${mine.filter(l => l.status === '대기').length}<small>건</small></div></div>
       </div>
