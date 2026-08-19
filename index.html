@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.705';
+const ERP_VERSION = 'v2.3.706';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -59056,6 +59056,50 @@ function _staffInsightsPayload() {
 }
 async function _staffMirrorInsights() { return _staffPush('insights', _staffInsightsPayload()); }
 
+/* v2.3.706 — 직원이 올린 인사이트. 추가·수정·삭제를 반영한다.
+   ⚠️ 수정은 upsert 로 updatedAt 비교 — 임원이 나중에 고친 값을 직원 사본이 되돌리지 않게. */
+async function _staffInboxInsights(verbose) {
+  if (!window._firestoreGetDoc || !window._firestoreDoc || !window._firebaseDb) return 0;
+  let done = 0;
+  try {
+    const ref = window._firestoreDoc(window._firebaseDb, 'staff_data', 'inbox_insights');
+    const snap = await window._firestoreGetDoc(ref);
+    if (!snap || !snap.exists()) { if (verbose) console.log('📥 [직원 인사이트] 요청 없음'); return 0; }
+    const list = JSON.parse(snap.data().data || '[]') || [];
+    if (!Array.isArray(DB.insights)) DB.insights = [];
+    let touched = false;
+    list.forEach(r => {
+      if (!r || r.applied) return;
+      const i = DB.insights.findIndex(x => x && String(x.id) === String(r.id));
+      if (r._del) {
+        if (i >= 0) { DB.insights.splice(i, 1); done++; }
+      } else if (i < 0) {
+        const rec = Object.assign({}, r);
+        delete rec._del; delete rec.applied; delete rec.appliedAt; delete rec.result;
+        DB.insights.push(rec); done++;
+      } else {
+        const cur = DB.insights[i];
+        if ((Number(r.updatedAt) || 0) > (Number(cur.updatedAt) || 0)) {
+          const rec = Object.assign({}, r);
+          delete rec._del; delete rec.applied; delete rec.appliedAt; delete rec.result;
+          Object.assign(cur, rec); done++;
+        }
+      }
+      r.applied = true; r.appliedAt = Date.now(); r.result = 'ok'; touched = true;
+    });
+    if (touched) await window._firestoreSetDoc(ref, { data: JSON.stringify(list), ts: Date.now() });
+  } catch (e) { console.warn('📥 [직원 인사이트] 실패:', e && e.message); }
+  if (done) {
+    try { if (typeof saveDataNow === 'function') await saveDataNow(); else saveData(); } catch(_){}
+    try { if (typeof renderInsightPage === 'function') renderInsightPage(); } catch(_){}
+    try { showNotif('📥 직원용 인사이트 ' + done + '건 반영', 'info'); } catch(_){}
+    try { _staffMirrorInsights(); } catch(_){}
+  } else if (verbose) { console.log('📥 [직원 인사이트] 처리할 요청이 없습니다'); }
+  return done;
+}
+window.staffInsightsNow = function() { return _staffInboxInsights(true); };
+
+
 /* 제품 포트폴리오 — 원본은 shared/product_map. 지연 로드라 못 읽었으면 밀지 않는다. */
 async function _staffMirrorProductMap() {
   try { if (!window._productMapData && typeof _pmLoad === 'function') await _pmLoad(); } catch (_) {}
@@ -59611,6 +59655,7 @@ function _staffInboxThrottled() {
       _staffInboxAdProjects().catch(() => {});  // v2.3.691
       _staffInboxConsign().catch(() => {});     // v2.3.692
       _staffInboxItems().catch(() => {});       // v2.3.698
+      _staffInboxInsights().catch(() => {});    // v2.3.706
       _staffInboxAds().catch(() => {});     // v2.3.672
     }, 6000);
   } catch(_) {}
