@@ -2201,3 +2201,112 @@ exports.aiRelay = functions
       throw new functions.https.HttpsError('internal', 'AI 호출 실패: ' + (err && err.message));
     }
   });
+
+
+// =============================================================================
+// v2.18 — 한국 공휴일 자동 수집 (대체공휴일 포함)
+// =============================================================================
+// 월차 계산이 '전월 평일 만근' 기준이라, 공휴일을 모르면 그날 출근 기록이 없어
+// 만근이 깨진다. 공휴일 목록을 서버가 받아 staff_data/holidays 에 캐시한다.
+//
+// 출처: Google 공개 공휴일 캘린더(ICS). 키·가입 불필요.
+//   · DESCRIPTION 이 '공휴일' 로 시작하는 항목만 취한다.
+//     (식목일·어버이날·스승의날·크리스마스 이브 등 '기념일' 은 근무일이다)
+//   · 대체공휴일이 별도 항목으로 들어 있다.
+// ⚠️ 브라우저에서 직접 못 부른다(CORS 헤더 없음) — 그래서 서버가 받는다.
+// ⚠️ 이 함수는 auto 만 덮어쓴다. 관리자가 넣은 add/remove 는 보존한다
+//    (임시공휴일 선포가 늦거나, 창립기념일 같은 회사 휴무일을 넣기 위해).
+// =============================================================================
+
+const HOLIDAY_ICS =
+  'https://calendar.google.com/calendar/ical/ko.south_korea%23holiday%40group.v.calendar.google.com/public/basic.ics';
+
+function _icsUnfold(text) {
+  // ICS 는 75바이트마다 줄을 접는다 — 줄바꿈 + 공백/탭이면 이어붙인다
+  return String(text || '').replace(/\r\n[ \t]/g, '').replace(/\n[ \t]/g, '');
+}
+function _icsUnescape(v) {
+  return String(v || '').replace(/\\n/g, '\n').replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\\\/g, '\\');
+}
+function _ymd(d8) { return d8.slice(0, 4) + '-' + d8.slice(4, 6) + '-' + d8.slice(6, 8); }
+
+/* ICS → { 'YYYY-MM-DD': '명칭' } (공휴일만) */
+function _parseHolidayIcs(text, years) {
+  const s = _icsUnfold(text);
+  const out = {};
+  const evs = s.split('BEGIN:VEVENT').slice(1);
+  evs.forEach(chunk => {
+    const body = chunk.split('END:VEVENT')[0];
+    const mS = /DTSTART;VALUE=DATE:(\d{8})/.exec(body);
+    if (!mS) return;
+    const mDesc = /\nDESCRIPTION:([^\n]*)/.exec('\n' + body);
+    const desc = _icsUnescape(mDesc ? mDesc[1] : '').trim();
+    // '공휴일' 로 시작하는 것만 — '기념일' 은 근무일이다
+    if (desc.indexOf('공휴일') !== 0) return;
+    const mN = /\nSUMMARY:([^\n]*)/.exec('\n' + body);
+    const name = _icsUnescape(mN ? mN[1] : '').trim() || '공휴일';
+    // 종료일이 있으면 그 전날까지(ICS DTEND 는 배타적)
+    const mE = /DTEND;VALUE=DATE:(\d{8})/.exec(body);
+    const start = new Date(Number(mS[1].slice(0, 4)), Number(mS[1].slice(4, 6)) - 1, Number(mS[1].slice(6, 8)));
+    const end = mE ? new Date(Number(mE[1].slice(0, 4)), Number(mE[1].slice(4, 6)) - 1, Number(mE[1].slice(6, 8)))
+                   : new Date(start.getTime() + 86400000);
+    for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
+      const ds = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      if (years && years.indexOf(ds.slice(0, 4)) < 0) continue;
+      out[ds] = name;
+    }
+  });
+  return out;
+}
+
+async function _syncHolidaysCore() {
+  const res = await fetch(HOLIDAY_ICS, { headers: { 'user-agent': 'reniv-erp/1.0' } });
+  if (!res.ok) throw new Error('공휴일 캘린더 응답 ' + res.status);
+  const text = await res.text();
+  const y = new Date().getFullYear();
+  const years = [String(y - 1), String(y), String(y + 1)];
+  const auto = _parseHolidayIcs(text, years);
+  const n = Object.keys(auto).length;
+  if (n < 10) throw new Error('공휴일이 ' + n + '개뿐 — 형식이 바뀐 것 같습니다. 덮어쓰지 않았습니다.');
+
+  const ref = admin.firestore().doc('staff_data/holidays');
+  const snap = await ref.get();
+  let prev = {};
+  try { prev = snap.exists ? (JSON.parse(snap.data().data || '{}') || {}) : {}; } catch (_) {}
+  // ⚠️ 관리자가 넣은 add/remove 는 건드리지 않는다
+  const merged = {
+    auto: auto,
+    add: (prev && prev.add) || {},
+    remove: Array.isArray(prev && prev.remove) ? prev.remove : [],
+    years: years,
+    source: 'google-ics',
+    syncedAt: Date.now(),
+  };
+  await ref.set({ data: JSON.stringify(merged), ts: Date.now() });
+  console.log('[HOLIDAY] ' + years.join(',') + ' — 공휴일 ' + n + '일 저장');
+  return { ok: true, count: n, years: years };
+}
+
+// 매월 1일 04:10 (KST) — 임시공휴일 선포가 늦게 나오는 경우까지 따라잡는다
+exports.scheduledHolidaySync = functions
+  .region(REGION)
+  .pubsub.schedule('10 4 1 * *')
+  .timeZone('Asia/Seoul')
+  .onRun(async () => {
+    try { await _syncHolidaysCore(); }
+    catch (e) { console.error('[HOLIDAY] 정기 동기화 실패:', e && e.message); }
+    return null;
+  });
+
+// 관리자가 즉시 갱신 (임원용 콘솔: syncHolidaysNow())
+exports.syncHolidays = functions
+  .region(REGION)
+  .https.onCall(async (data, context) => {
+    if (!context.auth) throw new functions.https.HttpsError('unauthenticated', '로그인이 필요합니다.');
+    const u = await admin.firestore().doc('users/' + context.auth.uid).get();
+    if (!u.exists || u.data().isAdmin !== true) {
+      throw new functions.https.HttpsError('permission-denied', '관리자 권한이 필요합니다.');
+    }
+    try { return await _syncHolidaysCore(); }
+    catch (e) { throw new functions.https.HttpsError('internal', (e && e.message) || '동기화 실패'); }
+  });

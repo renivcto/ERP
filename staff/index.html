@@ -1345,7 +1345,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.62.0';
+const STAFF_VERSION = 'v0.63.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1402,6 +1402,7 @@ let INSI = [];              // staff_data/inbox_insights — 직원이 올린 �
 let PMAP = null;            // staff_data/productmap — 제품 포트폴리오
 let FPT = null;             // staff_data/fptimeline — 완제품 생산 타임라인
 let NP_TOPTAB = 'board';    // 신제품 개발 상단 탭: board | timeline | portfolio | insight
+let HOL = null;             // staff_data/holidays — 공휴일(auto/add/remove). 만근 판정에 쓴다
 let SHIST = [];             // staff_data/stock_history  — 입출고 내역 (단가·금액 없음)
 let STOCK_TAB = 'now';      // 재고 관리 탭: now(재고 현황) | hist(입출고 내역)
 let SUPP = [];              // staff_data/supply_partners — 판매업체+쇼핑몰 (가격행 드롭다운)
@@ -1942,6 +1943,8 @@ function subscribeData() {
     e => console.warn('[productmap]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'fptimeline'), s => { FPT = parseCol(s, null); rerender(); },
     e => console.warn('[fptimeline]', e.message)));
+  _unsubs.push(onSnapshot(doc(db, 'staff_data', 'holidays'), s => { HOL = parseCol(s, null); rerender(); },
+    e => console.warn('[holidays]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'stock_history'), s => { SHIST = parseCol(s, []); rerender(); },
     e => console.warn('[stock_history]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'supply_partners'), s => { SUPP = parseCol(s, []); rerender(); },
@@ -2017,7 +2020,78 @@ function _ymAdd(ym, n) {
   const d = new Date(y, (m - 1) + n, 1);
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
 }
-function _isWorkday(d) { const w = d.getDay(); return w !== 0 && w !== 6; }
+
+/* ── 공휴일 (v0.63.0) ──
+   auto 는 Cloud Function 이 매월 1일 Google 공휴일 캘린더에서 받아 채운다(대체공휴일 포함).
+   회사 사정으로 다른 날은 관리자가 add/remove 로 조정한다 — 함수는 auto 만 덮어쓴다. */
+function holYm() { return today().slice(0, 7); }
+function holBoxHtml() {
+  if (ME.mode !== 'admin') return '';
+  const h = HOL || {};
+  const map = holidayMap();
+  const ym = holYm();
+  const thisMonth = Object.keys(map).filter(d => d.slice(0, 7) === ym).sort();
+  const when = h.syncedAt ? new Date(h.syncedAt) : null;
+  return `<div style="margin-top:12px;border:1px solid var(--line);border-radius:10px;padding:11px 13px">
+    <div style="font-size:12.5px;font-weight:800;margin-bottom:7px">🇰🇷 공휴일
+      <span class="hint" style="display:inline;margin:0">${Object.keys(map).length}일 등록${
+        when ? ' · 갱신 ' + when.getFullYear() + '.' + String(when.getMonth() + 1).padStart(2, '0') + '.' + String(when.getDate()).padStart(2, '0') : ''}</span></div>
+    <div class="hint" style="margin:0 0 8px">${thisMonth.length
+      ? '이번 달: ' + thisMonth.map(d => `<b>${d.slice(8)}일</b> ${esc(map[d])}`).join(' · ')
+      : '이번 달에는 공휴일이 없습니다'}</div>
+    <div class="np-row">
+      <input class="fi" id="hol-date" type="date" style="flex:1">
+      <input class="fi" id="hol-name" placeholder="휴무일 이름 (예: 창립기념일)" style="flex:2">
+      <button type="button" class="btn btn-sm btn-p" id="btn-hol-add">+ 휴무일</button>
+    </div>
+    ${Object.keys(h.add || {}).length ? `<div class="hint" style="margin:6px 0 0">회사 지정 휴무일: ${
+      Object.keys(h.add).sort().map(d => `<span class="dp-chip">${d} ${esc(h.add[d])}
+        <a data-hol-del="${d}" style="cursor:pointer;color:var(--bad);margin-left:4px">✕</a></span>`).join(' ')}</div>` : ''}
+    <div class="hint" style="margin:6px 0 0">공휴일이지만 근무하는 날은 날짜만 넣고 이름을 <b>비워서</b> 추가하면 제외됩니다.
+      자동 목록은 매월 1일에 갱신됩니다(대체공휴일 포함).</div>
+  </div>`;
+}
+async function holSave(next) {
+  try { await saveCol('holidays', next); HOL = next; rerender(); toast('저장했습니다'); }
+  catch (e) { toast('저장 실패: ' + e.message, true); }
+}
+function wireHoliday() {
+  const b = $('btn-hol-add');
+  if (b) b.onclick = () => {
+    const d = ($('hol-date').value || '').trim();
+    if (!d) { toast('날짜를 선택해 주세요', true); return; }
+    const nm = ($('hol-name').value || '').trim();
+    const h = HOL || {};
+    const next = { auto: h.auto || {}, add: Object.assign({}, h.add || {}),
+                   remove: (Array.isArray(h.remove) ? h.remove : []).slice(),
+                   syncedAt: h.syncedAt || 0, source: h.source || '' };
+    if (nm) { delete next.add[d]; next.add[d] = nm; next.remove = next.remove.filter(x => x !== d); }
+    else { delete next.add[d]; if (next.remove.indexOf(d) < 0) next.remove.push(d); }   // 이름 없이 = 근무일로 되돌림
+    holSave(next);
+  };
+  document.querySelectorAll('[data-hol-del]').forEach(el => el.onclick = () => {
+    const h = HOL || {};
+    const next = { auto: h.auto || {}, add: Object.assign({}, h.add || {}),
+                   remove: (Array.isArray(h.remove) ? h.remove : []).slice(),
+                   syncedAt: h.syncedAt || 0, source: h.source || '' };
+    delete next.add[el.dataset.holDel];
+    holSave(next);
+  });
+}
+/* 공휴일 집합 — 자동 수집분에서 회사가 근무하는 날(remove)을 빼고, 회사 휴무일(add)을 더한다 */
+function holidayMap() {
+  const h = HOL || {};
+  const out = Object.assign({}, h.auto || {}, h.add || {});
+  (Array.isArray(h.remove) ? h.remove : []).forEach(d => { delete out[d]; });
+  return out;
+}
+function isHoliday(ds) { return !!holidayMap()[ds]; }
+function _isWorkday(d) {
+  const w = d.getDay();
+  if (w === 0 || w === 6) return false;
+  const ds = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  return !isHoliday(ds);          // 공휴일은 근무일이 아니다 → 만근 판정에서 뺀다
+}
 /* 승인된 휴가가 덮는 날짜 집합 (시작일부터 days 일) */
 function _leaveDays(uid) {
   const set = new Set();
@@ -3142,8 +3216,9 @@ function pageAdmin(sec) {
               · 만근 = 전월 평일 전부 출근 기록<br>
               · 승인된 휴가일은 출근으로 인정<br>
               · 입사한 달은 만근 대상이 아님<br>
-              <span style="color:var(--ink-mute)">공휴일 달력이 없어 주말만 제외합니다</span>
+              · 주말과 <b>공휴일</b>은 근무일에서 제외
             </div>
+            ${holBoxHtml()}
             <div class="hint">한 달에 쓸 수 있는 월차 일수</div></div>
           <div class="fld"><label>연차 (년차별 일수)</label>
             <div id="pol-annual">${Object.keys(p.annual).sort((a,b)=>a-b).map(y =>
@@ -3258,6 +3333,7 @@ function wireAdmin() {
     const p = pol(); p.approvers = p.approvers.filter((_, i) => i !== +b.dataset.polApdel);
     POLICY = p; renderPage();
   });
+  wireHoliday();   // v0.63.0 — 공휴일 추가·제외
   if ($('btn-pol-save')) $('btn-pol-save').onclick = async () => {
     const p = pol();
     // 월차는 출퇴근 기록에서 자동 계산한다 — 사람이 넣는 값이 아니다(v0.62.0)
