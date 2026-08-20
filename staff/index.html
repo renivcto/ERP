@@ -567,7 +567,9 @@ tr:last-child td { border-bottom:none; }
 /* 신제품 타임라인 (v0.85.0) — 임원용과 같은 그림 */
 .np-tl-lgs { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:11px; }
 .np-tl-lg { display:inline-flex; align-items:center; gap:4px; font-size:11.5px; color:var(--ink-soft); }
-.np-tl-lg i { width:9px; height:9px; border-radius:50%; display:inline-block; }
+.np-tl-lg i { width:20px; height:20px; border-radius:50%; display:inline-flex; align-items:center;
+  justify-content:center; font-size:13px; font-style:normal; line-height:1;
+  filter:drop-shadow(1px 1px 1.5px rgba(0,0,0,.25)); }
 .ntl-next { background:linear-gradient(90deg,#fffbeb,#fef3c7); border:1px solid #fde68a; border-radius:10px;
   padding:9px 13px; font-size:13px; color:#78350f; margin-bottom:11px; }
 .ntl-next .dd { background:var(--bad); color:#fff; border-radius:99px; padding:1px 9px; font-size:11.5px; font-weight:800; margin-left:4px; }
@@ -583,19 +585,24 @@ tr:last-child td { border-bottom:none; }
   font-size:10px; font-weight:800; border-radius:5px; padding:1px 6px; z-index:2; white-space:nowrap; }
 .ntl-row { display:grid; border-bottom:1px solid var(--line-soft); background:#fffdf7; }
 .ntl-row:nth-child(odd) { background:#fff; }
-.ntl-name { padding:8px 12px; border-right:1px solid var(--line); overflow:hidden; }
+.ntl-name { padding:8px 12px; border-right:1px solid var(--line); overflow:hidden;
+  display:flex; flex-direction:column; justify-content:center; }   /* 세로 가운데 — 위에 붙지 않게 */
 .ntl-name .n { font-size:12.5px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ntl-name .s { font-size:11px; color:var(--ink-mute); margin-top:2px; white-space:nowrap; }
 .ntl-track { position:relative; }
 .ntl-tick { position:absolute; top:0; bottom:0; border-left:1px solid var(--line-soft); }
 .ntl-today { position:absolute; top:0; bottom:0; border-left:2px solid var(--bad); z-index:1; }
-.ntl-bar { position:absolute; height:20px; border-radius:99px; display:flex; align-items:center; gap:4px;
-  padding:0 9px; font-size:11px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden;
-  box-shadow:0 1px 3px rgba(15,23,42,.18); z-index:2; }
-.ntl-bar span { font-size:11px; }
-.ntl-mark { position:absolute; width:22px; height:20px; transform:translateX(-11px); border-radius:99px;
-  display:inline-flex; align-items:center; justify-content:center; font-size:12px; color:#fff;
-  box-shadow:0 1px 3px rgba(15,23,42,.22); z-index:3; }
+/* 막대 — 임원용처럼 아이콘이 왼쪽에 걸치고 이름이 안에 들어간다 */
+.ntl-bar { position:absolute; height:22px; z-index:2; }
+.ntl-bar i { position:absolute; left:0; right:0; top:1px; height:20px; border-radius:99px; display:flex;
+  align-items:center; padding:0 6px 0 22px; overflow:hidden; }
+.ntl-bar i b { color:#fff; font-size:11.5px; font-weight:700; letter-spacing:-.3px; white-space:nowrap; overflow:hidden; }
+.ntl-bar span { position:absolute; left:-2px; top:0; font-size:18px; line-height:1;
+  filter:drop-shadow(1px 1px 1.5px rgba(0,0,0,.3)); }
+/* 하루짜리 — 아이콘만 (배경 없음) */
+.ntl-mark { position:absolute; width:22px; height:22px; transform:translateX(-11px);
+  display:inline-flex; align-items:center; justify-content:center; font-size:18px; line-height:1;
+  filter:drop-shadow(1px 1px 1.5px rgba(0,0,0,.3)); z-index:3; }
 /* 업무 매뉴얼 버튼 (v0.81.0) — 홈 오른쪽 위 */
 .btn.btn-manual { background:#fff7ed; color:#c2410c; border-color:#fed7aa; font-weight:700; }
 .btn.btn-manual:hover { background:#ffedd5; border-color:#fdba74; }
@@ -1514,7 +1521,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.85.0';
+const STAFF_VERSION = 'v0.86.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -5076,7 +5083,7 @@ function ntlCard(title, rows, sub) {
         </div>
         ${rows.map(r => {
           const lanes = ntlLanes(r.items);
-          return `<div class="ntl-row" style="${grid};height:${lanes * 26 + 10}px">
+          return `<div class="ntl-row" style="${grid};height:${Math.max(54, lanes * 28 + 14)}px">
             <div class="ntl-name">
               <div class="n" title="${esc(r.name)}">${esc(r.name)}</div>
               ${r.sub ? `<div class="s">${r.sub}</div>` : ''}
@@ -5088,15 +5095,15 @@ function ntlCard(title, rows, sub) {
                 const l = pos(m.start);
                 if (l == null) return '';
                 const e = pos(m.end || m.start);
-                const top = (m._lane || 0) * 26 + 5;
+                const top = (m._lane || 0) * 28 + 7;
                 const t = `${m.label} · ${m.start}${m.end && m.end !== m.start ? ' ~ ' + m.end : ''}${m.done ? ' (완료)' : ''}`;
                 if (!m.end || m.end === m.start) {
-                  return `<span class="ntl-mark" style="left:${l.toFixed(2)}%;top:${top}px;background:${m.color}"
-                    title="${esc(t)}">${m.icon}</span>`;
+                  // 하루짜리는 아이콘만 — 동그라미를 두르면 아이콘이 묻혀 안 보인다(임원용과 같은 처리)
+                  return `<span class="ntl-mark" style="left:${l.toFixed(2)}%;top:${top}px" title="${esc(t)}">${m.icon}</span>`;
                 }
                 const w = Math.max(3, (e == null ? l : e) - l);
-                return `<div class="ntl-bar" style="left:${l.toFixed(2)}%;width:${w.toFixed(2)}%;top:${top}px;background:${m.color};opacity:${m.done ? .5 : 1}"
-                  title="${esc(t)}"><span>${m.icon}</span>${esc(m.label)}</div>`;
+                return `<div class="ntl-bar" style="left:${l.toFixed(2)}%;width:${w.toFixed(2)}%;top:${top}px;opacity:${m.done ? .5 : 1}"
+                  title="${esc(t)}"><i style="background:${m.color}"><b>${esc(m.label)}</b></i><span>${m.icon}</span></div>`;
               }).join('')}
             </div></div>`;
         }).join('')}
@@ -5134,7 +5141,7 @@ function pageNpTimeline() {
     const dd = npDday(p.launchDate);
     return {
       name: p.name || '(이름 없음)',
-      sub: p.launchDate ? `🚀 ${esc(String(p.launchDate).slice(5))}${dd == null ? '' :
+      sub: p.launchDate ? `🎯 ${esc(String(p.launchDate).slice(5))}${dd == null ? '' :
         ` · <b style="color:${dd >= 0 && dd <= 14 ? 'var(--bad)' : 'var(--brand-deep)'}">${dd >= 0 ? 'D-' + dd : 'D+' + Math.abs(dd)}</b>`}` : '',
       items: npTlItems(p),
     };
@@ -5143,10 +5150,10 @@ function pageNpTimeline() {
   const next = list.filter(p => p.launchDate && p.launchDate >= today())
     .sort((a, b) => String(a.launchDate).localeCompare(String(b.launchDate)))[0];
   const dd = next ? npDday(next.launchDate) : null;
-  const banner = next ? `<div class="ntl-next">🚀 다음 출시: <b>${esc(next.name || '')}</b>
+  const banner = next ? `<div class="ntl-next">🎯 다음 출시: <b>${esc(next.name || '')}</b>
     <span class="dd">D-${dd}</span> <span class="dt">(${esc(next.launchDate)})</span></div>` : '';
   const legend = `<div class="np-tl-lgs">${NP_MS_CATS.map(c =>
-    `<span class="np-tl-lg"><i style="background:${c.color}"></i>${esc(c.label)}</span>`).join('')}</div>`;
+    `<span class="np-tl-lg"><i style="background:${c.color}">${c.icon}</i>${esc(c.label)}</span>`).join('')}</div>`;
   const main = ntlCard('📅 신제품 런칭 예정', rows, banner + legend);
   const fp = ntlCard('🏭 완제품 생산 타임라인', npFpRows(), '');
   const sub = `<div class="pg-sub" style="margin-top:-6px">${DP_RO}</div>`;
@@ -5558,9 +5565,9 @@ const NP_MS_CATS = [
   { id: 'detailpage', label: '상세페이지', icon: '📝', color: '#60a5fa' },
   { id: 'wadiz',      label: '펀딩 오픈',  icon: '💎', color: '#e879f9' },
   { id: 'shipping',   label: '배송 시작',  icon: '🚚', color: '#34d399' },
-  { id: 'launch',     label: '런칭',       icon: '🚀', color: '#fb7185' },
+  { id: 'launch',     label: '런칭',       icon: '🎯', color: '#fb7185' },   // v0.86.0: 로켓 → 목표
 ];
-function npMsCat(id) { return NP_MS_CATS.find(c => c.id === id) || { id: id || 'etc', label: id || '기타', icon: '🎯', color: '#94a3b8' }; }
+function npMsCat(id) { return NP_MS_CATS.find(c => c.id === id) || { id: id || 'etc', label: id || '기타', icon: '📌', color: '#94a3b8' }; }
 function npDday(ds) {
   if (!ds) return null;
   const t = new Date(); t.setHours(0, 0, 0, 0);
@@ -5671,7 +5678,7 @@ function npRenderBody() {
       <div class="np-over3">
         ${npImgsHtml('productImgs', '제품 예상 이미지')}
         <div class="np-sec"><div class="h">📅 일정</div>
-          ${npIn('launchDate', '🚀 런칭 예정일', 'date')}
+          ${npIn('launchDate', '🎯 런칭 예정일', 'date')}
           ${npIn('wadizOpen', '💰 펀딩 오픈', 'date')}
           ${npIn('wadizShip', '📦 배송 시작', 'date')}
           ${npIn('extraDateLabel', '📅 기타 일정 이름')}
