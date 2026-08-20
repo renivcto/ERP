@@ -575,14 +575,18 @@ tr:last-child td { border-bottom:none; }
 .ntl-next .dd { background:var(--bad); color:#fff; border-radius:99px; padding:1px 9px; font-size:11.5px; font-weight:800; margin-left:4px; }
 .ntl-next .dt { color:#92400e; font-size:12px; margin-left:4px; }
 .ntl-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:12px; }
-.ntl { min-width:max-content; }
+.ntl { min-width:max-content; position:relative; }
+.ntl-line { position:absolute; top:0; bottom:0; width:2px; z-index:5;
+  background:linear-gradient(180deg,#fb923c,#dc2626); box-shadow:0 0 8px rgba(220,38,38,.35); }
+.ntl-line-b { position:absolute; top:3px; left:50%; transform:translateX(-50%); background:var(--bad); color:#fff;
+  font-size:10.5px; font-weight:800; border-radius:5px; padding:2px 8px; white-space:nowrap;
+  cursor:ew-resize; user-select:none; box-shadow:0 1px 3px rgba(15,23,42,.3); }
+.ntl-line-b.moved { background:#0f172a; }
 .ntl-head { display:grid; background:var(--line-soft); border-bottom:1px solid var(--line); }
 .ntl-hn { font-size:11.5px; font-weight:800; color:var(--ink-soft); padding:9px 12px; border-right:1px solid var(--line); }
 .ntl-hm { position:relative; display:grid; font-size:11.5px; font-weight:700; color:var(--ink-soft); }
 .ntl-hm > div { text-align:center; padding:9px 0; border-left:1px solid var(--line); }
 .ntl-hm > div:first-child { border-left:0; }
-.ntl-today-b { position:absolute; top:3px; transform:translateX(-50%); background:var(--bad); color:#fff;
-  font-size:10px; font-weight:800; border-radius:5px; padding:1px 6px; z-index:2; white-space:nowrap; }
 .ntl-row { display:grid; border-bottom:1px solid var(--line-soft); background:#fffdf7; }
 .ntl-row:nth-child(odd) { background:#fff; }
 .ntl-name { padding:8px 12px; border-right:1px solid var(--line); overflow:hidden;
@@ -591,7 +595,6 @@ tr:last-child td { border-bottom:none; }
 .ntl-name .s { font-size:11px; color:var(--ink-mute); margin-top:2px; white-space:nowrap; }
 .ntl-track { position:relative; }
 .ntl-tick { position:absolute; top:0; bottom:0; border-left:1px solid var(--line-soft); }
-.ntl-today { position:absolute; top:0; bottom:0; border-left:2px solid var(--bad); z-index:1; }
 /* 막대 — 임원용처럼 아이콘이 왼쪽에 걸치고 이름이 안에 들어간다 */
 .ntl-bar { position:absolute; height:22px; z-index:2; }
 .ntl-bar i { position:absolute; left:0; right:0; top:1px; height:20px; border-radius:99px; display:flex;
@@ -1521,7 +1524,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.86.0';
+const STAFF_VERSION = 'v0.87.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1857,6 +1860,10 @@ if (DEMO) {
       comments: [
         { text: '엑소좀 함량을 표기할 수 있는지 확인 부탁드립니다.', author: '권다빈 이사', authorPhoto: '', ts: 1786400000000, reactions: { '👍': ['x1'] } },
         { text: '식약처 표시 기준 확인해서 올리겠습니다.', author: '김서연', authorPhoto: '', ts: 1786400600000, parentTs: 1786400000000, reactions: {} }] },
+    { id: 'np4', name: '로얄젤리 단백질 세럼', stage: 'done', status: 'DONE', progress: 100,
+      launchDate: '2026-09-21', formulation: '세럼', comments: [],
+      milestones: [{ id: 'm4', category: 'materials', plannedDate: '2026-08-04', endDate: '2026-08-30', actualDate: '' },
+                   { id: 'm5', category: 'oem', plannedDate: '2026-08-10', endDate: '2026-09-15', actualDate: '' }] },
     { id: 'np2', name: '블러드라임 클렌징오일', stage: 'develop', status: 'DOING', progress: 45,
       launchDate: '2026-10-15', productNames: '블러드라임 클렌징오일', usp: '모공 딥클렌징',
       target: '20대', mainIngredients: '블러드오렌지, 라임', formulation: '오일', comments: [] },
@@ -3285,7 +3292,7 @@ function renderPage() {
     case 'partners': m.innerHTML = pagePartners(); wirePt('pt'); break;
     case 'accounts': m.innerHTML = pageAccounts(); wireAccounts(); break;
     case 'newproduct': case 'newproduct-insight': case 'newproduct-timeline': case 'newproduct-portfolio':
-      m.innerHTML = pageNewProduct(); wireNewProduct(); break;
+      m.innerHTML = pageNewProduct(); wireNewProduct(); wireNtl(); break;
     case 'pharmacy': m.innerHTML = pagePharmacy(); wirePharmacy(); break;
     case 'approval': case 'approval-gen': m.innerHTML = pageApproval(); wireApproval(); break;
     case 'items':    m.innerHTML = pageItems(); wireDataPage(); break;
@@ -5069,16 +5076,21 @@ function ntlCard(title, rows, sub) {
   const todayPos = pos(today());
   const W = Math.max(760, months.length * 108);
   const grid = `grid-template-columns:210px ${W}px`;
+  // 오늘 선은 행마다 긋지 않고 카드에 하나만 둔다 — 끌어서 옮기려면 하나여야 한다
+  const uid = 'ntl' + (window._ntlSeq = (window._ntlSeq || 0) + 1);
+  const line = todayPos == null ? '' : `<div class="ntl-line" id="${uid}"
+    data-first="${months[0]}-01" data-span="${span}" data-w="${W}" style="left:${(210 + W * todayPos / 100).toFixed(1)}px">
+    <span class="ntl-line-b" data-ntl-drag="${uid}" title="좌우로 끌면 그 날짜의 기준선이 됩니다 · 두 번 누르면 오늘로">오늘</span></div>`;
   return `<div class="card" style="margin-bottom:14px"><div class="card-h">${title}
       <span class="sub">${rows.length}개 · ${months[0]} ~ ${months[months.length - 1]}</span></div>
     <div class="card-b">
       ${sub || ''}
       <div class="ntl-wrap"><div class="ntl">
+        ${line}
         <div class="ntl-head" style="${grid}">
           <div class="ntl-hn">이름</div>
           <div class="ntl-hm" style="grid-template-columns:repeat(${months.length},1fr)">
             ${months.map(m => `<div>${m.slice(5)}월</div>`).join('')}
-            ${todayPos == null ? '' : `<span class="ntl-today-b" style="left:${todayPos.toFixed(2)}%">오늘</span>`}
           </div>
         </div>
         ${rows.map(r => {
@@ -5090,7 +5102,6 @@ function ntlCard(title, rows, sub) {
             </div>
             <div class="ntl-track">
               ${months.map((m, i) => i ? `<span class="ntl-tick" style="left:${(i / months.length * 100).toFixed(2)}%"></span>` : '').join('')}
-              ${todayPos == null ? '' : `<span class="ntl-today" style="left:${todayPos.toFixed(2)}%"></span>`}
               ${r.items.map(m => {
                 const l = pos(m.start);
                 if (l == null) return '';
@@ -5135,8 +5146,11 @@ function npFpRows() {
       start: x.start || x.date, end: x.end || '', done: false })) };
   }).filter(r => r.items.length);
 }
+/* 타임라인에 올릴 단계 — 아이디어 단계는 뺀다(v0.87.0).
+   런칭 일정을 보는 화면이라, 아직 일정이 잡히지 않은 아이디어까지 줄을 차지할 이유가 없다. */
+const NTL_STAGES = ['developing', 'done'];
 function pageNpTimeline() {
-  const list = npAll().filter(p => !npIsDrop(p));
+  const list = npAll().filter(p => !npIsDrop(p) && NTL_STAGES.indexOf(p.stage) >= 0);
   const rows = list.map(p => {
     const dd = npDday(p.launchDate);
     return {
@@ -5196,6 +5210,39 @@ function pmxCard(p, chans) {
       <span class="ch" style="color:${col}">${esc(p.channel || '-')}</span>
       <span class="pmx-st" style="color:${st.color};background:${st.bg}">${st.label}</span>
     </div></div>`;
+}
+/* '오늘' 라벨 드래그 — 임원용과 같은 조작. 끌면 그 날짜의 기준선이 되고 라벨에 날짜가 뜬다. */
+function wireNtl() {
+  document.querySelectorAll('[data-ntl-drag]').forEach(b => {
+    const line = document.getElementById(b.dataset.ntlDrag);
+    if (!line) return;
+    const first = new Date(line.dataset.first + 'T00:00:00');
+    const span = Number(line.dataset.span) || 1;
+    const W = Number(line.dataset.w) || 1;
+    const box = line.parentElement;                       // .ntl
+    const setAt = (px) => {
+      const x = Math.max(210, Math.min(210 + W, px));
+      line.style.left = x.toFixed(1) + 'px';
+      // 소수점 픽셀 때문에 하루가 어긋나 보이지 않게 가장 가까운 날로 맞춘다
+      const d = new Date(first.getTime() + Math.round(((x - 210) / W) * span) * 86400000);
+      const ds = String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      b.textContent = ds;
+      b.classList.add('moved');
+    };
+    b.onmousedown = e => {
+      e.preventDefault();
+      const move = ev => setAt(ev.clientX - box.getBoundingClientRect().left);
+      const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    };
+    b.ondblclick = () => {                                 // 두 번 누르면 오늘로 되돌린다
+      const t = new Date(today() + 'T00:00:00');
+      line.style.left = (210 + W * Math.max(0, Math.min(1, (t - first) / 86400000 / span))).toFixed(1) + 'px';
+      b.textContent = '오늘';
+      b.classList.remove('moved');
+    };
+  });
 }
 function pageNpPortfolio() {
   const d = (PMAP && typeof PMAP === 'object' && !Array.isArray(PMAP)) ? PMAP : {};
