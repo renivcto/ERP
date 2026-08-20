@@ -251,7 +251,18 @@ tr:last-child td { border-bottom:none; }
 .ph-sum .b .v { font-size:17px; font-weight:800; margin-top:3px; }
 .dp-tb .nm a { color:var(--brand-deep); font-weight:700; cursor:pointer; }
 .dp-tb .nm a:hover { text-decoration:underline; }
-.sp-row { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px; background:#fff; }
+.sp-row { position:relative; border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px; background:#fff; }
+.sp-row .sp-del { position:absolute; top:7px; right:7px; }   /* 임원용처럼 작은 ✕ (v0.82.0) */
+/* 보기 표 — 임원용 품목 상세와 같은 구성 */
+.sp-view { width:100%; border-collapse:collapse; font-size:12.5px; }
+.sp-view th { font-size:11px; color:var(--ink-mute); font-weight:700; padding:6px 8px; border-bottom:1px solid var(--line); }
+.sp-view td { padding:7px 8px; border-bottom:1px solid var(--line-soft); text-align:center; }
+.sp-view .nm { font-weight:700; color:var(--brand-deep); }
+.sp-view .sub2 { display:block; font-size:11px; color:var(--ink-mute); font-weight:500; margin-top:2px; }
+/* 접었다 폈다 하는 머리글 */
+.sp-head { display:flex; align-items:center; gap:7px; font-size:14px; font-weight:800; padding:2px 0 8px; cursor:pointer; user-select:none; }
+.sp-head .arrow { font-size:11px; color:var(--ink-mute); transition:transform .15s; }
+.sp-head.closed .arrow { transform:rotate(-90deg); }
 .sp-row .g { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:7px; }
 .sp-row .g4 { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:8px; }
 .sp-row .lb { font-size:11px; color:var(--ink-mute); font-weight:700; display:block; margin-bottom:3px; }
@@ -1247,8 +1258,11 @@ tr:last-child td { border-bottom:none; }
   <div class="modal" style="max-width:720px">
     <div class="modal-h"><span class="t" id="item-m-t">🧴 품목 상세</span><button class="modal-x" data-close="ovl-item">✕</button></div>
     <div class="modal-b" id="item-m-body"></div>
-    <div class="modal-f"><button class="btn" data-close="ovl-item">닫기</button>
-      <button class="btn btn-p" id="btn-item-save" style="display:none">판매업체 가격 저장</button></div>
+    <div class="modal-f">
+      <button class="btn" data-close="ovl-item" id="btn-item-close">닫기</button>
+      <button class="btn" id="btn-item-cancel" style="display:none">취소</button>
+      <button class="btn btn-p" id="btn-item-edit" style="display:none">✏️ 수정</button>
+      <button class="btn btn-p" id="btn-item-save" style="display:none">저장</button></div>
   </div>
 </div>
 
@@ -1435,7 +1449,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.81.0';
+const STAFF_VERSION = 'v0.82.1';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -5687,6 +5701,8 @@ function pagePharmacy() {
    ⚠️ 원가(단가)·재고평가액은 미러에 아예 없다 — 화면에도 '비공개' 로 표시만 한다.
    직원이 고칠 수 있는 것은 판매업체별 판매가·공급가 하나뿐이다. */
 let ITEM_OPEN = null, ITEM_SP = [];
+let ITEM_EDIT = false;      // 품목 상세: false=보기 / true=수정 (v0.82.0)
+let ITEM_SP_OPEN = true;    // 판매업체 가격 구역 접기 상태
 /* 전달 대기 중인 수정본을 미러 위에 덮어 보여준다 */
 function itemSupply(i) {
   const p = (ITMI || []).filter(r => r && !r.applied && String(r.id) === String(i.id)).pop();
@@ -5726,17 +5742,59 @@ function openItemModal(id) {
         ${i.minStock ? ` <span style="font-size:11.5px;color:var(--ink-mute)">(안전재고 ${Number(i.minStock).toLocaleString()})</span>` : ''}</td></tr>
       ${row('비고', esc(i.note || ''))}
     </table>
-    <div class="card-h" style="border:0;padding:0 0 8px;font-size:14px">🏷 판매업체별 판매가 · 공급가
-      <span class="sub">여기만 수정할 수 있습니다${itemPending(i) ? ' · <b style="color:var(--warn)">반영 대기 중</b>' : ''}</span></div>
-    <div id="item-sp-list"></div>
-    <button type="button" class="btn btn-sm" id="btn-sp-add">+ 거래처 추가</button>`;
-  renderItemSp();
-  $('btn-item-save').style.display = '';
+    <div id="item-sp-wrap"></div>`;
+  ITEM_EDIT = false;          // 열 때는 언제나 '보기'
+  ITEM_SP_OPEN = true;
+  itemFooter();
+  renderItemSpSection();
   $('ovl-item').classList.add('on');
+}
+/* 푸터 버튼 — 보기[닫기·수정] / 수정[취소·저장] */
+function itemFooter() {
+  const set = (id, on) => { const b = $(id); if (b) b.style.display = on ? '' : 'none'; };
+  set('btn-item-close', !ITEM_EDIT);
+  set('btn-item-edit', !ITEM_EDIT);
+  set('btn-item-cancel', ITEM_EDIT);
+  set('btn-item-save', ITEM_EDIT);
+}
+/* 판매업체 가격 구역 — 머리글(접기) + 목록 + (수정 중일 때만) 거래처 추가 */
+function renderItemSpSection() {
+  const el = $('item-sp-wrap');
+  const i = (ITEMS || []).find(x => String(x.id) === String(ITEM_OPEN));
+  if (!el || !i) return;
+  const n = ITEM_EDIT ? ITEM_SP.length : itemSupply(i).length;
+  el.innerHTML = `
+    <div class="sp-head ${ITEM_SP_OPEN ? '' : 'closed'}" id="sp-head">🏷 판매업체별 판매가 · 공급가
+      <span class="sub" style="font-weight:600">${n}곳${itemPending(i) ? ' · <b style="color:var(--warn)">반영 대기 중</b>' : ''}</span>
+      <span class="arrow" style="margin-left:auto">▾</span></div>
+    <div id="item-sp-list" style="display:${ITEM_SP_OPEN ? '' : 'none'}"></div>
+    ${(ITEM_EDIT && ITEM_SP_OPEN) ? '<button type="button" class="btn btn-sm" id="btn-sp-add" style="margin-top:2px">+ 거래처 추가</button>' : ''}`;
+  $('sp-head').onclick = () => { ITEM_SP_OPEN = !ITEM_SP_OPEN; renderItemSpSection(); };
+  renderItemSp();
+}
+function suppName(id) {
+  const p = (SUPP || []).find(x => String(x.id) === String(id));
+  return p ? p.name : (id || '-');
 }
 function renderItemSp() {
   const el = $('item-sp-list');
   if (!el) return;
+  // ── 보기 모드 — 임원용 상세와 같은 표. 여기서는 고칠 수 없다 ──
+  if (!ITEM_EDIT) {
+    const i = (ITEMS || []).find(x => String(x.id) === String(ITEM_OPEN));
+    const list = i ? itemSupply(i) : [];
+    const w = v => (v === '' || v == null) ? '-' : '₩' + Number(v).toLocaleString();
+    el.innerHTML = list.length ? `<table class="sp-view">
+      <thead><tr><th>판매업체</th><th>판매가</th><th>공급가</th><th>부가세</th><th>재고ID</th></tr></thead><tbody>
+      ${list.map(r => `<tr>
+        <td><span class="nm">${esc(suppName(r.sellerId))}</span>${r.itemName ? `<span class="sub2">${esc(r.itemName)}</span>` : ''}</td>
+        <td>${w(r.salePrice)}</td>
+        <td style="color:var(--ok);font-weight:700">${w(r.price)}</td>
+        <td>${r.vat === 'include' ? '포함' : '별도'}</td>
+        <td style="font-size:11.5px;color:var(--ink-mute)">${esc(r.stockId || '-')}</td></tr>`).join('')}
+      </tbody></table>` : '<div class="hint" style="margin:0">등록된 거래처 가격이 없습니다.</div>';
+    return;
+  }
   const opts = v => '<option value="">— 거래처 선택 —</option>'
     + (SUPP || []).map(p => `<option value="${esc(p.id)}"${String(p.id) === String(v) ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
   el.innerHTML = ITEM_SP.length ? ITEM_SP.map((r, i) => `
@@ -5753,8 +5811,8 @@ function renderItemSp() {
           <option value="exclude"${r.vat !== 'include' ? ' selected' : ''}>별도</option></select></div>
         <div><span class="lb">재고ID</span><input class="fi" data-sp-stock="${i}" value="${esc(r.stockId || '')}"></div>
       </div>
-      <div style="text-align:right;margin-top:6px"><button type="button" class="btn btn-sm btn-bad" data-sp-del="${i}">✕ 행 삭제</button></div>
-    </div>`).join('') : '<div class="hint" style="margin:0 0 8px">등록된 거래처 가격이 없습니다.</div>';
+      <button type="button" class="iconbtn sp-del" data-sp-del="${i}" title="이 행 삭제">✕</button>
+    </div>`).join('') : '<div class="hint" style="margin:0 0 8px">등록된 거래처 가격이 없습니다. [+ 거래처 추가]로 넣으세요.</div>';
   const bind = (sel, key, num) => el.querySelectorAll('[' + sel + ']').forEach(x => x.oninput = x.onchange = () => {
     const i = Number(x.getAttribute(sel));
     ITEM_SP[i][key] = num ? (x.value === '' ? '' : Number(x.value) || 0) : x.value;
@@ -5762,15 +5820,26 @@ function renderItemSp() {
   bind('data-sp-seller', 'sellerId'); bind('data-sp-name', 'itemName');
   bind('data-sp-sale', 'salePrice', true); bind('data-sp-price', 'price', true);
   bind('data-sp-vat', 'vat'); bind('data-sp-stock', 'stockId');
-  el.querySelectorAll('[data-sp-del]').forEach(x => x.onclick = () => { ITEM_SP.splice(Number(x.dataset.spDel), 1); renderItemSp(); });
+  el.querySelectorAll('[data-sp-del]').forEach(x => x.onclick = () => { ITEM_SP.splice(Number(x.dataset.spDel), 1); renderItemSpSection(); });
 }
 /* + 거래처 추가 버튼은 모달을 그릴 때마다 새로 생긴다 — 문서 위임으로 한 번만 배선한다 */
 document.addEventListener('click', e => {
   if (e.target && e.target.id === 'btn-sp-add') {
     ITEM_SP.push({ sellerId: '', itemName: '', salePrice: '', price: '', vat: 'include', stockId: '' });
-    renderItemSp();
+    renderItemSpSection();
   }
 });
+$('btn-item-edit').onclick = () => {
+  const i = (ITEMS || []).find(x => String(x.id) === String(ITEM_OPEN));
+  if (!i) return;
+  ITEM_SP = JSON.parse(JSON.stringify(itemSupply(i)));   // 편집은 언제나 사본으로
+  ITEM_EDIT = true; ITEM_SP_OPEN = true;
+  itemFooter(); renderItemSpSection();
+};
+$('btn-item-cancel').onclick = () => {
+  ITEM_EDIT = false;                                     // 고친 사본은 버린다
+  itemFooter(); renderItemSpSection();
+};
 $('btn-item-save').onclick = async () => {
   if (!ITEM_OPEN) return;
   const rows = ITEM_SP.filter(r => r && r.sellerId);
