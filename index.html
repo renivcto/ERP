@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.713';
+const ERP_VERSION = 'v2.3.714';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -48740,6 +48740,7 @@ async function _loadStaffUsersTable() {
           ${u.active === true
             ? `<button class="btn btn-outline btn-xs" onclick="staffUserSetActive('${esc0(u.uid)}', false)">비활성화</button>`
             : `<button class="btn btn-success btn-xs" onclick="staffUserSetActive('${esc0(u.uid)}', true)">✅ 승인</button>`}
+          <button class="btn btn-danger btn-xs" onclick="staffUserDelete('${esc0(u.uid)}', '${esc0(u.name || '')}', '${esc0(u.email || '')}')">🗑 삭제</button>
         </td>
       </tr>`).join('');
   } catch (e) {
@@ -48758,6 +48759,27 @@ window.staffUserSetActive = async function(uid, active) {
     _loadStaffUsersTable();
   } catch (e) {
     showNotif('처리 실패: ' + (e && e.message) + ' — 승인은 관리자 계정만 가능합니다', 'error');
+  }
+};
+
+/* v2.3.714 — 직원 계정 완전 삭제.
+   비활성화는 '못 들어오게' 하는 것이고, 삭제는 명단에서 지우는 것이다. 중복 가입 정리에 쓴다.
+   ⚠️ 되돌릴 수 없다. 문서가 지워지면 syncStaffClaim(onWrite)이 그 계정의 staff 표식도 걷어낸다.
+      직원이 작성한 문서·요청(staff_data/*)은 남는다 — 그건 업무 기록이라 계정과 함께 지우지 않는다. */
+window.staffUserDelete = async function(uid, name, email) {
+  const NL = String.fromCharCode(10);
+  if (!confirm('직원 계정을 완전히 삭제할까요?' + NL + NL
+    + (name || '(이름 없음)') + ' · ' + (email || '') + NL + NL
+    + '· 되돌릴 수 없습니다' + NL
+    + '· 이 사람이 다시 구글 로그인하면 새 승인대기 계정으로 올라옵니다' + NL
+    + '· 작성한 문서·요청은 그대로 남습니다' + NL + NL
+    + '들어오지 못하게만 하려면 [비활성화]를 쓰세요.')) return;
+  try {
+    await window._firestoreDeleteDoc(window._firestoreDoc(window._firebaseDb, 'staff_users', uid));
+    showNotif('🗑 삭제했습니다 — ' + (name || email || uid));
+    _loadStaffUsersTable();
+  } catch (e) {
+    showNotif('삭제 실패: ' + (e && e.message) + ' — 삭제는 관리자 계정만 가능합니다', 'error');
   }
 };
 
