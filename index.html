@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.714';
+const ERP_VERSION = 'v2.3.715';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58137,6 +58137,9 @@ function renderAccountsPage() {
         <div style="display:inline-flex;align-items:center;gap:3px">
           ${isStaffAcc ? `<span style="font-size:10px;color:#94a3b8;line-height:1.4" title="직원용 ERP에서 등록한 계정입니다. 수정·삭제는 직원용 ERP → 외부 계정에서 합니다">직원용에서<br>관리</span>` : ''}
           ${(canWrite && !isStaffAcc) ? `
+            <button title="${a.staffShare === false ? '직원용 ERP에서 감춰져 있습니다 — 누르면 공유합니다' : '직원용 ERP에 공유 중입니다 — 누르면 감춥니다'}"
+              onclick="accToggleStaffShare('${a.id}')"
+              style="background:${a.staffShare === false ? '#fee2e2' : '#ecfdf5'};color:${a.staffShare === false ? '#b91c1c' : '#047857'};border:1px solid ${a.staffShare === false ? '#fecaca' : '#a7f3d0'};width:24px;height:22px;padding:0;border-radius:5px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1">${a.staffShare === false ? '🚫' : '👥'}</button>
             <button title="수정" onclick="openAccountModal('${a.id}')" style="background:#eef2ff;color:#6366f1;border:1px solid #e0e7ff;width:24px;height:22px;padding:0;border-radius:5px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1">✏️</button>
             <div style="display:inline-flex;flex-direction:column;gap:1px">
               <button onclick="moveAccount('${a.id}','${fIdx > 0 ? filtered[fIdx-1].id : ''}')" ${fIdx===0?'disabled':''} style="background:${fIdx===0?'var(--gray-100)':'var(--sky-50)'};border:1px solid ${fIdx===0?'var(--gray-200)':'var(--sky-200)'};color:${fIdx===0?'var(--gray-300)':'var(--sky-500)'};border-radius:3px;width:14px;height:13px;cursor:${fIdx===0?'default':'pointer'};font-size:7px;display:flex;align-items:center;justify-content:center;padding:0">▲</button>
@@ -59987,7 +59990,9 @@ window._staffMirrorWorkflow = _staffMirrorWorkflow;
    직원용은 이 문서를 원본으로 보고, 자기가 지우거나 고친 것은 accounts_ov 오버레이에 쌓는다.
    ⚠️ 비밀번호도 함께 넘어간다 — 직원용 ERP 활성 직원 전원이 볼 수 있다. */
 function _staffAccPayload() {
-  return (DB.accounts || []).map(a => ({
+  // v2.3.715: 공유를 끈 계정은 아예 넘기지 않는다(화면에서 숨기는 게 아니라 데이터가 안 간다).
+  //   staffShare 가 없으면 공유 — 기존 계정의 동작을 바꾸지 않기 위해서다.
+  return (DB.accounts || []).filter(a => a && a.staffShare !== false).map(a => ({
     id: String(a.id), cat: a.cat || '업무', name: a.name || '', loginId: a.loginId || '',
     pw: a.pw || '', email: a.email || '', url: a.url || '', note: a.note || ''
   }));
@@ -60156,6 +60161,24 @@ window.saveStaffTrello = async function() {
   } catch (e) { showNotif('저장 실패: ' + (e && e.message), 'error'); }
 };
 
+/* v2.3.715 — 계정 하나의 직원 공유를 켜고 끈다.
+   끄면 직원용 문서에서 그 계정이 사라진다(미러를 바로 다시 밀기 때문). */
+window.accToggleStaffShare = async function(id) {
+  const a = (DB.accounts || []).find(x => String(x.id) === String(id));
+  if (!a) return;
+  const willShare = (a.staffShare === false);          // 지금 꺼져 있으면 켠다
+  if (!willShare && !confirm('이 계정을 직원용 ERP에서 감출까요?\n\n'
+      + (a.name || '') + '\n\n· 임원용에는 그대로 남습니다\n'
+      + '· 직원용 목록에서는 즉시 사라집니다(비밀번호도 넘어가지 않습니다)')) return;
+  a.staffShare = willShare ? true : false;
+  try {
+    saveData();
+    renderAccountsPage();
+    const ok = await _staffMirrorAccounts();
+    showNotif(willShare ? '👥 직원용에 공유합니다' : '🚫 직원용에서 감췄습니다', ok ? 'success' : 'warning');
+  } catch (e) { showNotif('처리 실패: ' + (e && e.message), 'error'); }
+};
+
 window.staffMirrorAccountsNow = async function() {
   const ok = await _staffMirrorAccounts();
   showNotif(ok ? ('✅ 외부 계정 ' + (DB.accounts || []).length + '건을 직원용 ERP와 동기화했습니다')
@@ -60182,7 +60205,7 @@ window.staffTransfer = async function(kind) {
     })).filter(s => s.company);
   } else {
     label = '외부 계정'; docId = 'accounts';
-    arr = (DB.accounts || []).map(a => ({
+    arr = (DB.accounts || []).filter(a => a && a.staffShare !== false).map(a => ({
       id: String(a.id), cat: a.cat || '', name: a.name || '', loginId: a.loginId || '',
       pw: pwOn ? (a.pw || '') : '', email: a.email || '', url: a.url || '', note: a.note || ''
     }));
