@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.721';
+const ERP_VERSION = 'v2.3.722';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -16035,21 +16035,67 @@ function _cpPct(n) { return (Math.round((Number(n)||0)*10)/10) + '%'; }
 function _cpEsc(s) { return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function _cpNum(id) { const el = document.getElementById(id); return el ? (parseFloat(String(el.value).replace(/,/g,''))||0) : 0; }
 
+/* v2.3.722 — 세트(제품+판매가+원가+목표수량). 2번 세트는 비워 둘 수 있다. */
+function _cpSetPrice(st) {
+  if (!st) return 0;
+  if (st.priceMode !== 'manual' && st.itemId) {
+    const it = (DB.items||[]).find(x => x && String(x.id) === String(st.itemId));
+    if (it && it.actualSalePrice != null && it.actualSalePrice !== '') return Number(it.actualSalePrice)||0;
+  }
+  return Number(st.price)||0;
+}
+function _cpSetCogs(st) {
+  if (!st) return 0;
+  if (st.cogsMode !== 'manual' && st.itemId) {
+    try { const bc = _cpBomCost(st.itemId); if (bc > 0) return bc; } catch(_){}
+    const it = (DB.items||[]).find(x => x && String(x.id) === String(st.itemId));
+    if (it && it.price) return Number(it.price)||0;
+  }
+  return Number(st.cogs)||0;
+}
+function _cpSetName(st) {
+  if (!st) return '';
+  const it = (DB.items||[]).find(x => x && String(x.id) === String(st.itemId));
+  return it ? (it.name || '') : '';
+}
+/* 값이 들어 있는 세트만 — 2번을 비워 두면 계산·표에서 아예 빠진다 */
+function _cpSetsOf(r) {
+  return (Array.isArray(r && r.sets) ? r.sets : [])
+    .filter(st => st && (st.itemId || (Number(st.qty)||0) > 0 || (Number(st.price)||0) > 0));
+}
 // 수익 계산 엔진
 function _cpCalc(r) {
   const targetCost = Number(r.targetCost)||0;
-  const hsRevenue = targetCost * (Number(r.achieveRate)||0) / 100;       // 홈쇼핑 매출
-  const actualRevenue = hsRevenue * (Number(r.convRate)||0) / 100;       // 실제매출
-  const sp = _cpLivePrice(r);
-  const orderQty = sp > 0 ? hsRevenue / sp : 0;
-  const soldQty  = sp > 0 ? actualRevenue / sp : 0;
+  const conv = (Number(r.convRate)||0) / 100;
+  let hsRevenue, actualRevenue, orderQty, soldQty, achieveRate, setRows = [], cogsFromSets = null;
+  if (Array.isArray(r.sets)) {
+    // v2.3.722 — 수량이 출발점. 달성률은 결과다.
+    const sets = _cpSetsOf(r);
+    hsRevenue = 0; orderQty = 0; soldQty = 0; cogsFromSets = 0;
+    sets.forEach((st, i) => {
+      const price = _cpSetPrice(st), qty = Number(st.qty)||0, unit = _cpSetCogs(st);
+      const sold = Math.round(qty * conv);
+      hsRevenue += price * qty; orderQty += qty; soldQty += sold; cogsFromSets += unit * sold;
+      setRows.push({ no: i+1, name: _cpSetName(st), price, qty, sold, cogsUnit: unit, amount: price * qty });
+    });
+    actualRevenue = hsRevenue * conv;
+    achieveRate = targetCost > 0 ? (hsRevenue / targetCost * 100) : 0;
+  } else {
+    // 옛 행 — 달성률 입력 방식 그대로 (화면이 갑자기 0 이 되지 않게)
+    achieveRate = Number(r.achieveRate)||0;
+    hsRevenue = targetCost * achieveRate / 100;
+    actualRevenue = hsRevenue * conv;
+    const sp = _cpLivePrice(r);
+    orderQty = sp > 0 ? hsRevenue / sp : 0;
+    soldQty  = sp > 0 ? actualRevenue / sp : 0;
+  }
   const specialFee = Number(r.specialFee)||0, guestFee = Number(r.guestFee)||0, insertFee = Number(r.insertFee)||0;
   const specialVat = specialFee * 0.1;
   const guestVat = guestFee * 0.1;
   const insertVat = insertFee * 0.1;   // v1.9.949: 자동 10% (인서트 부가세 입력칸 제거)
   const hsComm = actualRevenue * (Number(r.hsCommPct)||0) / 100;          // 홈쇼핑 수수료(부가세 포함)
   const vendorComm = actualRevenue * (Number(r.vendorCommPct)||0) / 100;  // 밴더 수수료(부가세 포함)
-  const cogs = soldQty * _cpLiveCost(r);                         // 제품원가
+  const cogs = (cogsFromSets != null) ? cogsFromSets : (soldQty * _cpLiveCost(r));   // 제품원가
   const cogsVat = cogs * 0.1;
   // v1.9.947: 순이익 = 부가세 제외(공급가) 기준. 매출·수수료는 부가세 포함값이라 ÷1.1 로
   //   공급가 환산, 특약금·게스트비·인서트비·제품원가는 이미 공급가(부가세 별도) 입력값.
@@ -16058,7 +16104,8 @@ function _cpCalc(r) {
   const netVendorComm = vendorComm / 1.1;      // 밴더수수료 공급가
   const settlement = netRevenue - specialFee - guestFee - insertFee - netHsComm - netVendorComm - cogs;
   const profitRate = netRevenue > 0 ? (settlement / netRevenue * 100) : 0;
-  return { hsRevenue, actualRevenue, orderQty, soldQty, specialFee, specialVat, guestFee, guestVat, insertFee, insertVat, hsComm, vendorComm, cogs, cogsVat, settlement, profitRate };
+  return { hsRevenue, actualRevenue, orderQty, soldQty, achieveRate, sets: setRows,
+           specialFee, specialVat, guestFee, guestVat, insertFee, insertVat, hsComm, vendorComm, cogs, cogsVat, settlement, profitRate };
 }
 
 // ── 저장 / 로드 (IndexedDB 주 저장 + localStorage 보조 + updatedAt 비교) ──
@@ -16094,6 +16141,19 @@ function renderChannelProfit() {
   _cpRender();
 }
 function switchChannelSubTab(sub) { _cpCurrentSub = sub; _cpRender(); }
+/* v2.3.722 — 옛 방식 홈쇼핑 행만 지운다. 약국·중국 수출 행은 건드리지 않는다. */
+window._cpClearLegacyHs = function() {
+  if (!_cpData) return;
+  const legacy = (_cpData.rows||[]).filter(x => x && (x.channelType||'homeshopping') === 'homeshopping' && !Array.isArray(x.sets));
+  if (!legacy.length) return;
+  if (!confirm('옛 방식으로 만든 홈쇼핑 행 ' + legacy.length + '건을 지울까요?' + String.fromCharCode(10, 10)
+    + '· 되돌릴 수 없습니다' + String.fromCharCode(10)
+    + '· 약국 판매·중국 수출 행은 그대로 둡니다')) return;
+  _cpData.rows = (_cpData.rows||[]).filter(x => !(x && (x.channelType||'homeshopping') === 'homeshopping' && !Array.isArray(x.sets)));
+  _cpSave();
+  _cpRender();
+  showNotif('🗑 옛 행 ' + legacy.length + '건을 정리했습니다', 'success');
+};
 function _cpRender() {
   const host = document.getElementById('sales-panel-channel');
   if (!host) return;
@@ -16108,6 +16168,16 @@ function _cpRender() {
   h += '</div>';
   h += '<button onclick="openCpModal(null)" style="padding:9px 18px;background:#0f172a;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">＋ 행 추가</button>';
   h += '</div>';
+  // v2.3.722: 옛 방식(세트 없음) 홈쇼핑 행 — 새 계산식과 섞이지 않게 정리 버튼을 띄운다
+  if (_cpCurrentSub === 'homeshopping') {
+    const _legacy = (_cpData.rows||[]).filter(x => x && (x.channelType||'homeshopping') === 'homeshopping' && !Array.isArray(x.sets));
+    if (_legacy.length) {
+      h += '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+        + '<span style="font-size:12.5px;color:#92400e">⚠️ 옛 방식(달성률 직접 입력)으로 만든 행이 <b>' + _legacy.length + '건</b> 있습니다. 새 계산식(세트·목표수량)과 방식이 달라 함께 두면 헷갈립니다.</span>'
+        + '<button onclick="_cpClearLegacyHs()" style="margin-left:auto;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;padding:6px 14px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">🗑 옛 행 ' + _legacy.length + '건 정리</button>'
+        + '</div>';
+    }
+  }
   h += '<div id="cp-table-wrap"></div>';
   host.innerHTML = h;
   _cpRenderTable();
@@ -16142,14 +16212,25 @@ function _cpRenderTable() {
     h += '<tr>';
     h += TD(_cpEsc(r.round||'-'), 'position:sticky;left:0;z-index:3;width:56px;min-width:56px;max-width:56px;background:#fff');
     h += TD('<div style="max-width:164px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0 auto"><span onclick="openCpDetail(' + r.id + ')" style="color:#1e40af;font-weight:700;cursor:pointer">' + _cpEsc(r.name||'(이름 없음)') + '</span></div>', 'position:sticky;left:56px;z-index:3;width:180px;min-width:180px;max-width:180px;background:#fff');
-    h += TD(_cpWon(c.hsRevenue) + '<div style="font-size:10px;color:#e11d48;font-weight:600;margin-top:1px">달성률 ' + _cpPct(r.achieveRate) + '</div>', 'position:sticky;left:236px;z-index:3;width:140px;min-width:140px;max-width:140px;background:#fff');
+    h += TD(_cpWon(c.hsRevenue) + '<div style="font-size:10px;color:#e11d48;font-weight:600;margin-top:1px">달성률 ' + _cpPct(c.achieveRate) + '</div>', 'position:sticky;left:236px;z-index:3;width:140px;min-width:140px;max-width:140px;background:#fff');
     h += TD('<b>' + _cpWon(c.actualRevenue) + '</b><div style="font-size:10px;color:#0369a1;margin-top:1px">전환율 ' + _cpPct(r.convRate) + '</div>', 'background:#e0f2fe;position:sticky;left:376px;z-index:3;width:130px;min-width:130px;max-width:130px');
     h += '<td style="padding:8px;text-align:center;border-bottom:1px solid #f1f5f9;background:#fffbeb;font-weight:800;width:120px;min-width:120px;max-width:120px;color:' + (posS?'#15803d':'#dc2626') + '">' + _cpWon(c.settlement) + '</td>';
     h += '<td style="padding:8px;text-align:center;border-bottom:1px solid #f1f5f9;background:#fffbeb;font-weight:800;width:68px;min-width:68px;max-width:68px;color:' + (posR?'#15803d':'#dc2626') + '">' + _cpPct(c.profitRate) + '</td>';
     h += TD(_cpWon(r.targetCost));
-    h += TD(_cpWon(_cpLivePrice(r)));
-    h += TD(Math.round(c.orderQty).toLocaleString() + '개');
-    h += TD(Math.round(c.soldQty).toLocaleString() + '개', 'background:#e0f2fe');
+    // v2.3.722: 세트가 있으면 세트별로 나눠 보여준다 (없으면 옛 행 — 한 줄)
+    const _setLine = (v, sub2) => '<div style="line-height:1.35">' + v
+      + (sub2 ? '<div style="font-size:9.5px;color:#94a3b8">' + sub2 + '</div>' : '') + '</div>';
+    if (c.sets && c.sets.length) {
+      h += TD(c.sets.map(s2 => _setLine(_cpWon(s2.price), s2.no + '번 ' + _cpEsc(s2.name || '세트'))).join(''));
+      h += TD(c.sets.map(s2 => _setLine('<b>' + s2.qty.toLocaleString() + '개</b>', s2.no + '번')).join('')
+        + (c.sets.length > 1 ? '<div style="font-size:9.5px;color:#64748b;border-top:1px dashed #e2e8f0;margin-top:2px;padding-top:2px">합 ' + Math.round(c.orderQty).toLocaleString() + '개</div>' : ''));
+      h += TD(c.sets.map(s2 => _setLine('<b>' + s2.sold.toLocaleString() + '개</b>', s2.no + '번')).join('')
+        + (c.sets.length > 1 ? '<div style="font-size:9.5px;color:#64748b;border-top:1px dashed #bae6fd;margin-top:2px;padding-top:2px">합 ' + Math.round(c.soldQty).toLocaleString() + '개</div>' : ''), 'background:#e0f2fe');
+    } else {
+      h += TD(_cpWon(_cpLivePrice(r)));
+      h += TD(Math.round(c.orderQty).toLocaleString() + '개');
+      h += TD(Math.round(c.soldQty).toLocaleString() + '개', 'background:#e0f2fe');
+    }
     h += TD(sub(c.specialFee, c.specialVat));
     h += TD(sub(c.guestFee, c.guestVat));
     h += TD(sub(c.insertFee, c.insertVat));
@@ -16802,6 +16883,49 @@ function openCpModal(id) {
       + (unit ? ('<span style="padding:0 10px;font-size:11.5px;color:#94a3b8;background:#f8fafc;align-self:stretch;display:flex;align-items:center;border-left:1px solid #e2e8f0">' + unit + '</span>') : '')
       + '</div></div>';
   };
+  /* v2.3.722 — 세트 블록. 세트마다 제품·판매가(자동/수동)·COGS(자동/수동)·목표 판매 수량. */
+  const _sets = Array.isArray(r && r.sets) ? r.sets : [];
+  const setBlock = (n) => {
+    const st = _sets[n-1] || {};
+    const opts = '<option value="">(제품 선택 안 함 — 직접 입력)</option>' + items.map(i =>
+      '<option value="' + i.id + '"' + (String(st.itemId||'') === String(i.id) ? ' selected' : '') + '>'
+      + _cpEsc(i.name) + (i.code ? (' (' + _cpEsc(i.code) + ')') : '') + '</option>').join('');
+    const modeBtns = (kind) => {
+      const isAuto = (st[kind + 'Mode'] !== 'manual');
+      const ON  = 'padding:3px 11px;border-radius:5px;font-size:11px;cursor:pointer;border:1px solid #0f172a;background:#0f172a;color:#fff;font-weight:700;line-height:1.3';
+      const OFF = 'padding:3px 11px;border-radius:5px;font-size:11px;cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:#475569;font-weight:500;line-height:1.3';
+      return '<span style="display:inline-flex;gap:4px;flex-shrink:0">'
+        + '<button type="button" id="cp-s' + n + '-' + kind + '-a" onclick="_cpSetMode(' + n + ',&quot;' + kind + '&quot;,&quot;auto&quot;)" title="품목정보·BOM 에서 자동" style="' + (isAuto?ON:OFF) + '">자동</button>'
+        + '<button type="button" id="cp-s' + n + '-' + kind + '-m" onclick="_cpSetMode(' + n + ',&quot;' + kind + '&quot;,&quot;manual&quot;)" title="직접 입력" style="' + (isAuto?OFF:ON) + '">수동</button>'
+        + '</span>';
+    };
+    const numFld = (kind, label, val, unit) => {
+      const isAuto = (st[kind + 'Mode'] !== 'manual');
+      return '<div>'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;gap:6px">'
+        + '<label style="font-size:11px;font-weight:700;color:#475569">' + label + '</label>' + modeBtns(kind) + '</div>'
+        + '<div style="display:flex;align-items:center;border:1px solid #cbd5e1;border-radius:7px;overflow:hidden">'
+        + '<input id="cp-s' + n + '-' + kind + '" type="number" step="any" value="' + _cpEsc(val==null?'':val) + '" oninput="_cpModalLive()" '
+        + 'data-mode="' + (isAuto?'auto':'manual') + '"' + (isAuto?' disabled':'')
+        + ' style="flex:1;border:none;padding:7px 9px;font-size:12.5px;outline:none;min-width:0;background:' + (isAuto?'#f1f5f9':'#fff') + ';color:' + (isAuto?'#475569':'#0f172a') + ';cursor:' + (isAuto?'not-allowed':'text') + '">'
+        + '<span style="padding:0 10px;font-size:11.5px;color:#94a3b8;background:#f8fafc;align-self:stretch;display:flex;align-items:center;border-left:1px solid #e2e8f0">' + unit + '</span>'
+        + '</div></div>';
+    };
+    return '<div style="grid-column:1/-1;border:1px solid ' + (n===1?'#bae6fd':'#e2e8f0') + ';background:' + (n===1?'#f0f9ff':'#fafafa') + ';border-radius:10px;padding:12px 14px">'
+      + '<div style="font-size:12.5px;font-weight:800;color:#0c4a6e;margin-bottom:9px">' + n + '번 세트'
+      + (n===2 ? '<span style="font-size:11px;font-weight:600;color:#94a3b8;margin-left:6px">선택 — 비워 두면 계산에서 빠집니다</span>' : '') + '</div>'
+      + '<div style="margin-bottom:9px"><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">제품 선택</label>'
+      + '<select id="cp-s' + n + '-prod" onchange="_cpSetProductChange(' + n + ')" style="width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px">' + opts + '</select></div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px">'
+      + numFld('price', '판매가', st.price, '원')
+      + numFld('cogs', '제품원가 COGS', st.cogs, '원')
+      + '<div><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">목표 판매 수량</label>'
+      + '<div style="display:flex;align-items:center;border:1px solid #cbd5e1;border-radius:7px;overflow:hidden">'
+      + '<input id="cp-s' + n + '-qty" type="number" step="any" value="' + _cpEsc(st.qty==null?'':st.qty) + '" oninput="_cpModalLive()" placeholder="0" style="flex:1;border:none;padding:7px 9px;font-size:12.5px;outline:none;min-width:0">'
+      + '<span style="padding:0 10px;font-size:11.5px;color:#94a3b8;background:#f8fafc;align-self:stretch;display:flex;align-items:center;border-left:1px solid #e2e8f0">개</span>'
+      + '</div></div>'
+      + '</div></div>';
+  };
   const chLabel = '📺 홈쇼핑 판매';
   const ov = document.createElement('div');
   ov.id = 'cp-modal-overlay';
@@ -16816,13 +16940,9 @@ function openCpModal(id) {
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">'
     + fld('채널명', 'cp-m-name', g('name'), '', {})
     + fld('회차', 'cp-m-round', g('round'), '', {})
-    + '<div style="grid-column:1/3"><label style="display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:3px">제품 선택 (BOM 원가·실제 판매가 자동)</label>'
-    + '<select id="cp-m-product" onchange="_cpModalProductChange()" style="width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:12.5px">' + prodOpts + '</select></div>'
-    + modeFld('제품원가 COGS', 'cp-m-cogsUnit', g('cogsUnit',0), '원', g('cogsUnitMode','auto'), 'HsCogs')
     + fld('구좌 목표 비용', 'cp-m-targetCost', g('targetCost',0), '원', {type:'number'})
-    + fld('달성률', 'cp-m-achieveRate', g('achieveRate',0), '%', {type:'number'})
     + fld('전환율', 'cp-m-convRate', g('convRate',70), '%', {type:'number'})
-    + modeFld('판매가', 'cp-m-sellPrice', g('sellPrice',0), '원', g('sellPriceMode','auto'), 'HsPrice')
+    + setBlock(1) + setBlock(2)
     + fld('특약금', 'cp-m-specialFee', g('specialFee',0), '원', {type:'number'})
     + fld('게스트 비용', 'cp-m-guestFee', g('guestFee',0), '원', {type:'number'})
     + fld('인서트 비용', 'cp-m-insertFee', g('insertFee',0), '원', {type:'number'})
@@ -16840,23 +16960,8 @@ function openCpModal(id) {
     + '<button onclick="saveCpRow()" style="background:#0f172a;color:#fff;border:none;padding:9px 22px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">저장</button>'
     + '</div></div>';
   document.body.appendChild(ov);
-  // v1.9.978: 자동 모드일 때만 BOM·품목정보로 자동 동기화 (수동 모드는 사용자 입력 보존)
-  try {
-    var _prodSel0 = document.getElementById('cp-m-product');
-    if (_prodSel0 && _prodSel0.value) {
-      var _itm0 = (DB.items||[]).find(function(x){ return x && String(x.id) === String(_prodSel0.value); });
-      var _cog0 = document.getElementById('cp-m-cogsUnit');
-      if (_cog0 && _cog0.dataset.mode !== 'manual') {
-        var _bc0 = _cpBomCost(_prodSel0.value);
-        if (_bc0 > 0) _cog0.value = _bc0;
-        else if (_itm0 && _itm0.price) _cog0.value = _itm0.price;
-      }
-      var _sp0 = document.getElementById('cp-m-sellPrice');
-      if (_sp0 && _sp0.dataset.mode !== 'manual' && _itm0 && _itm0.actualSalePrice != null && _itm0.actualSalePrice !== '') {
-        _sp0.value = _itm0.actualSalePrice;
-      }
-    }
-  } catch(_){}
+  // v2.3.722: 자동 모드인 칸을 품목정보·BOM 으로 채운다 (수동은 입력값 보존)
+  try { _cpSetSyncAuto(1); _cpSetSyncAuto(2); } catch(_){}
   _cpModalLive();
 }
 
@@ -16941,6 +17046,40 @@ function _cpHsPriceManual() { _cpFieldMode({inputId:'cp-m-sellPrice', productSel
 function _cpHsCogsAuto()    { _cpFieldMode({inputId:'cp-m-cogsUnit',  productSelId:'cp-m-product',kind:'cogs', mode:'auto'}); }
 function _cpHsCogsManual()  { _cpFieldMode({inputId:'cp-m-cogsUnit',  productSelId:'cp-m-product',kind:'cogs', mode:'manual'}); }
 
+/* v2.3.722 — 세트 칸의 자동/수동 토글. 자동이면 품목정보·BOM 값을 넣고 잠근다. */
+window._cpSetMode = function(n, kind, mode) {
+  const inp = document.getElementById('cp-s' + n + '-' + kind);
+  if (!inp) return;
+  inp.dataset.mode = mode;
+  inp.disabled = (mode === 'auto');
+  inp.style.background = (mode === 'auto') ? '#f1f5f9' : '#fff';
+  inp.style.color = (mode === 'auto') ? '#475569' : '#0f172a';
+  inp.style.cursor = (mode === 'auto') ? 'not-allowed' : 'text';
+  const ON  = 'padding:3px 11px;border-radius:5px;font-size:11px;cursor:pointer;border:1px solid #0f172a;background:#0f172a;color:#fff;font-weight:700;line-height:1.3';
+  const OFF = 'padding:3px 11px;border-radius:5px;font-size:11px;cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:#475569;font-weight:500;line-height:1.3';
+  const a = document.getElementById('cp-s' + n + '-' + kind + '-a');
+  const m = document.getElementById('cp-s' + n + '-' + kind + '-m');
+  if (a) a.style.cssText = (mode === 'auto') ? ON : OFF;
+  if (m) m.style.cssText = (mode === 'auto') ? OFF : ON;
+  if (mode === 'auto') _cpSetSyncAuto(n);
+  _cpModalLive();
+};
+/* 자동 모드인 칸만 품목정보·BOM 값으로 채운다 */
+window._cpSetSyncAuto = function(n) {
+  const sel = document.getElementById('cp-s' + n + '-prod');
+  if (!sel || !sel.value) return;
+  const it = (DB.items||[]).find(x => x && String(x.id) === String(sel.value));
+  if (!it) return;
+  const pr = document.getElementById('cp-s' + n + '-price');
+  if (pr && pr.dataset.mode !== 'manual' && it.actualSalePrice != null && it.actualSalePrice !== '') pr.value = it.actualSalePrice;
+  const cg = document.getElementById('cp-s' + n + '-cogs');
+  if (cg && cg.dataset.mode !== 'manual') {
+    const bc = _cpBomCost(it.id);
+    cg.value = (bc > 0) ? bc : (it.price || 0);
+  }
+};
+window._cpSetProductChange = function(n) { _cpSetSyncAuto(n); _cpModalLive(); };
+
 function _cpModalProductChange() {
   var sel = document.getElementById('cp-m-product');
   if (!sel) return;
@@ -16961,18 +17100,24 @@ function _cpModalProductChange() {
 function _cpReadModal() {
   if (_cpModalCh === 'pharmacy') return _cpReadModalPharmacy();
   if (_cpModalCh === 'export') return _cpReadModalExport();
-  const sel = document.getElementById('cp-m-product');
+  // v2.3.722: 세트 1·2 — 값이 하나도 없는 세트는 넣지 않는다(2번 비워 두기)
+  const readSet = (n) => {
+    const sel2 = document.getElementById('cp-s' + n + '-prod');
+    const st = {
+      itemId: sel2 ? sel2.value : '',
+      price: _cpNum('cp-s' + n + '-price'), priceMode: _cpModeOf('cp-s' + n + '-price'),
+      cogs: _cpNum('cp-s' + n + '-cogs'), cogsMode: _cpModeOf('cp-s' + n + '-cogs'),
+      qty: _cpNum('cp-s' + n + '-qty'),
+    };
+    return (st.itemId || st.price > 0 || st.qty > 0) ? st : null;
+  };
+  const _sets = [readSet(1), readSet(2)].filter(Boolean);
   return {
     name: (document.getElementById('cp-m-name')||{}).value || '',
     round: (document.getElementById('cp-m-round')||{}).value || '',
-    productId: sel ? sel.value : '',
-    cogsUnit: _cpNum('cp-m-cogsUnit'),
-    cogsUnitMode: _cpModeOf('cp-m-cogsUnit'),
+    sets: _sets,
     targetCost: _cpNum('cp-m-targetCost'),
-    achieveRate: _cpNum('cp-m-achieveRate'),
     convRate: _cpNum('cp-m-convRate'),
-    sellPrice: _cpNum('cp-m-sellPrice'),
-    sellPriceMode: _cpModeOf('cp-m-sellPrice'),
     specialFee: _cpNum('cp-m-specialFee'),
     guestFee: _cpNum('cp-m-guestFee'),
     insertFee: _cpNum('cp-m-insertFee'),
@@ -16992,16 +17137,31 @@ function _cpModalLive() {
     + '<b style="font-size:16px;color:' + (c.settlement>=0?'#15803d':'#dc2626') + '">' + _cpWon(c.settlement) + '</b></div>'
     + '<div><span style="font-size:11px;color:#92400e;font-weight:700">수익률</span> '
     + '<b style="font-size:16px;color:' + (c.profitRate>=0?'#15803d':'#dc2626') + '">' + _cpPct(c.profitRate) + '</b></div>'
-    + '<div style="font-size:11px;color:#a16207">홈쇼핑매출 ' + _cpWon(c.hsRevenue) + ' · 실제매출 ' + _cpWon(c.actualRevenue) + '</div>';
+    // v2.3.722: 수량에서 나온 값들을 그 자리에서 보여준다 — 달성률은 이제 결과다
+    + '<div style="font-size:11.5px;color:#a16207;line-height:1.7">'
+    + '방송 주문 <b>' + _cpWon(c.hsRevenue) + '</b> · 달성률 <b>' + _cpPct(c.achieveRate) + '</b><br>'
+    + '예상 실매출 <b>' + _cpWon(c.actualRevenue) + '</b>'
+    + ((c.sets && c.sets.length) ? ' · 실주문 예상 ' + c.sets.map(x => x.no + '번 <b>' + x.sold.toLocaleString() + '개</b>').join(' / ') : '')
+    + '</div>';
 }
 function saveCpRow() {
   if (!_cpData) _cpData = _cpDefault();
   const d = _cpReadModal();
   if ((_cpModalCh === 'pharmacy' || _cpModalCh === 'export') && !d.productId) { showNotif('완제품을 선택하세요', 'warning'); return; }
   if (!d.name.trim()) { showNotif('채널·회차명을 입력하세요', 'warning'); return; }
+  // v2.3.722: 홈쇼핑은 세트가 출발점 — 1번 세트가 비면 금액이 전부 0 이 된다
+  if (_cpModalCh === 'homeshopping' && !(d.sets && d.sets.length)) {
+    showNotif('1번 세트의 제품·판매가·목표 판매 수량을 입력하세요', 'warning'); return;
+  }
   if (_cpEditId != null) {
     const r = (_cpData.rows||[]).find(x => x && String(x.id) === String(_cpEditId));
-    if (r) { Object.assign(r, d); r.updatedAt = Date.now(); }
+    if (r) {
+      Object.assign(r, d); r.updatedAt = Date.now();
+      // 세트 방식으로 저장했으면 옛 단일 제품 필드는 지운다 — 두 방식이 섞이면 값이 어긋난다
+      if (Array.isArray(d.sets)) {
+        ['productId','cogsUnit','cogsUnitMode','sellPrice','sellPriceMode','achieveRate'].forEach(k => { delete r[k]; });
+      }
+    }
   } else {
     _cpData.rows.push(Object.assign({ id: _cpGenId(), channelType: _cpModalCh, updatedAt: Date.now() }, d));
   }
