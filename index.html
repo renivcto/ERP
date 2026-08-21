@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.727';
+const ERP_VERSION = 'v2.3.728';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -16031,6 +16031,16 @@ function _cpGenId() {
   return id;
 }
 function _cpWon(n) { return '₩' + (Math.round(Number(n)||0)).toLocaleString(); }
+/* v2.3.728 — 화면에 쓰는 이름. 새 행은 name 하나에 '롯데홈쇼핑 1차' 가 통째로 들어 있고,
+   옛 행은 name(롯데홈쇼핑) + round(1) 로 나뉘어 있어 이어 붙여 준다. */
+function _cpTitle(r) {
+  if (!r) return '-';
+  const nm = String(r.name || '').trim();
+  const rd = String(r.round || '').trim();
+  if (!rd) return nm || '-';
+  if (nm.indexOf(rd) >= 0) return nm;                 // 이미 이름에 회차가 들어 있으면 그대로
+  return (nm + ' ' + rd + (/차$/.test(rd) ? '' : '차')).trim();
+}
 function _cpPct(n) { return (Math.round((Number(n)||0)*10)/10) + '%'; }
 function _cpEsc(s) { return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function _cpNum(id) { const el = document.getElementById(id); return el ? (parseFloat(String(el.value).replace(/,/g,''))||0) : 0; }
@@ -16225,8 +16235,9 @@ function _cpRenderTable() {
   h += '<table style="border-collapse:collapse;white-space:nowrap;font-size:12px;min-width:100%"><thead><tr>';
   // 회차 / 방송 유형 / 홈쇼핑 방송 주문 / 실제매출 — sticky-left 4개
   // v2.3.724: 고정 4칸이 넓어 오른쪽 칸들이 밀렸다 — 내용에 맞게 줄인다(회차 40 · 유형 124 · 금액 124 · 실매출 120)
-  h += TH('회차','position:sticky;left:0;z-index:4;width:34px;min-width:34px;max-width:34px') + TH('방송 유형','position:sticky;left:34px;z-index:4;width:96px;min-width:96px;max-width:96px');
-  h += TH('목표 주문 금액','position:sticky;left:130px;z-index:4;width:124px;min-width:124px;max-width:124px') + TH('예상 실매출','background:#e0f2fe;position:sticky;left:254px;z-index:4;width:120px;min-width:120px;max-width:120px');
+  // v2.3.728: 회차 + 방송 유형 → '채널 · 회차' 한 칸
+  h += TH('채널 · 회차','position:sticky;left:0;z-index:4;width:150px;min-width:150px;max-width:150px');
+  h += TH('목표 주문 금액','position:sticky;left:150px;z-index:4;width:124px;min-width:124px;max-width:124px') + TH('예상 실매출','background:#e0f2fe;position:sticky;left:274px;z-index:4;width:120px;min-width:120px;max-width:120px');
   // 순이익 / 수익률 — 비스티키 (자연 흐름 위치)
   h += TH('예상 순이익<span style="cursor:help;color:#0ea5e9;font-weight:700;font-size:10px;margin-left:1px;vertical-align:super" title="순이익 = 부가세 제외(공급가) 기준 순이익&#10;&#10;= 실제매출 ÷ 1.1&#10;  - 특약금&#10;  - 게스트비&#10;  - 인서트비&#10;  - 홈쇼핑수수료 ÷ 1.1&#10;  - 밴더수수료 ÷ 1.1&#10;  - 제품원가&#10;&#10;※ 특약금·게스트비·인서트비·제품원가는 이미 공급가(부가세 별도) 입력값">ⓘ</span><div style="font-size:9px;color:#b45309;font-weight:600;margin-top:1px">부가세 제외</div>','background:#fffbeb;border-bottom-color:#fde68a;width:120px;min-width:120px;max-width:120px');
   h += TH('예상 수익률<div style="font-size:9px;color:#b45309;font-weight:600;margin-top:1px">부가세 제외</div>','background:#fffbeb;border-bottom-color:#fde68a;width:68px;min-width:68px;max-width:68px');
@@ -16238,10 +16249,9 @@ function _cpRenderTable() {
     const TD = (v,extra) => '<td style="padding:8px;text-align:center;border-bottom:1px solid #f1f5f9;' + (extra||'') + '">' + v + '</td>';
     const sub = (base,vat,lbl) => _cpWon(base) + '<div style="font-size:9.5px;color:#94a3b8;margin-top:1px">' + (lbl||'부가세') + ' ' + _cpWon(vat) + '</div>';
     h += '<tr>';
-    h += TD(_cpEsc(r.round||'-'), 'position:sticky;left:0;z-index:3;width:34px;min-width:34px;max-width:34px;background:#fff');
-    h += TD('<div style="max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0 auto"><span onclick="openCpDetail(' + r.id + ')" style="color:#1e40af;font-weight:700;cursor:pointer">' + _cpEsc(r.name||'(이름 없음)') + '</span></div>', 'position:sticky;left:34px;z-index:3;width:96px;min-width:96px;max-width:96px;background:#fff');
-    h += TD(_cpWon(c.hsRevenue) + '<div style="font-size:11.5px;color:#e11d48;font-weight:700;margin-top:2px">달성률 ' + _cpPct(c.achieveRate) + '</div>', 'position:sticky;left:130px;z-index:3;width:124px;min-width:124px;max-width:124px;background:#fff');
-    h += TD('<b>' + _cpWon(c.actualRevenue) + '</b><div style="font-size:11.5px;color:#0369a1;font-weight:700;margin-top:2px">전환율 ' + _cpPct(r.convRate) + '</div>', 'background:#e0f2fe;position:sticky;left:254px;z-index:3;width:120px;min-width:120px;max-width:120px');
+    h += TD('<div style="max-width:138px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0 auto"><span onclick="openCpDetail(' + r.id + ')" style="color:#1e40af;font-weight:700;cursor:pointer" title="' + _cpEsc(_cpTitle(r)) + '">' + _cpEsc(_cpTitle(r)) + '</span></div>', 'position:sticky;left:0;z-index:3;width:150px;min-width:150px;max-width:150px;background:#fff');
+    h += TD(_cpWon(c.hsRevenue) + '<div style="font-size:11.5px;color:#e11d48;font-weight:700;margin-top:2px">달성률 ' + _cpPct(c.achieveRate) + '</div>', 'position:sticky;left:150px;z-index:3;width:124px;min-width:124px;max-width:124px;background:#fff');
+    h += TD('<b>' + _cpWon(c.actualRevenue) + '</b><div style="font-size:11.5px;color:#0369a1;font-weight:700;margin-top:2px">전환율 ' + _cpPct(r.convRate) + '</div>', 'background:#e0f2fe;position:sticky;left:274px;z-index:3;width:120px;min-width:120px;max-width:120px');
     h += '<td style="padding:8px;text-align:center;border-bottom:1px solid #f1f5f9;background:#fffbeb;font-weight:800;width:120px;min-width:120px;max-width:120px;color:' + (posS?'#15803d':'#dc2626') + '">' + _cpWon(c.settlement) + '</td>';
     h += '<td style="padding:8px;text-align:center;border-bottom:1px solid #f1f5f9;background:#fffbeb;font-weight:800;width:68px;min-width:68px;max-width:68px;color:' + (posR?'#15803d':'#dc2626') + '">' + _cpPct(c.profitRate) + '</td>';
     h += TD(_cpWon(r.targetCost));
@@ -16965,8 +16975,8 @@ function openCpModal(id) {
     + '</div>'
     + '<div style="padding:18px 20px;max-height:62vh;overflow-y:auto">'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">'
-    + fld('채널명', 'cp-m-name', g('name'), '', {})
-    + fld('회차', 'cp-m-round', g('round'), '', {})
+    // v2.3.728: 채널명 + 회차 → 한 칸 ('롯데홈쇼핑 1차')
+    + '<div style="grid-column:1/-1">' + fld('채널 · 회차', 'cp-m-name', _cpTitle(r) === '-' ? '' : _cpTitle(r), '', {}) + '</div>'
     + fld('구좌 목표 비용', 'cp-m-targetCost', g('targetCost',0), '원', {type:'number'})
     + fld('전환율', 'cp-m-convRate', g('convRate',70), '%', {type:'number'})
     + setBlock(1) + setBlock(2)
@@ -17141,7 +17151,7 @@ function _cpReadModal() {
   const _sets = [readSet(1), readSet(2)].filter(Boolean);
   return {
     name: (document.getElementById('cp-m-name')||{}).value || '',
-    round: (document.getElementById('cp-m-round')||{}).value || '',
+    round: '',                       // v2.3.728: 회차는 이름에 함께 적는다
     sets: _sets,
     targetCost: _cpNum('cp-m-targetCost'),
     convRate: _cpNum('cp-m-convRate'),
@@ -17175,7 +17185,7 @@ function saveCpRow() {
   if (!_cpData) _cpData = _cpDefault();
   const d = _cpReadModal();
   if ((_cpModalCh === 'pharmacy' || _cpModalCh === 'export') && !d.productId) { showNotif('완제품을 선택하세요', 'warning'); return; }
-  if (!d.name.trim()) { showNotif('채널·회차명을 입력하세요', 'warning'); return; }
+  if (!d.name.trim()) { showNotif('채널 · 회차를 입력하세요 (예: 롯데홈쇼핑 1차)', 'warning'); return; }
   // v2.3.722: 홈쇼핑은 세트가 출발점 — 1번 세트가 비면 금액이 전부 0 이 된다
   if (_cpModalCh === 'homeshopping' && !(d.sets && d.sets.length)) {
     showNotif('1번 세트의 제품·판매가·목표 판매 수량을 입력하세요', 'warning'); return;
@@ -17299,8 +17309,8 @@ function openCpDetail(id) {
   const sect = (t) => '<div style="font-size:11.5px;font-weight:800;color:#0369a1;margin:14px 0 4px">' + t + '</div>';
   ov.innerHTML = '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;width:480px;max-width:96vw;box-shadow:0 18px 50px rgba(0,0,0,.3);overflow:hidden">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;padding:15px 20px;background:linear-gradient(135deg,#e0f2fe,#bae6fd)">'
-    + '<div><div style="font-size:15px;font-weight:800;color:#0c4a6e">' + _cpEsc(r.name||'-') + '</div>'
-    + '<div style="font-size:11.5px;color:#0369a1;margin-top:2px">' + ((r.channelType==='pharmacy')?'💊 약국 판매':'📺 홈쇼핑 판매') + ' · 회차 ' + _cpEsc(r.round||'-') + '</div></div>'
+    + '<div><div style="font-size:15px;font-weight:800;color:#0c4a6e">' + _cpEsc(_cpTitle(r)) + '</div>'
+    + '<div style="font-size:11.5px;color:#0369a1;margin-top:2px">' + ((r.channelType==='pharmacy')?'💊 약국 판매':'📺 홈쇼핑 판매') + '</div></div>'
     + '<button onclick="closeCpDetail()" style="background:rgba(255,255,255,.5);border:none;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:14px;color:#0c4a6e">✕</button>'
     + '</div>'
     + '<div style="padding:16px 20px;max-height:68vh;overflow-y:auto">'
