@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.726';
+const ERP_VERSION = 'v2.3.727';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -16076,7 +16076,8 @@ function _cpCalc(r) {
       const price = _cpSetPrice(st), qty = Number(st.qty)||0, unit = _cpSetCogs(st);
       const sold = Math.round(qty * conv);
       hsRevenue += price * qty; orderQty += qty; soldQty += sold; cogsFromSets += unit * sold;
-      setRows.push({ no: i+1, name: _cpSetName(st), price, qty, sold, cogsUnit: unit, amount: price * qty });
+      setRows.push({ no: i+1, name: _cpSetName(st), price, qty, sold, cogsUnit: unit, amount: price * qty,
+                     itemId: st.itemId || '', cogsManual: (st.cogsMode === 'manual') });
     });
     actualRevenue = hsRevenue * conv;
     achieveRate = targetCost > 0 ? (hsRevenue / targetCost * 100) : 0;
@@ -17234,6 +17235,48 @@ function copyCpRow(id) {
 
 // ── 상세 팝업 (제목 클릭) ──
 function closeCpDetail() { const ov = document.getElementById('cp-detail-overlay'); if (ov) ov.remove(); }
+/* v2.3.727 — BOM 구성품 목록. 원가가 어디서 나왔는지 그 자리에서 확인한다. */
+function _cpBomListHtml(itemId, unitCost, manual) {
+  const bom = (DB.boms && DB.boms[itemId]) || [];
+  const box = (inner) => '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:9px 11px;margin:2px 0 8px">' + inner + '</div>';
+  if (!bom.length) {
+    return box('<div style="font-size:11.5px;color:#94a3b8">BOM 이 등록되지 않았습니다 — 원가는 직접 입력한 값입니다</div>');
+  }
+  let sum = 0;
+  const rows = bom.map(b => {
+    const it = (typeof getItem === 'function') ? getItem(b.itemId) : {};
+    const price = Number(it && it.price) || 0;
+    const qty = Number(b.qty) || 0;
+    const amt = price * qty;
+    sum += amt;
+    return '<tr>'
+      + '<td style="padding:4px 6px;font-size:11.5px;color:#0f172a;text-align:left">' + _cpEsc((it && it.name) || ('품목 #' + b.itemId)) + '</td>'
+      + '<td style="padding:4px 6px;font-size:11.5px;color:#475569;text-align:right;white-space:nowrap">' + qty.toLocaleString() + (b.unit ? ' ' + _cpEsc(b.unit) : '') + '</td>'
+      + '<td style="padding:4px 6px;font-size:11.5px;color:#64748b;text-align:right;white-space:nowrap">' + _cpWon(price) + '</td>'
+      + '<td style="padding:4px 6px;font-size:11.5px;color:#0f172a;text-align:right;white-space:nowrap;font-weight:700">' + _cpWon(amt) + '</td>'
+      + '</tr>';
+  }).join('');
+  const foot = '<tr><td colspan="3" style="padding:5px 6px;font-size:11.5px;font-weight:800;color:#475569;text-align:right;border-top:1px solid #e2e8f0">BOM 합계</td>'
+    + '<td style="padding:5px 6px;font-size:12px;font-weight:800;color:#0f172a;text-align:right;border-top:1px solid #e2e8f0;white-space:nowrap">' + _cpWon(sum) + '</td></tr>';
+  const note = manual
+    ? '<div style="font-size:11px;color:#b45309;margin-top:5px">⚠️ 원가는 <b>수동 입력값(' + _cpWon(unitCost) + ')</b> 입니다 — 위 BOM 합계와 다를 수 있습니다</div>'
+    : '';
+  return box('<table style="width:100%;border-collapse:collapse">'
+    + '<thead><tr>'
+    + '<th style="padding:3px 6px;font-size:10.5px;color:#94a3b8;text-align:left">구성품</th>'
+    + '<th style="padding:3px 6px;font-size:10.5px;color:#94a3b8;text-align:right">수량</th>'
+    + '<th style="padding:3px 6px;font-size:10.5px;color:#94a3b8;text-align:right">단가</th>'
+    + '<th style="padding:3px 6px;font-size:10.5px;color:#94a3b8;text-align:right">금액</th>'
+    + '</tr></thead><tbody>' + rows + foot + '</tbody></table>' + note);
+}
+window._cpToggleBom = function(no) {
+  const el = document.getElementById('cp-bom-' + no);
+  const btn = document.getElementById('cp-bombtn-' + no);
+  if (!el) return;
+  const open = (el.style.display === 'none');
+  el.style.display = open ? '' : 'none';
+  if (btn) btn.textContent = open ? 'BOM ▲' : 'BOM ▼';
+};
 function openCpDetail(id) {
   closeCpDetail();
   const r = (_cpData && _cpData.rows ? _cpData.rows : []).find(x => x && String(x.id) === String(id));
@@ -17272,7 +17315,11 @@ function openCpDetail(id) {
     + line('예상 실매출', _cpWon(c.actualRevenue))
     // v2.3.723: 세트가 있으면 제품별로 나눠 보여준다
     + ((c.sets && c.sets.length)
-        ? c.sets.map(st => line(st.no + '번 제품 판매가' + (st.name ? ' — ' + _cpEsc(st.name) : ''), _cpWon(st.price))).join('')
+        ? c.sets.map(st => line(st.no + '번 제품 판매가' + (st.name ? ' — ' + _cpEsc(st.name) : ''),
+            _cpWon(st.price)
+            + '<span style="color:#64748b;font-weight:600;margin-left:8px">− 원가 ' + _cpWon(st.cogsUnit) + '</span>'
+            + '<button id="cp-bombtn-' + st.no + '" onclick="_cpToggleBom(' + st.no + ')" style="margin-left:8px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:6px;padding:2px 9px;font-size:11px;font-weight:700;cursor:pointer">BOM ▼</button>')
+            + '<div id="cp-bom-' + st.no + '" style="display:none">' + _cpBomListHtml(st.itemId, st.cogsUnit, st.cogsManual) + '</div>').join('')
           + c.sets.map(st => line(st.no + '번 목표 판매수량', st.qty.toLocaleString() + '개')).join('')
           + c.sets.map(st => line(st.no + '번 예상 실판매 수량', st.sold.toLocaleString() + '개')).join('')
         : line('판매가', _cpWon(_cpLivePrice(r)))
