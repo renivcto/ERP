@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.720';
+const ERP_VERSION = 'v2.3.721';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -39920,6 +39920,46 @@ window.forceApproveOrder = async function(query) {
   alert('✅ 결재완료로 처리했습니다. 새로고침해도 유지됩니다.');
 };
 
+/* v2.3.721 — 결재완료인데 override 가 없는 발주서를 찾는다.
+   있으면 '날인 필드가 사라지는 순간' 결재 요청으로 되돌아갈 수 있는 건들이다.
+   poApvAudit()           — 점검만 (기본)
+   poApvAudit({fix:true}) — 빠진 건에 override 를 채워 넣는다 */
+window.poApvAudit = async function(opt) {
+  const fix = !!(opt && opt.fix);
+  await _loadPoApprovalOverrides(true);
+  const rows = [];
+  (DB.orders || []).forEach(o => {
+    if (!o) return;
+    const ap = (DB.approvals || []).find(a => a && a.type === 'po_approval' && String(a.refId) === String(o.id));
+    const approved = (ap && ap.status === 'approved') || _orderHasStampProof(o);
+    if (!approved) return;
+    if (ap && ap.status === 'rejected') return;
+    const ov = _poApvOverrideOf(o);
+    rows.push({
+      id: o.id, 업체: (typeof vendorName === 'function' ? vendorName(o.vendorId) : ''),
+      발주일: String(o.orderDate || '').slice(0, 10),
+      날인: _orderHasStampProof(o) ? '있음' : '없음',
+      결재상태: ap ? ap.status : '(레코드 없음)',
+      override: (ov && ov.approved) ? '있음' : '❌ 없음',
+    });
+  });
+  const miss = rows.filter(r => r.override !== '있음');
+  console.log('%c발주서 결재완료 ' + rows.length + '건 · override 없는 건 ' + miss.length + '건',
+    'background:' + (miss.length ? '#dc2626' : '#059669') + ';color:#fff;padding:4px 10px;font-weight:700');
+  if (rows.length) console.table(rows);
+  if (!miss.length) { console.log('✅ 모두 보호되고 있습니다 — 머지가 되돌려도 결재완료가 유지됩니다'); return { total: rows.length, missing: 0 }; }
+  if (!fix) {
+    console.log('%c채워 넣으려면: poApvAudit({fix:true})', 'color:#dc2626;font-weight:700');
+    return { total: rows.length, missing: miss.length };
+  }
+  for (const r of miss) {
+    const o = (DB.orders || []).find(x => x && String(x.id) === String(r.id));
+    if (o) await _setPoApprovalOverride(o, true);
+  }
+  console.log('✅ ' + miss.length + '건에 override 를 기록했습니다');
+  return { total: rows.length, missing: miss.length, fixed: miss.length };
+};
+
 function getOrderApprovalStatus(o) {
   if (!o) return 'pending';
   if (_orderHasStampProof(o)) return 'approved';
@@ -39952,7 +39992,9 @@ function uploadStampAndApprove(orderId, inputEl) {
     // ap에 manualApprove 표시 (사용자가 명시적으로 승인한 것이므로)
     const ap = DB.approvals.find(a => a.type === 'po_approval' && String(a.refId) === String(orderId));
     if (ap) { ap.manualApprove = true; }
-    try { saveData(); } catch(_){}
+    // v2.3.721: 날인 경로에도 override 를 남긴다 — 머지가 날인 필드까지 덮어도 결재완료가 유지된다
+    try { _setPoApprovalOverride(o, true); } catch(_){}
+    try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
     try { renderApprovalPage(); } catch(_){}
     try { updateApprovalBadges(); } catch(_){}
     try { renderOrderTable && renderOrderTable(); } catch(_){}
@@ -47648,6 +47690,8 @@ function _savePoApprovalStamp() {
     DB.orders[idx].updatedAt = Date.now();
     // 3) 결재 레코드(po_approval) 상태도 approved 로 자동 전이
     try { if (typeof syncApprovalFromOrderStamp === 'function') syncApprovalFromOrderStamp(DB.orders[idx].id); } catch(_){}
+    // v2.3.721: override 기록 — 날인 필드가 머지로 덮여도 결재완료가 살아남게
+    try { if (typeof _setPoApprovalOverride === 'function') _setPoApprovalOverride(DB.orders[idx], true); } catch(_){}
     // 4) 저장 — 사용자 데이터라 즉시 (debounce 회피)
     try {
       if (typeof _doSaveData === 'function') _doSaveData().catch(function(e){ console.warn('도장 저장 후 _doSaveData:', e); });
