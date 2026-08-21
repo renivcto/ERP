@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.728';
+const ERP_VERSION = 'v2.3.729';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -46435,6 +46435,19 @@ async function openPoApprovalPage(orderId) {
           });
           h += 'window._poOpenFile = function(key) {';
           h += '  const f = window._poFileData[key];';
+          // v2.3.729: Storage 로 옮긴 첨부(https URL). 그냥 열면 저장소 내부 이름(확장자 없음)으로
+          //   받아 파일이 안 열린다 — 볼 수 있는 건 새 탭, 나머지는 원본 파일명으로 내려받는다.
+          h += '  if (f && f.data && (f.data.indexOf("https://") === 0 || f.data.indexOf("http://") === 0)) {';
+          h += '    var _n = String(f.name || "file");';
+          h += '    var _viewable = (f.type||"").indexOf("image/") === 0 || f.type === "application/pdf" || /[.](png|jpe?g|gif|webp|bmp|pdf)$/i.test(_n);';
+          h += '    if (_viewable) { window.open(f.data, "_blank"); return false; }';
+          h += '    fetch(f.data).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.blob(); }).then(function(b){';
+          h += '      var u = URL.createObjectURL(b); var a = document.createElement("a");';
+          h += '      a.href = u; a.download = _n; document.body.appendChild(a); a.click();';
+          h += '      setTimeout(function(){ URL.revokeObjectURL(u); a.remove(); }, 1500);';
+          h += '    }).catch(function(err){ console.warn("첨부 다운로드 실패, 새 탭으로 대체:", err); window.open(f.data, "_blank"); });';
+          h += '    return false;';
+          h += '  }';
           h += '  if (!f || !f.data || f.data === "__idb__" || f.data.indexOf("data:") !== 0) {';
           h += '    alert("⚠️ 파일 데이터 없음 또는 손실됨\\n\\n원본을 다시 첨부하거나, 다른 기기에서 확인 필요.");';
           h += '    console.warn("[v2.3.22] 파일 데이터 없음:", key, f);';
@@ -46474,7 +46487,9 @@ async function openPoApprovalPage(orderId) {
             const icon = canPreview ? '👁️ ' : '⬇️ ';
             // v2.3.22: 데이터 유효성 사전 검증
             const _isValidDataUrl = typeof dataUrl === 'string' && dataUrl.length > 100 && dataUrl !== '__idb__' && dataUrl.indexOf('data:') === 0;
-            if (!_isValidDataUrl) {
+            // v2.3.729: Storage 로 이전된 첨부(https URL)도 멀쩡한 파일이다 — '데이터 손실' 로 표시하던 버그
+            const _isStorageUrl = typeof dataUrl === 'string' && (dataUrl.indexOf('https://') === 0 || dataUrl.indexOf('http://') === 0);
+            if (!_isValidDataUrl && !_isStorageUrl) {
               return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0">'
                 + '<span style="display:inline-block;background:' + kindBg + ';color:' + kindFg + ';padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700">' + f.kind + '</span>'
                 + '<span style="flex:1;color:#94a3b8;font-size:12.5px;font-style:italic" title="원본 데이터가 IDB/Firestore 어디에도 없음">⚠️ ' + fileName + ' — 데이터 손실</span>'
@@ -48362,6 +48377,193 @@ function _apSheetBox(h, name, sign) {
     + (sign ? '<img src="' + sign + '" style="max-width:94px;max-height:58px">' : '') + '</div>'
     + '<div style="font-size:10.5px;padding:2px 0 3px;border-top:1px solid #e2e8f0;color:#64748b">' + escapeHtml(name || '') + '</div></div>';
 }
+/* v2.3.729 — 문서 모달에 붙일 첨부 목록.
+   quotes·attachments 는 f.data 에만 값이 있다(f.url 은 존재한 적이 없다).
+   발주 연동 건이면 발주서 PDF·견적서·결재 PDF·마감자료까지 함께 모은다. */
+function _apSheetFileList(r, isExp) {
+  const out = [];
+  const push = (f, kind, idbKey, fsKind, fsIdx, ownerId) => {
+    if (!f || !f.name) return;
+    out.push({ name: f.name, type: f.type || '', size: Number(f.size) || 0,
+               data: (typeof f.data === 'string' ? f.data : ''),
+               kind: kind, idbKey: idbKey || '', fsKind: fsKind || '',
+               fsIdx: (fsIdx == null ? -1 : fsIdx), ownerId: (ownerId == null ? '' : ownerId) });
+  };
+  if (!isExp) {
+    (Array.isArray(r.attachments) ? r.attachments : []).forEach((f, i) =>
+      push(f, '첨부', 'approval_attach_' + r.id + '_' + i, 'apn', i, r.id));
+    return out;
+  }
+  (Array.isArray(r.quotes) ? r.quotes : []).forEach((f, i) =>
+    push(f, '견적서', 'expense_quote_' + r.id + '_' + i, 'quote', i, r.id));
+  (Array.isArray(r.attachments) ? r.attachments : []).forEach((f, i) =>
+    push(f, '첨부', 'expense_attach_' + r.id + '_' + i, 'attach', i, r.id));
+  if ((r.category === 'po_prepay' || r.category === 'po_balance') && r.orderId) {
+    const po = (DB.orders || []).find(o => o && (o.id === r.orderId || Number(o.id) === Number(r.orderId)));
+    if (po) {
+      if (po.pdfData && po.pdfName)
+        push({ name: po.pdfName, type: 'application/pdf', data: po.pdfData }, '발주 PDF', 'order_pdf_' + po.id, 'order_pdf', -1, po.id);
+      (Array.isArray(po.quoteDocs) ? po.quoteDocs : []).forEach((f, i) =>
+        push(f, '견적서', 'order_qdoc_' + po.id + '_' + i, 'order_qdoc', i, po.id));
+      if (po.stampData && po.stampName)
+        push({ name: po.stampName, type: 'application/pdf', data: po.stampData }, '결재 PDF', 'order_stamp_' + po.id, 'order_stamp', -1, po.id);
+      (Array.isArray(po.closingDocs) ? po.closingDocs : []).forEach((f, i) =>
+        push(f, '마감자료', 'order_closing_' + po.id + '_' + i, 'order_closing', i, po.id));
+      if (po.isOverseas) {
+        if (po.invoiceFile && po.invoiceFile.name) push(po.invoiceFile, 'Invoice', '', '', -1, po.id);
+        (Array.isArray(po.otherFiles) ? po.otherFiles : []).forEach(f => push(f, 'PO 첨부', '', '', -1, po.id));
+      }
+    }
+  }
+  return out;
+}
+function _apSheetFilesHtml(files) {
+  const KB = { '견적서':['#fef3c7','#92400e'], '결재 PDF':['#fee2e2','#991b1b'], '마감자료':['#dcfce7','#166534'],
+               'Invoice':['#dbeafe','#1e40af'], '발주 PDF':['#ede9fe','#5b21b6'] };
+  const sz = n => !n ? '' : (n < 1024*1024 ? (n/1024).toFixed(0) + 'KB' : (n/1024/1024).toFixed(1) + 'MB');
+  let h = '<div style="margin-top:16px">'
+    + '<div style="font-size:12px;font-weight:800;color:#475569;letter-spacing:1px;margin-bottom:7px">📎 첨 부 파 일 '
+    + '<span style="color:#94a3b8;font-weight:500">(' + files.length + '건)</span></div>';
+  if (!files.length) {
+    return h + '<div style="border:1px dashed #e2e8f0;border-radius:8px;padding:12px;text-align:center;font-size:12px;color:#94a3b8">첨부된 파일이 없습니다</div></div>';
+  }
+  h += '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;background:#fff">';
+  h += files.map((f, i) => {
+    const c = KB[f.kind] || ['#e0e7ff', '#3730a3'];
+    return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;' + (i < files.length-1 ? 'border-bottom:1px dashed #e2e8f0' : '') + '">'
+      + '<span style="background:' + c[0] + ';color:' + c[1] + ';padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:700;flex-shrink:0">' + escapeHtml(f.kind) + '</span>'
+      + '<a href="javascript:void(0)" onclick="_apSheetOpen(' + i + ')" style="flex:1;color:#1e40af;font-size:12.5px;text-decoration:underline;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(f.name) + '</a>'
+      + '<span style="font-size:10.5px;color:#94a3b8;flex-shrink:0">' + sz(f.size) + '</span>'
+      + '</div>';
+  }).join('');
+  return h + '</div></div>';
+}
+/* 인라인 base64 → Storage URL → 내 IDB → 공유 Firestore 순으로 원본을 찾는다. */
+window._apSheetOpen = async function(i) {
+  const f = (window._apSheetFiles || [])[i];
+  if (!f) return;
+  const bad = v => !v || typeof v !== 'string' || v === '__idb__' || v === '__stored__' || v === '__stripped__';
+  let data = f.data || '';
+  if (!bad(data) && /^https?:/i.test(data)) { _apSheetShowFile(data, f.name, f.type); return; }
+  try { showNotif('첨부 여는 중…', 'info'); } catch(_){}
+  if ((bad(data) || data.indexOf('data:') !== 0) && f.idbKey) {
+    try { const v = await idbGet(f.idbKey); if (v) data = v; } catch(_){}
+  }
+  if (bad(data) || (data.indexOf('data:') !== 0 && !/^https?:/i.test(data))) {
+    try {
+      let v = null;
+      if (f.fsKind === 'quote' || f.fsKind === 'attach') v = await _loadSharedExpenseFile(f.ownerId, f.fsKind, f.fsIdx);
+      else if (f.fsKind === 'order_pdf') v = await _loadSharedOrderPdf(f.ownerId, 'pdf');
+      else if (f.fsKind === 'order_stamp') v = await _loadSharedOrderPdf(f.ownerId, 'stamp');
+      else if (f.fsKind === 'order_qdoc') v = await _loadSharedOrderQdoc(f.ownerId, f.fsIdx);
+      else if (f.fsKind === 'order_closing') v = await _loadSharedOrderClosing(f.ownerId, f.fsIdx);
+      else if (f.fsKind === 'apn') v = await _loadSharedApnAttach(f.ownerId, f.fsIdx);
+      if (v) { data = v; if (f.idbKey) { try { idbSet(f.idbKey, v); } catch(_){} } }
+    } catch(e) { console.warn('[v2.3.729] 공유 첨부 불러오기 실패:', e && e.message); }
+  }
+  if (bad(data)) {
+    try { showNotif('원본 파일을 찾을 수 없습니다 — 작성자가 수정 화면에서 다시 첨부·저장해야 모두가 볼 수 있습니다', 'warning'); } catch(_){}
+    return;
+  }
+  _apSheetShowFile(data, f.name, f.type);
+};
+/* 이미지·PDF 는 화면 안에서 보여 준다(팝업 차단을 피한다). 그 밖은 원본 이름으로 내려받는다. */
+function _apSheetShowFile(src, name, type) {
+  const nm = String(name || 'file');
+  const isHttp = /^https?:/i.test(src);
+  const isImage = /^image\//i.test(type || '') || /[.](png|jpe?g|gif|webp|bmp|svg)$/i.test(nm) || /^data:image\//i.test(src);
+  const isPdf = (type || '') === 'application/pdf' || /[.]pdf$/i.test(nm) || /^data:application\/pdf/i.test(src);
+  let url = src, revoke = false;
+  if (!isHttp) { try { url = URL.createObjectURL(_dataUrlToBlob(src)); revoke = true; } catch(_){ url = src; } }
+  if (!isImage && !isPdf) {
+    if (isHttp) {
+      fetch(src).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); }).then(b => {
+        const u = URL.createObjectURL(b), a = document.createElement('a');
+        a.href = u; a.download = nm; document.body.appendChild(a); a.click();
+        setTimeout(() => { try { URL.revokeObjectURL(u); a.remove(); } catch(_){} }, 1500);
+      }).catch(() => { window.open(src, '_blank'); });
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = url; a.download = nm; document.body.appendChild(a); a.click(); a.remove();
+    if (revoke) setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 60000);
+    return;
+  }
+  const esc = v => escapeHtml(String(v == null ? '' : v));
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;z-index:999999;background:rgba(15,23,42,.9);display:flex;flex-direction:column';
+  ov.innerHTML =
+    '<div style="display:flex;align-items:center;gap:8px;padding:10px 16px;background:#0f172a;color:#fff;flex-shrink:0">'
+    + '<span style="flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📎 ' + esc(nm) + '</span>'
+    + '<a href="' + url + '" target="_blank" rel="noopener" style="color:#fff;background:#334155;border:1px solid #475569;border-radius:6px;padding:5px 11px;font-size:12px;text-decoration:none">새 탭</a>'
+    + '<a href="' + url + '" download="' + esc(nm) + '" style="color:#fff;background:#334155;border:1px solid #475569;border-radius:6px;padding:5px 11px;font-size:12px;text-decoration:none">내려받기</a>'
+    + '<button type="button" data-close="1" style="color:#fff;background:#dc2626;border:0;border-radius:6px;padding:6px 13px;font-size:12px;font-weight:700;cursor:pointer">✕ 닫기</button>'
+    + '</div>'
+    + '<div style="flex:1;min-height:0;background:#111">'
+    + (isImage
+        ? '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box"><img src="' + url + '" style="max-width:100%;max-height:100%;object-fit:contain"></div>'
+        : '<iframe src="' + url + '" style="width:100%;height:100%;border:0;display:block"></iframe>')
+    + '</div>';
+  const onKey = ev => { if (ev.key === 'Escape') close(); };
+  const close = () => {
+    try { ov.remove(); } catch(_){}
+    try { document.removeEventListener('keydown', onKey); } catch(_){}
+    if (revoke) setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 1000);
+  };
+  try { ov.querySelector('[data-close]').addEventListener('click', close); } catch(_){}
+  ov.addEventListener('click', ev => { if (ev.target === ov) close(); });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(ov);
+}
+/* 적요 — 인쇄본과 같은 문장을 만든다(저장된 필드가 아니라 그때그때 짓는 문구다). */
+function _apSheetSummary(r) {
+  const ord = ((r.category === 'po_prepay' || r.category === 'po_balance') && r.orderId)
+    ? (DB.orders || []).find(o => o && (o.id === r.orderId || Number(o.id) === Number(r.orderId))) : null;
+  const serial = ord ? (ord.serial || ('PO-' + String(ord.id).padStart(3, '0'))) : '';
+  const pre = ord ? (parseFloat(ord.prepayPercent) || 0) : 0;
+  const pct = Math.round((r.category === 'po_prepay' ? pre : (100 - pre)) * 10) / 10;
+  if (r.category === 'po_prepay' && serial) return '발주서 ' + serial + ' 의 선급금 ' + pct + '% 지급 건';
+  if (r.category === 'po_balance' && serial) return '발주서 ' + serial + ' 의 잔금 ' + pct + '% 지급 건';
+  if (r.category === 'sample') return '샘플 구매 대금 지급 — ' + (r.title || '');
+  return r.title || '';
+}
+/* 집행내역 — 발주 연동이면 발주 품목, 샘플이면 샘플 품목. 인쇄본과 같은 표다. */
+function _apSheetExecHtml(r) {
+  let rows = [];
+  if ((r.category === 'po_prepay' || r.category === 'po_balance') && r.orderId) {
+    const ord = (DB.orders || []).find(o => o && (o.id === r.orderId || Number(o.id) === Number(r.orderId)));
+    if (ord) rows = (ord.rows || []).map((x, i) => ({ no: i+1, name: x.name || '-', spec: x.spec || x.unit || '',
+      qty: Number(x.qty) || 0, price: Number(x.price) || 0 }));
+  } else if (r.category === 'sample' && r.sampleId) {
+    const sp = (DB.samples || []).find(x => x && (x.id === r.sampleId || Number(x.id) === Number(r.sampleId)));
+    if (sp && Array.isArray(sp.rows)) rows = sp.rows.map((x, i) => ({ no: i+1, name: x.name || '-', spec: x.spec || '',
+      qty: Number(x.qty) || 1, price: Number(x.price) || 0 }));
+  }
+  if (!rows.length) return '';
+  const w = n => '₩' + (Math.round(Number(n) || 0)).toLocaleString('ko-KR');
+  const th = 'background:#f1f5f9;border:1px solid #cbd5e1;padding:5px 8px;font-size:11.5px;font-weight:700';
+  const td = 'border:1px solid #cbd5e1;padding:5px 8px;font-size:12px';
+  let sum = 0;
+  const body = rows.map(x => {
+    const st = x.qty * x.price; sum += st;
+    return '<tr><td style="' + td + ';text-align:center">' + x.no + '</td>'
+      + '<td style="' + td + '">' + escapeHtml(x.name) + '</td>'
+      + '<td style="' + td + ';color:#64748b">' + escapeHtml(x.spec) + '</td>'
+      + '<td style="' + td + ';text-align:right">' + x.qty.toLocaleString('ko-KR') + '</td>'
+      + '<td style="' + td + ';text-align:right">' + w(x.price) + '</td>'
+      + '<td style="' + td + ';text-align:right;font-weight:700">' + w(st) + '</td></tr>';
+  }).join('');
+  return '<div style="margin-top:16px">'
+    + '<div style="font-size:12px;font-weight:800;color:#475569;letter-spacing:1px;margin-bottom:7px">■ 집 행 내 역</div>'
+    + '<table style="width:100%;border-collapse:collapse">'
+    + '<thead><tr><th style="' + th + ';width:34px">No</th><th style="' + th + '">품목</th>'
+    + '<th style="' + th + ';width:110px">규격</th><th style="' + th + ';width:64px">수량</th>'
+    + '<th style="' + th + ';width:96px">단가</th><th style="' + th + ';width:108px">금액</th></tr></thead>'
+    + '<tbody>' + body + '</tbody>'
+    + '<tfoot><tr><td colspan="5" style="' + td + ';text-align:right;font-weight:800;background:#f8fafc">합계</td>'
+    + '<td style="' + td + ';text-align:right;font-weight:800;background:#f8fafc">' + w(sum) + '</td></tr></tfoot>'
+    + '</table></div>';
+}
 function openApprovalSheet(kind, id) {
   const isExp = kind === 'exp';
   const list = isExp ? (DB.expenses || []) : (DB.approvals || []);
@@ -48373,7 +48575,9 @@ function openApprovalSheet(kind, id) {
   const row = (k, v) => v ? '<tr><th style="background:#f1f5f9;border:1px solid #cbd5e1;padding:7px 10px;text-align:left;width:118px;white-space:nowrap;font-weight:700">'
     + k + '</th><td style="border:1px solid #cbd5e1;padding:7px 10px">' + v + '</td></tr>' : '';
   const money = n => '₩' + (Number(n) || 0).toLocaleString('ko-KR');
-  const files = (Array.isArray(r.attachments) ? r.attachments : []).filter(f => f && /^https?:/i.test(String(f.url || '')));
+  // v2.3.729: 첨부는 f.data 에만 값이 있다(f.url 은 존재한 적 없음) — 늘 0건이라 첨부가 안 보였다
+  const files = _apSheetFileList(r, isExp);
+  window._apSheetFiles = files;
   const o = _ensureOverlay('ap-sheet-modal');
   o.innerHTML = '<div class="modal" style="width:780px;max-width:96vw">'
     + '<div class="modal-hdr"><span class="modal-ttl">' + (isExp ? '💳 ' : '📝 ') + escapeHtml(r.title || '문서')
@@ -48399,9 +48603,14 @@ function openApprovalSheet(kind, id) {
     +   '<tr><th style="background:#f1f5f9;border:1px solid #cbd5e1;padding:7px 10px;text-align:left;width:118px;font-weight:700">'
     +   (isExp ? '비고 / 상세' : '상세 내용') + '</th><td style="border:1px solid #cbd5e1;padding:7px 10px;white-space:pre-wrap;'
     +   'font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.65">' + escapeHtml(r.note || '') + '</td></tr>'
-    +   (files.length ? row('첨부', files.map(f => '<a href="' + escapeHtml(f.url) + '" target="_blank" rel="noopener" style="color:#2563eb">📎 '
-        + escapeHtml(f.name || '첨부') + '</a>').join('<br>')) : '')
-    + '</table></div></div>'
+    + '</table>'
+    // v2.3.729: 인쇄본에는 있는데 모달에서 빠져 있던 아랫부분 — 집행내역·적요·첨부
+    +   (isExp ? _apSheetExecHtml(r) : '')
+    +   (function(){ const _sm = isExp ? _apSheetSummary(r) : '';
+          return _sm ? '<div style="margin-top:16px"><div style="font-size:12px;font-weight:800;color:#475569;letter-spacing:1px;margin-bottom:7px">■ 적   요</div>'
+            + '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.7;white-space:pre-wrap">' + escapeHtml(_sm) + '</div></div>' : ''; })()
+    +   _apSheetFilesHtml(files)
+    + '</div></div>'
     + '<div class="modal-ft">'
     + (isExp ? '<button class="btn btn-outline" onclick="closeModal(\'ap-sheet-modal\');openExpenseApprovalForm(' + JSON.stringify(r.id) + ')">🖨 인쇄용 PDF</button>' : '')
     + '<button class="btn btn-outline" onclick="closeModal(\'ap-sheet-modal\')">닫기</button></div></div>';
