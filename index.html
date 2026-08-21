@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.725';
+const ERP_VERSION = 'v2.3.726';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -16115,9 +16115,25 @@ function _cpSave() {
   const payload = JSON.stringify(_cpData);
   try { if (typeof idbSet === 'function') idbSet('reniv_channel_profit', payload); } catch(_){}
   try { localStorage.setItem('reniv_channel_profit', payload); } catch(_){}
+  // v2.3.726: 공유 저장 — 이게 없으면 만든 사람 브라우저에만 남는다(실제로 그랬다)
+  try {
+    if (typeof saveSharedSetting === 'function') {
+      saveSharedSetting('channel_profit', _cpData)
+        .then(ok => { if (!ok) console.warn('[수익계산] 공유 저장 실패 — 이 브라우저에만 남았습니다'); })
+        .catch(e => console.warn('[수익계산] 공유 저장 실패:', e && e.message));
+    }
+  } catch(e) { console.warn('[수익계산] 공유 저장 실패:', e && e.message); }
 }
 async function _cpLoad() {
   const cand = [];
+  // v2.3.726: 공유본(shared/channel_profit) — 다른 임원이 만든 것도 여기서 온다
+  let sharedVal = null;
+  try {
+    if (typeof loadSharedSetting === 'function') {
+      const sv = await loadSharedSetting('channel_profit');
+      if (sv && Array.isArray(sv.rows)) { sharedVal = sv; cand.push(sv); }
+    }
+  } catch(e) { console.warn('[수익계산] 공유 불러오기 실패:', e && e.message); }
   try { const ls = localStorage.getItem('reniv_channel_profit'); if (ls) { const p = JSON.parse(ls); if (p && Array.isArray(p.rows)) cand.push(p); } } catch(_){}
   try {
     if (typeof idbGet === 'function') {
@@ -16127,6 +16143,16 @@ async function _cpLoad() {
   } catch(_){}
   cand.sort((a,b) => (Number(b.updatedAt)||0) - (Number(a.updatedAt)||0));
   _cpData = cand[0] || _cpDefault();
+  // 공유본이 없거나 내 것이 더 최신이면 한 번 올려 준다 — 고치지 않아도 다른 임원이 보게
+  try {
+    const mine = Number(_cpData.updatedAt) || 0;
+    const theirs = Number(sharedVal && sharedVal.updatedAt) || 0;
+    if ((_cpData.rows||[]).length && mine > theirs && typeof saveSharedSetting === 'function') {
+      saveSharedSetting('channel_profit', _cpData)
+        .then(ok => { if (ok) console.log('📤 [수익계산] 공유 저장소에 올렸습니다 — 다른 임원도 보입니다'); })
+        .catch(() => {});
+    }
+  } catch(_){}
 }
 
 // ── 렌더 ──
@@ -59107,6 +59133,7 @@ function _sharedSettingCollection(key) {
       || k === 'pluscl_stock' || k === 'pluscl_item_map' || k === 'ad_refunds'
       || k === 'approval_signatures' || k === 'pharmacy_cal_events' || k === 'claims'
       || k === 'item_channels'   // v2.3.543: 완제품 판매 채널 목록(약국·온라인·홈쇼핑 등) — 전 직원 공유
+      || k === 'channel_profit'  // v2.3.726: 유통채널 수익계산 — 임원 전원이 봐야 한다(직원은 규칙상 제외)
       // v2.3.592: 정기 결제(구독) — 자동결제 건이 고정비·자금계획에 반영되므로 기기 로컬만으론
       //   기기마다 현금흐름 예측이 갈린다. 전 직원 read 필요 → shared/.
       || k === 'recurring_payments'
