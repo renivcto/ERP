@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.719';
+const ERP_VERSION = 'v2.3.720';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -19698,6 +19698,96 @@ window.__diagnoseExpense = function(expenseId) {
   return e;
 };
 console.log('%c💡 expense 진단: __diagnoseExpense(expenseId)','background:#10b981;color:#fff;padding:3px 8px');
+
+/* ═══════════ v2.3.720 — 지출결의서 삭제 복구 ═══════════
+   실수로 지운 건을 되살린다. 원본은 '삭제 이후 저장한 적 없는 브라우저' 의 백업뿐이다.
+   ⚠️ tombstone 을 같이 걷지 않으면 다음 머지에서 또 지워진다. */
+window._expTombIds = function() {
+  return (DB._deletedExpenseIds || []).map(t => (t && typeof t === 'object') ? t : { id: t, ts: 0 });
+};
+window._expBackupIndex = async function() {
+  const out = {};
+  const take = (arr, src) => {
+    if (!Array.isArray(arr)) return;
+    arr.forEach(e => {
+      if (!e || e.id == null) return;
+      const k = String(e.id);
+      if (!out[k]) out[k] = Object.assign({}, e, { _src: src });
+    });
+  };
+  // 지금 메모리에 있는 것이 가장 최신이다
+  take(DB.expenses, '현재 데이터');
+  try { take(JSON.parse(localStorage.getItem('reniv_expenses_backup') || 'null'), 'localStorage 백업'); } catch (_) {}
+  try {
+    if (typeof idbGet === 'function') {
+      const j = await idbGet('reniv_expenses_backup');
+      take(typeof j === 'string' ? JSON.parse(j) : j, 'IDB 백업');
+    }
+  } catch (_) {}
+  return out;
+};
+/* 지운 지출결의서 목록 — 되살릴 수 있는지까지 함께 보여준다 */
+window.__listDeletedExpenses = async function() {
+  const tombs = window._expTombIds();
+  if (!tombs.length) { console.log('🗑 지운 기록이 없습니다'); return []; }
+  const idx = await window._expBackupIndex();
+  const rows = tombs.sort((a, b) => (b.ts || 0) - (a.ts || 0)).map(t => {
+    const r = idx[String(t.id)];
+    return {
+      id: t.id,
+      삭제시각: t.ts ? new Date(t.ts).toLocaleString('ko-KR') : '(기록 없음)',
+      복구: r ? '✅ 가능 (' + r._src + ')' : '❌ 사본 없음',
+      업체: r ? (r.vendor || '-') : '-',
+      품목: r ? String(r.title || r.item || '-').slice(0, 30) : '-',
+      금액: r ? ('₩' + (Number(r.amount) || 0).toLocaleString()) : '-',
+    };
+  });
+  console.log('%c=== 지운 지출결의서 ===', 'background:#dc2626;color:#fff;padding:4px 8px;font-weight:700');
+  console.table(rows);
+  console.log('복구: %c__restoreExpense(id)', 'color:#059669;font-weight:700', '— 확인만 (모의실행)');
+  console.log('실제 복구: %c__restoreExpense(id, {apply:true})', 'color:#dc2626;font-weight:700');
+  return rows;
+};
+window.__restoreExpense = async function(id, opts) {
+  opts = opts || {};
+  const key = String(id);
+  const idx = await window._expBackupIndex();
+  const rec = idx[key];
+  const inDb = (DB.expenses || []).some(e => e && String(e.id) === key);
+  const tombs = window._expTombIds().filter(t => String(t.id) === key);
+  if (!rec) {
+    console.warn('❌ 되살릴 사본이 없습니다 — id:', id);
+    console.warn('   이 브라우저의 백업은 삭제 이후 상태입니다.');
+    console.warn('   삭제 뒤 ERP 를 연 적 없는 다른 PC 가 있으면, 그 PC 에서 같은 명령을 실행해 보세요.');
+    return null;
+  }
+  console.log('%c=== 복구 대상 ===', 'background:#0ea5e9;color:#fff;padding:4px 8px;font-weight:700');
+  console.log('출처:', rec._src, '| 업체:', rec.vendor || '-', '| 품목:', rec.title || '-',
+    '| 금액: ₩' + (Number(rec.amount) || 0).toLocaleString(), '| 지급예정:', rec.dueDate || '-');
+  console.log('현재 목록에 있음:', inDb ? '예' : '아니오', '| 삭제 표식:', tombs.length ? '있음' : '없음');
+  if (opts.apply !== true) {
+    console.log('%c모의실행입니다 — 실제로 되살리려면 __restoreExpense(' + JSON.stringify(id) + ', {apply:true})',
+      'background:#f59e0b;color:#fff;padding:3px 8px');
+    return rec;
+  }
+  // 1) 삭제 표식 제거 — 이걸 안 하면 다음 머지에서 다시 지워진다
+  DB._deletedExpenseIds = (DB._deletedExpenseIds || []).filter(t => String((t && typeof t === 'object') ? t.id : t) !== key);
+  // 2) 레코드 되돌리기 (이미 있으면 건드리지 않는다)
+  if (!inDb) {
+    const clean = Object.assign({}, rec);
+    delete clean._src;
+    if (!Array.isArray(DB.expenses)) DB.expenses = [];
+    DB.expenses.push(clean);
+  }
+  try { if (typeof saveDataNow === 'function') await saveDataNow(); else saveData(); } catch (e) {
+    console.warn('저장 실패:', e && e.message); return null;
+  }
+  try { if (typeof renderExpenses === 'function') renderExpenses(); } catch (_) {}
+  console.log('%c✅ 되살렸습니다 — 지출결의서 #' + id, 'background:#16a34a;color:#fff;padding:4px 8px;font-weight:700');
+  try { showNotif('✅ 지출결의서 #' + id + ' 를 되살렸습니다', 'success'); } catch (_) {}
+  return rec;
+};
+console.log('%c🗑 지운 지출결의서 확인: __listDeletedExpenses()','background:#dc2626;color:#fff;padding:3px 8px');
 
 // v2.2.47: 매출 대시보드 헬퍼 — 주어진 기간의 KPI 계산
 function _sdCalcMetrics(start, end) {
