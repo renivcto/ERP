@@ -1507,6 +1507,7 @@ tr:last-child td { border-bottom:none; }
 <link rel="stylesheet" href="../shared/panels.css">
 <script src="../shared/channel-profit.js"></script>
 <script src="../shared/margin-analysis.js"></script>
+<script src="../shared/ads-kpi.js"></script>
 <script type="module">
 /* ═══════════════════════════════════════════════════════════════
    르니브 직원 ERP — v0.1.0 (2026-08-16)
@@ -1529,7 +1530,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.88.1';
+const STAFF_VERSION = 'v0.88.2';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1586,7 +1587,7 @@ let INS = [];               // staff_data/insights       — 인사이트 보드
 let INSI = [];              // staff_data/inbox_insights — 직원이 올린 인사이트 (추가·수정·삭제)
 let PMAP = null;            // staff_data/productmap — 제품 포트폴리오
 let FPT = null;             // staff_data/fptimeline — 완제품 생산 타임라인
-let CPREF = { items: [], boms: {}, shops: [] };   // staff_data/cp_ref — 수익계산·마진분석이 쓰는 품목·BOM·쇼핑몰 참조 (v0.88.0)
+let CPREF = { items: [], boms: {}, shops: [], adRefunds: {} };   // staff_data/cp_ref — 수익계산·마진분석·광고KPI 가 쓰는 참조 (v0.88.0)
 let NP_TOPTAB = 'board';    // 신제품 개발 상단 탭: board | timeline | portfolio | insight
 /* 상단 탭 ↔ 하위 메뉴 id — 탭을 눌러도 사이드바 활성 표시가 따라오게 (v0.69.0) */
 const NP_PAGE_OF = { board: 'newproduct', insight: 'newproduct-insight',
@@ -2170,11 +2171,12 @@ function subscribeData() {
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'cp_ref'), s => {
     const v = parseCol(s, null);
     CPREF = (v && typeof v === 'object')
-      ? { items: v.items || [], boms: v.boms || {}, shops: v.shops || [] }
-      : { items: [], boms: {}, shops: [] };
+      ? { items: v.items || [], boms: v.boms || {}, shops: v.shops || [], adRefunds: v.adRefunds || {} }
+      : { items: [], boms: {}, shops: [], adRefunds: {} };
     cpSyncHost();
     if (CUR_PAGE === 'sales-channel') { try { renderChannelProfit(); } catch (_) {} }
     if (CUR_PAGE === 'sales-margin') { try { renderMarginAnalysis(); } catch (_) {} }
+    if (CUR_PAGE === 'sales-ads' || SALES_TAB === 'ads') { try { rerender(); } catch (_) {} }
   }, e => console.warn('[cp_ref]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'channel_profit'), s => {
     const v = parseCol(s, null);
@@ -7278,6 +7280,7 @@ function cpSyncHost() {
   // v0.88.1: 마진 분석이 쓰는 주문·쇼핑몰
   window.DB.shopOrders = (ORDERS || []).slice();
   window.DB.shops = (CPREF.shops || []).slice();
+  window._adRefunds = CPREF.adRefunds || {};   // v0.88.2: 광고비 KPI 의 '실 광고비'(지출−환불)
   if (typeof window.fmtW !== 'function') window.fmtW = n => '₩' + Math.round(Number(n) || 0).toLocaleString();
   if (typeof window.openOrderDetail !== 'function') window.openOrderDetail = () => {};
   if (typeof window.openModal !== 'function') window.openModal = () => {};
@@ -7533,6 +7536,10 @@ function wireDataPage() {
   const cn = $('btn-cg-new'); if (cn) cn.onclick = openCgModal;
   document.querySelectorAll('[data-cons-print]').forEach(b => b.onclick = () => consPrint(b.dataset.consPrint, 'seller'));
   document.querySelectorAll('[data-cons-3pl]').forEach(b => b.onclick = () => consPrint(b.dataset.cons3pl, '3pl'));
+  // v0.88.2: 광고비 KPI 는 임원용과 같은 파일이 DOM 에 직접 그린다 — 화면을 만든 뒤에 부른다
+  if (SALES_TAB === 'ads' && typeof wireAdsKpi === 'function') {
+    try { wireAdsKpi(adsAll().filter(a => inPeriod(a.startDate))); } catch (e) { console.warn('wireAdsKpi:', e); }
+  }
   const an = $('btn-ad-new'); if (an) an.onclick = openAdModal;
   const ap = $('btn-adp-new'); if (ap) ap.onclick = openAdpModal;
   const at = $('btn-adp-toggle'); if (at) at.onclick = () => { ADP_OPEN = !ADP_OPEN; renderPage(); };
@@ -7840,30 +7847,54 @@ function adpAll() {
   return mine.concat((ADP || []).filter(p => !delIds.has(String(p.id))));
 }
 function adMonthKey(d) { return String(d || '').slice(0, 7); }
+/* v0.88.2 — 광고비 KPI. 임원용과 같은 파일(shared/ads-kpi.js)이 그린다.
+   예전엔 여기서 5개짜리를 따로 만들어 디자인도 수치도 달랐다.
+   빈 자리만 내주고, 값은 그린 뒤에 채운다(renderAdsKpi 는 DOM 에 직접 쓴다). */
 function adsKpiHtml(list) {
-  const now = new Date();
-  const thisM = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
-  const pm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const prevM = pm.getFullYear() + '-' + String(pm.getMonth() + 1).padStart(2, '0');
-  const spendIn = m => list.filter(a => adMonthKey(a.startDate) === m).reduce((s, a) => s + (Number(a.cost) || 0), 0);
-  const spend = spendIn(thisM), prev = spendIn(prevM);
-  const ords = (ORDERS || []).filter(o => o && String(o.orderDate || '').slice(0, 7) === thisM);
-  const rev = ords.reduce((s, o) => s + (Number(o.paymentAmount) || 0), 0);
-  const roas = spend ? Math.round(rev / spend * 100) : 0;
-  const cac = ords.length ? Math.round(spend / ords.length) : 0;
-  const aov = ords.length ? Math.round(rev / ords.length) : 0;
-  const diff = prev ? Math.round((spend - prev) / prev * 1000) / 10 : 0;
-  const kpi = (t, v, s, bg, fg) => `<div class="ord-kpi" style="background:${bg}"><div class="t">${t}</div>
-    <div class="v" style="color:${fg}">${v}</div><div class="s">${s || ''}</div></div>`;
-  return `<div class="ord-kpis">
-    ${kpi('총 실 광고비', '₩' + spend.toLocaleString(), thisM + ' · ' + list.filter(a => adMonthKey(a.startDate) === thisM).length + '건 집행', '#fdf2f8', '#9d174d')}
-    ${kpi('평균 ROAS', spend ? roas + '%' : '-', '매출 ₩' + rev.toLocaleString(), '#ecfdf5', '#047857')}
-    ${kpi('고객획득비용 CAC', ords.length ? '₩' + cac.toLocaleString() : '-', '주문 ' + ords.length + '건', '#fffbeb', '#92400e')}
-    ${kpi('객단가 AOV', ords.length ? '₩' + aov.toLocaleString() : '-', '주문 ' + ords.length + '건', '#eff6ff', '#1d4ed8')}
-    ${kpi('이번달 vs 지난달', prev ? (diff >= 0 ? '▲ ' : '▼ ') + Math.abs(diff) + '%' : '-', '지난달 ₩' + prev.toLocaleString(), '#f8fafc', diff >= 0 ? '#b91c1c' : '#047857')}
-  </div>
-  <div class="hint" style="margin:-4px 0 12px">NET 마진 · 주문당 순익 · 손익분기 ROAS 는 원가가 있어야 계산되어 표시하지 않습니다.</div>`;
+  return '<div id="ads-kpi-row" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px"></div>';
 }
+/* 카드 오른쪽 위에 붙는 기간 이름 — 임원용의 periodLabelStr 자리다. */
+function _adsPeriodLabel() {
+  const p = SALES_PD, r = periodRange();
+  if (p.mode === 'all' || (!r.start && !r.end)) return '전체';
+  if (p.mode === 'month' && p.month) {
+    const [y, m] = p.month.split('-');
+    return y + '년 ' + m + '월';
+  }
+  if (p.mode === 'day') return r.start;
+  return (r.start || '') + ' ~ ' + (r.end || '');
+}
+/* 화면을 그린 뒤에 부른다 — 임원용 renderAdsPage 가 넘기는 것과 같은 모양으로 맞춘다. */
+function wireAdsKpi(list) {
+  const host = $('ads-kpi-row');
+  if (!host || typeof renderAdsKpi !== 'function') return;
+  cpSyncHost();
+  const withShop = (arr) => (arr || []).map(a => Object.assign({}, a, {
+    _shopId: a.shopId, _shopName: a.shopName || shopNameOf(a.shopId) || ''
+  }));
+  const _refundOf = (k) => Number((window._adRefunds || {})[k]) || 0;
+  const _rowKeyOf = (a) => (a && a.expenseId) ? ('exp:' + a.expenseId) : ('ad:' + (a && a.id));
+  const adEntryRefund = (a, seen) => {
+    if (a && a.projectId) {
+      const k = 'grp:' + a.projectId;
+      if (seen && seen.has(k)) return 0;
+      if (seen) seen.add(k);
+      return _refundOf(k);
+    }
+    return _refundOf(_rowKeyOf(a));
+  };
+  const now = new Date();
+  try {
+    renderAdsKpi(host, {
+      filtered: withShop(list),
+      allAds: withShop(adsAll()),
+      periodLabelStr: _adsPeriodLabel(),
+      yr: now.getFullYear(), mo: now.getMonth(),
+      adEntryRefund: adEntryRefund
+    });
+  } catch (e) { console.warn('renderAdsKpi:', e); }
+}
+// v0.88.2: 5개짜리 옛 KPI(_adsKpiHtmlLegacy)는 지웠다 — 임원용과 같은 8개를 shared/ads-kpi.js 가 그린다.
 /* 임원용과 같게 — 기본은 접혀 있고 [📂 프로젝트 관리 ▼] 로 연다 */
 let ADP_OPEN = false;
 function adProjectsHtml(list) {
