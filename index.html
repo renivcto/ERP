@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.737';
+const ERP_VERSION = 'v2.3.738';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12519,6 +12519,8 @@ function go(page) {
   const pg = $('page-' + page);
   if (pg) pg.classList.add('active');
   $('pageTitle').textContent = (page in PAGE_TITLES) ? PAGE_TITLES[page] : page;  // v2.3.436: 빈 타이틀('') 허용(HOME 제거)
+  // v2.3.738: 판매 관리는 탭마다 화면이 달라 머리말도 그 화면 이름으로 맞춘다
+  if (page === 'sales') { try { _applySalesTitle(window._salesTab || 'dashboard'); } catch(_){} }
   // v2.3.453: 대시보드는 상단 헤더 바를 숨김(빈 공간 제거) — 구글시트/알림은 대시보드 우측 상단으로 이동
   try { const _hdr = document.getElementById('header'); if (_hdr) _hdr.style.display = (page === 'dashboard') ? 'none' : ''; } catch(_){}
   // v2.3.433: 재고 리포트 버튼은 재고 관리 페이지에서만 헤더에 노출
@@ -15581,7 +15583,22 @@ function renderSalesPage() {
   } catch(e) { console.warn('renderSalesPage 오류:', e); }
 }
 
+/* v2.3.738 — 판매 관리는 화면이 여러 개다. 머리말을 지금 보고 있는 화면 이름으로 바꾼다.
+   왼쪽 하위메뉴와 같은 이름·아이콘을 쓴다(위탁 재고이동·광고비 관리는 별도 페이지라 PAGE_TITLES 에 이미 있다). */
+const SALES_TAB_TITLES = {
+  dashboard: '📊 매출 대시보드',
+  orders:    '📦 주문 관리',
+  margin:    '💰 마진 분석',
+  channel:   '🧮 유통채널 수익계산'
+};
+function _applySalesTitle(tab) {
+  const el = $('pageTitle');
+  if (!el) return;
+  el.textContent = SALES_TAB_TITLES[tab] || (PAGE_TITLES.sales || '판매 관리');
+}
 function switchSalesTab(tab) {
+  // 지금 보고 있는 탭을 기억해 둔다 — 왼쪽 '판매 관리' 를 다시 눌러 돌아와도 머리말이 맞는다
+  if (tab !== 'shops') { window._salesTab = tab; _applySalesTitle(tab); }
   ['dashboard','orders','margin','shops','channel'].forEach(t => {
     const panel = $('sales-panel-'+t);
     if (panel) panel.style.display = t === tab ? '' : 'none';
