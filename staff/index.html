@@ -1504,7 +1504,9 @@ tr:last-child td { border-bottom:none; }
 
 <!-- v0.88.0: 유통채널 수익계산 — 임원용(/index.html)과 함께 읽는 한 벌.
      화면·계산이 여기 한 곳에만 있어 두 ERP 가 어긋날 수 없다. -->
+<link rel="stylesheet" href="../shared/panels.css">
 <script src="../shared/channel-profit.js"></script>
+<script src="../shared/margin-analysis.js"></script>
 <script type="module">
 /* ═══════════════════════════════════════════════════════════════
    르니브 직원 ERP — v0.1.0 (2026-08-16)
@@ -1527,7 +1529,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.88.0';
+const STAFF_VERSION = 'v0.88.1';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1584,7 +1586,7 @@ let INS = [];               // staff_data/insights       — 인사이트 보드
 let INSI = [];              // staff_data/inbox_insights — 직원이 올린 인사이트 (추가·수정·삭제)
 let PMAP = null;            // staff_data/productmap — 제품 포트폴리오
 let FPT = null;             // staff_data/fptimeline — 완제품 생산 타임라인
-let CPREF = { items: [], boms: {} };   // staff_data/cp_ref — 수익계산이 쓰는 품목·BOM 참조 (v0.88.0)
+let CPREF = { items: [], boms: {}, shops: [] };   // staff_data/cp_ref — 수익계산·마진분석이 쓰는 품목·BOM·쇼핑몰 참조 (v0.88.0)
 let NP_TOPTAB = 'board';    // 신제품 개발 상단 탭: board | timeline | portfolio | insight
 /* 상단 탭 ↔ 하위 메뉴 id — 탭을 눌러도 사이드바 활성 표시가 따라오게 (v0.69.0) */
 const NP_PAGE_OF = { board: 'newproduct', insight: 'newproduct-insight',
@@ -2167,9 +2169,12 @@ function subscribeData() {
   // v0.88.0: 유통채널 수익계산 — 품목·BOM 참조와 본문 데이터
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'cp_ref'), s => {
     const v = parseCol(s, null);
-    CPREF = (v && typeof v === 'object') ? { items: v.items || [], boms: v.boms || {} } : { items: [], boms: {} };
+    CPREF = (v && typeof v === 'object')
+      ? { items: v.items || [], boms: v.boms || {}, shops: v.shops || [] }
+      : { items: [], boms: {}, shops: [] };
     cpSyncHost();
     if (CUR_PAGE === 'sales-channel') { try { renderChannelProfit(); } catch (_) {} }
+    if (CUR_PAGE === 'sales-margin') { try { renderMarginAnalysis(); } catch (_) {} }
   }, e => console.warn('[cp_ref]', e.message)));
   _unsubs.push(onSnapshot(doc(db, 'staff_data', 'channel_profit'), s => {
     const v = parseCol(s, null);
@@ -3184,6 +3189,8 @@ const MENUS = [
     { id: 'sales', ico: '📦', name: () => '주문 관리', tab: 'order', sync: '임원용과 연동됩니다 (고객정보 제외)' },
     { id: 'sales-consign', ico: '🧾', name: () => '위탁 재고이동', tab: 'consign', sync: '위탁 출고·명세서가 임원용과 연동됩니다' },
     { id: 'sales-ads', ico: '📢', name: () => '광고비 관리', tab: 'ads', sync: '광고비·프로젝트가 임원용과 연동됩니다' },
+    // v0.88.1: 임원용과 같은 파일을 읽어 화면·계산이 동일하다.
+    { id: 'sales-margin', ico: '💰', name: () => '마진 분석', sync: '임원용과 연동됩니다 — 주문·원가·수수료·광고비로 계산합니다' },
     // v0.88.0: 임원용과 같은 화면·같은 데이터. 여기서 고친 것이 임원용에도 그대로 반영된다.
     { id: 'sales-channel', ico: '🧮', name: () => '유통채널 수익계산', sync: '임원용과 양방향으로 연동됩니다 — 여기서 고쳐도 임원용에 바로 반영됩니다' },
   ]},
@@ -3320,6 +3327,8 @@ function renderPage() {
       m.innerHTML = pageSales(); wireDataPage(); break;
     case 'sales-channel':
       m.innerHTML = pageChannelProfit(); wireChannelProfit(); break;
+    case 'sales-margin':
+      m.innerHTML = pageMarginAnalysis(); wireMarginAnalysis(); break;
     case 'workflow': m.innerHTML = pageWorkflow(); wireWorkflow(); break;
     case 'board':    m.innerHTML = pageBoard(); wireBoard(); break;
     case 'calendar': m.innerHTML = pageCalendar(); wireCalendar(); break;
@@ -7266,6 +7275,14 @@ function cpSyncHost() {
   window.DB = window.DB || {};
   window.DB.items = (CPREF.items || []).slice();
   window.DB.boms = CPREF.boms || {};
+  // v0.88.1: 마진 분석이 쓰는 주문·쇼핑몰
+  window.DB.shopOrders = (ORDERS || []).slice();
+  window.DB.shops = (CPREF.shops || []).slice();
+  if (typeof window.fmtW !== 'function') window.fmtW = n => '₩' + Math.round(Number(n) || 0).toLocaleString();
+  if (typeof window.openOrderDetail !== 'function') window.openOrderDetail = () => {};
+  if (typeof window.openModal !== 'function') window.openModal = () => {};
+  if (typeof window.closeModal !== 'function') window.closeModal = () => {};
+  if (typeof window.$ !== 'function') window.$ = id => document.getElementById(id);
   window.getItem = id => (window.DB.items || []).find(x => x && String(x.id) === String(id)) || null;
   window.showNotif = (msg, kind) => toast(msg, kind === 'warning' || kind === 'error');
   // 직원도 임원과 똑같이 고칠 수 있다 (2026-08-22 결정). 관리자 모드와도 동일.
@@ -7304,6 +7321,27 @@ function wireChannelProfit() {
     return;
   }
   try { renderChannelProfit(); } catch (e) { console.warn('renderChannelProfit:', e); }
+}
+
+/* ═══════════ 마진 분석 (v0.88.1) ═══════════
+   화면 뼈대(KPI 카드·필터·표 머리글)까지 ../shared/margin-analysis.js 의
+   renderMarginShell() 이 그린다. 임원용이 쓰는 바로 그 함수라 어긋날 수 없다.
+   임원용에는 기간 필터가 상단 툴바에 따로 있지만 직원용엔 없어서 함께 그린다. */
+function pageMarginAnalysis() {
+  return `<div class="pg on">
+    <div class="pg-h"><h1>${esc(pgTitle())}${syncMark('임원용 ERP와 연동됩니다', 1)}</h1></div>
+    <div id="sales-panel-margin" style="margin-top:16px"></div>
+  </div>`;
+}
+function wireMarginAnalysis() {
+  cpSyncHost();
+  const host = $('sales-panel-margin');
+  if (typeof renderMarginShell !== 'function' || typeof renderMarginAnalysis !== 'function') {
+    if (host) host.innerHTML = '<div class="empty">마진 분석 모듈을 불러오지 못했습니다 — 새로고침해 주세요</div>';
+    return;
+  }
+  try { renderMarginShell(host, { periodFilter: true }); } catch (e) { console.warn('renderMarginShell:', e); }
+  try { renderMarginAnalysis(); } catch (e) { console.warn('renderMarginAnalysis:', e); }
 }
 
 /* ── 판매 관리 — 주문 관리 (고객정보 없음, 읽기 전용) ── */
