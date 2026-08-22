@@ -6354,7 +6354,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.733';
+const ERP_VERSION = 'v2.3.734';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -16295,34 +16295,42 @@ function _cpCalcPharmacy(r) {
   // v2.2.5: 바로팜 부대 수수료 (기본 5%) — 매출 × % (부가세 포함)
   const extraFeePct = (r.extraFeePct===''||r.extraFeePct==null) ? 5 : (Number(r.extraFeePct)||0);
   const unitCost = _cpLiveCost(r);
+  // v2.3.734: 4+1 사은품 — 4개 팔 때마다 1개를 얹어 준다. 매출은 없고 원가만 나간다.
+  //   기준(giftPer)은 행마다 고칠 수 있다. 0·빈칸이면 사은품 없음.
+  const giftPer = (r.giftPer === '' || r.giftPer == null) ? 4 : (Number(r.giftPer) || 0);
+  const giftQty = giftPer > 0 ? Math.floor(qty / giftPer) : 0;
+  const shipQty = qty + giftQty;                             // 실제로 나가는 수량
+  const giftCost = unitCost * giftQty;                       // 사은품 원가 (부가세 제외)
   const supplyPrice = salePrice * supplyRate / 100;          // 공급가 (부가세 포함)
-  const revenue = supplyPrice * qty;                         // 매출 (부가세 포함)
+  const revenue = supplyPrice * qty;                         // 매출 (부가세 포함) — 사은품은 빠진다
   const fee1 = revenue * fee1Pct / 100;                      // 바로팜 1차 수수료 (부가세 포함)
   const fee2 = revenue * fee2Pct / 100;                      // 바로팜 2차 수수료 (부가세 포함)
   const extraFee = revenue * extraFeePct / 100;              // 바로팜 부대 수수료 (부가세 포함)
-  const totalCost = unitCost * qty;                          // 총원가 (부가세 제외)
+  const totalCost = unitCost * shipQty;                      // 총원가 (부가세 제외) — 사은품 몫 포함
   const netRevenue = revenue / 1.1;                          // 매출 공급가 (부가세 제외)
   // 순이익(부가세 제외): 매출·수수료·배송비는 부가세 포함값이라 ÷1.1, 고정비·총원가는 이미 부가세 제외
   const netProfit = netRevenue - (fee1/1.1) - (fee2/1.1) - (extraFee/1.1) - fixedCost - totalCost - (shipping/1.1);
   const profitRate = netRevenue > 0 ? (netProfit / netRevenue * 100) : 0;
   return { supplyPrice:supplyPrice, revenue:revenue, fee1:fee1, fee2:fee2, extraFee:extraFee, extraFeePct:extraFeePct, totalCost:totalCost,
-    netRevenue:netRevenue, netProfit:netProfit, profitRate:profitRate, fee1Pct:fee1Pct, fee2Pct:fee2Pct };
+    netRevenue:netRevenue, netProfit:netProfit, profitRate:profitRate, fee1Pct:fee1Pct, fee2Pct:fee2Pct,
+    giftPer:giftPer, giftQty:giftQty, shipQty:shipQty, giftCost:giftCost, unitCost:unitCost };
 }
 
 var _CP_PHARM_INFO = {
   ph_name: ['제품명', '이 행에 연결된 완제품입니다.\n제품명을 클릭하면 전체 내역을 팝업으로 볼 수 있습니다.'],
   ph_revenue: ['매출 (부가세 포함)', '약국 공급 매출액입니다. (부가세 포함)\n\n매출 = 공급가 × 판매수량'],
-  ph_netProfit: ['순이익 (부가세 제외)', '부가세를 제외한 순이익입니다.\n\n순이익 = 매출÷1.1 − 바로팜1차÷1.1 − 바로팜2차÷1.1 − 바로팜부대÷1.1 − 고정비 − 총원가 − 예상배송비÷1.1\n\n※ 매출·수수료·배송비는 부가세 포함값이라 ÷1.1로 부가세를 빼고, 고정비·총원가는 이미 부가세 제외 금액입니다.'],
+  ph_netProfit: ['순이익 (부가세 제외)', '부가세를 제외한 순이익입니다.\n\n순이익 = 매출÷1.1 − 바로팜1차÷1.1 − 바로팜2차÷1.1 − 바로팜부대÷1.1 − 고정비 − 총원가 − 예상배송비÷1.1\n\n※ 매출·수수료·배송비는 부가세 포함값이라 ÷1.1로 부가세를 빼고, 고정비·총원가는 이미 부가세 제외 금액입니다.\n※ 총원가에는 4+1 사은품의 원가가 포함됩니다 — 사은품은 매출이 없어 순이익이 그만큼 줄어듭니다.'],
   ph_profitRate: ['수익율 (부가세 제외)', '부가세 제외 기준 수익율입니다.\n\n수익율 = 순이익 ÷ (매출÷1.1) × 100'],
   ph_salePrice: ['실제 판매가 (부가세 포함)', '완제품의 실제 판매가입니다. (부가세 포함)\n완제품을 선택하면 자동 입력되며 수정할 수 있습니다.'],
-  ph_qty: ['판매수량', '약국에 판매한 수량입니다. (입력값)'],
+  ph_qty: ['판매수량', '약국에 돈을 받고 판매한 수량입니다. (입력값)\n사은품은 여기에 들어가지 않습니다.'],
+  ph_giftQty: ['사은품 수량', '약국 판매는 4+1 입니다 — 4개 팔 때마다 1개를 사은품으로 얹어 줍니다.\n\n사은품 수량 = 판매수량 ÷ 기준(기본 4), 버림\n\n사은품은 매출이 없고 원가만 나갑니다. 그래서 총원가에 더해지고, 그만큼 순이익과 수익율이 내려갑니다.\n기준은 행 수정에서 바꿀 수 있습니다(0 이면 사은품 없음).'],
   ph_supplyPrice: ['공급가 (부가세 포함)', '약국에 공급하는 단가입니다. (부가세 포함)\n\n공급가 = 실제 판매가 × 공급율'],
   ph_fee1: ['바로팜 1차 수수료 (부가세 포함)', '바로팜 1차 수수료입니다. (부가세 포함)\n\n바로팜 1차 수수료 = 매출 × 1차 수수료%'],
   ph_fee2: ['바로팜 2차 수수료 (부가세 포함)', '바로팜 2차 수수료입니다. (부가세 포함)\n\n바로팜 2차 수수료 = 매출 × 2차 수수료%'],
   ph_extraFee: ['바로팜 부대 수수료 (부가세 포함)', '바로팜 부대 수수료입니다. (부가세 포함, 기본값 5%)\n\n바로팜 부대 수수료 = 매출 × 부대 수수료%'],
   ph_fixedCost: ['고정비 (부가세 제외)', '입력한 고정비입니다. (부가세 제외 금액)'],
   ph_cogs: ['제품원가 COGS', '제품 1개당 원가입니다. COGS이므로 부가세 제외 금액입니다.\n완제품의 BOM 합계 원가를 자동으로 가져오며, 수정할 수 있습니다.'],
-  ph_totalCost: ['총원가 (부가세 제외)', '판매수량 전체의 제조원가입니다. (부가세 제외)\n\n총원가 = 제품원가 COGS × 판매수량'],
+  ph_totalCost: ['총원가 (부가세 제외)', '실제로 나가는 수량 전체의 제조원가입니다. (부가세 제외)\n\n총원가 = 제품원가 COGS × (판매수량 + 사은품 수량)\n\n※ 사은품은 돈을 받지 않지만 원가는 똑같이 나갑니다.'],
   ph_shipping: ['예상 배송비 (부가세 포함)', '입력한 예상 배송비 총액입니다. (부가세 포함)\n순이익 계산 시 ÷1.1로 부가세를 빼고 차감합니다.']
 };
 
@@ -16343,6 +16351,7 @@ function _cpRenderPharmacyTable(wrap) {
   h += '<table style="border-collapse:collapse;white-space:nowrap;font-size:12px;min-width:100%"><thead><tr>';
   h += TH('제품명', 'ph_name', '', 'position:sticky;left:0;z-index:4;background:#f8fafc;width:172px;min-width:172px');
   h += TH('판매수량', 'ph_qty', '', '');
+  h += TH('사은품 수량', 'ph_giftQty', '매출 없음', '');   // v2.3.734: 4+1
   h += TH('매출', 'ph_revenue', '부가세 포함', 'background:#e0f2fe');
   h += TH('순이익', 'ph_netProfit', '부가세 제외', 'background:#fffbeb;border-bottom-color:#fde68a');
   h += TH('수익율', 'ph_profitRate', '부가세 제외', 'background:#fffbeb;border-bottom-color:#fde68a');
@@ -16365,6 +16374,11 @@ function _cpRenderPharmacyTable(wrap) {
     h += '<tr>';
     h += '<td style="padding:8px 10px;text-align:center;border-bottom:1px solid #f1f5f9;position:sticky;left:0;z-index:3;background:#fff;width:172px;min-width:172px"><span onclick="openCpDetail(' + r.id + ')" style="color:#9d174d;font-weight:700;cursor:pointer">' + _cpEsc(nm) + '</span></td>';
     h += TD('<b>' + (Math.round(Number(r.qty)||0)).toLocaleString() + '개</b>');
+    // v2.3.734: 사은품 — 몇 개 얹어 나갔는지, 원가가 얼마인지
+    h += TD(c.giftQty > 0
+      ? ('<b style="color:#9d174d">+' + c.giftQty.toLocaleString() + '개</b>'
+         + '<div style="font-size:9.5px;color:#94a3b8;margin-top:1px;font-weight:600">' + c.giftPer + '+1 · 원가 ' + _cpWon(c.giftCost) + '</div>')
+      : '<span style="color:#cbd5e1">-</span>');
     h += TD('<b>' + _cpWon(c.revenue) + '</b>', 'background:#e0f2fe');
     h += TD('<b style="color:' + (c.netProfit>=0?'#15803d':'#dc2626') + '">' + _cpWon(c.netProfit) + '</b>', 'background:#fffbeb;font-weight:800');
     h += TD('<b style="color:' + (c.profitRate>=0?'#15803d':'#dc2626') + '">' + _cpPct(c.profitRate) + '</b>', 'background:#fffbeb;font-weight:800');
@@ -16375,7 +16389,8 @@ function _cpRenderPharmacyTable(wrap) {
     h += TD(_cpWon(c.extraFee) + '<div style="font-size:9.5px;color:#0369a1;margin-top:1px;font-weight:700">' + _cpPct(c.extraFeePct) + '</div>');
     h += TD(_cpWon(r.fixedCost));
     h += TD(_cpWon(_cpLiveCost(r)));
-    h += TD(_cpWon(c.totalCost));
+    h += TD(_cpWon(c.totalCost)
+      + (c.giftQty > 0 ? ('<div style="font-size:9.5px;color:#94a3b8;margin-top:1px;font-weight:600">출고 ' + c.shipQty.toLocaleString() + '개</div>') : ''));
     h += TD(_cpWon(r.shipping));
     h += TD('<div style="display:flex;flex-direction:column;gap:2px;align-items:center"><button onclick="openCpModal(' + r.id + ')" style="background:#fce7f3;color:#9d174d;border:1px solid #fbcfe8;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;cursor:pointer;line-height:1.5">✏️</button><button onclick="copyCpRow(' + r.id + ')" title="이 행을 복사해 새 행 추가" style="background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;cursor:pointer;line-height:1.5">📋</button></div>');
     h += '</tr>';
@@ -16438,6 +16453,8 @@ function _cpOpenModalPharmacy(id, r) {
     + fld('공급율', 'cp-ph-supplyRate', g('supplyRate',50), '%', '')
     + fld('고정비', 'cp-ph-fixedCost', g('fixedCost',0), '원', '부가세 제외')
     + fld('판매 수량', 'cp-ph-qty', g('qty',0), '개', '')
+    // v2.3.734: 약국은 4+1 — 기준을 바꾸거나 0 으로 두면 사은품 없음
+    + fld('사은품 기준 (n개당 1개)', 'cp-ph-giftPer', g('giftPer',4), '개당 1개', '')
     + fld('예상 배송비', 'cp-ph-shipping', g('shipping',0), '원', '부가세 포함')
     + fld('바로팜 1차 수수료', 'cp-ph-fee1', g('fee1Pct',15), '%', '')
     + fld('바로팜 2차 수수료', 'cp-ph-fee2', g('fee2Pct',13), '%', '')
@@ -16506,6 +16523,7 @@ function _cpReadModalPharmacy() {
     supplyRate: _cpNum('cp-ph-supplyRate'),
     fixedCost: _cpNum('cp-ph-fixedCost'),
     qty: _cpNum('cp-ph-qty'),
+    giftPer: _cpNum('cp-ph-giftPer'),   // v2.3.734: 4+1 기준
     shipping: _cpNum('cp-ph-shipping'),
     fee1Pct: _cpNum('cp-ph-fee1'),
     fee2Pct: _cpNum('cp-ph-fee2'),
@@ -16523,7 +16541,10 @@ function _cpModalLivePharmacy(box) {
     + '<span style="font-size:9.5px;color:#b45309;margin-left:3px">부가세 제외</span></div>'
     + '<div><span style="font-size:11px;color:#9d174d;font-weight:700">수익율</span> '
     + '<b style="font-size:16px;color:' + (c.profitRate>=0?'#15803d':'#dc2626') + '">' + _cpPct(c.profitRate) + '</b></div>'
-    + '<div style="font-size:11px;color:#9d174d">매출 ' + _cpWon(c.revenue) + ' · 공급가 ' + _cpWon(c.supplyPrice) + ' · 총원가 ' + _cpWon(c.totalCost) + '</div>';
+    + '<div style="font-size:11px;color:#9d174d;line-height:1.7">매출 ' + _cpWon(c.revenue) + ' · 공급가 ' + _cpWon(c.supplyPrice) + ' · 총원가 ' + _cpWon(c.totalCost)
+    // v2.3.734: 사은품이 몇 개 나가고 원가가 얼마인지 그 자리에서 보여준다
+    + (c.giftQty > 0 ? ('<br>사은품 <b>' + c.giftQty.toLocaleString() + '개</b> (' + c.giftPer + '+1) · 사은품 원가 <b>' + _cpWon(c.giftCost) + '</b> · 출고 ' + c.shipQty.toLocaleString() + '개') : '')
+    + '</div>';
 }
 
 function _cpOpenDetailPharmacy(r) {
@@ -16556,13 +16577,16 @@ function _cpOpenDetailPharmacy(r) {
     + line('공급율', _cpPct(r.supplyRate))
     + line('공급가 (부가세 포함)', _cpWon(c.supplyPrice))
     + line('판매 수량', (Math.round(Number(r.qty)||0)).toLocaleString() + '개')
+    // v2.3.734: 사은품은 매출이 없다 — 매출 줄 위에 함께 보여 준다
+    + (c.giftQty > 0 ? line('사은품 수량 (' + c.giftPer + '+1, 매출 없음)', '+' + c.giftQty.toLocaleString() + '개', {color:'#9d174d'}) : '')
     + line('매출 (부가세 포함)', _cpWon(c.revenue))
     + sect('비용 · 원가')
     + line('바로팜 1차 수수료 (' + _cpPct(c.fee1Pct) + ', 부가세 포함)', _cpWon(c.fee1))
     + line('바로팜 2차 수수료 (' + _cpPct(c.fee2Pct) + ', 부가세 포함)', _cpWon(c.fee2))
     + line('고정비 (부가세 제외)', _cpWon(r.fixedCost))
     + line('제품원가 COGS (개당)', _cpWon(_cpLiveCost(r)))
-    + line('총원가 (부가세 제외)', _cpWon(c.totalCost))
+    + (c.giftQty > 0 ? line('사은품 원가 (' + c.giftQty.toLocaleString() + '개, 부가세 제외)', _cpWon(c.giftCost), {color:'#9d174d'}) : '')
+    + line('총원가 (부가세 제외' + (c.giftQty > 0 ? ', 출고 ' + c.shipQty.toLocaleString() + '개' : '') + ')', _cpWon(c.totalCost))
     + line('예상 배송비 (부가세 포함)', _cpWon(r.shipping))
     + (r.note ? (sect('비고') + '<div style="font-size:12px;color:#475569;padding:4px 0;white-space:pre-wrap">' + _cpEsc(r.note) + '</div>') : '')
     + '</div>'
