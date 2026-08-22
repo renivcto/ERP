@@ -1524,7 +1524,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.87.2';
+const STAFF_VERSION = 'v0.87.3';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1573,7 +1573,7 @@ let BOARD = [];             // staff_data/board       — 임원용이 '직원�
 let BOARD_S = [];           // staff_data/board_staff — 직원이 직접 등록한 글
 let CAL = [];               // staff_data/calendar    — 르니브 업무 일정 미러 (압축: 시작일 + days)
 let WF = [];                // staff_data/workflow    — 워크플로우 3개 보드 (신제품 개발 제외)
-let ITEMS = [];             // staff_data/items_fin   — 완제품 품목 (원가·재고평가액 제외, 읽기 전용)
+let ITEMS = [];             // staff_data/items_fin   — 완제품 품목 (재고평가액 제외, 읽기 전용)
 let WHS = [];               // staff_data/warehouses  — 창고 목록
 let ORDERS = [];            // staff_data/orders      — 주문 (고객정보 없음)
 let ORDI = [];              // staff_data/inbox_orders — 직원이 올린 주문 수정 요청
@@ -1900,12 +1900,13 @@ if (DEMO) {
       channels: ['온라인'], image: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI5NiIgaGVpZ2h0PSI5NiI+PHJlY3Qgd2lkdGg9Ijk2IiBoZWlnaHQ9Ijk2IiBmaWxsPSIjYjg4ODc4Ii8+PC9zdmc+', stock: 1985, whStock: { w2: 225, w1: 1760 }, defaultWh: 'w1', nameEn: '3X BARRIER 20-VEIL RENEW CREAM', consumerPrice: 42000, vendorName: '한국콜마',
       supplyPrices: [{ sellerId: 'shop:h1', sellerName: '쿠팡', itemName: '320 크림', salePrice: 27900, price: 21000, vat: 'include', stockId: '' },
                      { sellerId: 'sl1', sellerName: '바로팜', itemName: '320 리뉴 크림', salePrice: 27900, price: 19500, vat: 'include', stockId: '' }],
-      minStock: 100, salePrice: 27900, supply: [{ seller: '쿠팡 Wing', price: 27900 }], note: '' },
+      minStock: 100, salePrice: 27900, price: 8420, supply: [{ seller: '쿠팡 Wing', price: 27900 }], note: '' },
     { id: 'i2', code: 'P-3X-03', name: '3중 장벽 20층 리뉴 크림 60ml', spec: '60mL / NET WT. 2.13 OZ',
       channels: ['약국'], image: '', stock: 3443, whStock: { w3: 157, w1: 3286 }, defaultWh: 'w1',
-      minStock: 200, salePrice: 39000, supply: [{ seller: '바로팜', price: 39000 }], note: '' },
+      minStock: 200, salePrice: 39000, price: 12900, supply: [{ seller: '바로팜', price: 39000 }], note: '' },
     { id: 'i3', code: 'P-GS-01', name: '글로우샷 30ml', spec: '30ml', channels: ['약국'], image: '',
       stock: 5742, whStock: { w3: 113, w1: 5629 }, defaultWh: 'w1', minStock: 0, salePrice: 32000,
+      price: 4300, priceCurrency: 'USD', priceForeign: 3.2,
       supply: [{ seller: '바로팜', price: 32000 }], note: '' },
   ];
   ORDERS = [
@@ -3174,7 +3175,7 @@ const MENUS = [
   ]},
   { sep: true },
   { group: '제품 관리', ico: '📦', items: [
-    { id: 'items', ico: '🧴', name: () => '품목 정보', sync: '완제품만, 읽기 전용으로 임원용과 연동됩니다 (원가·재고평가액 제외)' },
+    { id: 'items', ico: '🧴', name: () => '품목 정보', sync: '완제품만, 읽기 전용으로 임원용과 연동됩니다 (원가 포함 · 재고평가액 제외)' },
     { id: 'stock', ico: '🏬', name: () => '재고 관리', sync: '완제품 재고·위탁 재고이동·창고 관리가 임원용과 연동됩니다' },
   ]},
   /* v0.69.0: 하위 메뉴가 곧 상단 탭이다 (판매·결재 관리와 같은 구조) */
@@ -6043,8 +6044,9 @@ function pagePharmacy() {
 
 /* ═══════════ 품목 상세 (v0.54.0) ═══════════
    임원용 품목 현황과 같은 정보를 보여준다.
-   ⚠️ 원가(단가)·재고평가액은 미러에 아예 없다 — 화면에도 '비공개' 로 표시만 한다.
-   직원이 고칠 수 있는 것은 판매업체별 판매가·공급가 하나뿐이다. */
+   v0.87.3 — 원가(단가)도 보여준다(2026-08-22 공개 결정). 재고평가액은 여전히 없다.
+   ⚠️ 원가는 보기 전용이다. 직원이 고쳐 임원용으로 되돌려 보낼 수 있는 것은
+      판매업체별 판매가·공급가 하나뿐이다 — 원가는 넘길 길이 아예 없다. */
 let ITEM_OPEN = null, ITEM_SP = [];
 let ITEM_EDIT = false;      // 품목 상세: false=보기 / true=수정 (v0.82.0)
 let ITEM_SP_OPEN = true;    // 판매업체 가격 구역 접기 상태
@@ -6078,8 +6080,12 @@ function openItemModal(id) {
       ${row('제조/공급처', esc(i.vendorName || ''))}
       ${row('소비자가', i.consumerPrice ? w(i.consumerPrice) : '')}
       ${row('대표 판매가', i.salePrice ? w(i.salePrice) : '')}
-      <tr><th>원가 (단가)</th><td><span class="sp-lock">🔒 비공개</span>
-        <span style="font-size:11.5px;color:var(--ink-mute);margin-left:6px">원가는 표시되지 않습니다</span></td></tr>
+      <tr><th>원가 (단가)</th><td>${i.price
+        ? `<b>${w(i.price)}</b>`
+          + (i.priceCurrency && i.priceCurrency !== 'KRW' && i.priceForeign
+              ? ` <span style="font-size:11.5px;color:var(--ink-mute)">(${esc(i.priceCurrency)} ${Number(i.priceForeign).toLocaleString()})</span>` : '')
+          + '<span style="font-size:11.5px;color:var(--ink-mute);margin-left:8px">임원용ERP에서만 수정합니다</span>'
+        : '<span style="color:var(--ink-mute)">-</span>'}</td></tr>
       <tr><th>재고</th><td>${whs.length
         ? whs.map(x => esc(x.name) + ' <b>' + x.qty.toLocaleString() + '</b>').join(' · ')
           + ' · 합계 <b>' + Number(i.stock || 0).toLocaleString() + '</b>'
@@ -6995,7 +7001,7 @@ function dpEmpty(what) {
     <p>아직 등록된 내용이 없습니다. 관리자에게 동기화를 요청해 주세요.</p></div>`;
 }
 
-/* ── 품목 정보 (완제품, 원가·재고평가액 없음) ── */
+/* ── 품목 정보 (완제품, 재고평가액 없음) ── */
 function pageItems() {
   const list = dpFilter(ITEMS || [], ITEM_Q, ['name', 'code', 'spec']);
   return `<div class="pg on">
