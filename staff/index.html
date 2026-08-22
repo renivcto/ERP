@@ -1524,7 +1524,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.87.1';
+const STAFF_VERSION = 'v0.87.2';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -4609,7 +4609,7 @@ function pageAccounts() {
               : ''}</td></tr>`;
         }).join('')}</tbody></table></div></div>`
       : `<div class="ph"><div class="big">🔑</div><h3>표시할 계정이 없습니다</h3>
-          <p>관리자가 등록한 계정은 여기에 자동으로 나타납니다.
+          <p>임원용ERP에서 등록한 계정은 여기에 자동으로 나타납니다.
              직접 등록할 수도 있습니다.</p></div>`}
   </div>`;
 }
@@ -4630,10 +4630,17 @@ function wireAccounts() {
     const [src, id] = tr.dataset.accRow.split('|');
     openAccView(src, id);
   });
-  // 비밀번호는 기본 가림 — 어깨너머 노출만 줄인다(문서에는 평문으로 들어 있다)
-  document.querySelectorAll('[data-pw-show]').forEach(b => b.onclick = e => {
-    e.stopPropagation();
+  wirePwShow(document);
+}
+/* v0.87.2 — 비밀번호 '보기' 배선.
+   화면을 그린 뒤 한 번만 돌면 나중에 열리는 팝업의 버튼은 배선이 안 된다
+   (상세 팝업에서 '보기' 가 안 눌리던 이유). 그려 넣는 쪽마다 불러 준다.
+   비밀번호는 기본 가림 — 어깨너머 노출만 줄인다(문서에는 평문으로 들어 있다). */
+function wirePwShow(root) {
+  (root || document).querySelectorAll('[data-pw-show]').forEach(b => b.onclick = e => {
+    if (e) e.stopPropagation();
     const s = b.previousElementSibling;
+    if (!s) return;
     const shown = s.dataset.on === '1';
     s.textContent = shown ? '••••••••' : s.dataset.pw;
     s.dataset.on = shown ? '' : '1';
@@ -4643,7 +4650,7 @@ function wireAccounts() {
 async function accDelete(src, id) {
   const a = accFind(src, id);
   if (!a) return;
-  if (src !== 'staff') { toast('관리자가 등록한 계정입니다 — 삭제는 관리자에게 요청하세요', true); return; }
+  if (src !== 'staff') { toast('임원용ERP에서 등록한 계정입니다 — 삭제는 관리자에게 요청하세요', true); return; }
   if (!confirm(`'${a.name}' 계정을 삭제할까요?`)) return;
   const arr = (ACC_S || []).filter(x => String(x.id) !== String(id));
   try { await saveCol('accounts_staff', arr); ACC_S = arr; toast('삭제했습니다'); rerender(); }
@@ -4668,12 +4675,13 @@ function openAccView(src, id) {
     + `<div class="acc-note" style="margin-top:14px;background:${mine ? 'var(--brand-soft)' : '#eef2ff'};color:${mine ? 'var(--brand-deep)' : '#4338ca'}">
         ${mine
           ? '👥 <b>직원이 등록한 계정</b>입니다.<br>수정·삭제는 여기에서 합니다.'
-          : '🔗 <b>관리자가 등록한 계정</b>입니다. 여기서는 수정·삭제할 수 없습니다.'
-            + '<br>비밀번호를 포함해 관리자가 고친 내용은 이 화면에 자동으로 반영됩니다.'}
+          : '🔗 <b>임원용ERP에서 등록한 계정</b>입니다. 여기서는 수정·삭제할 수 없습니다.'
+            + '<br>비밀번호를 포함해 임원용ERP에서 수정한 내용은 이 화면에 자동으로 반영됩니다.'}
        </div>`;
   $('accv-f').innerHTML = `<button class="btn" data-close="ovl-accv">닫기</button>`
     + (mine ? `<button class="btn btn-sm btn-bad" id="accv-del" style="padding:9px 16px">삭제</button>
                <button class="btn btn-p" id="accv-edit">✏️ 수정</button>` : '');
+  wirePwShow($('accv-b'));   // v0.87.2: 팝업은 지금 그렸다 — 여기서 배선하지 않으면 '보기' 가 안 눌린다
   $('accv-f').querySelectorAll('[data-close]').forEach(b => b.onclick = () => $('ovl-accv').classList.remove('on'));
   if (mine) {
     $('accv-edit').onclick = () => { $('ovl-accv').classList.remove('on'); openPtModal('acc', a.id, a.src); };
@@ -4696,14 +4704,7 @@ function wirePt(scope) {
       toast('삭제했습니다'); rerender();
     } catch (e) { toast('삭제 실패: ' + e.message, true); }
   });
-  // 비밀번호는 기본 가림 — 어깨너머 노출만 줄인다(문서에는 그대로 들어 있다)
-  document.querySelectorAll('[data-pw-show]').forEach(b => b.onclick = () => {
-    const s = b.previousElementSibling;
-    const shown = s.dataset.on === '1';
-    s.textContent = shown ? '••••••••' : s.dataset.pw;
-    s.dataset.on = shown ? '' : '1';
-    b.textContent = shown ? '보기' : '숨기기';
-  });
+  wirePwShow(document);
 }
 function openPtModal(kind, id, src) {
   const def = ptDef(kind);
@@ -4739,7 +4740,7 @@ $('btn-pt-save').onclick = async () => {
   // v0.21.0 — 외부 계정. 임원용 미러는 원본을 못 고치므로 오버레이에 덮어쓰기만 남긴다.
   if (kind === 'acc') {
     // 임원용 등록분은 여기서 고칠 수 없다 — 버튼도 안 만들지만 경로 자체를 막아 둔다
-    if (src === 'erp') { toast('관리자가 등록한 계정입니다 — 수정은 관리자에게 요청하세요', true); return; }
+    if (src === 'erp') { toast('임원용ERP에서 등록한 계정입니다 — 수정은 관리자에게 요청하세요', true); return; }
     try {
       const arr = (ACC_S || []).slice();
       const i = arr.findIndex(x => String(x.id) === String(obj.id));
