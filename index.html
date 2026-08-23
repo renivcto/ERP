@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.742';
+const ERP_VERSION = 'v2.3.743';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7256,6 +7256,72 @@ async function _shardRead(col, getFn){
   return { exists:true, orders:all, archN };
 }
 async function _soReadSharded(getFn){ return _shardRead('shopOrders', getFn); }
+
+/* ═══════════ v2.3.743 — 매출 소스 전수 진단 (읽기 전용) ═══════════
+   '8월 주문이 1건뿐' 의 정체를 밝힌다. 매출은 두 곳에 나뉘어 담긴다.
+     · DB.shopOrders          쇼핑몰 주문 (와디즈·쿠팡·스마트스토어·자사몰)
+     · _consign.shipments     위탁 출고 (바로팜 등) — 주문 관리 화면에 안 나온다
+   슬랙 리포트는 둘을 합산했는데, 주문 관리 화면은 앞의 것만 본다.
+   ⚠️ 읽기만 한다.  콘솔에서: salesAudit('2026-08')   (인자 없으면 이번 달) */
+window.salesAudit = function(month) {
+  const M = month || new Date().toISOString().slice(0, 7);
+  const won = n => '₩' + Math.round(Number(n) || 0).toLocaleString();
+  const ymOf = v => String(v || '').slice(0, 7);
+  console.log('%c══════ ' + M + ' 매출 소스 전수 ══════', 'font-weight:800;font-size:13px');
+
+  // ① 쇼핑몰 주문
+  const SO = (DB.shopOrders || []).filter(o => o && ymOf(o.orderDate || o.date) === M);
+  const soAmt = SO.reduce((s, o) => s + (Number(o.paymentAmount || o.totalPrice || 0) || 0), 0);
+  const byShop = {};
+  SO.forEach(o => {
+    const k = o.shopName || o.shopId || '(미상)';
+    if (!byShop[k]) byShop[k] = { 건수: 0, 금액: 0 };
+    byShop[k].건수++; byShop[k].금액 += Number(o.paymentAmount || o.totalPrice || 0) || 0;
+  });
+  console.log('① 쇼핑몰 주문 (주문 관리 화면에 나오는 것) —', SO.length, '건 ·', won(soAmt));
+  if (SO.length) console.table(byShop);
+
+  // ② 위탁 출고 — 바로팜 등. 주문 관리 화면엔 안 나온다.
+  let CS = [], csAmt = 0;
+  try {
+    const ship = (window._consign && Array.isArray(window._consign.shipments)) ? window._consign.shipments : [];
+    CS = ship.filter(sh => sh && ymOf(sh.date) === M);
+    const byWho = {};
+    CS.forEach(sh => {
+      let t = 0;
+      try { const A = _consignAmounts(sh); t = Number(A && (A.total != null ? A.total : A.sum)) || 0; } catch (_) {}
+      csAmt += t;
+      const sel = (DB.sellers || []).find(x => x && String(x.id) === String(sh.sellerId));
+      const k = (sel && sel.company) || sh.sellerName || '(미상)';
+      if (!byWho[k]) byWho[k] = { 건수: 0, 금액: 0 };
+      byWho[k].건수++; byWho[k].금액 += t;
+    });
+    console.log('② 위탁 출고 (바로팜 등 — 주문 관리 화면엔 안 나온다) —', CS.length, '건 ·', won(csAmt));
+    if (CS.length) console.table(byWho);
+    else console.log('   이 달 위탁 출고가 없다. (전체 위탁 건수:', ship.length, '건)');
+  } catch (e) { console.warn('   위탁 읽기 실패:', e && e.message); }
+
+  console.log('%c③ 합계 — ' + (SO.length + CS.length) + '건 · ' + won(soAmt + csAmt), 'font-weight:800;color:#0f766e');
+  console.log('   (슬랙 리포트는 이 합계를 쓴다. 주문 관리 화면은 ① 만 보여준다.)');
+
+  // ④ 최근 60일 쇼핑몰 주문 — '있었는데 사라졌다' 를 눈으로 확인
+  const cut = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
+  const recent = (DB.shopOrders || [])
+    .filter(o => o && String(o.orderDate || o.date || '').slice(0, 10) >= cut)
+    .sort((a, b) => String(b.orderDate || '').localeCompare(String(a.orderDate || '')));
+  console.log('④ 최근 60일 쇼핑몰 주문 —', recent.length, '건');
+  if (recent.length) {
+    console.table(recent.slice(0, 40).map(o => ({
+      주문일: String(o.orderDate || o.date || '').slice(0, 16),
+      쇼핑몰: o.shopName || o.shopId || '', 주문번호: o.orderNo || '',
+      상품: String(o.productName || '').slice(0, 22),
+      금액: Number(o.paymentAmount || o.totalPrice || 0), 상태: o.status || ''
+    })));
+  }
+  return { month: M, 쇼핑몰주문: SO.length, 쇼핑몰금액: soAmt,
+           위탁출고: CS.length, 위탁금액: csAmt,
+           합계건수: SO.length + CS.length, 합계금액: soAmt + csAmt, 최근60일: recent.length };
+};
 
 /* ═══════════ v2.3.742 — 주문 집계 진단 (읽기 전용) ═══════════
    '8월인데 1건만 나온다' 를 두 갈래로 가른다.
