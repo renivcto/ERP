@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.746';
+const ERP_VERSION = 'v2.3.747';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7256,6 +7256,60 @@ async function _shardRead(col, getFn){
   return { exists:true, orders:all, archN };
 }
 async function _soReadSharded(getFn){ return _shardRead('shopOrders', getFn); }
+
+/* ═══════════ v2.3.747 — 바로팜 흔적 추적 (읽기 전용) ═══════════
+   바로팜 주문은 원래 shopOrders 에 '주문' 으로 들어왔다
+   (서버 자동입력 스크립트가 넣었고, 고객 판별도 c.shops.has('바로팜') 로 한다).
+   지금 shopOrders 에 바로팜이 0건이라면 그 주문들이 사라진 것이다.
+   위탁 출고(_consign)는 창고 이동이라 '다른 데이터' 다 — 합쳐 보이는 것은 복구가 아니다.
+
+   얼마나, 언제 것이 사라졌는지 흔적으로 재 본다.  콘솔에서: await baroAudit() */
+window.baroAudit = async function() {
+  const isB = v => /바로팜/.test(String(v || ''));
+  const ym = v => String(v || '').slice(0, 7) || '(날짜없음)';
+  const tally = (arr, f) => { const m = {}; arr.forEach(x => { const k = f(x); m[k] = (m[k] || 0) + 1; }); 
+    return Object.keys(m).sort().reduce((a, k) => (a[k] = m[k], a), {}); };
+  console.log('%c══════ 바로팜 흔적 추적 ══════', 'font-weight:800;font-size:13px');
+
+  // ① shopOrders 안의 바로팜 주문 (원래 여기 있었다)
+  const bo = (DB.shopOrders || []).filter(o => o && (isB(o.shopName) || isB(o.shopId)));
+  console.log('① 주문(shopOrders)의 바로팜 —', bo.length, '건');
+  if (bo.length) console.table(tally(bo, o => ym(o.orderDate || o.date)));
+  else console.log('%c   0건. 원래 여기 있어야 하는데 없다 → 사라진 것이다.', 'color:#dc2626;font-weight:700');
+
+  // ② 서버 자동입력이 넣은 행 (_srvTs) — 바로팜 자동입력의 흔적
+  const srv = (DB.shopOrders || []).filter(o => o && (o._srvTs || o.srvTs));
+  console.log('② 서버 자동입력이 넣은 주문 —', srv.length, '건',
+              srv.length ? '(쇼핑몰별: ' + JSON.stringify(tally(srv, o => o.shopName || '?')) + ')' : '');
+
+  // ③ 위탁 출고 — 이건 창고 이동이지 판매가 아니다
+  if (!(window._consign && window._consign.loaded) && typeof _consignLoad === 'function') {
+    try { await _consignLoad(true); } catch (_) {}
+  }
+  const ship = (window._consign && window._consign.shipments) || [];
+  const bs = ship.filter(sh => {
+    const sel = (DB.sellers || []).find(x => x && String(x.id) === String(sh.sellerId));
+    return isB(sel && sel.company) || isB(sh.sellerName);
+  });
+  console.log('③ 위탁 출고의 바로팜 —', bs.length, '건 (창고 이동 · 판매 아님)');
+  if (bs.length) console.table(tally(bs, sh => ym(sh.date)));
+
+  // ④ 재고 이력에 남은 바로팜 흔적 — 주문이 지워져도 이건 남는다
+  const sh2 = (DB.stockHistory || []).filter(h => h && isB(h.note));
+  console.log('④ 재고 이력의 바로팜 흔적 —', sh2.length, '건');
+  if (sh2.length) {
+    console.table(tally(sh2, h => ym(h.date)));
+    console.log('   최근 10건:');
+    console.table(sh2.slice(-10).map(h => ({ 날짜: h.date, 구분: h.type, 수량: h.qty, 비고: String(h.note || '').slice(0, 50) })));
+  }
+
+  console.log('%c══════ 정리 ══════', 'font-weight:800');
+  console.log('주문 바로팜', bo.length, '건 / 위탁 바로팜', bs.length, '건 / 재고이력 흔적', sh2.length, '건');
+  if (!bo.length && (bs.length || sh2.length)) {
+    console.log('%c→ 주문은 사라졌고 위탁·재고이력에만 흔적이 남았다. 재수집으로 되살려야 한다.', 'color:#b45309;font-weight:700');
+  }
+  return { 주문바로팜: bo.length, 서버자동입력: srv.length, 위탁바로팜: bs.length, 재고이력흔적: sh2.length };
+};
 
 /* ═══════════ v2.3.743 — 매출 소스 전수 진단 (읽기 전용) ═══════════
    '8월 주문이 1건뿐' 의 정체를 밝힌다. 매출은 두 곳에 나뉘어 담긴다.
