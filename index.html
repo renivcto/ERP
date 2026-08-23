@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.743';
+const ERP_VERSION = 'v2.3.744';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7263,8 +7263,14 @@ async function _soReadSharded(getFn){ return _shardRead('shopOrders', getFn); }
      · _consign.shipments     위탁 출고 (바로팜 등) — 주문 관리 화면에 안 나온다
    슬랙 리포트는 둘을 합산했는데, 주문 관리 화면은 앞의 것만 본다.
    ⚠️ 읽기만 한다.  콘솔에서: salesAudit('2026-08')   (인자 없으면 이번 달) */
-window.salesAudit = function(month) {
+window.salesAudit = async function(month) {
   const M = month || new Date().toISOString().slice(0, 7);
+  // ⚠️ 위탁(_consign)은 지연 로드다 — 위탁 화면을 한 번도 안 열었으면 shipments 가 비어 있다.
+  //   이걸 안 부르고 세면 바로팜이 늘 0건으로 나온다(실제로 그렇게 나왔다).
+  if (!(window._consign && window._consign.loaded) && typeof _consignLoad === 'function') {
+    console.log('   … 위탁 데이터를 불러오는 중');
+    try { await _consignLoad(true); } catch (e) { console.warn('   위탁 불러오기 실패:', e && e.message); }
+  }
   const won = n => '₩' + Math.round(Number(n) || 0).toLocaleString();
   const ymOf = v => String(v || '').slice(0, 7);
   console.log('%c══════ ' + M + ' 매출 소스 전수 ══════', 'font-weight:800;font-size:13px');
@@ -7296,9 +7302,16 @@ window.salesAudit = function(month) {
       if (!byWho[k]) byWho[k] = { 건수: 0, 금액: 0 };
       byWho[k].건수++; byWho[k].금액 += t;
     });
-    console.log('② 위탁 출고 (바로팜 등 — 주문 관리 화면엔 안 나온다) —', CS.length, '건 ·', won(csAmt));
+    console.log('② 위탁 출고 (바로팜 등 — 주문 관리 화면엔 안 나온다) —', CS.length, '건 ·', won(csAmt),
+                '| 불러옴:', !!(window._consign && window._consign.loaded), '| 전체 위탁', ship.length, '건');
     if (CS.length) console.table(byWho);
-    else console.log('   이 달 위탁 출고가 없다. (전체 위탁 건수:', ship.length, '건)');
+    else if (ship.length) {
+      const byM = {};
+      ship.forEach(x => { const k = ymOf(x && x.date) || '(날짜없음)'; byM[k] = (byM[k] || 0) + 1; });
+      console.log('   이 달 위탁 출고가 없다. 전체 위탁의 월별 분포:'); console.table(byM);
+    } else {
+      console.log('   위탁 출고가 아예 없다 — 저장소(shared/consignment_shipments)가 비었거나 못 읽었다.');
+    }
   } catch (e) { console.warn('   위탁 읽기 실패:', e && e.message); }
 
   console.log('%c③ 합계 — ' + (SO.length + CS.length) + '건 · ' + won(soAmt + csAmt), 'font-weight:800;color:#0f766e');
