@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.747';
+const ERP_VERSION = 'v2.3.748';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7256,6 +7256,87 @@ async function _shardRead(col, getFn){
   return { exists:true, orders:all, archN };
 }
 async function _soReadSharded(getFn){ return _shardRead('shopOrders', getFn); }
+
+/* ═══════════ v2.3.748 — 백업에서 사라진 주문 복구 ═══════════
+   [DIAG] 가 '주문: 1157건(백업1192)' 를 찍었다 — 이 브라우저의 백업
+   (reniv_shopOrders_backup)에 라이브보다 35건이 더 있다.
+   스마트스토어 수집 버그(functions v2.23 에서 수정)가 아카이브를 고아로
+   만들면서 사라진 몫이 백업엔 남아 있는 것이다.
+
+   콘솔에서:
+     await orderRestoreFromBackup()              — 모의실행(아무것도 안 바꿈)
+     await orderRestoreFromBackup({apply:true})  — 실제 복구 + 저장            */
+window.orderRestoreFromBackup = async function(opt) {
+  const apply = !!(opt && opt.apply);
+  const live = Array.isArray(DB.shopOrders) ? DB.shopOrders : [];
+  const liveIds = new Set(live.map(o => o && String(o.id)));
+  const liveKeys = new Set(live.map(o => o && (String(o.orderNo||'') + '§' + String(o.customerName||''))));
+
+  // 의도적으로 지운 것은 되살리지 않는다 — 묘비·영구차단 키
+  const norm = v => String(v || '').trim();
+  const tombIds = new Set(), tombKeys = new Set();
+  (Array.isArray(DB._deletedShopOrderSigs) ? DB._deletedShopOrderSigs : []).forEach(t => {
+    if (!t) return;
+    if (t.dupId != null) tombIds.add(String(t.dupId));
+    if (t.id != null) tombIds.add(String(t.id));
+    if (t.orderNo) tombKeys.add(norm(t.orderNo) + '§' + norm(t.customerName));
+  });
+  (Array.isArray(DB._permaBlockedShopOrders) ? DB._permaBlockedShopOrders : []).forEach(b => {
+    if (b && b.orderNo) tombKeys.add(norm(b.orderNo) + '§' + norm(b.customerName));
+  });
+
+  // 백업 소스 — 최근 것 우선 (localStorage 가 매 로드마다 갱신되므로 IDB 와 병행)
+  const sources = [];
+  try { const raw = localStorage.getItem('reniv_shopOrders_backup');
+        if (raw) sources.push(['localStorage 백업', JSON.parse(raw)]); } catch(_){}
+  try { if (typeof idbGet === 'function') {
+          const raw = await idbGet('reniv_shopOrders_backup');
+          if (raw) sources.push(['IDB 백업', typeof raw === 'string' ? JSON.parse(raw) : raw]); } } catch(_){}
+
+  const found = new Map();       // id -> {order, 출처}
+  const skipped = { 묘비: 0, 중복키: 0 };
+  sources.forEach(([label, arr]) => {
+    if (!Array.isArray(arr)) return;
+    arr.forEach(o => {
+      if (!o || o.id == null) return;
+      const id = String(o.id);
+      if (liveIds.has(id) || found.has(id)) return;
+      const key = norm(o.orderNo) + '§' + norm(o.customerName);
+      if (tombIds.has(id) || tombKeys.has(key)) { skipped.묘비++; return; }
+      if (liveKeys.has(key)) { skipped.중복키++; return; }   // id 만 다른 같은 주문
+      found.set(id, { o, 출처: label });
+    });
+  });
+
+  const missing = [...found.values()].map(x => x.o);
+  const tally = (arr, f) => { const m = {}; arr.forEach(x => { const k = f(x); m[k] = (m[k]||0)+1; });
+    return Object.keys(m).sort().reduce((a,k)=>(a[k]=m[k],a),{}); };
+  console.log('%c═══ 백업에서 주문 복구 ' + (apply ? '(실행)' : '(모의실행)') + ' ═══',
+              'background:' + (apply ? '#dc2626' : '#0ea5e9') + ';color:#fff;padding:4px 8px;font-weight:700');
+  console.log('라이브', live.length, '건 · 백업 소스', sources.map(s2 => s2[0] + ' ' + (s2[1]||[]).length + '건').join(' / '));
+  console.log('백업에만 있는 주문:', missing.length, '건 · 건너뜀(의도적 삭제 흔적):', skipped.묘비, '건 · 중복키:', skipped.중복키, '건');
+  if (missing.length) {
+    console.log('월별:'); console.table(tally(missing, o => String(o.orderDate || o.date || '').slice(0,7) || '(날짜없음)'));
+    console.log('쇼핑몰별:'); console.table(tally(missing, o => o.shopName || o.shopId || '(미상)'));
+    console.table(missing.slice(0, 40).map(o => ({
+      주문일: String(o.orderDate || o.date || '').slice(0,16), 쇼핑몰: o.shopName || '',
+      주문번호: o.orderNo || '', 고객: o.customerName || '',
+      금액: Number(o.paymentAmount || o.totalPrice || 0), 상태: o.status || '' })));
+  }
+  if (!apply) {
+    console.warn(missing.length
+      ? '모의실행입니다. 위 목록이 맞으면: await orderRestoreFromBackup({apply:true})'
+      : '되살릴 것이 없습니다.');
+    return { dryRun: true, restorable: missing.length, skipped };
+  }
+  if (!missing.length) return { dryRun: false, restored: 0 };
+  DB.shopOrders = live.concat(missing);
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
+  await saveDataNow();
+  try { renderShopOrderTable(); } catch(_){}
+  console.log('%c✅ ' + missing.length + '건 복구 + 저장 완료 — 주문 관리에서 확인하세요', 'color:#15803d;font-weight:800');
+  return { dryRun: false, restored: missing.length };
+};
 
 /* ═══════════ v2.3.747 — 바로팜 흔적 추적 (읽기 전용) ═══════════
    바로팜 주문은 원래 shopOrders 에 '주문' 으로 들어왔다
@@ -17631,7 +17712,10 @@ function _toggleOrderDeposit(id, checked){
    ⚠️ 합치는 건 '그릴 때' 뿐이다. DB.shopOrders 에는 절대 넣지 않는다.
       넣으면 자동 중복정리·재고차감·마진분석이 물들고 되돌리기 어려워진다.
       나중에 분리할 때는 아래 스위치만 false 로 두면 된다. */
-window.SO_INCLUDE_CONSIGN = (window.SO_INCLUDE_CONSIGN !== false);
+// v2.3.748: 기본 꺼짐 — 위탁은 재고이동일 뿐 주문이 아니다(사용자 확정, 2026-08-23).
+//   바로팜 '주문' 은 원래 드라이브 업로드 → 자동 수집으로 shopOrders 에 들어온다.
+//   위탁을 주문에 섞으면 그 주문이 복구될 때 매출이 두 번 잡힌다.
+window.SO_INCLUDE_CONSIGN = (window.SO_INCLUDE_CONSIGN === true);
 
 /* 위탁 거래처(바로팜)를 같은 이름의 쇼핑몰에 붙인다 — 기존 '바로팜' 칩으로 걸러지게. */
 function _soConsignShopId(sellerName) {
