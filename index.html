@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.741';
+const ERP_VERSION = 'v2.3.742';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7256,6 +7256,104 @@ async function _shardRead(col, getFn){
   return { exists:true, orders:all, archN };
 }
 async function _soReadSharded(getFn){ return _shardRead('shopOrders', getFn); }
+
+/* ═══════════ v2.3.742 — 주문 집계 진단 (읽기 전용) ═══════════
+   '8월인데 1건만 나온다' 를 두 갈래로 가른다.
+     (A) 화면 기간 필터가 잘라내고 있다  → 데이터는 서버에 그대로 있다
+     (B) 주문이 실제로 지워졌다          → 어디서 지웠는지 흔적을 찾는다
+   ⚠️ 이 함수는 아무것도 쓰지 않는다. 고치지도 않는다. 숫자만 본다.
+   콘솔에서: await orderAudit() */
+window.orderAudit = async function() {
+  const L = (DB.shopOrders || []).filter(Boolean);
+  const dOf = o => String((o && (o.orderDate || o.date)) || '');
+  const monthOf = o => (dOf(o).slice(0, 7) || '(날짜없음)');
+  const tally = (arr, keyFn) => {
+    const m = {};
+    arr.forEach(o => { const k = keyFn(o); m[k] = (m[k] || 0) + 1; });
+    return Object.keys(m).sort().reduce((a, k) => (a[k] = m[k], a), {});
+  };
+
+  console.log('%c══════ 주문 집계 진단 (읽기 전용) ══════', 'font-weight:800;font-size:13px');
+  console.log('① 이 브라우저(로컬) 주문 —', L.length, '건');
+  console.table(tally(L, monthOf));
+  console.log('   쇼핑몰별:'); console.table(tally(L, o => (o.shopName || o.shopId || '(미상)')));
+
+  // ── 화면 필터가 지금 무엇을 자르는지 ──
+  let range = { start: '', end: '' };
+  try { if (typeof _periodComputeRange === 'function') range = _periodComputeRange('so'); } catch (_) {}
+  const shopF = (document.getElementById('shop-order-shop-filter') || {}).value || '';
+  const statF = (document.getElementById('shop-order-status-filter') || {}).value || '';
+  const q = ((document.getElementById('shop-order-search') || {}).value || '').trim();
+  const inRange = L.filter(o => {
+    const d = (typeof _periodNormDate === 'function') ? _periodNormDate(dOf(o)) : dOf(o).slice(0, 10);
+    if (range.start && d < range.start) return false;
+    if (range.end && d > range.end) return false;
+    return true;
+  });
+  console.log('② 화면 필터 — 기간', (range.start || '(제한없음)') + ' ~ ' + (range.end || '(제한없음)'),
+              '| 쇼핑몰:', shopF || '전체', '| 상태:', statF || '전체', '| 검색어:', q || '(없음)');
+  console.log('   → 이 기간에 걸리는 주문:', inRange.length, '건 (화면에 그만큼 나와야 한다)');
+  if (inRange.length !== L.length) {
+    console.log('   기간 밖으로 빠진', L.length - inRange.length, '건의 날짜 분포:');
+    console.table(tally(L.filter(o => inRange.indexOf(o) < 0), monthOf));
+  }
+
+  // ── 지운 흔적 ──
+  const tomb = Array.isArray(DB._deletedShopOrderSigs) ? DB._deletedShopOrderSigs : [];
+  const perma = Array.isArray(DB._permaBlockedShopOrders) ? DB._permaBlockedShopOrders : [];
+  console.log('③ 삭제 흔적 — 묘비(tombstone)', tomb.length, '건 / 영구차단', perma.length, '건');
+  if (tomb.length) {
+    const recent = tomb.slice().sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0)).slice(0, 15);
+    console.log('   최근 삭제 15건 (사유별 개수:', tally(tomb, t => t.reason || '(사유없음)'), ')');
+    console.table(recent.map(t => ({
+      주문번호: t.orderNo || '', 고객: t.customerName || '', 사유: t.reason || '',
+      시각: t.ts ? new Date(Number(t.ts)).toLocaleString('ko-KR') : ''
+    })));
+  }
+
+  // ── 서버 원본과 비교 ──
+  let srv = null;
+  try {
+    const getFn = window._firestoreGetDocFromServer || window._firestoreGetDoc;
+    srv = await _soReadSharded(getFn);
+  } catch (e) { console.warn('   서버 읽기 실패:', e && e.message); }
+  if (srv && srv.exists) {
+    const S = (srv.orders || []).filter(Boolean);
+    console.log('④ 서버(Firestore) 원본 —', S.length, '건 (아카이브 샤드', srv.archN, '개)');
+    console.table(tally(S, monthOf));
+    const localIds = new Set(L.map(o => String(o.id)));
+    const onlyServer = S.filter(o => !localIds.has(String(o.id)));
+    console.log('   서버에만 있고 이 브라우저엔 없는 주문:', onlyServer.length, '건');
+    if (onlyServer.length) {
+      console.log('   → 데이터는 서버에 살아 있다. 이 브라우저가 덜 받았거나 지운 것이다.');
+      console.table(onlyServer.slice(0, 15).map(o => ({
+        주문일: dOf(o), 쇼핑몰: o.shopName || o.shopId || '', 주문번호: o.orderNo || '',
+        금액: Number(o.paymentAmount || o.totalPrice || 0)
+      })));
+    }
+    const serverIds = new Set(S.map(o => String(o.id)));
+    const onlyLocal = L.filter(o => !serverIds.has(String(o.id)));
+    console.log('   이 브라우저에만 있고 서버엔 없는 주문:', onlyLocal.length, '건');
+  } else {
+    console.log('④ 서버 원본을 읽지 못했다 (로그인/권한 확인)');
+  }
+
+  console.log('%c══════ 판정 ══════', 'font-weight:800');
+  if (srv && srv.exists && (srv.orders || []).length > L.length) {
+    console.log('%c→ (B) 이 브라우저의 주문이 서버보다 적다. 로컬에서 지워졌거나 덜 받았다. 새로고침 후 다시 확인할 것.', 'color:#b45309;font-weight:700');
+  } else if (inRange.length < L.length) {
+    console.log('%c→ (A) 데이터는 있는데 화면 기간 필터가 잘라내고 있다.', 'color:#b45309;font-weight:700');
+  } else if (L.length <= 1) {
+    console.log('%c→ (B) 로컬·서버 모두 주문이 거의 없다. 실제 유실이다 — 백업에서 되살려야 한다.', 'color:#dc2626;font-weight:800');
+  } else {
+    console.log('→ 로컬·서버·화면이 서로 맞는다. 위 월별 표를 보고 어느 달이 빠졌는지 확인할 것.');
+  }
+  return {
+    local: L.length, inRange: inRange.length,
+    server: (srv && srv.exists) ? (srv.orders || []).length : null,
+    tombstones: tomb.length, permaBlocked: perma.length, range
+  };
+};
 // 전체 배열을 라이브+아카이브 샤드로 나눠 원자적(batch) 저장.
 async function _shardWrite(col, arr){
   const db = window._firebaseDb, dref = window._firestoreDoc, setD = window._firestoreSetDoc, mkBatch = window._firestoreWriteBatch;
