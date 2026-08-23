@@ -1521,17 +1521,37 @@ async function ssSaveState(db, processedIds, lastPolledAt) {
 }
 
 // shopOrders 트랜잭션 머지 (read→dedupe→write) — 브리핑 §4
+//
+// ⚠️ v2.23 (2026-08-23) — 주문이 사라지던 원인을 여기서 고쳤다.
+//   v2.22 에서 shopOrders 를 샤딩(라이브 + shopOrders_arch1..N)했는데,
+//   쿠팡·Cafe24·PlusCL 은 readAllShopOrders/writeShopOrdersSharded 로 옮겼지만
+//   스마트스토어(v2.16)만 erp_data/shopOrders 를 직접 읽고 쓰는 채로 남았다.
+//   그래서 수집이 한 번 돌 때마다
+//     1) 라이브 샤드만 읽어 dedupe → 아카이브에 있는 주문을 '없다' 고 오판하고
+//     2) tx.set(ref, {data, ts}) 로 **arch 필드를 지운 채** 덮어썼다.
+//   arch 가 사라지면 앱은 archN=0 으로 읽어 아카이브 주문을 통째로 못 본다.
+//   그 상태에서 앱이 저장하면 아카이브 몫이 영구 소실된다
+//   (index.html 의 _saveColDoc 주석이 경고하던 바로 그 사고).
+//   → 이제 전체 샤드를 읽고 전체 샤드로 되쓴다. arch 는 항상 유지된다.
 async function mergeSmartstoreOrdersTx(db, newOrders, processedSet) {
-  const ref = db.doc('erp_data/shopOrders');
+  const liveRef = db.doc('erp_data/shopOrders');
   let added = 0, sampleNew = [];
   await db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
+    // ── 읽기: 라이브 + 아카이브 전부 (트랜잭션은 모든 read 를 write 보다 먼저 해야 한다)
+    const liveSnap = await tx.get(liveRef);
     let existing = [];
-    if (snap.exists) {
-      const raw = snap.data().data;
-      if (typeof raw === 'string') { try { existing = JSON.parse(raw) || []; } catch (_) {} }
-      else if (Array.isArray(raw)) existing = raw;
+    let archN = 0;
+    if (liveSnap.exists) {
+      const d = liveSnap.data() || {};
+      archN = Number(d.arch) || 0;
+      existing = _parseOrdersData(d.data);
     }
+    for (let i = 1; i <= archN; i++) {
+      const s = await tx.get(db.doc('erp_data/shopOrders_arch' + i));
+      if (s.exists) existing = existing.concat(_parseOrdersData(s.data().data));
+    }
+
+    // ── dedupe: 이제 아카이브까지 보고 판단한다
     const keyset = new Set(existing.map(o => String(o.orderNo) + '|' + (o.customerName || '')));
     const trulyNew = [];
     for (const o of newOrders) {
@@ -1540,7 +1560,21 @@ async function mergeSmartstoreOrdersTx(db, newOrders, processedSet) {
       if (processedSet.has(String(o.orderNo))) continue;  // 과거 적재분(사용자 삭제 가능) → 재삽입 금지
       keyset.add(key); trulyNew.push(o);
     }
-    if (trulyNew.length) tx.set(ref, { data: JSON.stringify(existing.concat(trulyNew)), ts: Date.now() });
+
+    // ── 쓰기: 전체를 다시 샤딩해서 arch 메타까지 함께 저장
+    if (trulyNew.length) {
+      const shards = _shardShopOrders(existing.concat(trulyNew));
+      const nArch = shards.length - 1;
+      const ts = Date.now();
+      tx.set(liveRef, { data: JSON.stringify(shards[0] || []), ts, arch: nArch });
+      for (let i = 1; i <= nArch; i++) {
+        tx.set(db.doc('erp_data/shopOrders_arch' + i), { data: JSON.stringify(shards[i]), ts });
+      }
+      // 샤드 수가 줄었으면 남은 옛 아카이브를 지운다(stale 방지). 있었던 범위까지만 건드린다.
+      for (let i = nArch + 1; i <= archN; i++) {
+        tx.delete(db.doc('erp_data/shopOrders_arch' + i));
+      }
+    }
     added = trulyNew.length; sampleNew = trulyNew.slice(0, 3);
   });
   return { added, sampleNew };
@@ -1681,6 +1715,7 @@ exports.manualFetchSmartstoreOrders = functions
   });
 
 // =============================================================================
+// v2.23 (2026-08-23): 스마트스토어 수집이 샤딩을 우회해 아카이브를 고아로 만들던 버그 수정
 // v2.19 — PlusCL(3PL 물류) 배송정보 자동 수집 → ERP shopOrders
 //   기존 쿠팡/자사몰/스마트스토어 개별 크롤링을 대체. 각 쇼핑몰 주문이 PlusCL 에
 //   물류 위탁되며, 여기서 '주문 출고 내역'(출고완료)을 가져와 shopOrders 로 적재.
