@@ -1530,7 +1530,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.89.2';
+const STAFF_VERSION = 'v0.89.3';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1811,6 +1811,7 @@ if (DEMO) {
   ADP = [{ id: 'ap1', name: '와디즈 320 크림 펀딩', shopName: '와디즈', startDate: '2026-03-30', endDate: '2026-04-30', budget: 3000000 },
          { id: 'ap2', name: '와디즈 나드 엑소좀 글로우샷 펀딩', shopName: '와디즈', startDate: '2026-05-01', endDate: '2026-05-20', budget: 2000000 }];
   CSM = { sellers: [{ id: 'sl1', name: '바로팜' }, { id: 'sl2', name: '온누리약국체인' }],
+    shops: [{ id: 'sh1', name: '스마트스토어' }, { id: 'sh2', name: '자사몰' }],
           prices: { 'sl1|i1': 12000, 'sl1|i2': 9800 } };
   PT.shop = [{ id: 'h1', company: '쿠팡', channel: '오픈마켓', manager: '김서연', settlement: '주 1회', note: '' },
              { id: 'h2', company: '스마트스토어', channel: '오픈마켓', manager: '김서연', settlement: '월 2회', note: '' }];
@@ -7867,9 +7868,14 @@ function cgSum() {
 }
 function openCgModal() {
   const sellers = cgMeta().sellers || [];
-  if (!sellers.length) { toast('판매업체 정보가 아직 없습니다 — 관리자에게 동기화를 요청해 주세요', true); return; }
+  // v0.89.3: 임원용처럼 쇼핑몰도 수신처로 — 미러(consign_meta.shops)에서 온다
+  const shops = cgMeta().shops || [];
+  if (!sellers.length && !shops.length) { toast('판매업체 정보가 아직 없습니다 — 관리자에게 동기화를 요청해 주세요', true); return; }
   if (!(WHS || []).length) { toast('창고 정보가 아직 넘어오지 않았습니다', true); return; }
-  $('cg-f-seller').innerHTML = sellers.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+  const opt = s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`;
+  $('cg-f-seller').innerHTML =
+    (sellers.length ? `<optgroup label="🛒 판매업체">${sellers.map(opt).join('')}</optgroup>` : '')
+    + (shops.length ? `<optgroup label="🏪 쇼핑몰">${shops.map(opt).join('')}</optgroup>` : '');
   const whOpts = (WHS || []).map(w => `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');
   $('cg-f-from').innerHTML = '<option value="__un__">미지정(잔여)</option>' + whOpts;
   $('cg-f-to').innerHTML = whOpts;
@@ -7893,7 +7899,8 @@ $('btn-cg-save').onclick = async () => {
   const arr = (CGI || []).slice();
   arr.push({
     id: 'CS' + Date.now(), sellerId,
-    sellerName: (cgMeta().sellers.find(s => String(s.id) === String(sellerId)) || {}).name || '',
+    sellerName: ((cgMeta().sellers || []).concat(cgMeta().shops || [])
+                  .find(s => String(s.id) === String(sellerId)) || {}).name || '',
     date: $('cg-f-date').value || today(), vatMode: $('cg-f-vat').value,
     whFromId: from, whToId: to, whToName: whName(to),
     lines: lines.map(l => ({ itemId: l.itemId, name: l.name, spec: l.spec,
