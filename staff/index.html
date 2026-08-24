@@ -1022,14 +1022,23 @@ tr:last-child td { border-bottom:none; }
     <div class="modal-h"><span class="t">🚚 위탁 출고 등록</span><button class="modal-x" data-close="ovl-cg">✕</button></div>
     <div class="modal-b">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div class="fld"><label>판매업체 *</label><select class="fi" id="cg-f-seller"></select></div>
+        <div class="fld"><label style="display:flex;align-items:center;gap:8px">판매업체(수신처) *
+          <span style="display:inline-flex;gap:4px;margin-left:auto">
+            <button type="button" id="cg-recv-tab-seller" class="btn btn-sm" style="padding:2px 10px;font-size:11px">판매업체</button>
+            <button type="button" id="cg-recv-tab-shop" class="btn btn-sm" style="padding:2px 10px;font-size:11px">쇼핑몰</button>
+          </span></label><select class="fi" id="cg-f-seller"></select></div>
         <div class="fld"><label>출고일 *</label><input class="fi" id="cg-f-date" type="date"></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-        <div class="fld"><label>출고 창고 *</label><select class="fi" id="cg-f-from"></select></div>
-        <div class="fld"><label>입고 창고 *</label><select class="fi" id="cg-f-to"></select></div>
+        <div class="fld"><label>출고 창고(르니브) *</label><select class="fi" id="cg-f-from"></select></div>
+        <div class="fld"><label>입고 창고(바로팜) *</label><select class="fi" id="cg-f-to"></select></div>
         <div class="fld"><label>부가세</label><select class="fi" id="cg-f-vat">
           <option value="">별도 (공급가 + 10%)</option><option value="include">포함 (단가에 VAT 포함)</option></select></div>
+      </div>
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">
+        <div class="fld"><label>입고지(주소)</label><input class="fi" id="cg-recv-addr" placeholder="입고 창고 주소"></div>
+        <div class="fld"><label>입고 담당자</label><input class="fi" id="cg-recv-mgr" placeholder="담당자명"></div>
+        <div class="fld"><label>담당자 연락처</label><input class="fi" id="cg-recv-phone" placeholder="010-…"></div>
       </div>
       <div class="fld"><label>품목 *</label>
         <div id="cg-lines"></div>
@@ -1530,7 +1539,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.89.3';
+const STAFF_VERSION = 'v0.89.4';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -7866,22 +7875,42 @@ function cgSum() {
   $('cg-sum').innerHTML = `공급가액 <b>₩${supply.toLocaleString()}</b> · 세액 ₩${tax.toLocaleString()}
     · 합계 <b style="color:var(--brand-deep)">₩${(supply + tax).toLocaleString()}</b>`;
 }
+let CG_RECV_TAB = 'seller';   // v0.89.4: 임원용(v2.3.624)과 같은 판매업체/쇼핑몰 탭
+function cgRecvTab(tab) {
+  CG_RECV_TAB = tab;
+  const opt = s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`;
+  const list = tab === 'shop' ? (cgMeta().shops || []) : (cgMeta().sellers || []);
+  $('cg-f-seller').innerHTML = list.map(opt).join('');
+  const ON = 'padding:2px 10px;font-size:11px;background:var(--brand-deep,#4338ca);color:#fff;border-color:transparent';
+  const OFF = 'padding:2px 10px;font-size:11px';
+  $('cg-recv-tab-seller').style.cssText = tab === 'seller' ? ON : OFF;
+  $('cg-recv-tab-shop').style.cssText = tab === 'shop' ? ON : OFF;
+  $('cg-f-seller').onchange && $('cg-f-seller').onchange();
+}
 function openCgModal() {
   const sellers = cgMeta().sellers || [];
   // v0.89.3: 임원용처럼 쇼핑몰도 수신처로 — 미러(consign_meta.shops)에서 온다
   const shops = cgMeta().shops || [];
   if (!sellers.length && !shops.length) { toast('판매업체 정보가 아직 없습니다 — 관리자에게 동기화를 요청해 주세요', true); return; }
   if (!(WHS || []).length) { toast('창고 정보가 아직 넘어오지 않았습니다', true); return; }
-  const opt = s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`;
-  $('cg-f-seller').innerHTML =
-    (sellers.length ? `<optgroup label="🛒 판매업체">${sellers.map(opt).join('')}</optgroup>` : '')
-    + (shops.length ? `<optgroup label="🏪 쇼핑몰">${shops.map(opt).join('')}</optgroup>` : '');
+  $('cg-recv-tab-seller').onclick = () => cgRecvTab('seller');
+  $('cg-recv-tab-shop').onclick = () => cgRecvTab('shop');
+  cgRecvTab(sellers.length ? 'seller' : 'shop');
   const whOpts = (WHS || []).map(w => `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');
   $('cg-f-from').innerHTML = '<option value="__un__">미지정(잔여)</option>' + whOpts;
   $('cg-f-to').innerHTML = whOpts;
   $('cg-f-date').value = today();
   $('cg-f-vat').value = '';
   $('cg-f-note').value = '';
+  // v0.89.4: 입고 창고를 고르면 창고 정보(주소·담당자·연락처)로 자동 채움 — 수정 가능
+  const fillRecv = () => {
+    const w = (WHS || []).find(x => String(x.id) === String($('cg-f-to').value)) || {};
+    $('cg-recv-addr').value = w.address || '';
+    $('cg-recv-mgr').value = w.manager || '';
+    $('cg-recv-phone').value = w.phone || '';
+  };
+  $('cg-f-to').onchange = fillRecv;
+  fillRecv();
   CG_LINES = [{ itemId: '', name: '', spec: '', qty: 0, price: 0 }];
   cgRenderLines();
   $('cg-f-seller').onchange = () => { CG_LINES.forEach(l => { if (l.itemId) l.price = cgPrice($('cg-f-seller').value, l.itemId); }); cgRenderLines(); };
@@ -7903,6 +7932,9 @@ $('btn-cg-save').onclick = async () => {
                   .find(s => String(s.id) === String(sellerId)) || {}).name || '',
     date: $('cg-f-date').value || today(), vatMode: $('cg-f-vat').value,
     whFromId: from, whToId: to, whToName: whName(to),
+    recvAddr: ($('cg-recv-addr') || {}).value || '',
+    recvManager: ($('cg-recv-mgr') || {}).value || '',
+    recvPhone: ($('cg-recv-phone') || {}).value || '',
     lines: lines.map(l => ({ itemId: l.itemId, name: l.name, spec: l.spec,
       qty: Number(l.qty) || 0, price: Number(l.price) || 0 })),
     note: $('cg-f-note').value.trim(), _by: ME.name, _byUid: ME.uid, createdAt: Date.now(),
