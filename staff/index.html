@@ -737,8 +737,9 @@ tr:last-child td { border-bottom:none; }
 .jr-row .memo { flex:1 1 180px; border:1px solid var(--line); border-radius:8px; padding:6px 9px; font-size:12.5px; }
 .jr-bar { height:7px; border-radius:99px; background:var(--line-soft); overflow:hidden; min-width:80px; flex:0 0 90px; }
 .jr-bar i { display:block; height:100%; background:var(--brand); border-radius:99px; }
-.jr-react button { border:1px solid transparent; background:transparent; border-radius:99px; padding:6px 13px;
-  font-size:15px; margin-right:6px; }
+.jr-react { display:inline-flex; align-items:center; border:1px solid var(--line); border-radius:99px; padding:3px 6px; background:#fff; }
+.jr-react button { border:1px solid transparent; background:transparent; border-radius:99px; padding:4px 8px;
+  font-size:15px; margin:0; }
 .jr-react button.on { border-color:var(--brand); background:var(--brand-soft); }
 .att-nav .lbl { font-weight:700; font-size:14.5px; min-width:190px; text-align:center; }
 .modal-f { display:flex; gap:8px; justify-content:flex-end; padding:14px 20px; border-top:1px solid var(--line-soft); }
@@ -1540,7 +1541,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.90.4';
+const STAFF_VERSION = 'v0.91.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -2603,7 +2604,12 @@ async function clock(type) {
    레코드: { id, uid, date, items:{taskId:{done,pct,memo}}, note(HTML),
             fb:{ by, at, react, comment(HTML) } }  ← fb = 관리자 피드백 */
 const JR_NOTE_PH = '오늘 특이사항이나 공유할 내용을 적어주세요';
-const JR_REACTS = ['👍', '👏', '🔥', '💡', '🤝', '❤️', '✅'];
+// v0.91.0: 🤝 → 😊, ✅ → ✔(텍스트 체크 — 보라색으로 칠한다. 이모지엔 빨강·보라 체크가 없다)
+const JR_REACTS = ['👍', '👏', '🔥', '💡', '😊', '❤️', '✔'];
+function _jrReactHtml(r) {
+  if (r === '✔') return '<span style="color:#7c3aed;font-weight:900">✔</span>';
+  return esc(r);
+}
 
 function jrAll() {
   let all = JR.slice();
@@ -2742,10 +2748,51 @@ function _jrFbWhoHtml(f) {
   const title = _titleFor(f.by, f.byTitle || '');
   return `<span class="ava">${avaHtml(f.byAvatar || '🙂', 24)}</span>
     <span class="nm">${esc(f.by || '-')}${title ? ' ' + esc(title) : ''}</span>
-    ${f.react ? `<span class="react">${esc(f.react)}</span>` : ''}
+    ${f.react ? `<span class="react">${_jrReactHtml(f.react)}</span>` : ''}
     <span class="when">${f.at ? _fmtSeen(f.at) : ''}</span>`;
 }
 function _jrFbCanDel(f) { return ME.mode === 'admin' || String(f.by || '') === String(ME.name || ''); }
+/* v0.91.0 — 의견·답글 각각의 감정 리액션. 슬랙처럼 이모지 칩 + [+] 팔레트.
+   같은 사람이 같은 이모지를 다시 누르면 해제된다. */
+function _jrReactBar(f, uid, date, fid, rid) {
+  const key = rid ? fid + '-' + rid : fid;
+  const reacts = Array.isArray(f.reacts) ? f.reacts : [];
+  const byEmoji = {};
+  reacts.forEach(x => { if (x && x.e) (byEmoji[x.e] = byEmoji[x.e] || []).push(x.by); });
+  const chip = 'display:inline-flex;align-items:center;gap:3px;font-size:12.5px;padding:2px 8px;border-radius:99px;cursor:pointer;border:1px solid';
+  const chips = Object.keys(byEmoji).map(e => {
+    const mine = byEmoji[e].indexOf(ME.name) >= 0;
+    return `<span style="${chip} ${mine ? '#a5b4fc;background:#eef2ff' : 'var(--line);background:#fff'}"
+      title="${esc(byEmoji[e].join(', '))}"
+      onclick="_jrFbReactToggle('${esc(uid)}','${esc(date)}','${esc(fid)}','${esc(rid || '')}','${esc(e)}')">${_jrReactHtml(e)} ${byEmoji[e].length}</span>`;
+  }).join('');
+  const pal = JR_REACTS.map(e =>
+    `<button type="button" style="border:none;background:transparent;font-size:15px;padding:3px 6px;cursor:pointer"
+      onclick="_jrFbReactToggle('${esc(uid)}','${esc(date)}','${esc(fid)}','${esc(rid || '')}','${esc(e)}')">${_jrReactHtml(e)}</button>`).join('');
+  return `<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:7px">
+    ${chips}
+    <span style="position:relative;display:inline-block">
+      <span style="${chip} var(--line);background:#fff;color:var(--ink-mute)" onclick="_jrFbReactPal('${esc(key)}')">🙂＋</span>
+      <span id="jr-rpal-${esc(key)}" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;z-index:50;background:#fff;border:1px solid var(--line);border-radius:99px;padding:2px 5px;box-shadow:0 6px 18px rgba(15,23,42,.14);white-space:nowrap">${pal}</span>
+    </span>
+  </div>`;
+}
+window._jrFbReactPal = function(key) {
+  const el = document.getElementById('jr-rpal-' + key);
+  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+};
+window._jrFbReactToggle = function(uid, date, fid, rid, emoji) {
+  _jrFbMutate(uid, date, rec => {
+    const f = rec.fbs.find(x => x && String(x.id) === String(fid));
+    if (!f) return;
+    const target = rid ? (Array.isArray(f.replies) ? f.replies : []).find(r => r && String(r.id) === String(rid)) : f;
+    if (!target) return;
+    if (!Array.isArray(target.reacts)) target.reacts = [];
+    const i = target.reacts.findIndex(x => x && x.e === emoji && x.by === ME.name);
+    if (i >= 0) target.reacts.splice(i, 1);          // 다시 누르면 해제
+    else target.reacts.push({ e: emoji, by: ME.name });
+  });
+};
 function jrFbThreadHtml(rec, uid) {
   const fbs = _jrFbs(rec);
   if (!fbs.length) return '';
@@ -2761,12 +2808,14 @@ function jrFbThreadHtml(rec, uid) {
           ${_jrFbCanDel(f) ? `<button style="${btn};color:var(--bad,#dc2626);margin-left:auto" onclick="_jrFbDel('${esc(uid)}','${esc(date)}','${esc(f.id)}','')">삭제</button>` : ''}
         </div>
         <div class="rt-view jr-fb-body" style="font-size:13.5px;line-height:1.7">${_rtHtml(f.comment || '-')}</div>
+        ${_jrReactBar(f, uid, date, f.id, '')}
         ${(Array.isArray(f.replies) ? f.replies : []).map(r => `
           <div style="margin:9px 0 0 22px;padding:9px 12px;background:#f0f9ff;border:1px solid #dbeefe;border-radius:9px">
             <div class="jr-fb-who" style="display:flex;align-items:center;gap:7px;margin-bottom:4px">${_jrFbWhoHtml(r)}
               ${_jrFbCanDel(r) ? `<button style="${btn};color:var(--bad,#dc2626);margin-left:auto" onclick="_jrFbDel('${esc(uid)}','${esc(date)}','${esc(f.id)}','${esc(r.id)}')">삭제</button>` : ''}
             </div>
             <div style="font-size:13px;white-space:pre-wrap;line-height:1.6">${esc(r.comment || '')}</div>
+            ${_jrReactBar(r, uid, date, f.id, r.id)}
           </div>`).join('')}
         <div style="margin:9px 0 0 22px">
           <button style="${btn}" onclick="_jrFbReplyOpen('${esc(f.id)}')">↩ 답글</button>
@@ -3071,7 +3120,7 @@ function openJrModal(uid, date) {
   $('jr-m-body').innerHTML = rec ? jrViewHtml(rec, uid)
     : '<div class="empty">이 날짜에 작성된 일지가 없습니다</div>';
   $('jr-m-react').innerHTML = JR_REACTS.map(r =>
-    `<button type="button" data-jr-react="${r}" class="${r === _jrReact ? 'on' : ''}">${r}</button>`).join('');
+    `<button type="button" data-jr-react="${r}" class="${r === _jrReact ? 'on' : ''}">${_jrReactHtml(r)}</button>`).join('');
   $('jr-m-react').querySelectorAll('[data-jr-react]').forEach(b => b.onclick = () => {
     _jrReact = (_jrReact === b.dataset.jrReact) ? '' : b.dataset.jrReact;   // 다시 누르면 해제
     $('jr-m-react').querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.jrReact === _jrReact));
