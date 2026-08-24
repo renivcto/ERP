@@ -894,7 +894,6 @@ tr:last-child td { border-bottom:none; }
       <div id="jr-m-body"></div>
       <div id="jr-m-fbwrap" style="margin-top:18px;border-top:1px solid var(--line-soft);padding-top:14px">
         <div id="jr-m-fblist"></div>
-        <div class="fld"><div class="jr-react" id="jr-m-react"></div></div>
         <div class="fld jr-fb-edit"><label>💬 새 의견 작성</label>
           <div class="rt-toolbar" data-for="jr-m-comment"></div>
           <div class="rt-editor fi" id="jr-m-comment" contenteditable="true"
@@ -1541,7 +1540,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.91.0';
+const STAFF_VERSION = 'v0.91.1';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -2709,6 +2708,8 @@ function jrViewHtml(rec, uid) {
   if (!tasks.length) html += '<div class="empty">배정된 업무가 없습니다</div>';
   html += `<div style="margin-top:16px;font-weight:700;font-size:13.5px">특이사항</div>
     <div class="rt-view jr-m-note">${rec && rec.note ? _rtHtml(rec.note) : '-'}</div>`;
+  // v0.91.1: 일지 자체에도 감정 아이콘을 달 수 있다 (칩 + 팔레트, 의견 리액션과 동일)
+  if (rec) html += _jrReactBar(rec, uid, rec.date, '__rec__', '');
   return html;
 }
 /* 이름에 붙일 직함 (v0.23.0).
@@ -2783,9 +2784,13 @@ window._jrFbReactPal = function(key) {
 };
 window._jrFbReactToggle = function(uid, date, fid, rid, emoji) {
   _jrFbMutate(uid, date, rec => {
-    const f = rec.fbs.find(x => x && String(x.id) === String(fid));
-    if (!f) return;
-    const target = rid ? (Array.isArray(f.replies) ? f.replies : []).find(r => r && String(r.id) === String(rid)) : f;
+    let target;
+    if (fid === '__rec__') target = rec;          // v0.91.1: 일지 자체에 다는 리액션
+    else {
+      const f = rec.fbs.find(x => x && String(x.id) === String(fid));
+      if (!f) return;
+      target = rid ? (Array.isArray(f.replies) ? f.replies : []).find(r => r && String(r.id) === String(rid)) : f;
+    }
     if (!target) return;
     if (!Array.isArray(target.reacts)) target.reacts = [];
     const i = target.reacts.findIndex(x => x && x.e === emoji && x.by === ME.name);
@@ -2947,6 +2952,7 @@ function pageJournal() {
           <button class="btn btn-p" id="btn-jr-save" style="display:${noteEditing ? '' : 'none'}">저장</button>
           <span style="font-size:12.5px;color:var(--ink-mute)">${rec && rec.updatedAt ? '마지막 저장 ' + _fmtSeen(rec.updatedAt) : '아직 저장하지 않았습니다'}</span>
         </div>
+        ${rec ? _jrReactBar(rec, ME.uid, rec.date, '__rec__', '') : ''}
         ${jrFbHtml(rec)}
       </div></div>`;
   } else {
@@ -3119,12 +3125,6 @@ function openJrModal(uid, date) {
   $('jr-m-title').textContent = `${u.name} — 업무 일지 (${date})`;
   $('jr-m-body').innerHTML = rec ? jrViewHtml(rec, uid)
     : '<div class="empty">이 날짜에 작성된 일지가 없습니다</div>';
-  $('jr-m-react').innerHTML = JR_REACTS.map(r =>
-    `<button type="button" data-jr-react="${r}" class="${r === _jrReact ? 'on' : ''}">${_jrReactHtml(r)}</button>`).join('');
-  $('jr-m-react').querySelectorAll('[data-jr-react]').forEach(b => b.onclick = () => {
-    _jrReact = (_jrReact === b.dataset.jrReact) ? '' : b.dataset.jrReact;   // 다시 누르면 해제
-    $('jr-m-react').querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.jrReact === _jrReact));
-  });
   // v0.90.0: 기존 의견은 스레드로 보여주고, 에디터는 '새 의견 추가' 용으로 비운다
   $('jr-m-fblist').innerHTML = rec ? jrFbThreadHtml(rec, uid) : '';
   $('jr-m-comment').innerHTML = '';
@@ -3139,14 +3139,12 @@ $('btn-jr-fb-save').onclick = async () => {
   if (!rec) { toast('작성된 일지가 없습니다', true); return; }
   // v0.90.0: 덮어쓰지 않고 새 의견으로 추가한다 — 여러 개를 달 수 있다
   const html = _rtSanitize($('jr-m-comment').innerHTML);
-  if (!_plainText(html) && !_jrReact) { toast('의견 내용이나 감정 표시를 입력해 주세요', true); return; }
+  if (!_plainText(html)) { toast('의견 내용을 입력해 주세요', true); return; }
   await _jrFbMutate(_jrRef.uid, _jrRef.date, r => {
     r.fbs.push(Object.assign({ id: 'fb' + Date.now(), replies: [] }, _fbWho(),
-      { at: Date.now(), react: _jrReact, comment: html }));
+      { at: Date.now(), react: '', comment: html }));
   });
   $('jr-m-comment').innerHTML = '';
-  _jrReact = '';
-  $('jr-m-react').querySelectorAll('button').forEach(x => x.classList.remove('on'));
   toast('의견을 남겼습니다');
 };
 
