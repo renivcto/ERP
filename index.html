@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.749';
+const ERP_VERSION = 'v2.3.750';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58075,6 +58075,101 @@ function _staffCpRefPayload() {
 }
 async function _staffMirrorCpRef() { return _staffPush('cp_ref', _staffCpRefPayload()); }
 
+/* ═══════════ v2.3.750 — 쇼핑몰 거래처 양방향 연동 ═══════════
+   종전에는 staffTransfer('shops') 로 얕은 5필드를 최초 1회만 넘겼다. 그래서
+   직원용 상세가 텅 비었고, 임원용에서 고쳐도 반영되지 않았다.
+
+   임원용 → 직원용: 전체 필드를 자동 미러한다. 통짜 덮어쓰기가 아니라 병합이다 —
+     · 직원이 추가한 행(임원 DB.shops 에 없는 것)은 그대로 남긴다
+     · 직원이 고칠 수 있는 기본 5필드(쇼핑몰명·구분·담당자·정산주기·메모)는
+       직원 행의 값을 유지한다(비어 있을 때만 임원 값으로 채움)
+     · 상세(_detail: 수수료·배송·정산·담당자들·API)는 항상 임원용 최신으로 덮는다
+   직원용 → 임원용: _staffShopSyncWatch 가 구독해, 직원이 고친 행(updatedAt)을
+     임원 DB.shops 의 name·manager·settlementCycle·memo 에 반영한다. */
+function _staffShopDetailOf(sh) {
+  const contacts = (typeof _partnerNormalizeContacts === 'function')
+    ? _partnerNormalizeContacts(sh)
+    : [{ name: sh.manager || '', phone: sh.phone || '', email: sh.email || '' }];
+  return {
+    commissionBase: Number(sh.commissionBase) || 0,
+    shippingPolicy: sh.shippingPolicy || '',
+    shippingCost: Number(sh.shippingCost) || 0,
+    freeShippingThreshold: Number(sh.freeShippingThreshold) || 0,
+    couponBorneRate: Number(sh.couponBorneRate) || 0,
+    settleLabel: (typeof _shopSettleLabel === 'function' ? _shopSettleLabel(sh.settlement) : '') || sh.settlementCycle || '',
+    apiLinked: !!sh.apiLinked,
+    channelType: sh.channelType || 'consumer',
+    memo: String(sh.memo || '').replace(/<[^>]+>/g, ' ').trim(),
+    contacts: contacts.filter(c => c && (c.name || c.phone || c.email))
+      .map(c => ({ name: c.name || '', phone: c.phone || '', email: c.email || '' }))
+  };
+}
+async function _staffMirrorPartnersShop() {
+  const _ch = { consumer: '소비자몰', pharmacist: 'pharmacist', biz: 'B2B', open: '오픈마켓' };
+  let existing = [];
+  try {
+    const _db = window._firebaseDb, _doc = window._firestoreDoc, _get = window._firestoreGetDoc;
+    if (_db && _doc && _get) {
+      const snap = await _get(_doc(_db, 'staff_data', 'partners_shop'));
+      if (snap.exists()) { const v = JSON.parse(snap.data().data); if (Array.isArray(v)) existing = v; }
+    }
+  } catch (e) { console.warn('[쇼핑몰 미러] 기존 문서 읽기 실패(새로 만든다):', e && e.message); }
+  const byId = new Map(existing.map(r => [String(r && r.id), r]));
+  const merged = [];
+  (DB.shops || []).forEach(sh => {
+    if (!sh || !sh.name) return;
+    const prev = byId.get(String(sh.id));
+    byId.delete(String(sh.id));
+    const det = _staffShopDetailOf(sh);
+    const row = prev ? Object.assign({}, prev) : { id: String(sh.id) };
+    // 직원이 고칠 수 있는 기본 필드 — 직원 값 유지, 비어 있으면 임원 값
+    if (!row.company) row.company = sh.name || '';
+    if (!row.channel) row.channel = _ch[sh.channelType] || sh.channelType || '';
+    if (!row.manager) row.manager = sh.manager || (det.contacts[0] && det.contacts[0].name) || '';
+    if (!row.settlement) row.settlement = det.settleLabel;
+    if (!row.note) row.note = det.memo;
+    row._detail = det;          // 상세는 항상 임원용 최신
+    row._erp = true;            // 임원용 원본이 있는 행 표시
+    merged.push(row);
+  });
+  // 직원이 추가한 행(임원 DB 에 없는 것) 보존
+  byId.forEach(r => { if (r) merged.push(r); });
+  return _staffPush('partners_shop', merged);
+}
+
+let _staffShopUnwatch = null;
+function _staffShopSyncWatch() {
+  if (_staffShopUnwatch) return;
+  const _db = window._firebaseDb, _doc = window._firestoreDoc, _sub = window._firestoreOnSnapshot;
+  if (!_db || !_doc || !_sub) return;
+  try {
+    _staffShopUnwatch = _sub(_doc(_db, 'staff_data', 'partners_shop'), snap => {
+      try {
+        if (!snap.exists()) return;
+        const rows = JSON.parse(snap.data().data);
+        if (!Array.isArray(rows)) return;
+        let changed = 0;
+        rows.forEach(r => {
+          if (!r || !r.updatedAt) return;                      // 직원이 고친 행만 updatedAt 이 있다
+          const sh = (DB.shops || []).find(x => x && String(x.id) === String(r.id));
+          if (!sh) return;                                     // 직원 신규 행은 임원 DB 에 만들지 않는다(정책)
+          if (Number(r.updatedAt) <= (Number(sh._staffSyncTs) || 0)) return;
+          if (r.company && r.company !== sh.name) { sh.name = r.company; changed++; }
+          if (r.manager != null && r.manager !== (sh.manager || '')) { sh.manager = r.manager; changed++; }
+          if (r.settlement != null && r.settlement !== (sh.settlementCycle || '')) { sh.settlementCycle = r.settlement; changed++; }
+          if (r.note != null && r.note !== (sh.memo || '')) { sh.memo = r.note; changed++; }
+          sh._staffSyncTs = Number(r.updatedAt);
+        });
+        if (changed) {
+          console.log('🔁 [쇼핑몰] 직원용 수정 ' + changed + '건을 임원용에 반영했습니다');
+          try { saveData(); } catch (_) {}
+          try { if (typeof renderShopList === 'function') renderShopList(); } catch (_) {}
+        }
+      } catch (e) { console.warn('[쇼핑몰 역방향] 반영 실패:', e && e.message); }
+    }, err => console.warn('[쇼핑몰 역방향] 구독 실패:', err && err.message));
+  } catch (e) { console.warn('[쇼핑몰 역방향] 시작 실패:', e && e.message); }
+}
+
 /* v2.3.698 — 판매업체별 가격 편집에 쓸 거래처 후보(판매업체 + 쇼핑몰). 임원용 드롭다운과 같은 값. */
 function _staffSupplyPartnersPayload() {
   const out = [];
@@ -58879,8 +58974,12 @@ function _staffConsignPayload() {
         qty: Number((l && l.qty) || 0), price: Number((l && l.price) || 0) })),
       buyer: { name: _sel.company || sh.sellerName || '', bizno: _sel.bizno || '',
                ceo: _sel.ceo || '', addr: _sel.address || '' },
-      supplier: { name: _ci.name || '(주)르니브', bizno: _ci.bizno || '', ceo: _ci.ceo || '',
-                  addr: _ci.address || '', tel: _ci.tel || '' }
+      // v2.3.750: 회사정보의 실제 필드명은 company/bizNo/addr 이다 — 종전엔 name/bizno/address 를
+      //   읽어 늘 빈 값이었고, 직원용 거래명세서의 공급자 칸이 상호·대표자 빼고 전부 비었다.
+      supplier: { name: _ci.company || '(주)르니브', bizno: _ci.bizNo || '', ceo: _ci.ceo || '',
+                  addr: _ci.addr || '',
+                  tel: (Array.isArray(_ci.contacts) && _ci.contacts.length
+                        ? String((_ci.contacts.find(c => c && c.phone) || {}).phone || '') : '') }
     };
   }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
 }
@@ -59105,6 +59204,8 @@ function _staffMirrorCalendarThrottled() {
       _staffMirrorInsights().catch(() => {});       // v2.3.704 인사이트 보드
       _staffMirrorProductMap().catch(() => {});     // v2.3.704 제품 포트폴리오
       _staffMirrorFpTimeline().catch(() => {});     // v2.3.704 완제품 생산 타임라인
+      _staffMirrorPartnersShop().catch(() => {});   // v2.3.750 쇼핑몰 전체 필드(병합)
+      _staffShopSyncWatch();                        // v2.3.750 직원용 수정 역반영 구독
     }, 4000);
   } catch(_) {}
 }
@@ -59288,6 +59389,8 @@ window.staffMirrorNow = async function() {
   const workflow = await _staffMirrorWorkflow();
   const items = await _staffMirrorItems();
   try { await _staffMirrorCpRef(); } catch(_) {}   // v2.3.739: 수익계산용 품목·BOM 참조
+  try { await _staffMirrorPartnersShop(); } catch(_) {}   // v2.3.750: 쇼핑몰 전체 필드
+  try { _staffShopSyncWatch(); } catch(_) {}
   const warehouses = await _staffMirrorWarehouses();
   const orders = await _staffMirrorOrders();
   const pharmacies = await _staffMirrorPharm();
