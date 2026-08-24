@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.756';
+const ERP_VERSION = 'v2.3.757';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28543,6 +28543,14 @@ function _whMoveVaultRestore(){
     DB.stockHistory.forEach(h => { if (h) have[sig(h)] = (have[sig(h)]||0) + 1; });
     const need = {};
     vault.forEach(r => { if (r) need[sig(r)] = (need[sig(r)]||0) + 1; });
+    // v2.3.757: 사용자가 지운 이동은 유실이 아니다 — 묘비만큼 복구 수요에서 뺀다
+    (Array.isArray(DB._deletedStockMoveSigs) ? DB._deletedStockMoveSigs : []).forEach(t => {
+      if (t && t.sig && need[t.sig]) need[t.sig] -= 1;
+    });
+    // v2.3.757: 사용자가 지운 이동은 유실이 아니다 — 묘비만큼 복구 수요에서 뺀다
+    (Array.isArray(DB._deletedStockMoveSigs) ? DB._deletedStockMoveSigs : []).forEach(t => {
+      if (t && t.sig && need[t.sig]) need[t.sig] -= 1;
+    });
     let restored = 0;
     Object.keys(need).forEach(k => {
       const miss = need[k] - (have[k]||0);
@@ -59861,15 +59869,46 @@ function applyUserPhoto(src) {
 function deleteStockHistory(id) {
   const h = DB.stockHistory.find(x => x.id === id);
   if (!h) return;
-  if (!confirm('이 입출고 내역을 삭제합니까?\n재고 수량이 역산됩니다.')) return;
-  // 재고 역산
-  const itemIdx = DB.items.findIndex(i => i.id === h.itemId);
-  if (itemIdx >= 0) {
-    if (h.type === 'in') DB.items[itemIdx].stock -= h.qty;
-    else DB.items[itemIdx].stock += h.qty;
+  const isMove = h.type === 'move';
+  if (!confirm(isMove
+    ? '이 재고이동 내역을 삭제합니까?\n창고별 재고가 이동 전으로 되돌아갑니다.\n(' + (h.qty||0) + '개: 도착 창고에서 빼고 출발 창고로 돌려놓습니다)'
+    : '이 입출고 내역을 삭제합니까?\n재고 수량이 역산됩니다.')) return;
+  const item = (DB.items || []).find(i => i && i.id === h.itemId);
+  if (item) {
+    if (isMove) {
+      // v2.3.757: 이동은 총 재고가 변하지 않는다 — 종전엔 else 로 떨어져 총량이 +qty 되고
+      //   창고별(whStock)은 그대로였다. 창고별만 이동 전으로 되돌린다.
+      const qty = Number(h.qty) || 0;
+      item.whStock = (item.whStock && typeof item.whStock === 'object') ? item.whStock : {};
+      const from = h.fromWh, to = h.toWh;
+      if (to != null && to !== '' && to !== '__un__') {
+        item.whStock[to] = (Number(item.whStock[to]) || 0) - qty;
+        if (item.whStock[to] <= 0) delete item.whStock[to];
+      }
+      if (from != null && from !== '' && from !== '__un__') {
+        item.whStock[from] = (Number(item.whStock[from]) || 0) + qty;
+      }
+      item.updatedAt = Date.now();
+    } else if (h.type === 'in') item.stock -= h.qty;
+    else item.stock += h.qty;
   }
   DB.stockHistory = DB.stockHistory.filter(x => x.id !== id);
-  saveData(); renderStock(); showNotif('삭제되었습니다');
+  // v2.3.757: 같은 기록이 금고(_whMoveVault)에서 되살아나지 않게 —
+  //   ① 이 브라우저 금고에서 같은 서명 1건 제거 ② DB 에 삭제 묘비를 남겨
+  //   _whMoveVaultRestore 가 어느 기기에서 돌아도 되살리지 않는다.
+  if (isMove) {
+    const sig = [h.itemId, h.type, h.qty, h.fromWh || '', h.toWh || '', h.date || ''].join('|');
+    try {
+      const v = _whMoveVaultRead();
+      const i = v.findIndex(r => r && [r.itemId, r.type, r.qty, r.fromWh || '', r.toWh || '', r.date || ''].join('|') === sig);
+      if (i >= 0) { v.splice(i, 1); localStorage.setItem(_WHMOVE_VAULT_KEY, JSON.stringify(v)); }
+    } catch(_){}
+    if (!Array.isArray(DB._deletedStockMoveSigs)) DB._deletedStockMoveSigs = [];
+    DB._deletedStockMoveSigs.push({ sig: sig, ts: Date.now() });
+    DB._deletedStockMoveSigs = DB._deletedStockMoveSigs.slice(-300);
+  }
+  saveData(); renderStock();
+  showNotif(isMove ? '삭제되었습니다 — 창고별 재고를 이동 전으로 되돌렸습니다' : '삭제되었습니다');
 }
 
 function uploadLogo(input) {
