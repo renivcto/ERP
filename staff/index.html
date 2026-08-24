@@ -1530,7 +1530,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.89.1';
+const STAFF_VERSION = 'v0.89.2';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1845,7 +1845,11 @@ if (DEMO) {
            cost: 300000, memo: '인스타 추가 집행', _by: '김서연', _byUid: 'd1', createdAt: Date.now() - 1800e3 }];
   CONS = [
     { id: 'cs1', date: '2026-08-12', seller: '바로팜', items: '3중 장벽 20층 리뉴 크림 60ml 외 2종',
-      qty: 330, total: 8910000, wh: '바로팜 창고' },
+      qty: 330, total: 8910000, wh: '바로팜 창고',
+      lines: [{ name: '320 리뉴 크림 60ml', spec: '60mL', qty: 100, price: 15210 }],
+      supplier: { name: '(주)르니브', bizno: '297-81-03973', ceo: '이주연', addr: '서울 성동구 성수이로7길 7' },
+      buyer: { name: '바로팜', manager: '김형석', phone: '010-2001-9453',
+               addr: '경기도 용인시 남사읍 형제로 26, CJ대한통운 3층 남사제약센터' } },
     { id: 'cs2', date: '2026-07-28', seller: '바로팜', items: '글로우샷 30ml', qty: 120, total: 2880000, wh: '바로팜 창고' },
   ];
   SMV = [
@@ -7715,17 +7719,27 @@ function consStatementHtml(sh, hidePrice) {
   };
   const _mbuy = sh.buyer || {};
   const _sel = (PT.seller || []).find(p => p && String(p.company || '').trim() === String(_mbuy.name || sh.seller || '').trim()) || {};
+  // v0.89.2: 임원용 명세서의 '공급받는 곳' 과 같은 구성 — 수신처·담당자·연락처·입고지.
+  //   출고 등록 때 적은 값(미러 buyer)이 우선이고, 판매업체 정보로 빈 곳을 보강한다.
   const buy = {
     name: _mbuy.name || sh.seller || '',
-    bizno: _mbuy.bizno || _sel.bizno || '',
-    ceo: _mbuy.ceo || _sel.ceo || '',
-    addr: _mbuy.addr || _sel.address || ''
+    manager: _mbuy.manager || _sel.contact || '',
+    phone: _mbuy.phone || _sel.phone || '',
+    addr: _mbuy.addr || _sel.address || '',
+    bizno: _mbuy.bizno || _sel.bizno || ''
   };
   const party = (t, o) => `<table class="p"><tr><th colspan="2" class="ph">${t}</th></tr>
     <tr><th>상호</th><td>${esc(o.name || '')}</td></tr>
     <tr><th>사업자번호</th><td>${esc(o.bizno || '')}</td></tr>
     <tr><th>대표자</th><td>${esc(o.ceo || '')}</td></tr>
     <tr><th>주소</th><td>${esc(o.addr || '')}</td></tr></table>`;
+  // v0.89.2: 공급받는자는 임원용 위탁 명세서와 같은 구성(수신처·담당자·연락처·입고지·출고일).
+  //   바로팜은 사업자번호·대표자를 따로 받지 않아 그 칸이 늘 비었다 — 실재하는 정보로 바꾼다.
+  const partyRecv = (t, o) => `<table class="p"><tr><th colspan="2" class="ph">${t}</th></tr>
+    <tr><th>수신처</th><td>${esc(o.name || '')}</td></tr>
+    <tr><th>담당자</th><td>${esc(o.manager || '-')}</td></tr>
+    <tr><th>연락처</th><td>${esc(o.phone || '-')}</td></tr>
+    <tr><th>입고지</th><td>${esc(o.addr || '-')}</td></tr></table>`;
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
   <title>거래명세서 ${esc(sh.date || '')} ${esc(sh.seller || '')}</title>
   <style>
@@ -7752,7 +7766,7 @@ function consStatementHtml(sh, hidePrice) {
   <div class="tools"><button onclick="window.print()">🖨 인쇄 / PDF 저장</button><button onclick="window.close()" style="background:#fff;color:#0f172a">닫기</button></div>
   <h1>거 래 명 세 서</h1>
   <div class="sub">${esc(sh.date || '')}${hidePrice ? ' · 3PL 인수용 (금액 미표기)' : ''}</div>
-  <div class="parties">${party('공급자', sup)}${party('공급받는자', buy)}</div>
+  <div class="parties">${party('공급자', sup)}${partyRecv('공급받는자', buy)}</div>
   <table class="g">
     <thead><tr><th style="width:34px">No</th><th>품목</th><th style="width:90px">규격</th>
       <th style="width:60px">수량</th><th style="width:100px">공급단가</th><th style="width:110px">공급가액</th><th style="width:100px">세액</th></tr></thead>
