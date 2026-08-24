@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.757';
+const ERP_VERSION = 'v2.3.758';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -57923,9 +57923,21 @@ function _staffCalPayload() {
   const from = new Date(today); from.setDate(from.getDate() - 45);
   const to = new Date(today); to.setDate(to.getDate() + 240);
   const fY = _ymd(from), tY = _ymd(to);
+  // v2.3.758: 자재(원자재·부자재·OEM) 발주의 입고예정도 임원용 전용 —
+  //   ActivePep·ATL Sphere 같은 신제품 개발용 원료 입고 일정이 직원용 홈에 떠 있었다.
+  //   완제품 발주 입고(직원 재고 실무와 직결)만 남긴다.
+  const _poStaffOk = e => {
+    if (e.type !== 'po') return true;
+    const o = (DB.orders || []).find(x => x && String(x.id) === String(e.orderId));
+    if (!o) return false;
+    return (o.rows || []).some(r => {
+      const it = (DB.items || []).find(i => i && String(i.id) === String(r && r.itemId));
+      return it && it.type === '완제품';
+    });
+  };
   return _getAllTrelloEvents('all')
     // v2.3.665: 신제품 개발은 임원용 전용 — 직원용 캘린더로 넘기지 않는다
-    .filter(e => e && !e.rangeIdx && e.board !== '신제품' && e.date >= fY && e.date <= tY)
+    .filter(e => e && !e.rangeIdx && e.board !== '신제품' && _poStaffOk(e) && e.date >= fY && e.date <= tY)
     .map(e => ({
       d: e.date, n: String(e.name || '').slice(0, 120),
       b: e.board || '', i: e.boardIcon || '📌',
