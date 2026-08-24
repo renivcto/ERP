@@ -1539,7 +1539,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.89.4';
+const STAFF_VERSION = 'v0.89.5';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -7880,7 +7880,8 @@ function cgRecvTab(tab) {
   CG_RECV_TAB = tab;
   const opt = s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`;
   const list = tab === 'shop' ? (cgMeta().shops || []) : (cgMeta().sellers || []);
-  $('cg-f-seller').innerHTML = list.map(opt).join('');
+  // v0.89.5: 기본은 미선택 — 실수로 첫 업체((주)디비링크)로 등록되는 것을 막는다
+  $('cg-f-seller').innerHTML = '<option value="">— 판매업체를 선택하세요 —</option>' + list.map(opt).join('');
   const ON = 'padding:2px 10px;font-size:11px;background:var(--brand-deep,#4338ca);color:#fff;border-color:transparent';
   const OFF = 'padding:2px 10px;font-size:11px';
   $('cg-recv-tab-seller').style.cssText = tab === 'seller' ? ON : OFF;
@@ -7899,6 +7900,12 @@ function openCgModal() {
   const whOpts = (WHS || []).map(w => `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');
   $('cg-f-from').innerHTML = '<option value="__un__">미지정(잔여)</option>' + whOpts;
   $('cg-f-to').innerHTML = whOpts;
+  // v0.89.5: 기본값 — 출고는 르니브 창고, 입고는 바로팜 창고 (이름으로 찾는다)
+  const _whIdByName = re => ((WHS || []).find(w => re.test(String(w.name || ''))) || {}).id;
+  const _fromDef = _whIdByName(/^르니브 창고/);
+  if (_fromDef) $('cg-f-from').value = String(_fromDef);
+  const _toDef = _whIdByName(/바로팜/);
+  if (_toDef) $('cg-f-to').value = String(_toDef);
   $('cg-f-date').value = today();
   $('cg-f-vat').value = '';
   $('cg-f-note').value = '';
@@ -7925,6 +7932,7 @@ $('btn-cg-save').onclick = async () => {
   if (!to) { toast('입고 창고를 선택해 주세요', true); return; }
   if (from === to) { toast('출고 창고와 입고 창고가 같습니다', true); return; }
   const sellerId = $('cg-f-seller').value;
+  if (!sellerId) { toast('판매업체를 선택해 주세요', true); return; }
   const arr = (CGI || []).slice();
   arr.push({
     id: 'CS' + Date.now(), sellerId,
