@@ -892,8 +892,9 @@ tr:last-child td { border-bottom:none; }
     <div class="modal-b">
       <div id="jr-m-body"></div>
       <div id="jr-m-fbwrap" style="margin-top:18px;border-top:1px solid var(--line-soft);padding-top:14px">
+        <div id="jr-m-fblist"></div>
         <div class="fld"><label>감정 표시</label><div class="jr-react" id="jr-m-react"></div></div>
-        <div class="fld jr-fb-edit"><label>💬 의견</label>
+        <div class="fld jr-fb-edit"><label>💬 새 의견 작성</label>
           <div class="rt-toolbar" data-for="jr-m-comment"></div>
           <div class="rt-editor fi" id="jr-m-comment" contenteditable="true"
                data-ph="직원에게 남길 의견을 적어주세요" style="min-height:100px"></div></div>
@@ -1539,7 +1540,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.89.6';
+const STAFF_VERSION = 'v0.90.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -2728,21 +2729,96 @@ function _fbWho() {
     byAvatar: isAdm ? '👑' : (ME.avatar || '🙂'),
   };
 }
-function jrFbHtml(rec) {
-  const fb = rec && rec.fb;
-  if (!fb || (!fb.comment && !fb.react)) return '';
-  // 저장 당시 직함이 '관리자' 처럼 뭉뚱그려져 있어도, 지금 결재라인에 있으면 그 직함을 쓴다
-  const title = _titleFor(fb.by, fb.byTitle || '');
+/* ═══════════ v0.90.0 — 의견 스레드 ═══════════
+   여러 개의 의견 + 각 의견에 답글(대댓글). 옛 단일 rec.fb 는 첫 항목으로 승격. */
+function _jrFbs(rec) {
+  if (!rec) return [];
+  if (Array.isArray(rec.fbs)) return rec.fbs;
+  if (rec.fb && (rec.fb.comment || rec.fb.react))
+    return [Object.assign({ id: 'fb0', replies: [] }, rec.fb)];
+  return [];
+}
+function _jrFbWhoHtml(f) {
+  const title = _titleFor(f.by, f.byTitle || '');
+  return `<span class="ava">${avaHtml(f.byAvatar || '🙂', 24)}</span>
+    <span class="nm">${esc(f.by || '-')}${title ? ' ' + esc(title) : ''}</span>
+    ${f.react ? `<span class="react">${esc(f.react)}</span>` : ''}
+    <span class="when">${f.at ? _fmtSeen(f.at) : ''}</span>`;
+}
+function _jrFbCanDel(f) { return ME.mode === 'admin' || String(f.by || '') === String(ME.name || ''); }
+function jrFbThreadHtml(rec, uid) {
+  const fbs = _jrFbs(rec);
+  if (!fbs.length) return '';
+  const date = rec.date;
+  const btn = 'font-size:11px;padding:2px 9px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer;color:var(--ink-soft)';
   return `<div class="jr-fb">
-      <div class="jr-fb-h">💬 의견</div>
-      <div class="jr-fb-who">
-        <span class="ava">${avaHtml(fb.byAvatar || '👑', 26)}</span>
-        <span class="nm">${esc(fb.by || '관리자')}${title ? ' ' + esc(title) : ''}</span>
-        ${fb.react ? `<span class="react">${esc(fb.react)}</span>` : ''}
-        <span class="when">${fb.at ? _fmtSeen(fb.at) : ''}</span>
-      </div>
-      <div class="rt-view jr-fb-body">${_rtHtml(fb.comment || '-')}</div>
-    </div>`;
+    <div class="jr-fb-h">💬 의견 <span style="font-weight:500;color:var(--ink-mute)">(${fbs.length})</span></div>
+    ${fbs.map(f => `
+      <div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px dashed var(--line-soft)">
+        <div class="jr-fb-who">${_jrFbWhoHtml(f)}
+          ${_jrFbCanDel(f) ? `<button style="${btn};color:var(--bad,#dc2626)" onclick="_jrFbDel('${esc(uid)}','${esc(date)}','${esc(f.id)}','')">삭제</button>` : ''}
+        </div>
+        <div class="rt-view jr-fb-body">${_rtHtml(f.comment || '-')}</div>
+        ${(Array.isArray(f.replies) ? f.replies : []).map(r => `
+          <div style="margin:8px 0 0 26px;padding:8px 10px;background:var(--bg-soft,#f8fafc);border-radius:8px">
+            <div class="jr-fb-who" style="margin-bottom:3px">${_jrFbWhoHtml(r)}
+              ${_jrFbCanDel(r) ? `<button style="${btn};color:var(--bad,#dc2626)" onclick="_jrFbDel('${esc(uid)}','${esc(date)}','${esc(f.id)}','${esc(r.id)}')">삭제</button>` : ''}
+            </div>
+            <div style="font-size:13px;white-space:pre-wrap">${esc(r.comment || '')}</div>
+          </div>`).join('')}
+        <div style="margin:8px 0 0 26px">
+          <button style="${btn}" onclick="_jrFbReplyOpen('${esc(f.id)}')">↩ 답글</button>
+          <div id="jr-reply-${esc(f.id)}" style="display:none;margin-top:6px">
+            <textarea class="fi" id="jr-reply-in-${esc(f.id)}" rows="2" placeholder="답글을 입력하세요" style="resize:vertical"></textarea>
+            <div style="margin-top:5px;display:flex;gap:6px;justify-content:flex-end">
+              <button style="${btn}" onclick="_jrFbReplyOpen('${esc(f.id)}')">취소</button>
+              <button class="btn btn-sm btn-p" onclick="_jrFbReplySend('${esc(uid)}','${esc(date)}','${esc(f.id)}')">답글 달기</button>
+            </div>
+          </div>
+        </div>
+      </div>`).join('')}
+  </div>`;
+}
+function jrFbHtml(rec) { return jrFbThreadHtml(rec, rec && rec.uid ? rec.uid : ME.uid); }
+window._jrFbReplyOpen = function(fid) {
+  const el = document.getElementById('jr-reply-' + fid);
+  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+};
+async function _jrFbMutate(uid, date, fn) {
+  const rec = jrGet(uid, date);
+  if (!rec) { toast('일지를 찾을 수 없습니다', true); return; }
+  rec.fbs = _jrFbs(rec).slice();
+  fn(rec);
+  rec.fb = rec.fbs.length ? rec.fbs[rec.fbs.length - 1] : null;   // 목록 '작성함' 표시용 요약
+  try {
+    await jrSave(rec);
+    // 관리자 모달이 열려 있으면 그 안을, 아니면 화면을 갱신한다
+    if ($('ovl-jr').classList.contains('on') && _jrRef && _jrRef.uid === uid && _jrRef.date === date) {
+      $('jr-m-fblist').innerHTML = jrFbThreadHtml(rec, uid);
+    } else rerender();
+  } catch (e) { toast('저장 실패: ' + e.message, true); }
+}
+window._jrFbReplySend = function(uid, date, fid) {
+  const inp = document.getElementById('jr-reply-in-' + fid);
+  const text = (inp && inp.value || '').trim();
+  if (!text) { toast('답글 내용을 입력해 주세요', true); return; }
+  _jrFbMutate(uid, date, rec => {
+    const f = rec.fbs.find(x => x && String(x.id) === String(fid));
+    if (!f) return;
+    if (!Array.isArray(f.replies)) f.replies = [];
+    f.replies.push(Object.assign({ id: 'r' + Date.now() }, _fbWho(), { at: Date.now(), comment: text }));
+  }).then(() => toast('답글을 남겼습니다'));
+};
+window._jrFbDel = function(uid, date, fid, rid) {
+  if (!confirm(rid ? '이 답글을 삭제할까요?' : '이 의견을 삭제할까요? (답글도 함께 지워집니다)')) return;
+  _jrFbMutate(uid, date, rec => {
+    if (rid) {
+      const f = rec.fbs.find(x => x && String(x.id) === String(fid));
+      if (f && Array.isArray(f.replies)) f.replies = f.replies.filter(r => r && String(r.id) !== String(rid));
+    } else {
+      rec.fbs = rec.fbs.filter(x => x && String(x.id) !== String(fid));
+    }
+  }).then(() => toast('삭제했습니다'));
 }
 
 /* 업무 요약 모달 (v0.16.0) — 서식 문서에서 글자만 뽑아 앞부분만 보여준다 */
@@ -2998,7 +3074,10 @@ function openJrModal(uid, date) {
     _jrReact = (_jrReact === b.dataset.jrReact) ? '' : b.dataset.jrReact;   // 다시 누르면 해제
     $('jr-m-react').querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.jrReact === _jrReact));
   });
-  $('jr-m-comment').innerHTML = (rec && rec.fb && rec.fb.comment) ? _rtSanitize(rec.fb.comment) : '';
+  // v0.90.0: 기존 의견은 스레드로 보여주고, 에디터는 '새 의견 추가' 용으로 비운다
+  $('jr-m-fblist').innerHTML = rec ? jrFbThreadHtml(rec, uid) : '';
+  $('jr-m-comment').innerHTML = '';
+  _jrReact = '';
   $('jr-m-fbwrap').style.display = rec ? '' : 'none';
   buildRtToolbars();
   $('ovl-jr').classList.add('on');
@@ -3007,9 +3086,17 @@ $('btn-jr-fb-save').onclick = async () => {
   if (!_jrRef) return;
   const rec = jrGet(_jrRef.uid, _jrRef.date);
   if (!rec) { toast('작성된 일지가 없습니다', true); return; }
-  rec.fb = Object.assign(_fbWho(), { at: Date.now(), react: _jrReact, comment: _rtSanitize($('jr-m-comment').innerHTML) });
-  try { await jrSave(rec); $('ovl-jr').classList.remove('on'); toast('의견을 저장했습니다'); }
-  catch (e) { toast('저장 실패: ' + e.message, true); }
+  // v0.90.0: 덮어쓰지 않고 새 의견으로 추가한다 — 여러 개를 달 수 있다
+  const html = _rtSanitize($('jr-m-comment').innerHTML);
+  if (!_plainText(html) && !_jrReact) { toast('의견 내용이나 감정 표시를 입력해 주세요', true); return; }
+  await _jrFbMutate(_jrRef.uid, _jrRef.date, r => {
+    r.fbs.push(Object.assign({ id: 'fb' + Date.now(), replies: [] }, _fbWho(),
+      { at: Date.now(), react: _jrReact, comment: html }));
+  });
+  $('jr-m-comment').innerHTML = '';
+  _jrReact = '';
+  $('jr-m-react').querySelectorAll('button').forEach(x => x.classList.remove('on'));
+  toast('의견을 남겼습니다');
 };
 
 /* ── 출퇴근 지난 데이터 (v0.13.0) — 일별 / 주간 / 월간 ── */
