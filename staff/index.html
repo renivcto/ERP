@@ -1539,7 +1539,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.89.5';
+const STAFF_VERSION = 'v0.89.6';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -7910,17 +7910,29 @@ function openCgModal() {
   $('cg-f-vat').value = '';
   $('cg-f-note').value = '';
   // v0.89.4: 입고 창고를 고르면 창고 정보(주소·담당자·연락처)로 자동 채움 — 수정 가능
+  // v0.89.6: 창고에 정보가 없으면(바로팜 창고가 그렇다) 같은 수신처의
+  //   '가장 최근 위탁 출고' 에 적었던 입고지·담당자로 채운다(명세서 buyer 미러).
   const fillRecv = () => {
     const w = (WHS || []).find(x => String(x.id) === String($('cg-f-to').value)) || {};
-    $('cg-recv-addr').value = w.address || '';
-    $('cg-recv-mgr').value = w.manager || '';
-    $('cg-recv-phone').value = w.phone || '';
+    const sellerName = (($('cg-f-seller') || {}).selectedOptions || [{}])[0].textContent || '';
+    const last = (CONS || []).filter(c => c && String(c.seller || '') === String(sellerName).trim()
+                    && c.buyer && (c.buyer.addr || c.buyer.manager || c.buyer.phone))
+                 .sort((x, y) => String(y.date||'').localeCompare(String(x.date||'')))[0];
+    const b = (last && last.buyer) || {};
+    $('cg-recv-addr').value = w.address || b.addr || '';
+    $('cg-recv-mgr').value = w.manager || b.manager || '';
+    $('cg-recv-phone').value = w.phone || b.phone || '';
   };
+
   $('cg-f-to').onchange = fillRecv;
   fillRecv();
   CG_LINES = [{ itemId: '', name: '', spec: '', qty: 0, price: 0 }];
   cgRenderLines();
-  $('cg-f-seller').onchange = () => { CG_LINES.forEach(l => { if (l.itemId) l.price = cgPrice($('cg-f-seller').value, l.itemId); }); cgRenderLines(); };
+  $('cg-f-seller').onchange = () => {
+    CG_LINES.forEach(l => { if (l.itemId) l.price = cgPrice($('cg-f-seller').value, l.itemId); });
+    cgRenderLines();
+    fillRecv();   // v0.89.6: 수신처를 바꾸면 입고지·담당자도 그 수신처 기준으로 다시 채운다
+  };
   $('cg-f-vat').onchange = cgSum;
   $('ovl-cg').classList.add('on');
 }

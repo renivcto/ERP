@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.754';
+const ERP_VERSION = 'v2.3.755';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28765,12 +28765,28 @@ async function openConsignShip(editId){
   }
 }
 function _consignFillWhInfo(){
-  const w = _whById((document.getElementById('cs-wh-to')||{}).value);
-  if (!w) return;
+  // v2.3.755 — 입고 창고를 고르면 입고지·담당자·연락처를 채운다.
+  //   종전엔 (1) 창고에 정보가 없으면(바로팜 창고가 그렇다) 아무것도 못 채웠고
+  //   (2) 칸에 값이 있으면 창고를 바꿔도 갱신되지 않았다.
+  //   → 창고 정보 → 같은 수신처의 '가장 최근 출고' 에 적었던 값 순서로 찾고,
+  //     찾은 값이 있으면 덮어쓴다(창고 선택은 명시적 행위다).
+  const w = _whById((document.getElementById('cs-wh-to')||{}).value) || {};
+  const sellerId = (document.getElementById('cs-seller')||{}).value || '';
+  let last = null;
+  try {
+    const ships = (window._consign && window._consign.shipments) || [];
+    last = ships.filter(sh => sh && String(sh.sellerId) === String(sellerId)
+                        && (sh.recvAddr || sh.recvManager || sh.recvPhone))
+                .sort((x, y) => String(y.date||'').localeCompare(String(x.date||'')))[0] || null;
+  } catch(_){}
+  const pick = (whVal, lastVal) => whVal || (last && lastVal) || '';
+  const addr = pick(w.address, last && last.recvAddr);
+  const mgr  = pick(w.manager, last && last.recvManager);
+  const ph   = pick(w.phone,   last && last.recvPhone);
   const a=document.getElementById('cs-recv-addr'), m=document.getElementById('cs-recv-mgr'), p=document.getElementById('cs-recv-phone');
-  if (a && !a.value) a.value = w.address||'';
-  if (m && !m.value) m.value = w.manager||'';
-  if (p && !p.value) p.value = w.phone||'';
+  if (a && addr) a.value = addr;
+  if (m && mgr)  m.value = mgr;
+  if (p && ph)   p.value = ph;
 }
 function _consignFinishedItems(){ return (DB.items||[]).filter(i=>i && i.type==='완제품'); }
 // v2.3.495: 품목 라벨 — 선택된 판매업체에 거래처 품목명이 등록돼 있으면 그 이름, 없으면 ERP 대표명
