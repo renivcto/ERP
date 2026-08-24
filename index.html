@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.750';
+const ERP_VERSION = 'v2.3.751';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58194,8 +58194,14 @@ function _staffWhPayload() {
     if (i.defaultWh) bag.add(String(i.defaultWh));
   });
   return list
-    .filter(w => w && !(other.has(String(w.id)) && !fin.has(String(w.id))))
-    .map(w => ({ id: String(w.id), name: w.name || '' }));
+    // v2.3.751: '르니브 본사' 는 완제품 재고가 없어도 항상 넘긴다(대표 지시).
+    //   바이오코스텍·내추럴솔루션 같은 자재 창고는 종전대로 제외된다.
+    .filter(w => w && (/르니브\s*본사/.test(String(w.name || ''))
+                       || !(other.has(String(w.id)) && !fin.has(String(w.id)))))
+    // v2.3.751: 이름만 넘기던 것을 주소·담당자·연락처·업체까지 — 직원용 창고 관리가
+    //   임원용과 같은 정보를 보고, 수정 요청도 기존 값 위에서 하게 한다.
+    .map(w => ({ id: String(w.id), name: w.name || '', address: w.address || '',
+                 manager: w.manager || '', phone: w.phone || '', vendorName: w.vendorName || '' }));
 }
 /* ⚠️ v2.3.702: 창고 목록(_WH.list)도 지연 로드다 — 위탁과 같은 사고를 막는다.
    못 읽은 상태로 밀면 직원용 창고 목록이 통째로 비워지고, 그러면 직원이 입출고 요청을
