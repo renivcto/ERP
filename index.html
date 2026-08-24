@@ -48254,15 +48254,17 @@ async function loadTrelloCards() {
 
     const [b1, b2, b3, b4] = await Promise.all([
       _fetchBoard(TRELLO_BOARD_ID),
-      _fetchBoard(TRELLO_BOARD_ID_2).catch(e => { console.warn('[Trello] 보드2 로드 실패:', e); return { lists: [], cards: [] }; }),
-      _fetchBoard(TRELLO_BOARD_ID_3).catch(e => { console.warn('[Trello] 보드3(홈쇼핑) 로드 실패:', e); return { lists: [], cards: [] }; }),
-      _fetchBoard(TRELLO_BOARD_ID_4).catch(e => { console.warn('[Trello] 보드4(약국 영업) 로드 실패:', e); return { lists: [], cards: [] }; })
+      _fetchBoard(TRELLO_BOARD_ID_2).catch(e => { console.warn('[Trello] 보드2 로드 실패:', e); return null; }),
+      _fetchBoard(TRELLO_BOARD_ID_3).catch(e => { console.warn('[Trello] 보드3(홈쇼핑) 로드 실패:', e); return null; }),
+      _fetchBoard(TRELLO_BOARD_ID_4).catch(e => { console.warn('[Trello] 보드4(약국 영업) 로드 실패:', e); return null; })
     ]);
 
     const lists = b1.lists, cards = b1.cards;
-    const lists2 = b2.lists, cards2 = b2.cards;
-    const lists3 = b3.lists, cards3 = b3.cards;  // v2.3.178: 홈쇼핑 준비
-    const lists4 = b4.lists, cards4 = b4.cards;  // v2.3.274: 약국 영업
+    // v2.3.759: 보드 로드가 실패하면 빈 배열로 덮지 않고 기존 데이터를 지킨다
+    //   — 종전엔 일시 실패 한 번에 홈쇼핑·박은빈MD 일정이 직원용에서 통째로 사라졌다
+    const lists2 = b2 ? b2.lists : (DB._trelloLists2 || []), cards2 = b2 ? b2.cards : (DB._trelloCards2 || []);
+    const lists3 = b3 ? b3.lists : (DB._trelloLists3 || []), cards3 = b3 ? b3.cards : (DB._trelloCards3 || []);  // 홈쇼핑 준비
+    const lists4 = b4 ? b4.lists : (DB._trelloLists4 || []), cards4 = b4 ? b4.cards : (DB._trelloCards4 || []);  // 약국(박은빈MD)
 
     // 디버그: 첫 카드의 모든 필드를 콘솔에 출력
     if (cards.length) {
@@ -48283,8 +48285,10 @@ async function loadTrelloCards() {
     DB._trelloLists3 = lists3;   // v2.3.178
     DB._trelloCards3 = cards3;
     DB._trelloLists4 = lists4;   // v2.3.274
-    try { _staffMirrorWorkflow(); } catch(_){}   // v2.3.665: 직원용 워크플로우 반영
     DB._trelloCards4 = cards4;
+    try { _staffMirrorWorkflow(); } catch(_){}   // v2.3.665: 직원용 워크플로우 반영
+    // v2.3.759: 트렐로를 새로 받아오면 직원용 캘린더도 즉시 미러 (6시간 스로틀을 기다리지 않는다)
+    try { _staffMirrorCalendar().catch(()=>{}); } catch(_){}
     try {
       localStorage.setItem('reniv_trello_lists', JSON.stringify(lists));
       localStorage.setItem('reniv_trello_cards', JSON.stringify(cards));
