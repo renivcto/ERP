@@ -787,14 +787,12 @@ async function ingestCoupangOrders({ daysBack = 7 } = {}) {
 // ─────────────────────────────────────────────────────────────
 // 4) 쿠팡 주문 자동 수집 — 매일 KST 09:00 / 13:00 / 18:00
 // ─────────────────────────────────────────────────────────────
-// v2.27(2026-08-25): 쿠팡 자동 수집 복귀 — 평일 17:30 KST.
-//   v2.19 에서 PlusCL 출고 기준으로 전환하며 껐지만, PlusCL 주문 양식이
-//   '르니브_자사양식기본' 하나로 통합돼 ord_comp_name 몰 구분이 사라졌다(2026-08 실측 217행 전부 동일).
-//   물류 데이터로는 쿠팡만 골라낼 수 없어 쿠팡 공식 API 수집을 다시 켠다.
-//   (ERP 쿠팡 주문이 7/3 에서 끊겨 있던 원인이 이 비활성이었다.)
+// v2.28(2026-08-25): 쿠팡 API 자동 수집 재비활성 — 사용자 확인: 쿠팡 Open API 의 허용 IP 1개를
+//   물류사(PlusCL)가 쓰고 있어 ERP 서버 IP 를 추가로 등록할 수 없다(등록하면 물류 연동이 깨진다).
+//   쿠팡 주문은 물류 출고 데이터에서 골라 온다 → fetchPlusclCoupangOrders (주문번호 형식 판별).
 // v2.19: PlusCL(3PL 물류) 배송정보 수집으로 전환 — 쿠팡 자동 크롤러 비활성(export 제거 → 배포 시 삭제).
 //   코드는 롤백 대비 보존. 스케줄 트리거는 export 안 되면 등록/실행되지 않음.
-exports.fetchCoupangOrders = functions
+const _off_fetchCoupangOrders = functions
   .region(REGION)
   .runWith({
     secrets: ['COUPANG_ACCESS_KEY', 'COUPANG_SECRET_KEY', 'COUPANG_VENDOR_ID', 'SLACK_ORDERS_WEBHOOK'],
@@ -1869,9 +1867,21 @@ async function mergePlusclOrders(firestoreDb, newOrders) {
   return { added: trulyNew.length, total: merged.length, sampleNew: trulyNew.slice(0, 3), newOrders: trulyNew };
 }
 
+// v2.28: 쿠팡 주문 판별 — PlusCL 주문 양식이 '르니브_자사양식기본' 으로 통합돼 ord_comp_name 만으로는
+//   몰을 알 수 없다(2026-08 실측 217행 전부 동일). 주문번호 형식으로 가른다:
+//   · 쿠팡: 13~14자리 숫자, 날짜로 시작하지 않음 (ERP 실데이터 예: 24101360750369, 9101354723086)
+//   · 스마트스토어: 16자리, 'YYYYMMDD' 날짜로 시작 (예: 2026082356533761) — 제외
+//   · 와디즈·바로팜: 7~8자리 / 자사몰: 'YYYYMMDD-****' — 제외
+//   8월 217행 중 13~14자리는 0건(쿠팡 주문이 없던 기간) → 오탐 없음 확인.
+function plusclIsCoupang(r) {
+  if (plusclMallName(r.ord_comp_name) === '쿠팡') return true;   // 몰 이름이 살아 있으면 그대로 신뢰
+  const no = String(r.ord_no1 || '').trim();
+  return /^\d{13,14}$/.test(no) && !/^20\d{6}/.test(no);
+}
+
 // 메인 인입 로직
-// v2.27: mallFilter — 지정한 몰만 적재(['쿠팡'] 등). mallRename — ERP 쇼핑몰명으로 치환('쿠팡'→'쿠팡 Wing').
-async function ingestPlusclShipments({ daysBack = 1, mallFilter = null, mallRename = null } = {}) {
+// v2.28: rowFilter — 행 단위 필터(쿠팡만 등). forceMall — 판정된 몰 이름을 강제(ERP 쇼핑몰명 '쿠팡 Wing').
+async function ingestPlusclShipments({ daysBack = 1, rowFilter = null, forceMall = null } = {}) {
   const now = new Date();
   const from = new Date(now); from.setDate(from.getDate() - daysBack);
   const sDate = plusclDateStr(from);
@@ -1882,9 +1892,8 @@ async function ingestPlusclShipments({ daysBack = 1, mallFilter = null, mallRena
   const shopCache = {};
   const erpOrders = [];
   for (const r of rows) {
-    let mall = plusclMallName(r.ord_comp_name);
-    if (mallFilter && !mallFilter.includes(mall)) continue;
-    if (mallRename && mallRename[mall]) mall = mallRename[mall];
+    if (rowFilter && !rowFilter(r)) continue;
+    const mall = forceMall || plusclMallName(r.ord_comp_name);
     if (!(mall in shopCache)) {
       const shop = await findShopByName(firestoreDb, mall);
       shopCache[mall] = shop ? { id: shop.id, name: shop.name } : { id: '', name: mall };
@@ -2071,9 +2080,46 @@ exports.scheduledPlusclStock = functions
     }
   });
 
-// (v2.27 에서 잠시 만들었던 '물류 출고 기준 쿠팡 수집'은 폐기 — PlusCL 주문 양식 통합으로
-//  ord_comp_name 몰 구분이 사라져 쿠팡만 골라낼 수 없다. 쿠팡 공식 API 수집(fetchCoupangOrders)으로 대체.
-//  ingestPlusclShipments 의 mallFilter/mallRename 옵션은 무해해 남겨 둔다.)
+// v2.28(2026-08-25): 평일 17:30 KST — 물류(PlusCL) 출고분 중 '쿠팡' 주문만 ERP 주문 관리에 자동 적재.
+//   쿠팡 Open API 는 허용 IP 1개를 물류사가 쓰고 있어 직접 수집 불가(사용자 확인) —
+//   물류 출고 데이터에서 주문번호 형식(plusclIsCoupang)으로 쿠팡을 판별한다.
+//   카페24·스마트스토어는 각자 API 수집(09/13/18시)이 있으므로 제외(병행 시 중복).
+//   ERP 쇼핑몰명 '쿠팡 Wing' 으로 적재 → 주문 관리의 [쿠팡 Wing] 탭에 잡힌다.
+//   plusclUid dedupe 로 멱등. daysBack:3 — 주말(토·일) 출고를 월요일에 포함.
+exports.fetchPlusclCoupangOrders = functions
+  .region(REGION)
+  .runWith({ secrets: ['PLUSCL_AUTH_KEY', 'SLACK_ORDERS_WEBHOOK'], timeoutSeconds: 300, memory: '256MB' })
+  .pubsub.schedule('30 17 * * 1-5')
+  .timeZone('Asia/Seoul')
+  .onRun(async () => {
+    try {
+      const result = await ingestPlusclShipments({
+        daysBack: 3,
+        rowFilter: plusclIsCoupang,
+        forceMall: '쿠팡 Wing',
+      });
+      const won = n => '₩' + Math.round(Number(n) || 0).toLocaleString('en-US');
+      await notifySlack({
+        title: '쿠팡 Wing 주문 자동 수집 (물류 출고 기준)',
+        level: result.totalCount > 0 ? 'success' : 'info',
+        details: `[신규 ${result.totalCount}건 - ${won(result.totalAmount)}] (조회 ${result.range}, 쿠팡 판정 ${result.fetched}건)`,
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+        titlePrefix: ''
+      });
+      console.log('[PLUSCL COUPANG] 성공:', JSON.stringify({ added: result.added, fetched: result.fetched, range: result.range }));
+      return result;
+    } catch (err) {
+      console.error('[PLUSCL COUPANG] 실패:', err);
+      await notifySlack({
+        title: '쿠팡 Wing 주문 자동 수집 실패',
+        level: 'error',
+        details: `❌ ${err.message}`,
+        webhookOverride: process.env.SLACK_ORDERS_WEBHOOK,
+        titlePrefix: ''
+      });
+      throw err;
+    }
+  });
 
 
 // =============================================================================
