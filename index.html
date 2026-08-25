@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.760';
+const ERP_VERSION = 'v2.3.761';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -46931,6 +46931,70 @@ function _apSheetPoOrder(r) {
   return ((r.category === 'po_prepay' || r.category === 'po_balance') && r.orderId)
     ? (DB.orders || []).find(o => o && (o.id === r.orderId || Number(o.id) === Number(r.orderId))) : null;
 }
+/* v2.3.761: 지급 방법·증빙·입금 계좌 — 인쇄본(v1.9.219~v2.2.65)과 같은 조회 순서를 한 곳으로.
+   expense 자체 → 샘플 → 해외 PO 결제수단 매핑 → 거래처 계좌 폴백. */
+function _apSheetPayInfo(e) {
+  let payMethod = (e.payMethod && String(e.payMethod).trim()) || '';
+  let bankName    = e.bankName    || (e.bank && e.bank.name) || '';
+  let bankAccount = e.bankAccount || e.account || (e.bank && e.bank.account) || (e.bank && e.bank.number) || '';
+  let bankHolder  = e.bankHolder  || e.accountHolder || (e.bank && e.bank.holder) || (e.bank && e.bank.beneficiary) || '';
+  if (!payMethod && e.category === 'sample' && e.sampleId) {
+    const sp = (DB.samples||[]).find(x => x && (x.id === e.sampleId || Number(x.id) === Number(e.sampleId)));
+    if (sp) {
+      payMethod   = sp.payMethod   || payMethod;
+      bankName    = bankName    || sp.bankName    || '';
+      bankAccount = bankAccount || sp.bankAccount || '';
+      bankHolder  = bankHolder  || sp.bankHolder  || '';
+    }
+  }
+  if (!payMethod && (e.category === 'po_prepay' || e.category === 'po_balance') && e.orderId) {
+    const _povOrd = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
+    if (_povOrd && _povOrd.isOverseas) {
+      const _pmEng = String(_povOrd.payment || '').trim();
+      const _pmMap = {
+        'T/T (Wire Transfer)': '계좌이체 (T/T Wire Transfer)',
+        'T/T': '계좌이체 (T/T Wire Transfer)',
+        'Wire Transfer': '계좌이체 (Wire Transfer)',
+        'Credit Card': '카드결제 (Credit Card)',
+        'L/C': '신용장 (L/C)',
+        'PayPal': '페이팔 (PayPal)',
+        'Cash': '현금 (Cash)',
+      };
+      payMethod = _pmMap[_pmEng] || (_pmEng ? (_pmEng + ' (해외)') : '');
+    }
+  }
+  if (!payMethod) payMethod = '계좌이체';
+  if (payMethod === '계좌이체' && !bankAccount && e.vendor) {
+    const v = (DB.vendors||[]).find(x => x && x.company && x.company.trim() === String(e.vendor).trim());
+    if (v) {
+      bankName    = v.bankName    || '';
+      bankAccount = v.bankAccount || '';
+      bankHolder  = v.bankHolder  || v.company || '';
+    }
+  }
+  const _proofMap = { '세금계산서':'세금계산서', '카드전표':'카드전표', '현금영수증':'현금영수증', '영수증':'영수증 (일반)', '견적서':'견적서/계약서', '없음':'증빙 없음' };
+  let proofLabel;
+  if (e.proofType && _proofMap[e.proofType]) {
+    proofLabel = _proofMap[e.proofType];
+    if (e.proofType === '세금계산서' && e.taxInvoice === '수령완료') proofLabel = '세금계산서 (수령완료)';
+  } else {
+    proofLabel = e.taxInvoice === '수령완료' ? '세금계산서 (수령완료)' : '세금계산서';
+  }
+  return { payMethod: payMethod, bankName: bankName, bankAccount: bankAccount, bankHolder: bankHolder, proofLabel: proofLabel };
+}
+/* v2.3.761: 기안자 — 발주 연동 지출결의서는 authorName 저장이 없다.
+   연결 발주 결재 → 발주서 → 현재 로그인 사용자 순으로 찾는다(발주 결재 문서 뷰와 같은 관례). */
+function _apSheetAuthor(r) {
+  if (r.authorName) return r.authorName;
+  if (r._byName) return r._byName;
+  try {
+    const ap = r.approvalId ? (DB.approvals || []).find(a => a && String(a.id) === String(r.approvalId)) : null;
+    if (ap && ap.authorName) return ap.authorName;
+    const ord = _apSheetPoOrder(r);
+    if (ord && ord.authorName) return ord.authorName;
+  } catch(_){}
+  return (window._currentUser && (window._currentUser.displayName || window._currentUser.name)) || '';
+}
 /* 적요 — 인쇄본과 같은 문장을 만든다(저장된 필드가 아니라 그때그때 짓는 문구다). */
 function _apSheetSummary(r) {
   const ord = _apSheetPoOrder(r);
@@ -47013,12 +47077,17 @@ function openApprovalSheet(kind, id) {
     + '<table style="width:100%;border-collapse:collapse;font-size:13px">'
     +   row('분류', escapeHtml(catLabels[r.category] || r.category || '기타'))
     +   row('제목', '<b>' + escapeHtml(r.title || '') + '</b>')
-    +   row('기안자', escapeHtml(r.authorName || r._byName || '-'))
+    // v2.3.761: 기안자·지급방법·입금계좌를 인쇄본과 같은 로직으로 채운다 — 발주 연동 건은 저장 필드가 없어 '-' 로 나왔다
+    +   row('기안자', escapeHtml(_apSheetAuthor(r) || '-'))
     +   (isExp ? row('지급처', escapeHtml(r.vendor || '')) : '')
     +   (isExp ? row('금액', '<b style="font-size:15px">' + money(r.amount) + '</b>') : '')
     +   (isExp ? row('지급 요청일', escapeHtml(r.dueDate || '')) : row('요청일', escapeHtml(r.date || '')))
-    +   (isExp ? row('지급 방법', escapeHtml((r.payMethod || '') + ' / 증빙 ' + (r.proofType || ''))) : '')
-    +   (isExp && r.account ? row('입금 계좌', escapeHtml(r.account + (r.accountHolder ? ' (' + r.accountHolder + ')' : ''))) : '')
+    +   (function(){ if (!isExp) return '';
+          const pi = _apSheetPayInfo(r);
+          let h = row('지급 방법', escapeHtml(pi.payMethod + ' / 증빙 ' + pi.proofLabel));
+          if (pi.bankAccount) h += row('입금 계좌', escapeHtml((pi.bankName ? pi.bankName + ' ' : '') + pi.bankAccount
+            + (pi.bankHolder ? ' (예금주: ' + pi.bankHolder + ')' : '')));
+          return h; })()
     +   (!isExp && r.phase ? row('단계', r.phase === 'planning' ? '📋 사전 품의' : '🚀 실행 기안') : '')
     +   '<tr><th style="background:#f1f5f9;border:1px solid #cbd5e1;padding:7px 10px;text-align:left;width:118px;font-weight:700">'
     +   (isExp ? '비고 / 상세' : '상세 내용') + '</th><td style="border:1px solid #cbd5e1;padding:7px 10px;white-space:pre-wrap;'
@@ -47201,63 +47270,15 @@ async function openExpenseApprovalForm(expenseId) {
   const dueKor = e.dueDate ? `${e.dueDate.slice(0,4)}년 ${e.dueDate.slice(5,7)}월 ${e.dueDate.slice(8,10)}일` : '-';
   const amt = Number(e.amount) || 0;
   const amtKor = _numberToKoreanWon(amt);
-  // v2.3.204: 증빙 종류 — 사용자가 고른 proofType 을 그대로 표시 (이전엔 무조건 '세금계산서' 로 잘못 나옴)
-  const _proofMap = { '세금계산서':'세금계산서', '카드전표':'카드전표', '현금영수증':'현금영수증', '영수증':'영수증 (일반)', '견적서':'견적서/계약서', '없음':'증빙 없음' };
-  let taxLabel;
-  if (e.proofType && _proofMap[e.proofType]) {
-    taxLabel = _proofMap[e.proofType];
-    if (e.proofType === '세금계산서' && e.taxInvoice === '수령완료') taxLabel = '세금계산서 (수령완료)';
-  } else {
-    // 옛 데이터(proofType 없음) — taxInvoice 기반 fallback
-    taxLabel = e.taxInvoice === '수령완료' ? '세금계산서 (수령완료)' : '세금계산서';
-  }
-  // v1.9.219: 지급 방법 및 계좌정보 — expense 자체에 있으면 그대로 사용, 없으면 샘플/업체에서 조회
-  let payMethod = (e.payMethod && String(e.payMethod).trim()) || '';
-  let bankName    = e.bankName    || (e.bank && e.bank.name) || '';
-  // v2.2.58 + v2.2.65: 옛/새/중첩 필드명 모두 호환
-  let bankAccount = e.bankAccount || e.account || (e.bank && e.bank.account) || (e.bank && e.bank.number) || '';
-  let bankHolder  = e.bankHolder  || e.accountHolder || (e.bank && e.bank.holder) || (e.bank && e.bank.beneficiary) || '';
+  // v2.3.761: 증빙·지급방법·계좌·기안자 계산을 상세 모달과 공유(_apSheetPayInfo/_apSheetAuthor) — 로직 두 벌 방지
+  const _pi = _apSheetPayInfo(e);
+  let taxLabel = _pi.proofLabel;
+  let payMethod = _pi.payMethod, bankName = _pi.bankName, bankAccount = _pi.bankAccount, bankHolder = _pi.bankHolder;
   // v2.2.65: 진단 로그 (콘솔에서 데이터 누락 확인 가능)
   if (!bankAccount && (e.category === 'po_balance' || e.category === 'po_prepay' || e.category === 'sample' || e.category === 'other' || e.category === 'ad')) {
     console.log('[expense voucher] 계좌 누락 감지 — expense:', e.id, '/ 사용 가능 필드:', Object.keys(e || {}).filter(k => /bank|account|holder/i.test(k)).join(', ') || '(없음)');
   }
-  if (!payMethod && e.category === 'sample' && e.sampleId) {
-    const sp = (DB.samples||[]).find(x => x && (x.id === e.sampleId || Number(x.id) === Number(e.sampleId)));
-    if (sp) {
-      payMethod   = sp.payMethod   || payMethod;
-      bankName    = bankName    || sp.bankName    || '';
-      bankAccount = bankAccount || sp.bankAccount || '';
-      bankHolder  = bankHolder  || sp.bankHolder  || '';
-    }
-  }
-  // v2.2.38: 해외 PO 면 PO 의 payment 필드를 한글로 매핑 (Credit Card → 카드결제, T/T → 계좌이체 등)
-  if (!payMethod && (e.category === 'po_prepay' || e.category === 'po_balance') && e.orderId) {
-    const _povOrd = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
-    if (_povOrd && _povOrd.isOverseas) {
-      const _pmEng = String(_povOrd.payment || '').trim();
-      const _pmMap = {
-        'T/T (Wire Transfer)': '계좌이체 (T/T Wire Transfer)',
-        'T/T': '계좌이체 (T/T Wire Transfer)',
-        'Wire Transfer': '계좌이체 (Wire Transfer)',
-        'Credit Card': '카드결제 (Credit Card)',
-        'L/C': '신용장 (L/C)',
-        'PayPal': '페이팔 (PayPal)',
-        'Cash': '현금 (Cash)',
-      };
-      payMethod = _pmMap[_pmEng] || (_pmEng ? (_pmEng + ' (해외)') : '');
-    }
-  }
-  // 발주/기타: 기본 계좌이체 + 업체 계좌 조회
-  if (!payMethod) payMethod = '계좌이체';
-  if (payMethod === '계좌이체' && !bankAccount && e.vendor) {
-    const v = (DB.vendors||[]).find(x => x && x.company && x.company.trim() === String(e.vendor).trim());
-    if (v) {
-      bankName    = v.bankName    || '';
-      bankAccount = v.bankAccount || '';
-      bankHolder  = v.bankHolder  || v.company || '';
-    }
-  }
-  const authorName = (window._currentUser && (window._currentUser.displayName || window._currentUser.name)) || '스텔라';
+  const authorName = _apSheetAuthor(e) || '스텔라';
   const deptName = (window._currentUser && window._currentUser.dept) || 'R&D';
   const companyName = '㈜르니브 (RENIV)';
 
