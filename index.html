@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.758';
+const ERP_VERSION = 'v2.3.760';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -46912,15 +46912,35 @@ async function _apSheetShowFile(src, name, type) {
   document.addEventListener('keydown', onKey);
   document.body.appendChild(ov);
 }
+/* v2.3.760: 발주 품목 분류(원자재/부자재/OEM 등) 수집 — 중복 제거·등장 순, 품목 미매칭 시 거래처 분류 폴백.
+   v2.3.622 가 인쇄본에 넣던 계산인데 상세 모달(openApprovalSheet)이 v2.3.688 에 새로 생기며 빠졌다. */
+function _poCatsOf(ord) {
+  if (!ord) return '';
+  try {
+    const _tset = [];
+    (ord.rows || []).forEach(r => {
+      const it = (DB.items || []).find(x => x && String(x.id) === String(r.itemId));
+      const t = it && it.type;
+      if (t && _tset.indexOf(t) < 0) _tset.push(t);
+    });
+    if (!_tset.length) { const _v = (typeof getVendor === 'function') ? getVendor(ord.vendorId) : null; if (_v && _v.type) _tset.push(_v.type); }
+    return _tset.join(' · ');
+  } catch(_) { return ''; }
+}
+function _apSheetPoOrder(r) {
+  return ((r.category === 'po_prepay' || r.category === 'po_balance') && r.orderId)
+    ? (DB.orders || []).find(o => o && (o.id === r.orderId || Number(o.id) === Number(r.orderId))) : null;
+}
 /* 적요 — 인쇄본과 같은 문장을 만든다(저장된 필드가 아니라 그때그때 짓는 문구다). */
 function _apSheetSummary(r) {
-  const ord = ((r.category === 'po_prepay' || r.category === 'po_balance') && r.orderId)
-    ? (DB.orders || []).find(o => o && (o.id === r.orderId || Number(o.id) === Number(r.orderId))) : null;
+  const ord = _apSheetPoOrder(r);
   const serial = ord ? (ord.serial || ('PO-' + String(ord.id).padStart(3, '0'))) : '';
+  const cats = _poCatsOf(ord);
+  const catSfx = cats ? ' (' + cats + ')' : '';
   const pre = ord ? (parseFloat(ord.prepayPercent) || 0) : 0;
   const pct = Math.round((r.category === 'po_prepay' ? pre : (100 - pre)) * 10) / 10;
-  if (r.category === 'po_prepay' && serial) return '발주서 ' + serial + ' 의 선급금 ' + pct + '% 지급 건';
-  if (r.category === 'po_balance' && serial) return '발주서 ' + serial + ' 의 잔금 ' + pct + '% 지급 건';
+  if (r.category === 'po_prepay' && serial) return '발주서 ' + serial + catSfx + ' 의 선급금 ' + pct + '% 지급 건';
+  if (r.category === 'po_balance' && serial) return '발주서 ' + serial + catSfx + ' 의 잔금 ' + pct + '% 지급 건';
   if (r.category === 'sample') return '샘플 구매 대금 지급 — ' + (r.title || '');
   return r.title || '';
 }
@@ -46980,6 +47000,9 @@ function openApprovalSheet(kind, id) {
     + '<div class="modal-hdr"><span class="modal-ttl">' + (isExp ? '💳 ' : '📝 ') + escapeHtml(r.title || '문서')
     + '</span><button class="modal-x" onclick="closeModal(\'ap-sheet-modal\')">✕</button></div>'
     + '<div class="modal-body"><div style="border:1px solid #e2e8f0;border-radius:12px;padding:20px 22px;background:#fff">'
+    // v2.3.760: 발주 선급금·잔금이면 좌상단에 자재 분류 배지(원자재/부자재/OEM) — 인쇄본(v2.3.622)과 같은 표기
+    + (function(){ const cats = isExp ? _poCatsOf(_apSheetPoOrder(r)) : '';
+        return cats ? '<div style="height:0;text-align:left"><span style="display:inline-block;background:#eef2ff;color:#3730a3;border:1.5px solid #c7d2fe;border-radius:8px;padding:5px 14px;font-size:12.5px;font-weight:800;letter-spacing:1px">' + escapeHtml(cats) + '</span></div>' : ''; })()
     + '<div style="display:flex;justify-content:flex-end;margin-bottom:14px">'
     +   _apSheetBox('1차', r.l1Name || '', r.l1Sign)
     +   _apSheetBox('2차 본부장', '이주연', (r.directorSign || ''))
@@ -47126,17 +47149,7 @@ async function openExpenseApprovalForm(expenseId) {
     const ord = DB.orders.find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
     if (ord) {
       poSerial = ord.serial || ('PO-'+String(ord.id).padStart(3,'0'));
-      // v2.3.622: 발주 품목들의 분류 수집(중복 제거, 등장 순) — 품목 미매칭 시 거래처 분류로 폴백
-      try {
-        const _tset = [];
-        (ord.rows||[]).forEach(r => {
-          const it = (DB.items||[]).find(x => x && String(x.id) === String(r.itemId));
-          const t = it && it.type;
-          if (t && _tset.indexOf(t) < 0) _tset.push(t);
-        });
-        if (!_tset.length) { const _v = (typeof getVendor === 'function') ? getVendor(ord.vendorId) : null; if (_v && _v.type) _tset.push(_v.type); }
-        poCats = _tset.join(' · ');
-      } catch(_){}
+      poCats = _poCatsOf(ord);   // v2.3.760: 상세 모달과 같은 계산(_poCatsOf)으로 통일
       const prepayPct = parseFloat(ord.prepayPercent) || 0;
       // v1.9.323: 표시용 1 소수점 반올림
       percent = Math.round((e.category === 'po_prepay' ? prepayPct : (100 - prepayPct)) * 10) / 10;
