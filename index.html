@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.761';
+const ERP_VERSION = 'v2.3.762';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -46964,8 +46964,20 @@ function _apSheetPayInfo(e) {
     }
   }
   if (!payMethod) payMethod = '계좌이체';
-  if (payMethod === '계좌이체' && !bankAccount && e.vendor) {
-    const v = (DB.vendors||[]).find(x => x && x.company && x.company.trim() === String(e.vendor).trim());
+  if (payMethod.indexOf('계좌이체') === 0 && !bankAccount) {
+    // v2.3.762: 거래처 조회 강화 — 이름 완전 일치만 보던 탓에 '(주)' 표기·공백이 조금만 달라도
+    //   계좌를 못 찾았다. ① 이름 일치 → ② 발주서 vendorId 직결 → ③ 정규화 이름 비교 순.
+    let v = null;
+    if (e.vendor) v = (DB.vendors||[]).find(x => x && x.company && x.company.trim() === String(e.vendor).trim());
+    if (!v && (e.category === 'po_prepay' || e.category === 'po_balance') && e.orderId) {
+      const _bOrd = (DB.orders||[]).find(o => o && (o.id === e.orderId || Number(o.id) === Number(e.orderId)));
+      if (_bOrd && _bOrd.vendorId != null && typeof getVendor === 'function') v = getVendor(_bOrd.vendorId) || null;
+    }
+    if (!v && e.vendor) {
+      const _norm = t => String(t||'').replace(/주식회사|\(주\)|㈜/g, '').replace(/\s+/g, '').trim();
+      const _tgt = _norm(e.vendor);
+      if (_tgt) v = (DB.vendors||[]).find(x => x && x.company && _norm(x.company) === _tgt);
+    }
     if (v) {
       bankName    = v.bankName    || '';
       bankAccount = v.bankAccount || '';
@@ -47087,6 +47099,10 @@ function openApprovalSheet(kind, id) {
           let h = row('지급 방법', escapeHtml(pi.payMethod + ' / 증빙 ' + pi.proofLabel));
           if (pi.bankAccount) h += row('입금 계좌', escapeHtml((pi.bankName ? pi.bankName + ' ' : '') + pi.bankAccount
             + (pi.bankHolder ? ' (예금주: ' + pi.bankHolder + ')' : '')));
+          // v2.3.762: 계좌를 못 찾았으면 빈칸 대신 원인을 보여준다 — 거래처 관리에 계좌를 넣으면 자동 표시
+          else if (pi.payMethod.indexOf('계좌이체') === 0) h += row('입금 계좌',
+            '<span style="color:#94a3b8">등록된 계좌 없음 — 거래처 관리에서 ' + escapeHtml(r.vendor || '지급처')
+            + ' 의 은행·계좌번호·예금주를 등록하면 자동으로 표시됩니다</span>');
           return h; })()
     +   (!isExp && r.phase ? row('단계', r.phase === 'planning' ? '📋 사전 품의' : '🚀 실행 기안') : '')
     +   '<tr><th style="background:#f1f5f9;border:1px solid #cbd5e1;padding:7px 10px;text-align:left;width:118px;font-weight:700">'
