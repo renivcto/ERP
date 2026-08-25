@@ -2040,6 +2040,29 @@ exports.manualFetchPlusclStock = functions
     }
   });
 
+// v2.26(2026-08-25): 평일 18:00 KST 물류창고(GLXY) 실재고 자동 조회.
+//   앱의 '실시간 조회' 버튼(saveSharedSetting('pluscl_stock'))과 같은 문서·같은 형식
+//   ({value: JSON.stringify({list, ts})})으로 shared/pluscl_stock 캐시를 갱신한다 —
+//   앱은 loadSharedSetting 으로 읽으므로 다음 접속부터 최신 재고가 바로 보인다.
+//   수동 조회(manualFetchPlusclStock)는 그대로 병행.
+exports.scheduledPlusclStock = functions
+  .region(REGION)
+  .runWith({ secrets: ['PLUSCL_AUTH_KEY'], timeoutSeconds: 120, memory: '256MB' })
+  .pubsub.schedule('0 18 * * 1-5')
+  .timeZone('Asia/Seoul')
+  .onRun(async () => {
+    try {
+      const r = await ingestPlusclStock();
+      await admin.firestore().doc('shared/pluscl_stock').set(
+        { value: JSON.stringify({ list: r.list, ts: r.ts }) }, { merge: true });
+      console.log('[PLUSCL STOCK SCHED] 저장 완료:', r.count, '건');
+      return { count: r.count };
+    } catch (err) {
+      console.error('[PLUSCL STOCK SCHED] 실패:', err);
+      throw err;
+    }
+  });
+
 
 // =============================================================================
 // v2.16 — 직원 계정 표식(커스텀 클레임)
