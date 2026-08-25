@@ -1540,7 +1540,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.91.2';
+const STAFF_VERSION = 'v0.92.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -8483,15 +8483,15 @@ async function wfSync(btn) {
       await saveCol('inbox_wfsync', { at: Date.now(), by: ME.name, byUid: ME.uid });
       toast('동기화를 요청했습니다 — 관리자 확인 후 Trello를 다시 불러옵니다');
     } catch (e) { toast('요청 실패: ' + e.message, true); }
-    return;
+    return false;
   }
-  if (DEMO) { toast('데모 모드 — 실제 동기화는 하지 않습니다'); return; }
+  if (DEMO) { toast('데모 모드 — 실제 동기화는 하지 않습니다'); return false; }
   const prev = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 동기화 중…'; }
   try {
     const boards = (WF || []).map(b => b && (b.boardId ? b : Object.assign({}, b, { boardId: WF_BOARD_IDS[b.key] })))
       .filter(b => b && b.boardId);
-    if (!boards.length) { toast('동기화할 보드가 없습니다', true); return; }
+    if (!boards.length) { toast('동기화할 보드가 없습니다', true); return false; }
     const bust = '&_=' + Date.now();
     const out = [];
     for (const b of boards) {
@@ -8518,11 +8518,58 @@ async function wfSync(btn) {
     const n = out.reduce((s, b) => s + b.cards.length, 0);
     toast('Trello 동기화 완료 — 카드 ' + n + '장');
     rerender();
+    return true;
   } catch (e) {
     toast('동기화 실패: ' + (e && e.message || e), true);
+    return false;
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = prev; }
   }
+}
+
+/* v0.92.0 — 캘린더의 Trello 동기화 (임원용과 같은 버튼).
+   wfSync 로 보드 3개 카드를 새로 받고, 그 카드로 캘린더의 '트렐로 일정'
+   (운영·약국·홈쇼핑, ty 가 빈 항목)만 다시 만든다. 발주 입고예정(ty:'po')과
+   약국 직접 입력 일정(ty:'custom')은 임원용 미러가 정본 — 건드리지 않는다.
+   보드 표기(색·아이콘)는 임원용 _getAllTrelloEvents 의 값과 동일하게 맞춘다.
+   임원용 미러가 다음에 돌면 같은 내용으로 다시 덮으므로(정본) 어긋날 여지가 없다. */
+const CAL_TRELLO_META = {
+  ops:      { b: '운영',   i: '🏢', c: '#bbf7d0', t: '#166534' },
+  homeshop: { b: '홈쇼핑', i: '🏠', c: '#fecaca', t: '#b91c1c' },
+  pharmacy: { b: '약국',   i: '💊', c: '#bfdbfe', t: '#1d4ed8' },
+};
+async function calTrelloSync(btn) {
+  const ok = await wfSync(btn);
+  if (!ok) return;                     // 실패했거나 임원용 요청 폴백 — 안내는 wfSync 가 띄웠다
+  const ymd = v => { const k = new Date(v); return isNaN(k) ? '' :
+    k.getFullYear() + '-' + String(k.getMonth() + 1).padStart(2, '0') + '-' + String(k.getDate()).padStart(2, '0'); };
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const from = new Date(today); from.setDate(from.getDate() - 45);
+  const to = new Date(today); to.setDate(to.getDate() + 240);
+  const fY = ymd(from), tY = ymd(to);   // 임원용 _staffCalPayload 와 같은 범위
+  const evs = [];
+  (WF || []).forEach(bd => {
+    const meta = bd && CAL_TRELLO_META[bd.key];
+    if (!meta) return;
+    (bd.cards || []).forEach(c => {
+      if (!c || (!c.due && !c.start)) return;
+      let sY = ymd(c.start || c.due), eY = ymd(c.due || c.start);
+      if (!sY || !eY) return;
+      if (sY > eY) eY = sY;
+      if (sY < fY || sY > tY) return;
+      const days = Math.min(400, Math.max(1,
+        Math.round((new Date(eY + 'T00:00:00') - new Date(sY + 'T00:00:00')) / 86400000) + 1));
+      evs.push({ d: sY, n: String(c.name || '').slice(0, 120), b: meta.b, i: meta.i,
+        c: meta.c, t: meta.t, days: days, done: !!c.done, ty: '', urg: '',
+        url: /^https:/i.test(c.url || '') ? c.url : '' });
+    });
+  });
+  const tb = { '운영': 1, '약국': 1, '홈쇼핑': 1 };
+  CAL = (CAL || []).filter(e => e && !(!e.ty && tb[e.b])).concat(evs);
+  try { await saveCol('calendar', CAL); }
+  catch (e) { toast('캘린더 저장 실패: ' + e.message, true); return; }
+  toast('캘린더 갱신 완료 — 트렐로 일정 ' + evs.length + '건');
+  rerender();
 }
 
 /* ═══════════ 르니브 업무 일정 (v0.18.0 · 기획서 p11) ═══════════
@@ -8628,7 +8675,8 @@ function pageCalendar() {
   return `
   <div class="pg on">
     <div class="pg-h"><h1>르니브 캘린더${syncMark('임원용 ERP의 업무 일정과 동일하게 연동됩니다', 1)}</h1></div>
-    <div class="pg-sub">르니브의 업무 일정입니다 · 총 ${calRows().length}건</div>
+    <div class="pg-sub">르니브의 업무 일정입니다 · 총 ${calRows().length}건
+      <button class="btn btn-sm" data-cal-trello-sync="1" style="margin-left:10px" title="${(TRELLO && TRELLO.key && TRELLO.token) ? '직원 전용 Trello 계정으로 바로 동기화합니다' : '임원용 ERP에 동기화를 요청합니다'}">🔄 Trello 동기화</button></div>
     <div class="bd-grid">
       <div class="card">
         <div class="card-h">🗓️ ${calLabel()}
@@ -8645,7 +8693,11 @@ function pageCalendar() {
     </div>
   </div>`;
 }
-function wireCalendar() { wireCalCommon(); }
+function wireCalendar() {
+  wireCalCommon();
+  const b = document.querySelector('[data-cal-trello-sync]');
+  if (b) b.onclick = () => calTrelloSync(b);
+}
 
 /* ═══════ 플레이스홀더 — 기획서 p5 "우선 메뉴만" ═══════ */
 const PH = {
