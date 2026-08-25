@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.763';
+const ERP_VERSION = 'v2.3.764';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -46806,7 +46806,8 @@ function _apSheetFileList(r, isExp) {
     if (po) {
       if (po.pdfData && po.pdfName)
         // v2.3.730: type 을 pdf 로 단정하지 않는다 — 이 칸에 xlsx 가 들어 있는 발주서가 있다
-        push({ name: po.pdfName, type: '', data: po.pdfData }, '발주 문서', 'order_pdf_' + po.id, 'order_pdf', -1, po.id);
+        // v2.3.764: 라벨 '발주 문서' → '견적서' (사용자 요청 — 이 칸에 실제로 들어가는 건 견적서다)
+        push({ name: po.pdfName, type: '', data: po.pdfData }, '견적서', 'order_pdf_' + po.id, 'order_pdf', -1, po.id);
       (Array.isArray(po.quoteDocs) ? po.quoteDocs : []).forEach((f, i) =>
         push(f, '견적서', 'order_qdoc_' + po.id + '_' + i, 'order_qdoc', i, po.id));
       if (po.stampData && po.stampName)
@@ -46823,7 +46824,7 @@ function _apSheetFileList(r, isExp) {
 }
 function _apSheetFilesHtml(files) {
   const KB = { '견적서':['#fef3c7','#92400e'], '결재 문서':['#fee2e2','#991b1b'], '마감자료':['#dcfce7','#166534'],
-               'Invoice':['#dbeafe','#1e40af'], '발주 문서':['#ede9fe','#5b21b6'] };
+               'Invoice':['#dbeafe','#1e40af'] };
   const sz = n => !n ? '' : (n < 1024*1024 ? (n/1024).toFixed(0) + 'KB' : (n/1024/1024).toFixed(1) + 'MB');
   let h = '<div style="margin-top:16px">'
     + '<div style="font-size:12px;font-weight:800;color:#475569;letter-spacing:1px;margin-bottom:7px">📎 첨 부 파 일 '
@@ -46848,8 +46849,20 @@ window._apSheetOpen = async function(i) {
   if (!f) return;
   const bad = v => !v || typeof v !== 'string' || v === '__idb__' || v === '__stored__' || v === '__stripped__';
   let data = f.data || '';
+  // v2.3.764: 이미지·PDF 는 ERP 위 오버레이가 아니라 새 창에서 연다. 데이터 로드가 비동기라
+  //   로드 후 window.open 을 부르면 팝업으로 차단된다 — 클릭 시점(제스처 유효)에 빈 창을
+  //   먼저 열어 두고, 준비되면 그 창을 파일로 이동시킨다. 차단되면 종전 오버레이로 폴백.
+  let _viewWin = null;
+  const _vk = _apSheetKind(f.name, f.type);
+  if (_vk === 'image' || _vk === 'pdf') {
+    try { _viewWin = window.open('', '_blank'); } catch(_){}
+    if (_viewWin) {
+      try { _viewWin.document.write('<title>' + escapeHtml(String(f.name || '첨부')) + '</title>'
+        + '<p style="font-family:sans-serif;color:#64748b;padding:24px">📎 첨부 여는 중…</p>'); } catch(_){}
+    }
+  }
   try { showNotif('첨부 여는 중…', 'info'); } catch(_){}
-  if (!bad(data) && /^https?:/i.test(data)) { await _apSheetShowFile(data, f.name, f.type); return; }
+  if (!bad(data) && /^https?:/i.test(data)) { await _apSheetShowFile(data, f.name, f.type, _viewWin); return; }
   if ((bad(data) || data.indexOf('data:') !== 0) && f.idbKey) {
     try { const v = await idbGet(f.idbKey); if (v) data = v; } catch(_){}
   }
@@ -46866,10 +46879,11 @@ window._apSheetOpen = async function(i) {
     } catch(e) { console.warn('[v2.3.729] 공유 첨부 불러오기 실패:', e && e.message); }
   }
   if (bad(data)) {
+    if (_viewWin) { try { _viewWin.close(); } catch(_){} }
     try { showNotif('원본 파일을 찾을 수 없습니다 — 작성자가 수정 화면에서 다시 첨부·저장해야 모두가 볼 수 있습니다', 'warning'); } catch(_){}
     return;
   }
-  await _apSheetShowFile(data, f.name, f.type);
+  await _apSheetShowFile(data, f.name, f.type, _viewWin);
 };
 /* v2.3.730 — 무엇으로 볼지는 파일 '이름' 으로 정한다.
    발주서의 pdfData 칸에 xlsx 가 들어 있는 건이 있어, 적혀 있는 type 을 믿으면
@@ -46893,8 +46907,9 @@ function _apSheetSaveAs(url, name) {
   a.href = url; a.download = String(name || 'file'); a.rel = 'noopener';
   document.body.appendChild(a); a.click(); a.remove();
 }
-/* 이미지·PDF 는 화면 안에서 보여 준다(팝업 차단을 피한다). 그 밖은 원본 이름으로 내려받는다. */
-async function _apSheetShowFile(src, name, type) {
+/* v2.3.764: 이미지·PDF 는 새 창(viewWin — 클릭 시점에 미리 열어 둔 창)에서 연다.
+   팝업이 차단돼 창이 없으면 종전(v2.3.730) 오버레이로 폴백. 그 밖은 원본 이름으로 내려받는다. */
+async function _apSheetShowFile(src, name, type, viewWin) {
   const nm = String(name || 'file');
   const kind = _apSheetKind(nm, type);
   let url = src, revoke = false;
@@ -46909,6 +46924,7 @@ async function _apSheetShowFile(src, name, type) {
       revoke = true;
     } catch (err) {
       console.warn('[v2.3.730] 첨부 받기 실패 — 새 탭으로 엽니다:', err && err.message);
+      if (viewWin && !viewWin.closed) { try { viewWin.location.href = src; return; } catch(_){} }
       window.open(src, '_blank', 'noopener');
       return;
     }
@@ -46916,9 +46932,18 @@ async function _apSheetShowFile(src, name, type) {
     try { url = URL.createObjectURL(_dataUrlToBlob(src)); revoke = true; } catch(_){ url = src; }
   }
   if (kind === 'file') {
+    if (viewWin) { try { viewWin.close(); } catch(_){} }   // 다운로드 파일엔 빈 창이 필요 없다
     _apSheetSaveAs(url, nm);
     if (revoke) setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 60000);
     return;
+  }
+  if (viewWin && !viewWin.closed) {
+    try {
+      viewWin.location.href = url;   // blob: 은 우리가 연 창(같은 출처)에서 열린다
+      // 주의: 새 창이 로드하기 전에 revoke 하면 안 된다 — 60초 뒤에 해제
+      if (revoke) setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 60000);
+      return;
+    } catch(_) { /* 이동 실패 → 아래 오버레이 폴백 */ }
   }
   const isImage = (kind === 'image');
   const esc = v => escapeHtml(String(v == null ? '' : v));
