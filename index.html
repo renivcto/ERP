@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.762';
+const ERP_VERSION = 'v2.3.763';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -23642,6 +23642,46 @@ function removeVendorAttach(i) {
   window._vendorAttachments.splice(i, 1);
   renderVendorAttachList();
 }
+
+// v2.3.763: 파일 대화상자 우회 — 첨부 박스에 파일을 끌어다 놓으면 바로 첨부된다.
+//   OneDrive '클라우드 전용'(탐색기 상태가 구름) 파일은 로컬에 실체가 없어 브라우저
+//   열기 대화상자에서 '열기' 가 무반응이 되는 사례가 있다. 대화상자를 안 거치는 경로를 하나 더 둔다.
+(function _wirePartnerFileDrops() {
+  const IDS = ['v-bankbook-inp', 'vendor-edit-bizdoc-input',
+               'coop-edit-bizdoc-input', 'coop-edit-bankbook-input',
+               'seller-edit-bizdoc-input', 'seller-edit-bankbook-input'];
+  const OK_EXT = /\.(pdf|jpe?g|png)$/i;
+  function wire() {
+    IDS.forEach(id => {
+      const inp = document.getElementById(id);
+      if (!inp || inp._dropWired) return;
+      const box = inp.parentElement;
+      if (!box) return;
+      inp._dropWired = true;
+      const baseBorder = box.style.border;
+      box.addEventListener('dragover', ev => { ev.preventDefault(); box.style.border = '2px dashed #6366f1'; });
+      box.addEventListener('dragleave', () => { box.style.border = baseBorder; });
+      box.addEventListener('drop', ev => {
+        ev.preventDefault();
+        box.style.border = baseBorder;
+        const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+        if (!f) return;
+        if (!OK_EXT.test(f.name || '')) {
+          if (typeof showNotif === 'function') showNotif('PDF 또는 이미지(jpg·png)만 첨부할 수 있습니다', 'warning');
+          return;
+        }
+        try {
+          const dt = new DataTransfer();
+          dt.items.add(f);
+          inp.files = dt.files;
+        } catch(_) {}
+        inp.dispatchEvent(new Event('change'));   // 인라인 onchange(핸들러)가 그대로 돈다
+      });
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
+  else wire();
+})();
 
 // v1.9.219: 통장사본 업로드/미리보기/삭제
 function handleVendorBankbook(input) {
