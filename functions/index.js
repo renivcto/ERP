@@ -787,9 +787,14 @@ async function ingestCoupangOrders({ daysBack = 7 } = {}) {
 // ─────────────────────────────────────────────────────────────
 // 4) 쿠팡 주문 자동 수집 — 매일 KST 09:00 / 13:00 / 18:00
 // ─────────────────────────────────────────────────────────────
+// v2.27(2026-08-25): 쿠팡 자동 수집 복귀 — 평일 17:30 KST.
+//   v2.19 에서 PlusCL 출고 기준으로 전환하며 껐지만, PlusCL 주문 양식이
+//   '르니브_자사양식기본' 하나로 통합돼 ord_comp_name 몰 구분이 사라졌다(2026-08 실측 217행 전부 동일).
+//   물류 데이터로는 쿠팡만 골라낼 수 없어 쿠팡 공식 API 수집을 다시 켠다.
+//   (ERP 쿠팡 주문이 7/3 에서 끊겨 있던 원인이 이 비활성이었다.)
 // v2.19: PlusCL(3PL 물류) 배송정보 수집으로 전환 — 쿠팡 자동 크롤러 비활성(export 제거 → 배포 시 삭제).
 //   코드는 롤백 대비 보존. 스케줄 트리거는 export 안 되면 등록/실행되지 않음.
-const _off_fetchCoupangOrders = functions
+exports.fetchCoupangOrders = functions
   .region(REGION)
   .runWith({
     secrets: ['COUPANG_ACCESS_KEY', 'COUPANG_SECRET_KEY', 'COUPANG_VENDOR_ID', 'SLACK_ORDERS_WEBHOOK'],
@@ -799,7 +804,7 @@ const _off_fetchCoupangOrders = functions
     vpcConnector: 'erp-coupang-vpc-conn',
     vpcConnectorEgressSettings: 'ALL_TRAFFIC'
   })
-  .pubsub.schedule('0 9,13,18 * * *')
+  .pubsub.schedule('30 17 * * 1-5')   // v2.27: 평일 17:30 KST 1회
   .timeZone('Asia/Seoul')
   .onRun(async (context) => {
     try {
@@ -1865,7 +1870,8 @@ async function mergePlusclOrders(firestoreDb, newOrders) {
 }
 
 // 메인 인입 로직
-async function ingestPlusclShipments({ daysBack = 1 } = {}) {
+// v2.27: mallFilter — 지정한 몰만 적재(['쿠팡'] 등). mallRename — ERP 쇼핑몰명으로 치환('쿠팡'→'쿠팡 Wing').
+async function ingestPlusclShipments({ daysBack = 1, mallFilter = null, mallRename = null } = {}) {
   const now = new Date();
   const from = new Date(now); from.setDate(from.getDate() - daysBack);
   const sDate = plusclDateStr(from);
@@ -1876,7 +1882,9 @@ async function ingestPlusclShipments({ daysBack = 1 } = {}) {
   const shopCache = {};
   const erpOrders = [];
   for (const r of rows) {
-    const mall = plusclMallName(r.ord_comp_name);
+    let mall = plusclMallName(r.ord_comp_name);
+    if (mallFilter && !mallFilter.includes(mall)) continue;
+    if (mallRename && mallRename[mall]) mall = mallRename[mall];
     if (!(mall in shopCache)) {
       const shop = await findShopByName(firestoreDb, mall);
       shopCache[mall] = shop ? { id: shop.id, name: shop.name } : { id: '', name: mall };
@@ -2062,6 +2070,10 @@ exports.scheduledPlusclStock = functions
       throw err;
     }
   });
+
+// (v2.27 에서 잠시 만들었던 '물류 출고 기준 쿠팡 수집'은 폐기 — PlusCL 주문 양식 통합으로
+//  ord_comp_name 몰 구분이 사라져 쿠팡만 골라낼 수 없다. 쿠팡 공식 API 수집(fetchCoupangOrders)으로 대체.
+//  ingestPlusclShipments 의 mallFilter/mallRename 옵션은 무해해 남겨 둔다.)
 
 
 // =============================================================================
