@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.765';
+const ERP_VERSION = 'v2.3.766';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28505,7 +28505,9 @@ async function openStockMove(presetItemId){
   o.innerHTML = `<div class="modal" style="max-width:520px">
     <div class="modal-hdr"><span class="modal-ttl">🔁 재고 이동</span><button class="modal-x" onclick="closeModal('stock-move-modal')">✕</button></div>
     <div class="modal-body">
-      <div class="fg" style="margin-bottom:10px"><label>품목</label>
+      <div class="fg" style="margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">품목
+          <span id="wm-type-chips" style="display:inline-flex;gap:4px;flex-wrap:wrap"></span></label>
         <input class="fi" id="wm-item-search" placeholder="🔍 품목명·코드 검색" style="margin-bottom:6px" oninput="_wmFillItems()">
         <select class="fs" id="wm-item" onchange="_wmOnItem()"></select>
       </div>
@@ -28520,8 +28522,33 @@ async function openStockMove(presetItemId){
     </div>
     <div class="modal-ft"><button class="btn btn-outline" onclick="closeModal('stock-move-modal')">취소</button><button class="btn btn-primary" onclick="saveStockMove()">이동 처리</button></div>
   </div>`;
+  // v2.3.766: 분류 탭 — 품목 드롭다운이 너무 길어 분류(완제품/원자재/부자재…)로 먼저 좁힌다.
+  //   preset 품목이 있으면 그 품목의 분류 탭을 미리 켜 준다.
+  window._wmType = '';
+  if (presetItemId != null && presetItemId !== '') {
+    const pi = (DB.items || []).find(i => i && String(i.id) === String(presetItemId));
+    if (pi && pi.type) window._wmType = pi.type;
+  }
+  _wmRenderTypeChips();
   _wmFillItems(presetItemId);
   openModal('stock-move-modal');
+}
+// v2.3.766: 분류 칩 — 재고 관리 탭과 같은 분류 + 데이터에만 있는 분류를 더한다
+function _wmRenderTypeChips(){
+  const host = document.getElementById('wm-type-chips'); if (!host) return;
+  const fixed = ['완제품','원자재','부자재','OEM','외주가공'];
+  const extra = [...new Set((DB.items||[]).filter(i=>i&&!i.archived&&_hasItemCode(i)).map(i=>i.type))]
+    .filter(t => t && fixed.indexOf(t) < 0);
+  const types = ['', ...fixed, ...extra];
+  host.innerHTML = types.map(t => {
+    const on = (window._wmType || '') === t;
+    return `<button type="button" data-wm-type="${_whEsc(t)}" style="padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid ${on?'#4338ca':'#e2e8f0'};background:${on?'#4338ca':'#fff'};color:${on?'#fff':'#64748b'}">${t || '전체'}</button>`;
+  }).join('');
+  host.querySelectorAll('[data-wm-type]').forEach(b => b.onclick = () => {
+    window._wmType = b.getAttribute('data-wm-type') || '';
+    _wmRenderTypeChips();
+    _wmFillItems();
+  });
 }
 function _wmWhOptions(){
   return '<option value="__un__">미지정 (기본 재고)</option>' + (window._WH.list||[]).map(w=>`<option value="${w.id}">${_whEsc(w.name)}</option>`).join('');
@@ -28530,6 +28557,7 @@ function _wmFillItems(preset){
   const sel=document.getElementById('wm-item'); if(!sel) return;
   const q=((document.getElementById('wm-item-search')||{}).value||'').toLowerCase().trim();
   let items=(DB.items||[]).filter(i=>i && !i.archived && _hasItemCode(i));
+  if(window._wmType) items=items.filter(i=>i.type===window._wmType);   // v2.3.766: 분류 탭 필터
   if(q) items=items.filter(i=>(i.name||'').toLowerCase().includes(q)||(i.code||'').toLowerCase().includes(q));
   items=items.slice().sort(sortByCode);
   sel.innerHTML='<option value="">— 품목 선택 —</option>'+items.map(i=>`<option value="${i.id}">${_whEsc(i.name)} (재고:${fmt(i.stock)})</option>`).join('');
