@@ -2064,6 +2064,8 @@ try{
         </div>
       </div>
       <div id="stock-history" style="display:none">
+        <!-- v2.3.791: 창고별 입출고 보기 — 칩은 renderStockHistory 가 창고 목록으로 채운다 -->
+        <div id="sh-wh-chips" style="display:flex;gap:5px;flex-wrap:wrap;margin:0 0 10px"></div>
         <div class="card">
           <div class="card-body p0 tbl-wrap">
             <table>
@@ -6323,7 +6325,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.790';
+const ERP_VERSION = 'v2.3.791';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30326,15 +30328,49 @@ function renderStockHistory() {
   //   재고관리 대상이 아니므로 입출고 내역에서 숨김 (데이터는 보존)
   const revHistory = DB.stockHistory.slice().reverse()
     .filter(h => { const _it = getItem(h && h.itemId); return _it && _it.name; });
-  // v2.3.789: '잔여 재고' — 각 행 처리 직후의 총 재고. 현재 재고에서 최신→과거로 품목별 역산
-  //   (입고 -qty · 출고 +qty · 이동은 총량 불변). 품목 팝업(v2.3.412)과 같은 방식.
+  // ── v2.3.791: 창고별 보기 ──
+  //   기록의 귀속 창고: 이동은 출발+도착, 창고가 명시된 입출고는 그 창고,
+  //   창고 정보가 없는 기록(주문 자동차감·발주 자동입고 등)은 품목의 기본 창고(없으면 미지정)
+  //   — 화면의 실효 배정(_itemWhEffective, 잔여→기본 창고 귀속)과 같은 규칙이라 숫자가 맞아떨어진다.
+  const _shWhOf = (h, item) => {
+    if (h.type === 'move') return [String(h.fromWh || '__un__'), String(h.toWh || '__un__')];
+    if (h.fromWh || h.toWh) return [String(h.fromWh || h.toWh)];
+    const dw = (item && item.defaultWh && _whById(item.defaultWh)) ? String(item.defaultWh) : '__un__';
+    return [dw];
+  };
+  const _whF = window._shWhFilter || '';
+  // 창고 칩 — 전체 + 등록 창고 + 미지정
+  const _chipHost = document.getElementById('sh-wh-chips');
+  if (_chipHost) {
+    const whs = [['', '전체'], ...((window._WH && window._WH.list) || []).map(w => [String(w.id), w.name]), ['__un__', '미지정']];
+    _chipHost.innerHTML = whs.map(([id, nm]) => {
+      const on = _whF === id;
+      return `<button type="button" data-sh-wh="${_whEsc(id)}" style="padding:5px 14px;border-radius:99px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid ${on ? '#4338ca' : '#e2e8f0'};background:${on ? '#4338ca' : '#fff'};color:${on ? '#fff' : '#64748b'}">${_whEsc(nm)}</button>`;
+    }).join('');
+    _chipHost.querySelectorAll('[data-sh-wh]').forEach(b => b.onclick = () => {
+      window._shWhFilter = b.getAttribute('data-sh-wh') || '';
+      renderStockHistory();
+    });
+  }
+  const viewHistory = _whF ? revHistory.filter(h => _shWhOf(h, getItem(h.itemId)).indexOf(_whF) >= 0) : revHistory;
+  // v2.3.789: '잔여 재고' — 각 행 처리 직후의 재고. 현재값에서 최신→과거로 품목별 역산.
+  //   전체 탭 = 총 재고(입고 -qty · 출고 +qty · 이동 불변).
+  //   창고 탭 = 그 창고의 실효 배정에서 역산(이동은 출발 +qty · 도착 -qty).
   const _shBal = {};
-  $('stock-history-table').innerHTML = revHistory.map(h => {
+  $('stock-history-table').innerHTML = viewHistory.map(h => {
     const item = getItem(h.itemId);
     const _bk = String(h.itemId);
-    if (!(_bk in _shBal)) _shBal[_bk] = Number(item.stock) || 0;
+    if (!(_bk in _shBal)) {
+      _shBal[_bk] = _whF ? (Number((_itemWhEffective(item) || {})[_whF]) || 0) : (Number(item.stock) || 0);
+    }
     const _after = _shBal[_bk];   // 이 행 처리 직후 재고
-    _shBal[_bk] = _after - (h.type === 'in' ? (Number(h.qty) || 0) : (h.type === 'out' ? -(Number(h.qty) || 0) : 0));
+    if (_whF && h.type === 'move') {
+      if (String(h.fromWh || '__un__') === _whF) _shBal[_bk] = _after + (Number(h.qty) || 0);
+      else if (String(h.toWh || '__un__') === _whF) _shBal[_bk] = _after - (Number(h.qty) || 0);
+    } else if (!(_whF && h.type === 'move')) {
+      const _touches = !_whF || _shWhOf(h, item).indexOf(_whF) >= 0;
+      if (_touches) _shBal[_bk] = _after - (h.type === 'in' ? (Number(h.qty) || 0) : (h.type === 'out' ? -(Number(h.qty) || 0) : 0));
+    }
     const total = h.qty * h.price;
     const _isMove = h.type==='move';
     const _isAdj = !!h.adjust;   // v2.3.676: 수량 수정(증가/차감)
@@ -30351,7 +30387,7 @@ function renderStockHistory() {
         <button class="btn btn-danger btn-xs" onclick="deleteStockHistory(${h.id})">삭제</button>
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="9" class="empty">입출고 내역이 없습니다</td></tr>';
+  }).join('') || ('<tr><td colspan="9" class="empty">' + (_whF ? '이 창고의 입출고 내역이 없습니다' : '입출고 내역이 없습니다') + '</td></tr>');
 }
 
 // v2.3.411: 재고현황에서 예상재고 클릭 → 해당 품목 입출고 내역 팝업(DB.stockHistory)
