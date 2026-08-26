@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.770';
+const ERP_VERSION = 'v2.3.771';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28258,12 +28258,28 @@ function _ensureOverlay(id){
 // v2.3.770: 입출고 기록에 시각·작성자·IP — 표시는 renderStockHistory(비고 아래 작게).
 //   IP 는 부팅 시 1회 조회(직원용 출퇴근과 같은 api.ipify.org). 실패해도 기록은 계속된다.
 window._myIp = window._myIp || '';
-try { fetch('https://api.ipify.org?format=json').then(r => r.json()).then(j => { window._myIp = (j && j.ip) || ''; }).catch(() => {}); } catch(_){}
+// v2.3.771: 소스 2곳 폴백 — ipify 가 막힌 환경(확장프로그램 차단 등)에서도 IP 를 확보한다.
+window._fetchMyIp = function(){
+  if (window._myIp || window._myIpBusy) return;
+  window._myIpBusy = true;
+  const urls = ['https://api.ipify.org?format=json', 'https://api64.ipify.org?format=json'];
+  (function next(i){
+    if (i >= urls.length) { window._myIpBusy = false; return; }
+    try {
+      fetch(urls[i]).then(r => r.json()).then(j => {
+        const ip = (j && j.ip) || '';
+        if (ip) { window._myIp = ip; window._myIpBusy = false; } else next(i + 1);
+      }).catch(() => next(i + 1));
+    } catch(_) { next(i + 1); }
+  })(0);
+};
+try { window._fetchMyIp(); } catch(_){}
 function _shStamp(rec){
   try {
     rec.ts = Date.now();
     rec.by = (window._currentUser && (window._currentUser.displayName || window._currentUser.name)) || '';
     if (window._myIp) rec.ip = window._myIp;
+    else try { window._fetchMyIp(); } catch(_){}   // 이번 건은 놓쳐도 다음 기록부터 붙게 재시도
   } catch(_){}
   return rec;
 }
@@ -30094,7 +30110,7 @@ function renderStockHistory() {
       <td style="text-align:center;color:${_isMove?'#7c3aed':(h.type==='in'?'var(--green-600)':'var(--red-600)')}"><strong>${_isMove?'':(h.type==='in'?'+':'-')}${fmt(h.qty)}</strong></td>
       <td style="text-align:center">${_isMove?'-':fmtW(h.price)}</td>
       <td style="text-align:center">${_isMove?'-':fmtW(total)}</td>
-      <td style="text-align:center">${h.note||'-'}${(h.by||h.ip) ? `<div style="font-size:11px;color:#94a3b8;margin-top:2px">${h.by?_whEsc(h.by):''}${(h.by&&h.ip)?' · ':''}${h.ip?_whEsc(h.ip):''}</div>` : ''}</td>
+      <td style="text-align:center">${h.note||'-'}${(h.by||h.ip) ? `<div style="font-size:11px;color:#94a3b8;margin-top:2px">${h.by?`작성자 : ${_whEsc(h.by)}`:''}${(h.by&&h.ip)?' · ':''}${h.ip?`IP : ${_whEsc(h.ip)}`:''}</div>` : ''}</td>
       <td style="white-space:nowrap;text-align:center">
         <button class="btn btn-danger btn-xs" onclick="deleteStockHistory(${h.id})">삭제</button>
       </td>
