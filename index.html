@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.768';
+const ERP_VERSION = 'v2.3.769';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29497,6 +29497,9 @@ function _renderItemWhPanel(itemId){
         <button class="btn btn-primary" onclick="_iwpMove(${it.id})" style="height:34px;white-space:nowrap">이동</button>
       </div>
       <div id="iwp-avail" style="font-size:11px;color:#64748b;margin-top:6px"></div>
+      <!-- v2.3.769: 이동 사유 — 재고 이동 모달과 동일. 입출고 내역 비고에 함께 기록 -->
+      <div style="margin-top:8px"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">이동 사유 <span style="color:#94a3b8">(선택)</span></label>
+        <input class="fi" id="iwp-reason" placeholder="예시 : 본사 샘플용 이관 등" maxlength="120"></div>
     </div>
 
     <div style="font-size:12px;font-weight:700;color:#475569;margin-bottom:6px">🕘 이동·수정 히스토리 <span style="font-size:11px;color:#94a3b8;font-weight:500">(${hist.length}건)</span></div>
@@ -29545,7 +29548,8 @@ async function _iwpMove(itemId){
   const it=(DB.items||[]).find(i=>String(i.id)===String(itemId));
   const from=(document.getElementById('iwp-from')||{}).value, to=(document.getElementById('iwp-to')||{}).value;
   const qty=parseInt((document.getElementById('iwp-qty')||{}).value)||0;
-  const r=_applyStockMove(it, from, to, qty);
+  const reason=((document.getElementById('iwp-reason')||{}).value||'').trim();   // v2.3.769
+  const r=_applyStockMove(it, from, to, qty, reason);
   if(!r.ok){ showNotif(r.err,'warning'); return; }
   _renderItemWhPanel(itemId);              // 패널(분포+히스토리) 즉시 갱신
   if(typeof renderStock==='function') renderStock();
@@ -59022,7 +59026,9 @@ async function _staffInboxStock(verbose) {
         const it = (DB.items || []).find(x => x && String(x.id) === String(r.itemId));
         let res;
         if (!it) res = { ok: false, err: '품목을 찾을 수 없습니다' };
-        else if (r.kind === 'move') res = _applyStockMove(it, r.fromWh, r.toWh, Number(r.qty) || 0);
+        // v2.3.769: 직원이 적은 메모를 이동 사유로 넘긴다 — 입출고 내역 비고에 '[직원 요청 · 이름] 메모' 로 남는다
+        else if (r.kind === 'move') res = _applyStockMove(it, r.fromWh, r.toWh, Number(r.qty) || 0,
+          '[직원 요청' + (r._by ? ' · ' + r._by : '') + ']' + (r.note ? ' ' + r.note : ''));
         else res = _staffApplyInOut(it, r.kind, r.kind === 'in' ? r.toWh : r.fromWh, Number(r.qty) || 0, r._by);
         r.applied = true; r.appliedAt = Date.now();
         r.result = res.ok ? 'ok' : 'fail';
