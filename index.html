@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.773';
+const ERP_VERSION = 'v2.3.774';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26153,6 +26153,26 @@ function reloadPsComponentsFromBom() {
   renderPsComponentRows(rows);
 }
 
+// v2.3.774: 구성품 업체 연락처 — 업체명으로 거래처를 찾아 담당자·전화를 업체 칸 아래에 표시.
+//   '(주)'/'㈜'·공백 표기 차이는 무시하고 비교(지출결의서 계좌 조회와 같은 방식).
+function _psVendorContact(name){
+  const t = String(name || '').trim();
+  if (!t) return '';
+  const norm = x => String(x || '').replace(/주식회사|\(주\)|㈜/g, '').replace(/\s+/g, '');
+  const tv = norm(t);
+  if (!tv) return '';
+  const v = (DB.vendors || []).find(x => x && x.company && (x.company.trim() === t || norm(x.company) === tv));
+  if (!v) return '';
+  const c = (Array.isArray(v.contacts) ? v.contacts : []).find(x => x && (x.phone || x.name)) || {};
+  const nm = c.name || '';
+  const ph = c.phone || String(v.phone || '').split('\n')[0] || '';
+  if (!nm && !ph) return '';
+  return '📞 ' + [nm, ph].filter(Boolean).join(' ');
+}
+window._psVendorPhoneSync = function(ta){
+  const d = ta && ta.parentElement && ta.parentElement.querySelector('.ps-c-vphone');
+  if (d) d.textContent = _psVendorContact(ta.value);
+};
 function renderPsComponentRows(rows) {
   const tb = $('ps-comp-rows');
   if (!tb) return;
@@ -26164,7 +26184,8 @@ function renderPsComponentRows(rows) {
       <td><textarea class="fi ps-c-name" rows="2" style="${taStyle}">${_escText(r.name||'')}</textarea></td>
       <td><textarea class="fi ps-c-mat" rows="2" style="${taStyle}">${_escText(r.material||'')}</textarea></td>
       <td><textarea class="fi ps-c-spec" rows="2" style="${taStyle}">${_escText(r.spec||'')}</textarea></td>
-      <td><textarea class="fi ps-c-vendor" rows="2" style="${taStyle}">${_escText(r.vendor||'')}</textarea></td>
+      <td><textarea class="fi ps-c-vendor" rows="2" style="${taStyle}" oninput="_psVendorPhoneSync(this)">${_escText(r.vendor||'')}</textarea>
+        <div class="ps-c-vphone" style="font-size:10.5px;color:#64748b;margin-top:2px;min-height:13px">${_escText(_psVendorContact(r.vendor||''))}</div></td>
       <td><textarea class="fi ps-c-note" rows="2" style="${taStyle}">${_escText(r.note||'')}</textarea></td>
       <td style="text-align:center;vertical-align:middle"><button type="button" class="btn btn-xs" style="padding:1px 6px;font-size:10px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca" onclick="this.closest('tr').remove()">✕</button></td>
     </tr>`).join('');
@@ -26181,7 +26202,8 @@ function addPsComponentRow() {
     <td><textarea class="fi ps-c-name" rows="2" style="${taStyle}"></textarea></td>
     <td><textarea class="fi ps-c-mat" rows="2" style="${taStyle}"></textarea></td>
     <td><textarea class="fi ps-c-spec" rows="2" style="${taStyle}"></textarea></td>
-    <td><textarea class="fi ps-c-vendor" rows="2" style="${taStyle}"></textarea></td>
+    <td><textarea class="fi ps-c-vendor" rows="2" style="${taStyle}" oninput="_psVendorPhoneSync(this)"></textarea>
+      <div class="ps-c-vphone" style="font-size:10.5px;color:#64748b;margin-top:2px;min-height:13px"></div></td>
     <td><textarea class="fi ps-c-note" rows="2" style="${taStyle}"></textarea></td>
     <td style="text-align:center;vertical-align:middle"><button type="button" class="btn btn-xs" style="padding:1px 6px;font-size:10px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca" onclick="this.closest('tr').remove()">✕</button></td>
   `;
