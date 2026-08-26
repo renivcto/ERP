@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.782';
+const ERP_VERSION = 'v2.3.783';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27051,7 +27051,19 @@ async function emailPartSpec(id){
           const y = (el.getBoundingClientRect().top - _bodyTop) * _sc;
           if (y > 0) hardBreaks.push(y);
         });
-        fdoc.querySelectorAll('tr, table, .section-title, .sub-box, .img-grid, .img-cell, .two-col, .footer-meta, h1').forEach(el => {
+        // v2.3.783: 제목류 — 아래 경계는 후보에서 뺀다(제목만 남고 표가 넘어가는 것 방지)
+        const _isHead = el => !!el && (el.tagName === 'H1'
+          || (el.classList && el.classList.contains('section-title')));
+        // (1) 덩어리의 '위' 경계 — 여기서 끊으면 덩어리 전체가 다음 장으로 간다.
+        //     앞 형제가 제목이면 제외 — 제목과 본문이 갈라지지 않게 한다.
+        fdoc.querySelectorAll('h1, .section-title, table, .sub-box, .img-grid, .two-col').forEach(el => {
+          if (_isHead(el.previousElementSibling)) return;
+          const y = (el.getBoundingClientRect().top - _bodyTop) * _sc;
+          if (y > 0) softBreaks.push(y);
+        });
+        // (2) 덩어리의 '아래' 경계 — 제목류는 넣지 않는다. 표 헤더 행도 제외(헤더만 남는 페이지 방지).
+        fdoc.querySelectorAll('tr, table, .sub-box, .img-cell, .img-grid, .two-col, .footer-meta').forEach(el => {
+          if (el.tagName === 'TR' && !el.querySelector('td')) return;
           const y = (el.getBoundingClientRect().bottom - _bodyTop) * _sc;
           if (y > 0) softBreaks.push(y);
         });
