@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.779';
+const ERP_VERSION = 'v2.3.780';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13138,7 +13138,7 @@ function closeModal(id) {
   if (id === 'add-partspec') {
     window._editingPartSpecId = null;
     window._psImages = { packaging: [], label: [] };
-    window._psBomInbound = {};
+    window._psBomInbound = {}; window._psBomInboundAll = false;
     window._psBomInboundQty = {};
     window._psBomInboundVol = {};
     window._psBomInboundName = {};
@@ -26102,7 +26102,7 @@ function openPartSpecForm() {
   $('ps-notes').value = '* 아웃박스 겉면 현품표 부착(* 현품표 샘플 시트 확인 必)\n- 전체 아웃박스 앞뒷면 1회 부착, 팔레트 적치 시 현품표 확인 가능하도록 적치 요망\n- 동일 제품 기준 유통기한 및 롯트 혼적 불가\n    1) 아웃박스 당 유통기한 및 롯트 혼적 불가\n    2) 파렛트 당 유통기한 및 롯트 혼적 불가 (단일 롯트로 적재)\n** 현품표 및 거래명세서 작성 시 발주서 상 르니브 품목코드 및 품목명으로 작성 必';
   $('ps-comp-rows').innerHTML = '';
   // BOM 입고 정보 초기화
-  window._psBomInbound = {};
+  window._psBomInbound = {}; window._psBomInboundAll = false;
   window._psBomInboundQty = {};
   window._psBomInboundVol = {};
   window._psBomInboundName = {};
@@ -26283,10 +26283,12 @@ function renderPsBomInboundRows() {
     const volume = (volOv !== undefined && volOv !== null) ? volOv : (it.spec || '');
     const autoQty = info ? info.qty : '';
     const autoDate = info ? info.inDate : '';
-    // v2.3.778: 빈 문자열 override = '사용자가 지운 날짜' — 발주서 날짜로 되돌리지 않는다
+    // v2.3.778~780: 빈 문자열 override = '사용자가 지운 날짜' — 발주서 날짜로 되돌리지 않는다.
+    //   저장 플래그(_psBomInboundAll)가 있으면 '키 없음' 도 지운 것으로 본다(부활 차단).
     //   (부자재 입고를 안 하는 품목도 있어 날짜를 비워 둘 수 있어야 한다)
     const override = overrides[r.itemId];
-    const dateVal = (override !== undefined) ? override : autoDate;
+    const dateVal = (override !== undefined) ? override
+      : (window._psBomInboundAll ? '' : autoDate);
     const qtyOv = qtyOverrides[r.itemId];
     const qtyVal = (qtyOv !== undefined && qtyOv !== '') ? qtyOv : (autoQty !== '' ? autoQty : '');
     const orderLabel = info ? `${_esc(info.serial || ('#'+info.orderId))} (${_esc(info.status || '-')})` : '<span style="color:#cbd5e1">연결된 발주서 없음</span>';
@@ -26312,7 +26314,8 @@ function psBomInboundRemoveRow(itemId) {
 
 function reloadPsBomInboundFromOrders() {
   // overrides 초기화 — 발주서 데이터로 완전 재로드 (삭제된 행도 복원)
-  window._psBomInbound = {};
+  //   v2.3.780: _psBomInboundAll 도 함께 꺼져 발주서 날짜 자동 연동이 되살아난다
+  window._psBomInbound = {}; window._psBomInboundAll = false;
   window._psBomInboundQty = {};
   window._psBomInboundVol = {};
   window._psBomInboundName = {};
@@ -26601,6 +26604,7 @@ function collectPartSpecForm() {
     packagingImages: (window._psImages && window._psImages.packaging) ? window._psImages.packaging.slice() : [],
     labelImages: (window._psImages && window._psImages.label) ? window._psImages.label.slice() : [],
     bomInboundDates: collectPsBomInboundDates(),
+    bomInboundDatesAll: true,   // v2.3.780: 빈 날짜까지 전부 담았다는 표식 — 지운 날짜가 부활하지 않는다
     bomInboundQtys: collectPsBomInboundQtys(),
     bomInboundVols: collectPsBomInboundVols(),
     bomInboundNames: collectPsBomInboundNames(),
@@ -26678,7 +26682,7 @@ function editPartSpec(id) {
   // 편집 시작 전에 모든 전역 상태를 초기화하고 동적으로 생성된 DOM 자식을 비운다
   window._editingPartSpecId = id;
   window._psImages = { packaging: [], label: [] };
-  window._psBomInbound = {};
+  window._psBomInbound = {}; window._psBomInboundAll = false;
   window._psBomInboundQty = {};
   window._psBomInboundVol = {};
   window._psBomInboundName = {};
@@ -26744,6 +26748,8 @@ function editPartSpec(id) {
     $('ps-notes').value = p.notes || '';
     // BOM 입고 정보 복원
     window._psBomInbound = (p.bomInboundDates && typeof p.bomInboundDates === 'object') ? Object.assign({}, p.bomInboundDates) : {};
+    // v2.3.780: 이 사양서가 '모든 행의 날짜를 빠짐없이 저장한' 판이면 키 없는 행은 빈 날짜로 확정(폴백 금지)
+    window._psBomInboundAll = !!p.bomInboundDatesAll;
     window._psBomInboundQty = (p.bomInboundQtys && typeof p.bomInboundQtys === 'object') ? Object.assign({}, p.bomInboundQtys) : {};
     window._psBomInboundVol = (p.bomInboundVols && typeof p.bomInboundVols === 'object') ? Object.assign({}, p.bomInboundVols) : {};
     window._psBomInboundName = (p.bomInboundNames && typeof p.bomInboundNames === 'object') ? Object.assign({}, p.bomInboundNames) : {};
@@ -26956,9 +26962,11 @@ function _partSpecPrintHtml(id) {
     const orderInfo = getLatestOrderInfoForItem(r.itemId);
     const overrideQty = (p.bomInboundQtys && p.bomInboundQtys[r.itemId] !== undefined && p.bomInboundQtys[r.itemId] !== '') ? p.bomInboundQtys[r.itemId] : '';
     const inboundQty = overrideQty !== '' ? overrideQty : (orderInfo ? orderInfo.qty : '');
-    // v2.3.778: 저장된 override 가 있으면(빈 값 포함) 그대로 쓴다 — 빈 값 = 사용자가 지운 날짜
+    // v2.3.778~780: 저장된 override 가 있으면(빈 값 포함) 그대로. 전량 저장 플래그가 있으면
+    //   키가 없는 행도 '지운 날짜' 로 확정해 발주서 날짜를 되살리지 않는다.
     const _hasDateOv = p.bomInboundDates && Object.prototype.hasOwnProperty.call(p.bomInboundDates, r.itemId);
-    const inDate = _hasDateOv ? (p.bomInboundDates[r.itemId] || '') : (orderInfo ? orderInfo.inDate : '');
+    const inDate = _hasDateOv ? (p.bomInboundDates[r.itemId] || '')
+      : (p.bomInboundDatesAll ? '' : (orderInfo ? orderInfo.inDate : ''));
     // 분수 입력 보존: qtyDisplay(원본 입력)가 있으면 우선 사용, 없으면 formatQty로 분수 자동 변환
     const qtyStr = (r.qtyDisplay && String(r.qtyDisplay).trim()) ? r.qtyDisplay : (typeof formatQty === 'function' ? formatQty(r.qty) : String(r.qty));
     return `<tr>
