@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.781';
+const ERP_VERSION = 'v2.3.782';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27028,7 +27028,11 @@ async function emailPartSpec(id){
     try {
       fr.contentDocument.open(); fr.contentDocument.write(html); fr.contentDocument.close();
       await new Promise(r => setTimeout(r, 400));
-      const body = fr.contentDocument.body;
+      const fdoc = fr.contentDocument;
+      const body = fdoc.body;
+      // v2.3.782: rect 는 뷰포트 기준이라 iframe 이 내용을 다 담고 있어야 정확하다
+      fr.style.height = Math.max(1200, body.scrollHeight + 120) + 'px';
+      await new Promise(r => setTimeout(r, 200));
       const canvas = await window.html2canvas(body, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
       const jsPDF = window.jspdf.jsPDF;
       const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
@@ -27036,12 +27040,45 @@ async function emailPartSpec(id){
       const margin = 8;
       const imgW = pdfW - 2 * margin;
       const pageHpx = Math.floor(canvas.width * ((pdfH - 2 * margin) / imgW));
-      let sy = 0, first = true;
-      while (sy < canvas.height) {
-        const sliceH = Math.min(pageHpx, canvas.height - sy);
+      // ── v2.3.782: 안전한 분할선 수집 — 표 행 중간을 지나지 않게 자른다 ──
+      //   인쇄본은 CSS(.page-break / page-break-inside:avoid)로 나누지만 캔버스 이미지엔
+      //   그 규칙이 남지 않아, 고정 높이로 자르면 '적재 사항' 표가 두 동강 났다.
+      const _sc = canvas.height / Math.max(1, body.scrollHeight);   // CSS px → canvas px
+      const _bodyTop = body.getBoundingClientRect().top;
+      const hardBreaks = [], softBreaks = [];
+      try {
+        fdoc.querySelectorAll('.page-break').forEach(el => {
+          const y = (el.getBoundingClientRect().top - _bodyTop) * _sc;
+          if (y > 0) hardBreaks.push(y);
+        });
+        fdoc.querySelectorAll('tr, table, .section-title, .sub-box, .img-grid, .img-cell, .two-col, .footer-meta, h1').forEach(el => {
+          const y = (el.getBoundingClientRect().bottom - _bodyTop) * _sc;
+          if (y > 0) softBreaks.push(y);
+        });
+      } catch(_){}
+      hardBreaks.sort((x, y) => x - y);
+      softBreaks.sort((x, y) => x - y);
+      let sy = 0, first = true, guard = 0;
+      while (sy < canvas.height - 2 && guard++ < 60) {
+        const maxEnd = sy + pageHpx;
+        let end;
+        if (maxEnd >= canvas.height) {
+          end = canvas.height;                       // 마지막 페이지
+        } else {
+          const minSlice = sy + pageHpx * 0.25;      // 너무 얕게 끊어 빈 페이지가 되는 것 방지
+          const hardIn = hardBreaks.filter(y => y > minSlice && y <= maxEnd);
+          if (hardIn.length) end = hardIn[0];        // 강제 분할선은 만나는 즉시 끊는다(인쇄본과 같은 구성)
+          else {
+            const softIn = softBreaks.filter(y => y > minSlice && y <= maxEnd);
+            end = softIn.length ? softIn[softIn.length - 1] : maxEnd;
+          }
+        }
+        const sliceH = Math.max(1, Math.round(end - sy));
         const pc = document.createElement('canvas');
         pc.width = canvas.width; pc.height = sliceH;
-        pc.getContext('2d').drawImage(canvas, 0, sy, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+        const pctx = pc.getContext('2d');
+        pctx.fillStyle = '#ffffff'; pctx.fillRect(0, 0, pc.width, pc.height);
+        pctx.drawImage(canvas, 0, Math.round(sy), canvas.width, sliceH, 0, 0, canvas.width, sliceH);
         if (!first) pdf.addPage();
         pdf.addImage(pc.toDataURL('image/jpeg', 0.92), 'JPEG', margin, margin, imgW, sliceH * (imgW / canvas.width));
         first = false; sy += sliceH;
