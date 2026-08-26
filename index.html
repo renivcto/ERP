@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.784';
+const ERP_VERSION = 'v2.3.785';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27030,72 +27030,68 @@ async function emailPartSpec(id){
       await new Promise(r => setTimeout(r, 400));
       const fdoc = fr.contentDocument;
       const body = fdoc.body;
-      // v2.3.782: rect 는 뷰포트 기준이라 iframe 이 내용을 다 담고 있어야 정확하다
       fr.style.height = Math.max(1200, body.scrollHeight + 120) + 'px';
       await new Promise(r => setTimeout(r, 200));
-      const canvas = await window.html2canvas(body, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+      // ── v2.3.785: 슬라이스 위치 '계산' 을 버리고 구조로 나눈다 ──
+      //   .page-break 를 기준으로 body 자식들을 그룹으로 갈라, 그룹마다 따로 캡처한다.
+      //   'BOM 사양서' 가 새 페이지에서 시작하는 것이 계산이 아니라 구조로 보장된다.
+      //   (v2.3.782~784 의 분할선 계산은 실제 렌더에서 어긋나는 경우가 남아 폐기)
+      const groups = [];
+      let _cur = [];
+      Array.from(body.children).forEach(ch => {
+        if (ch.classList && ch.classList.contains('page-break')) { groups.push(_cur); _cur = []; }
+        else _cur.push(ch);
+      });
+      groups.push(_cur);
       const jsPDF = window.jspdf.jsPDF;
       const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
       const pdfW = pdf.internal.pageSize.getWidth(), pdfH = pdf.internal.pageSize.getHeight();
       const margin = 8;
       const imgW = pdfW - 2 * margin;
-      const pageHpx = Math.floor(canvas.width * ((pdfH - 2 * margin) / imgW));
-      // ── v2.3.782: 안전한 분할선 수집 — 표 행 중간을 지나지 않게 자른다 ──
-      //   인쇄본은 CSS(.page-break / page-break-inside:avoid)로 나누지만 캔버스 이미지엔
-      //   그 규칙이 남지 않아, 고정 높이로 자르면 '적재 사항' 표가 두 동강 났다.
-      const _sc = canvas.height / Math.max(1, body.scrollHeight);   // CSS px → canvas px
-      const _bodyTop = body.getBoundingClientRect().top;
-      const hardBreaks = [], softBreaks = [];
-      try {
-        fdoc.querySelectorAll('.page-break').forEach(el => {
-          const y = (el.getBoundingClientRect().top - _bodyTop) * _sc;
-          if (y > 0) hardBreaks.push(y);
-        });
-        // v2.3.783: 제목류 — 아래 경계는 후보에서 뺀다(제목만 남고 표가 넘어가는 것 방지)
-        const _isHead = el => !!el && (el.tagName === 'H1' || el.tagName === 'H2' || el.tagName === 'H3'
-          || (el.classList && el.classList.contains('section-title')));
-        // (1) 덩어리의 '위' 경계 — 여기서 끊으면 덩어리 전체가 다음 장으로 간다.
-        //     앞 형제가 제목이면 제외 — 제목과 본문이 갈라지지 않게 한다.
-        fdoc.querySelectorAll('h1, h2, h3, .section-title, table, .sub-box, .img-grid, .two-col').forEach(el => {
-          if (_isHead(el.previousElementSibling)) return;
-          const y = (el.getBoundingClientRect().top - _bodyTop) * _sc;
-          if (y > 0) softBreaks.push(y);
-        });
-        // (2) 덩어리의 '아래' 경계 — 제목류는 넣지 않는다. 표 헤더 행도 제외(헤더만 남는 페이지 방지).
-        fdoc.querySelectorAll('tr, table, .sub-box, .img-cell, .img-grid, .two-col, .footer-meta').forEach(el => {
-          if (el.tagName === 'TR' && !el.querySelector('td')) return;
-          const y = (el.getBoundingClientRect().bottom - _bodyTop) * _sc;
-          if (y > 0) softBreaks.push(y);
-        });
-      } catch(_){}
-      hardBreaks.sort((x, y) => x - y);
-      softBreaks.sort((x, y) => x - y);
-      let sy = 0, first = true, guard = 0;
-      while (sy < canvas.height - 2 && guard++ < 60) {
-        const maxEnd = sy + pageHpx;
-        let end;
-        if (maxEnd >= canvas.height) {
-          end = canvas.height;                       // 마지막 페이지
-        } else {
-          const minSlice = sy + pageHpx * 0.25;      // 너무 얕게 끊어 빈 페이지가 되는 것 방지
-          // v2.3.784: 강제 분할선(.page-break)은 minSlice 를 적용하지 않는다 —
-          //   페이지 초반에 있으면 조건에 걸려 무시돼 'BOM 사양서' 가 앞장에 붙어 잘렸다.
-          const hardIn = hardBreaks.filter(y => y > sy + 8 && y <= maxEnd);
-          if (hardIn.length) end = hardIn[0];        // 만나는 즉시 끊는다(인쇄본과 같은 구성)
+      const bodyW = Math.max(300, body.clientWidth);
+      let first = true;
+      for (const g of groups) {
+        if (!g.length) continue;
+        // 그룹 요소들을 흰 배경 래퍼로 옮겨 그 래퍼만 캡처한다
+        const wrap = fdoc.createElement('div');
+        wrap.style.cssText = 'background:#fff;width:' + bodyW + 'px;padding:1px 0';
+        body.appendChild(wrap);
+        g.forEach(el => wrap.appendChild(el));
+        await new Promise(r => setTimeout(r, 80));
+        const canvas = await window.html2canvas(wrap, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+        const pageHpx = Math.floor(canvas.width * ((pdfH - 2 * margin) / imgW));
+        // 그룹이 한 페이지보다 길면 — 표 행·표·박스의 아래 경계에서만 자른다
+        const _sc = canvas.height / Math.max(1, wrap.scrollHeight);
+        const wTop = wrap.getBoundingClientRect().top;
+        const soft = [];
+        try {
+          wrap.querySelectorAll('tr, table, .sub-box, .img-cell, .img-grid, .two-col, .footer-meta').forEach(el => {
+            if (el.tagName === 'TR' && !el.querySelector('td')) return;   // 헤더 행 직후 분할 금지
+            const y = (el.getBoundingClientRect().bottom - wTop) * _sc;
+            if (y > 0) soft.push(y);
+          });
+        } catch(_){}
+        soft.sort((x, y) => x - y);
+        let sy = 0, guard = 0;
+        while (sy < canvas.height - 2 && guard++ < 40) {
+          const maxEnd = sy + pageHpx;
+          let end;
+          if (maxEnd >= canvas.height) end = canvas.height;
           else {
-            const softIn = softBreaks.filter(y => y > minSlice && y <= maxEnd);
-            end = softIn.length ? softIn[softIn.length - 1] : maxEnd;
+            const minSlice = sy + pageHpx * 0.25;
+            const si = soft.filter(y => y > minSlice && y <= maxEnd);
+            end = si.length ? si[si.length - 1] : maxEnd;
           }
+          const sliceH = Math.max(1, Math.round(end - sy));
+          const pc = document.createElement('canvas');
+          pc.width = canvas.width; pc.height = sliceH;
+          const pctx = pc.getContext('2d');
+          pctx.fillStyle = '#ffffff'; pctx.fillRect(0, 0, pc.width, pc.height);
+          pctx.drawImage(canvas, 0, Math.round(sy), canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+          if (!first) pdf.addPage();
+          pdf.addImage(pc.toDataURL('image/jpeg', 0.92), 'JPEG', margin, margin, imgW, sliceH * (imgW / canvas.width));
+          first = false; sy += sliceH;
         }
-        const sliceH = Math.max(1, Math.round(end - sy));
-        const pc = document.createElement('canvas');
-        pc.width = canvas.width; pc.height = sliceH;
-        const pctx = pc.getContext('2d');
-        pctx.fillStyle = '#ffffff'; pctx.fillRect(0, 0, pc.width, pc.height);
-        pctx.drawImage(canvas, 0, Math.round(sy), canvas.width, sliceH, 0, 0, canvas.width, sliceH);
-        if (!first) pdf.addPage();
-        pdf.addImage(pc.toDataURL('image/jpeg', 0.92), 'JPEG', margin, margin, imgW, sliceH * (imgW / canvas.width));
-        first = false; sy += sliceH;
       }
       const blob = pdf.output('blob');
       const dataUrl = await new Promise((res, rej) => {
