@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.777';
+const ERP_VERSION = 'v2.3.778';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26276,8 +26276,10 @@ function renderPsBomInboundRows() {
     const volume = (volOv !== undefined && volOv !== null) ? volOv : (it.spec || '');
     const autoQty = info ? info.qty : '';
     const autoDate = info ? info.inDate : '';
+    // v2.3.778: 빈 문자열 override = '사용자가 지운 날짜' — 발주서 날짜로 되돌리지 않는다
+    //   (부자재 입고를 안 하는 품목도 있어 날짜를 비워 둘 수 있어야 한다)
     const override = overrides[r.itemId];
-    const dateVal = (override !== undefined && override !== '') ? override : autoDate;
+    const dateVal = (override !== undefined) ? override : autoDate;
     const qtyOv = qtyOverrides[r.itemId];
     const qtyVal = (qtyOv !== undefined && qtyOv !== '') ? qtyOv : (autoQty !== '' ? autoQty : '');
     const orderLabel = info ? `${_esc(info.serial || ('#'+info.orderId))} (${_esc(info.status || '-')})` : '<span style="color:#cbd5e1">연결된 발주서 없음</span>';
@@ -26316,7 +26318,8 @@ function collectPsBomInboundDates() {
   const out = {};
   document.querySelectorAll('#ps-bom-inbound-rows .ps-bom-date').forEach(inp => {
     const id = parseInt(inp.dataset.itemid);
-    if (id && inp.value) out[id] = inp.value;
+    // v2.3.778: 빈 값도 저장한다 — 저장 안 하면 다음 렌더에서 발주서 날짜가 되살아난다
+    if (id) out[id] = inp.value || '';
   });
   return out;
 }
@@ -26945,8 +26948,9 @@ function printPartSpec(id) {
     const orderInfo = getLatestOrderInfoForItem(r.itemId);
     const overrideQty = (p.bomInboundQtys && p.bomInboundQtys[r.itemId] !== undefined && p.bomInboundQtys[r.itemId] !== '') ? p.bomInboundQtys[r.itemId] : '';
     const inboundQty = overrideQty !== '' ? overrideQty : (orderInfo ? orderInfo.qty : '');
-    const overrideDate = (p.bomInboundDates && p.bomInboundDates[r.itemId]) ? p.bomInboundDates[r.itemId] : '';
-    const inDate = overrideDate || (orderInfo ? orderInfo.inDate : '');
+    // v2.3.778: 저장된 override 가 있으면(빈 값 포함) 그대로 쓴다 — 빈 값 = 사용자가 지운 날짜
+    const _hasDateOv = p.bomInboundDates && Object.prototype.hasOwnProperty.call(p.bomInboundDates, r.itemId);
+    const inDate = _hasDateOv ? (p.bomInboundDates[r.itemId] || '') : (orderInfo ? orderInfo.inDate : '');
     // 분수 입력 보존: qtyDisplay(원본 입력)가 있으면 우선 사용, 없으면 formatQty로 분수 자동 변환
     const qtyStr = (r.qtyDisplay && String(r.qtyDisplay).trim()) ? r.qtyDisplay : (typeof formatQty === 'function' ? formatQty(r.qty) : String(r.qty));
     return `<tr>
