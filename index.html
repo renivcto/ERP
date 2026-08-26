@@ -6327,7 +6327,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.794';
+const ERP_VERSION = 'v2.3.795';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30353,12 +30353,16 @@ function renderStockHistory() {
       {off:'#fdf0f4', text:'#b04a72', bd:'#f2c6d6', on:'#cf6f95'},   // 로즈
       {off:'#eef3fb', text:'#3b5f9e', bd:'#c4d4ee', on:'#5b82c4'},   // 인디고
     ];
-    const whs = [['', '전체'], ...((window._WH && window._WH.list) || []).map(w => [String(w.id), w.name]), ['__un__', '미지정']];
+    // v2.3.795: 사용자 지정 순서 — 목록에 없는 새 창고는 그 뒤에 등록 순서대로
+    const _WH_ORDER = ['르니브 창고', '르니브 본사', '바로팜 창고', '쿠팡 창고', '바이오코스텍 창고', '내추럴솔루션 창고'];
+    const _oi = nm => { const i = _WH_ORDER.findIndex(x => nm === x || String(nm || '').indexOf(x) === 0); return i < 0 ? 99 : i; };
+    const _whSorted = ((window._WH && window._WH.list) || []).slice().sort((a, b) => _oi(a.name) - _oi(b.name));
+    const whs = [..._whSorted.map(w => [String(w.id), w.name]), ['', '전체'], ['__un__', '미지정']];
     _chipHost.innerHTML = whs.map(([id, nm], k) => {
       const on = _whF === id;
       const c = id === '' ? {off:'#eaf4f9', text:'#3c7a99', bd:'#bcdcea', on:'#7bb8d6'}
         : id === '__un__' ? {off:'#f1f3f5', text:'#6b7280', bd:'#d1d5db', on:'#9ca3af'}
-        : _WHPAL[(k - 1) % _WHPAL.length];
+        : _WHPAL[k % _WHPAL.length];
       return `<div class="pg-chip ${on ? 'active' : ''}" data-sh-wh="${_whEsc(id)}"
         style="background:${on ? c.on : c.off};color:${on ? '#fff' : c.text};border-color:${on ? c.on : c.bd}">${_whEsc(nm)}</div>`;
     }).join('');
@@ -58747,7 +58751,7 @@ async function _staffMirrorWarehouses() {
    ⚠️ 단가(price)·합계는 원가다 — 넣지 않는다. 수량·창고·사유만 넘긴다. */
 function _staffStockHistPayload() {
   const fin = {};
-  (DB.items || []).forEach(i => { if (i && i.type === '완제품') fin[String(i.id)] = i.name || ''; });
+  (DB.items || []).forEach(i => { if (i && (i.type === '완제품' || i.type === '판촉물')) fin[String(i.id)] = i.name || ''; });   // v2.3.795: 판촉물 포함
   return (DB.stockHistory || [])
     .filter(h => h && fin[String(h.itemId)] != null)
     .slice()

@@ -1540,7 +1540,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.93.1';
+const STAFF_VERSION = 'v0.93.2';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1605,6 +1605,7 @@ const NP_PAGE_OF = { board: 'newproduct', insight: 'newproduct-insight',
 let HOL = null;             // staff_data/holidays — 공휴일(auto/add/remove). 만근 판정에 쓴다
 let SHIST = [];             // staff_data/stock_history  — 입출고 내역 (단가·금액 없음)
 let STOCK_TAB = 'now';      // 재고 관리 탭: now(재고 현황) | hist(입출고 내역)
+let SHIST_WH = '';          // v0.93.2: 입출고 내역 창고 탭 (창고 id — 첫 렌더에서 르니브 창고로)
 let STOCK_TYPE = '완제품';  // v0.93.0: 분류 필터 (v0.93.1: 임원용과 같이 완제품 기본)
 let SUPP = [];              // staff_data/supply_partners — 판매업체+쇼핑몰 (가격행 드롭다운)
 let ITMI = [];              // staff_data/inbox_items    — 직원이 올린 판매업체 가격 수정 요청
@@ -7341,23 +7342,52 @@ const HIST_KIND = {
   out: ['📤 출고', '#fee2e2', '#b91c1c', '-'],
   move:['🔁 이동', '#e0e7ff', '#4338ca', ''],
 };
+/* v0.93.2 — 입출고 내역 창고 탭 (임원용 v2.3.791~795 과 같은 규칙).
+   기록의 귀속 창고: 이동=출발+도착 / 창고 명시=그 창고 / 없으면 품목 기본 창고.
+   직원용은 완제품·판촉물 재고만 관리 — 르니브 창고·르니브 본사·바로팜 창고·쿠팡 창고 4탭. */
+const SHIST_WH_TABS = [['르니브 창고', '#eefbf2', '#2d7a4a', '#b8e8c8', '#4aab6e'],
+  ['르니브 본사', '#e9f7f6', '#0f766e', '#b6e0dd', '#14a098'],
+  ['바로팜 창고', '#eef3fb', '#3b5f9e', '#c4d4ee', '#5b82c4'],
+  ['쿠팡 창고', '#f6f0ff', '#7c4dbd', '#d4bfee', '#a06cd6']];
+function shistWhTabs() {
+  // 이름으로 창고 id 를 찾는다(미러 목록에 없는 창고 탭은 숨김)
+  return SHIST_WH_TABS.map(([nm, off, tx, bd, on]) => {
+    const w = (WHS || []).find(x => x && (x.name === nm || String(x.name || '').indexOf(nm) === 0));
+    return w ? { id: String(w.id), nm, off, tx, bd, on } : null;
+  }).filter(Boolean);
+}
+function shistWhOf(h) {
+  if (h.type === 'move') return [String(h.fromWh || '__un__'), String(h.toWh || '__un__')];
+  if (h.fromWh || h.toWh) return [String(h.fromWh || h.toWh)];
+  const it = (ITEMS || []).find(x => x && String(x.id) === String(h.itemId));
+  return [(it && it.defaultWh) ? String(it.defaultWh) : '__un__'];
+}
 function pageStockHist() {
-  const list = histRows();
+  const tabs = shistWhTabs();
+  if (!SHIST_WH && tabs.length) SHIST_WH = tabs[0].id;   // 기본 = 르니브 창고
+  const list = histRows().filter(h => !SHIST_WH || shistWhOf(h).indexOf(SHIST_WH) >= 0);
   return `<div class="pg on">
     <div class="pg-h"><h1>재고 관리${syncMark('임원용 ERP와 연동됩니다', 1)}</h1>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${dpSearch('dp-q-stock', '품목명 검색')}</span></div>
     ${dpSub(`최근 ${(SHIST || []).length}건 · 단가와 금액은 표시되지 않습니다 ${DP_RO}`)}
     ${stockTabsHtml()}
+    <div style="display:flex;gap:0;flex-wrap:wrap;align-items:flex-end;margin:2px 0 12px">
+      ${tabs.map(t => { const on = SHIST_WH === t.id;
+        return `<button data-shist-wh="${esc(t.id)}" style="padding:5px 15px;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px 8px 0 0;border:1px solid ${on ? t.on : t.bd};border-bottom:${on ? '3px solid ' + t.on : '1px solid ' + t.bd};background:${on ? t.on : t.off};color:${on ? '#fff' : t.tx};height:29px;box-sizing:border-box">${esc(t.nm)}</button>`; }).join('')}
+    </div>
     ${list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb" style="min-width:820px">
       <thead><tr><th>일자</th><th>품목명</th><th>구분</th><th>수량</th><th>출발</th><th>도착</th><th>비고</th></tr></thead><tbody>
       ${list.map(h => {
         const k = HIST_KIND[h.type] || ['기타', 'var(--line-soft)', 'var(--ink-soft)', ''];
-        const sign = h.adjust ? (h.type === 'in' ? '증가 +' : '차감 -') : k[3];
+        // v0.93.2: 이동은 보고 있는 창고 관점의 부호 — 나가면 -, 들어오면 +
+        const _mv = h.type === 'move' && SHIST_WH
+          ? (String(h.fromWh || '__un__') === SHIST_WH ? '-' : (String(h.toWh || '__un__') === SHIST_WH ? '+' : '')) : '';
+        const sign = h.adjust ? (h.type === 'in' ? '증가 +' : '차감 -') : (_mv || k[3]);
         return `<tr>
           <td style="white-space:nowrap">${esc(h.date || '-')}</td>
           <td class="nm">${esc(h.itemName || '-')}</td>
           <td><span class="dp-chip" style="background:${k[1]};color:${k[2]}">${h.adjust ? '📊 재고 수정' : k[0]}</span></td>
-          <td style="font-weight:800;color:${k[2]}">${sign}${Number(h.qty || 0).toLocaleString()}</td>
+          <td style="font-weight:800;color:${_mv === '-' ? 'var(--bad)' : (_mv === '+' ? 'var(--ok, #16a34a)' : k[2])}">${sign}${Number(h.qty || 0).toLocaleString()}</td>
           <td style="font-size:12px">${esc(whName(h.fromWh) || (h.fromWh ? '미지정' : '-'))}</td>
           <td style="font-size:12px">${esc(whName(h.toWh) || (h.toWh ? '미지정' : '-'))}</td>
           <td class="pt-note" style="font-size:12px">${esc(h.note || '')}</td></tr>`;
@@ -7808,6 +7838,7 @@ function pageSales() {
    대신 입력값을 상태에 담아 두어 다시 그린 뒤 포커스를 복원한다. */
 function wireDataPage() {
   document.querySelectorAll('[data-stock-type]').forEach(b => b.onclick = () => { STOCK_TYPE = b.dataset.stockType; renderPage(); });   // v0.93.0
+  document.querySelectorAll('[data-shist-wh]').forEach(b => b.onclick = () => { SHIST_WH = b.dataset.shistWh; renderPage(); });   // v0.93.2
   document.querySelectorAll('[data-sm-new]').forEach(b => b.onclick = () => openSmModal(b.dataset.smNew));
   const wo = $('btn-wh-open'); if (wo) wo.onclick = openWhModal;
   wirePeriod();
