@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.769';
+const ERP_VERSION = 'v2.3.770';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28255,6 +28255,18 @@ function _ensureOverlay(id){
 }
 // v2.3.676: 창고별 수량 직접 수정 — 차이를 증가/차감 이력으로 남긴다(사유 필수).
 //   whStock 재구성은 _applyStockMove 와 같은 규칙을 쓴다(기본창고·미지정은 잔여로).
+// v2.3.770: 입출고 기록에 시각·작성자·IP — 표시는 renderStockHistory(비고 아래 작게).
+//   IP 는 부팅 시 1회 조회(직원용 출퇴근과 같은 api.ipify.org). 실패해도 기록은 계속된다.
+window._myIp = window._myIp || '';
+try { fetch('https://api.ipify.org?format=json').then(r => r.json()).then(j => { window._myIp = (j && j.ip) || ''; }).catch(() => {}); } catch(_){}
+function _shStamp(rec){
+  try {
+    rec.ts = Date.now();
+    rec.by = (window._currentUser && (window._currentUser.displayName || window._currentUser.name)) || '';
+    if (window._myIp) rec.ip = window._myIp;
+  } catch(_){}
+  return rec;
+}
 function _applyStockAdjust(it, whKey, newQty, reason){
   if(!it) return {ok:false, err:'품목을 찾을 수 없습니다'};
   const rs = String(reason||'').trim();
@@ -28280,6 +28292,7 @@ function _applyStockAdjust(it, whKey, newQty, reason){
     fromWh: (diff>0?'':whKey), toWh: (diff>0?whKey:''),
     date: new Date().toISOString().slice(0,10), lot: it.lot||'',
     note: '재고 수정('+wn+'): '+fmt(cur)+' → '+fmt(nq)+' · '+rs };
+  _shStamp(rec);   // v2.3.770
   DB.stockHistory.push(rec);
   try{ if(typeof _whMoveVaultAdd==='function') _whMoveVaultAdd(Object.assign({ _vts: Date.now() }, rec)); }catch(_){}
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(_){}
@@ -28707,6 +28720,7 @@ function _applyStockMove(it, from, to, qty, reason){   // v2.3.767: reason(선�
   const toName = to==='__un__'?'미지정':_whName(to);
   DB.stockHistory=DB.stockHistory||[];
   const _mvRec = { id: nextId('stock'), itemId: it.id, type:'move', qty: qty, price: it.price||0, fromWh: from, toWh: to, date: new Date().toISOString().slice(0,10), lot: it.lot||'', note:`재고이동: ${fromName} → ${toName}` + (reason && String(reason).trim() ? ` — ${String(reason).trim()}` : '') };
+  _shStamp(_mvRec);   // v2.3.770
   DB.stockHistory.push(_mvRec);
   _whMoveVaultAdd(Object.assign({ _vts: Date.now() }, _mvRec));   // v2.3.634: 유실 대비 금고 기록
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(_){}
@@ -30074,13 +30088,13 @@ function renderStockHistory() {
     const _isMove = h.type==='move';
     const _isAdj = !!h.adjust;   // v2.3.676: 수량 수정(증가/차감)
     return `<tr>
-      <td>${h.date||'-'}</td>
+      <td style="white-space:nowrap">${h.date||'-'}${h.ts ? `<br><span style="font-size:11px;color:#94a3b8">${new Date(h.ts).toTimeString().slice(0,5)}</span>` : ''}</td>
       <td class="lnk" style="font-size:14px" onclick="showItemDetail(${h.itemId})">${item.name||'-'}</td>
       <td style="text-align:center"><span class="badge ${_isMove?'purple':(h.type==='in'?'green':'red')}" style="font-size:11px">${_isMove?'🔁 이동':(_isAdj?(h.type==='in'?'📊 증가':'📊 차감'):(h.type==='in'?'📥 입고':'🚚 출고'))}</span></td>
       <td style="text-align:center;color:${_isMove?'#7c3aed':(h.type==='in'?'var(--green-600)':'var(--red-600)')}"><strong>${_isMove?'':(h.type==='in'?'+':'-')}${fmt(h.qty)}</strong></td>
       <td style="text-align:center">${_isMove?'-':fmtW(h.price)}</td>
       <td style="text-align:center">${_isMove?'-':fmtW(total)}</td>
-      <td style="text-align:center">${h.note||'-'}</td>
+      <td style="text-align:center">${h.note||'-'}${(h.by||h.ip) ? `<div style="font-size:11px;color:#94a3b8;margin-top:2px">${h.by?_whEsc(h.by):''}${(h.by&&h.ip)?' · ':''}${h.ip?_whEsc(h.ip):''}</div>` : ''}</td>
       <td style="white-space:nowrap;text-align:center">
         <button class="btn btn-danger btn-xs" onclick="deleteStockHistory(${h.id})">삭제</button>
       </td>
@@ -30248,7 +30262,7 @@ function saveStockIn() {
     if ($('si-lot').value) DB.items[idx].lot = $('si-lot').value;
     if ($('si-exp').value) DB.items[idx].expiry = $('si-exp').value;
   }
-  DB.stockHistory.push({id:nextId('stock'), itemId, type:'in', qty, price, date, lot:$('si-lot').value, note:$('si-note').value});
+  DB.stockHistory.push(_shStamp({id:nextId('stock'), itemId, type:'in', qty, price, date, lot:$('si-lot').value, note:$('si-note').value}));
   saveData(); closeModal('stock-in-modal'); renderStock(); updateBadges();
   showNotif('재고 입고가 처리되었습니다','success');
 }
@@ -30262,7 +30276,7 @@ function saveStockOut() {
   if (item.stock < qty) { showNotif('재고가 부족합니다 (현재: '+item.stock+')','error'); return; }
   const idx = DB.items.findIndex(i=>i.id===itemId);
   if (idx>=0) DB.items[idx].stock -= qty;
-  DB.stockHistory.push({id:nextId('stock'), itemId, type:'out', qty, price:item.price, date, lot:item.lot||'', note:$('so-reason').value});
+  DB.stockHistory.push(_shStamp({id:nextId('stock'), itemId, type:'out', qty, price:item.price, date, lot:item.lot||'', note:$('so-reason').value}));
   saveData(); closeModal('stock-out-modal'); renderStock(); updateBadges();
   showNotif('재고 출고가 처리되었습니다','success');
 }
@@ -45948,7 +45962,7 @@ function processOrderStockIn(rows, date, serial, orderVendorId, orderId) {
         DB.items[idx].stock += row.qty;
         // v1.9.982: 머지 EDIT RECOVERY 가 로컬 변경을 보존하도록 updatedAt 갱신
         DB.items[idx].updatedAt = Date.now();
-        DB.stockHistory.push({
+        DB.stockHistory.push(_shStamp({
           id: nextId('stock'),
           itemId: item.id,
           type: 'in',
@@ -45957,7 +45971,7 @@ function processOrderStockIn(rows, date, serial, orderVendorId, orderId) {
           date: date,
           lot: serial || '',
           note: '발주서 입고완료 자동반영' + (serial ? ' (' + serial + ')' : '')
-        });
+        }));
         addedCount++;
         console.log('재고 입고 반영:', item.name, '+', row.qty, '→', DB.items[idx].stock);
       }
@@ -58834,6 +58848,8 @@ function _staffApplyInOut(it, kind, wh, qty, by) {
     fromWh: kind === 'out' ? wh : '', toWh: kind === 'in' ? wh : '',
     date: new Date().toISOString().slice(0, 10), lot: it.lot || '',
     note: (kind === 'in' ? '입고' : '출고') + ' (직원용 ERP · ' + (by || '') + ')' };
+  _shStamp(rec);
+  if (by) rec.by = by;   // v2.3.770: 작성자 = 요청한 직원
   DB.stockHistory.push(rec);
   try { if (typeof _whMoveVaultAdd === 'function') _whMoveVaultAdd(Object.assign({ _vts: Date.now() }, rec)); } catch(_){}
   return { ok: true };
@@ -60259,13 +60275,13 @@ function _autoDeductStockForOrders(opts = {}) {
     if (oldStock < qty) insufficient++;
 
     DB.stockHistory = DB.stockHistory || [];
-    DB.stockHistory.push({
+    DB.stockHistory.push(_shStamp({
       id: nextId('stock'), itemId: o.itemId, type: 'out', qty: qty,
       price: item.price || 0,
       date: new Date().toISOString().slice(0, 10),
       lot: item.lot || '',
       note: `주문등록 자동차감 [${o.orderNo}] ${o.shopName||'-'} / ${o.customerName||'-'}`
-    });
+    }));
     o.stockDeducted = true;
     o.stockDeductedQty = qty; // v1.9.535: 정확히 얼마 차감했는지 추적
     o.stockDeductedAt = Date.now();
