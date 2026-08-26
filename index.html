@@ -6323,7 +6323,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.787';
+const ERP_VERSION = 'v2.3.788';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -58466,12 +58466,14 @@ async function _staffItemsPayload() {
   //    로드 전이면 잔여가 전부 '__un__'(미지정)으로 떨어져 직원용 재고 위치가 통째로 틀어진다.
   try { if (typeof _whEnsureLoaded === 'function') await _whEnsureLoaded(); } catch (_) {}
   const imgs = {};
-  const fin = (DB.items || []).filter(i => i && i.type === '완제품' && !i._archivedAt);
+  // v2.3.788: 판촉물(VMD 세트 등)도 직원용 재고 관리 대상 — 완제품과 함께 미러한다
+  const fin = (DB.items || []).filter(i => i && (i.type === '완제품' || i.type === '판촉물') && !i._archivedAt);
   for (const i of fin) { try { imgs[String(i.id)] = await _staffItemImg(i); } catch (_) { imgs[String(i.id)] = ''; } }
   const sellers = {};
   (DB.sellers || []).forEach(s => { if (s) sellers[String(s.id)] = s.company || ''; });
   return fin.map(i => _staffStripPii({
     id: String(i.id), code: i.code || '', name: i.name || '', spec: i.spec || '',
+    type: i.type || '완제품',   // v2.3.788: 직원용 분류 탭(완제품/판촉물) 구분용
     channels: Array.isArray(i.channels) ? i.channels : (i.channels ? [i.channels] : []),
     image: imgs[String(i.id)] || _staffPubImg(i.thumb), stock: Number(i.stock) || 0,
     // v2.3.700: 화면에 보이는 값과 같아야 한다 — 기본창고 잔여까지 반영된 실효 배정을 넘긴다.

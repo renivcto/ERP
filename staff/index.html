@@ -1540,7 +1540,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.92.2';
+const STAFF_VERSION = 'v0.93.0';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -1605,6 +1605,7 @@ const NP_PAGE_OF = { board: 'newproduct', insight: 'newproduct-insight',
 let HOL = null;             // staff_data/holidays — 공휴일(auto/add/remove). 만근 판정에 쓴다
 let SHIST = [];             // staff_data/stock_history  — 입출고 내역 (단가·금액 없음)
 let STOCK_TAB = 'now';      // 재고 관리 탭: now(재고 현황) | hist(입출고 내역)
+let STOCK_TYPE = '전체';    // v0.93.0: 분류 필터 — 전체 | 완제품 | 판촉물
 let SUPP = [];              // staff_data/supply_partners — 판매업체+쇼핑몰 (가격행 드롭다운)
 let ITMI = [];              // staff_data/inbox_items    — 직원이 올린 판매업체 가격 수정 요청
 let CSM = null;             // staff_data/consign_meta — 위탁 기준정보(판매업체·공급단가)
@@ -7311,7 +7312,7 @@ function pageItems() {
       <thead><tr><th>분류</th><th>품목코드</th><th>판매채널</th><th>품목명</th><th>이미지</th><th>용량</th>
         <th>창고 재고</th><th>판매업체</th><th>판매가</th></tr></thead><tbody>
       ${list.map(i => `<tr>
-        <td><span class="dp-chip">완제품</span></td>
+        <td><span class="dp-chip"${(i.type === '판촉물') ? ' style="background:#fdf2f8;color:#be185d"' : ''}>${esc(i.type || '완제품')}</span></td>
         <td style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px">${esc(i.code || '-')}</td>
         <td>${(i.channels || []).map(c => `<span class="dp-chip" style="background:#fee2e2;color:#b91c1c">${esc(c)}</span>`).join(' ') || '-'}</td>
         <td class="nm"><a data-item-open="${esc(i.id)}" title="클릭하면 품목 상세가 열립니다">${esc(i.name)}</a></td>
@@ -7374,12 +7375,18 @@ function stockTabsHtml() {
 }
 function pageStock() {
   if (STOCK_TAB === 'hist') return pageStockHist();
-  const list = dpFilter(ITEMS || [], STOCK_Q, ['name', 'code']);
+  // v0.93.0: 분류 필터 — 판촉물(VMD 세트 등)도 임원용에서 미러되어 재고 관리 대상이다
+  const base = (ITEMS || []).filter(i => STOCK_TYPE === '전체' || (i.type || '완제품') === STOCK_TYPE);
+  const list = dpFilter(base, STOCK_Q, ['name', 'code']);
   return `<div class="pg on">
     <div class="pg-h"><h1>재고 관리${syncMark('임원용 ERP와 연동됩니다', 1)}</h1>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${dpSearch('dp-q-stock', '품목명·코드 검색')}</span></div>
     ${dpSub(DP_RO)}
     ${stockTabsHtml()}
+    <div style="display:flex;gap:5px;margin-bottom:10px">
+      ${['전체', '완제품', '판촉물'].map(t => `<button data-stock-type="${t}"
+        style="padding:4px 14px;border-radius:99px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid ${STOCK_TYPE === t ? (t === '판촉물' ? '#be185d' : 'var(--pri)') : 'var(--line)'};background:${STOCK_TYPE === t ? (t === '판촉물' ? '#be185d' : 'var(--pri)') : '#fff'};color:${STOCK_TYPE === t ? '#fff' : 'var(--ink-soft)'}">${t}</button>`).join('')}
+    </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
       <button class="btn btn-sm btn-p" data-sm-new="in">📥 입고</button>
       <button class="btn btn-sm btn-p" data-sm-new="out">📤 출고</button>
@@ -7394,7 +7401,7 @@ function pageStock() {
         const total = Number(i.stock) || 0;
         const isLow = i.minStock && total < Number(i.minStock);
         return `<tr>
-          <td><span class="dp-chip">완제품</span></td>
+          <td><span class="dp-chip"${(i.type === '판촉물') ? ' style="background:#fdf2f8;color:#be185d"' : ''}>${esc(i.type || '완제품')}</span></td>
           <td style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px">${esc(i.code || '-')}</td>
           <td class="nm">${esc(i.name)}</td>
           <td style="font-size:12px">${esc(i.spec || '-')}</td>
@@ -7798,6 +7805,7 @@ function pageSales() {
 /* 검색은 그 페이지만 다시 그리면 되지만, 표가 통째로 바뀌므로 renderPage 로 충분하다.
    대신 입력값을 상태에 담아 두어 다시 그린 뒤 포커스를 복원한다. */
 function wireDataPage() {
+  document.querySelectorAll('[data-stock-type]').forEach(b => b.onclick = () => { STOCK_TYPE = b.dataset.stockType; renderPage(); });   // v0.93.0
   document.querySelectorAll('[data-sm-new]').forEach(b => b.onclick = () => openSmModal(b.dataset.smNew));
   const wo = $('btn-wh-open'); if (wo) wo.onclick = openWhModal;
   wirePeriod();
