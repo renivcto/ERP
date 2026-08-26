@@ -1540,7 +1540,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.93.2';
+const STAFF_VERSION = 'v0.93.3';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -7366,6 +7366,30 @@ function pageStockHist() {
   const tabs = shistWhTabs();
   if (!SHIST_WH && tabs.length) SHIST_WH = tabs[0].id;   // 기본 = 르니브 창고
   const list = histRows().filter(h => !SHIST_WH || shistWhOf(h).indexOf(SHIST_WH) >= 0);
+  // v0.93.3: '잔여 재고' — 보고 있는 창고 기준, 현재 배정(whStock)에서 최신→과거 역산 (임원용 v2.3.791 과 동일)
+  const _shBal = {};
+  const _shAfter = h => {
+    const bk = String(h.itemId);
+    if (!(bk in _shBal)) {
+      const it = (ITEMS || []).find(x => x && String(x.id) === String(h.itemId));
+      _shBal[bk] = Number(((it && it.whStock) || {})[SHIST_WH]) || 0;
+    }
+    const after = _shBal[bk];
+    const q = Number(h.qty) || 0;
+    if (h.type === 'move') {
+      if (String(h.fromWh || '__un__') === SHIST_WH) _shBal[bk] = after + q;
+      else if (String(h.toWh || '__un__') === SHIST_WH) _shBal[bk] = after - q;
+    } else _shBal[bk] = after - (h.type === 'in' ? q : -q);
+    return after;
+  };
+  // v0.93.3: 자동 처리 기록의 작성자 표기 보정 (임원용 _shByLabel 과 동일)
+  const _shBy = h => {
+    let by = h.by || '';
+    if (by && by.indexOf('자동') !== 0 && /^(주문등록 자동차감|발주서 입고완료 자동반영|바로팜 자동차감)/.test(String(h.note || ''))) {
+      by = '자동 (' + by + ' 계정에서 처리)';
+    }
+    return by;
+  };
   return `<div class="pg on">
     <div class="pg-h"><h1>재고 관리${syncMark('임원용 ERP와 연동됩니다', 1)}</h1>
       <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${dpSearch('dp-q-stock', '품목명 검색')}</span></div>
@@ -7376,21 +7400,22 @@ function pageStockHist() {
         return `<button data-shist-wh="${esc(t.id)}" style="padding:5px 15px;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px 8px 0 0;border:1px solid ${on ? t.on : t.bd};border-bottom:${on ? '3px solid ' + t.on : '1px solid ' + t.bd};background:${on ? t.on : t.off};color:${on ? '#fff' : t.tx};height:29px;box-sizing:border-box">${esc(t.nm)}</button>`; }).join('')}
     </div>
     ${list.length ? `<div class="card"><div class="card-b dp-wrap" style="padding:0 0 0 18px"><table class="dp-tb" style="min-width:820px">
-      <thead><tr><th>일자</th><th>품목명</th><th>구분</th><th>수량</th><th>출발</th><th>도착</th><th>비고</th></tr></thead><tbody>
+      <thead><tr><th>일자</th><th>품목명</th><th>구분</th><th>수량</th><th>잔여 재고</th><th>비고</th></tr></thead><tbody>
       ${list.map(h => {
         const k = HIST_KIND[h.type] || ['기타', 'var(--line-soft)', 'var(--ink-soft)', ''];
         // v0.93.2: 이동은 보고 있는 창고 관점의 부호 — 나가면 -, 들어오면 +
         const _mv = h.type === 'move' && SHIST_WH
           ? (String(h.fromWh || '__un__') === SHIST_WH ? '-' : (String(h.toWh || '__un__') === SHIST_WH ? '+' : '')) : '';
         const sign = h.adjust ? (h.type === 'in' ? '증가 +' : '차감 -') : (_mv || k[3]);
+        const _after = _shAfter(h);
+        const _by = _shBy(h);
         return `<tr>
-          <td style="white-space:nowrap">${esc(h.date || '-')}</td>
+          <td style="white-space:nowrap">${esc(h.date || '-')}${h.ts ? `<br><span style="font-size:11px;color:var(--ink-mute)">${new Date(h.ts).toTimeString().slice(0, 5)}</span>` : ''}</td>
           <td class="nm">${esc(h.itemName || '-')}</td>
           <td><span class="dp-chip" style="background:${k[1]};color:${k[2]}">${h.adjust ? '📊 재고 수정' : k[0]}</span></td>
           <td style="font-weight:800;color:${_mv === '-' ? 'var(--bad)' : (_mv === '+' ? 'var(--ok, #16a34a)' : k[2])}">${sign}${Number(h.qty || 0).toLocaleString()}</td>
-          <td style="font-size:12px">${esc(whName(h.fromWh) || (h.fromWh ? '미지정' : '-'))}</td>
-          <td style="font-size:12px">${esc(whName(h.toWh) || (h.toWh ? '미지정' : '-'))}</td>
-          <td class="pt-note" style="font-size:12px">${esc(h.note || '')}</td></tr>`;
+          <td style="font-weight:700;color:#1d4ed8;font-variant-numeric:tabular-nums">${_after.toLocaleString()}</td>
+          <td class="pt-note" style="font-size:12px">${esc(h.note || '')}${(_by || h.ip) ? `<div style="font-size:11px;color:var(--ink-mute);margin-top:2px">${_by ? `작성자 : ${esc(_by)}` : ''}${(_by && h.ip) ? ' · ' : ''}${h.ip ? `IP : ${esc(h.ip)}` : ''}</div>` : ''}</td></tr>`;
       }).join('')}</tbody></table></div></div>`
       : ((SHIST || []).length ? '<div class="empty">검색 결과가 없습니다</div>'
          : `<div class="ph"><div class="big">📋</div><h3>입출고 내역이 아직 없습니다</h3>
