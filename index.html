@@ -2067,7 +2067,7 @@ try{
         <div class="card">
           <div class="card-body p0 tbl-wrap">
             <table>
-              <thead><tr><th>일자</th><th>품목명</th><th>구분</th><th>수량</th><th>단가</th><th>합계</th><th>비고</th><th>관리</th></tr></thead>
+              <thead><tr><th>일자</th><th>품목명</th><th>구분</th><th>수량</th><th>잔여 재고</th><th>단가</th><th>합계</th><th>비고</th><th>관리</th></tr></thead>
               <tbody id="stock-history-table"></tbody>
             </table>
           </div>
@@ -6323,7 +6323,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.788';
+const ERP_VERSION = 'v2.3.789';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30326,8 +30326,15 @@ function renderStockHistory() {
   //   재고관리 대상이 아니므로 입출고 내역에서 숨김 (데이터는 보존)
   const revHistory = DB.stockHistory.slice().reverse()
     .filter(h => { const _it = getItem(h && h.itemId); return _it && _it.name; });
+  // v2.3.789: '잔여 재고' — 각 행 처리 직후의 총 재고. 현재 재고에서 최신→과거로 품목별 역산
+  //   (입고 -qty · 출고 +qty · 이동은 총량 불변). 품목 팝업(v2.3.412)과 같은 방식.
+  const _shBal = {};
   $('stock-history-table').innerHTML = revHistory.map(h => {
     const item = getItem(h.itemId);
+    const _bk = String(h.itemId);
+    if (!(_bk in _shBal)) _shBal[_bk] = Number(item.stock) || 0;
+    const _after = _shBal[_bk];   // 이 행 처리 직후 재고
+    _shBal[_bk] = _after - (h.type === 'in' ? (Number(h.qty) || 0) : (h.type === 'out' ? -(Number(h.qty) || 0) : 0));
     const total = h.qty * h.price;
     const _isMove = h.type==='move';
     const _isAdj = !!h.adjust;   // v2.3.676: 수량 수정(증가/차감)
@@ -30336,6 +30343,7 @@ function renderStockHistory() {
       <td class="lnk" style="font-size:14px" onclick="showItemDetail(${h.itemId})">${item.name||'-'}</td>
       <td style="text-align:center"><span class="badge ${_isMove?'purple':(h.type==='in'?'green':'red')}" style="font-size:11px">${_isMove?'🔁 이동':(_isAdj?(h.type==='in'?'📊 증가':'📊 차감'):(h.type==='in'?'📥 입고':'🚚 출고'))}</span></td>
       <td style="text-align:center;color:${_isMove?'#7c3aed':(h.type==='in'?'var(--green-600)':'var(--red-600)')}"><strong>${_isMove?'':(h.type==='in'?'+':'-')}${fmt(h.qty)}</strong></td>
+      <td style="text-align:center;font-weight:700;color:#334155;font-variant-numeric:tabular-nums">${fmt(_after)}</td>
       <td style="text-align:center">${_isMove?'-':fmtW(h.price)}</td>
       <td style="text-align:center">${_isMove?'-':fmtW(total)}</td>
       <td style="text-align:center">${h.note||'-'}${(h.by||h.ip) ? `<div style="font-size:11px;color:#94a3b8;margin-top:2px">${h.by?`작성자 : ${_whEsc(_shByLabel(h))}`:''}${(h.by&&h.ip)?' · ':''}${h.ip?`IP : ${_whEsc(h.ip)}`:''}</div>` : ''}</td>
@@ -30343,7 +30351,7 @@ function renderStockHistory() {
         <button class="btn btn-danger btn-xs" onclick="deleteStockHistory(${h.id})">삭제</button>
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="8" class="empty">입출고 내역이 없습니다</td></tr>';
+  }).join('') || '<tr><td colspan="9" class="empty">입출고 내역이 없습니다</td></tr>';
 }
 
 // v2.3.411: 재고현황에서 예상재고 클릭 → 해당 품목 입출고 내역 팝업(DB.stockHistory)
