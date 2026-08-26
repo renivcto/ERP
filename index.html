@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.766';
+const ERP_VERSION = 'v2.3.767';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28519,6 +28519,9 @@ async function openStockMove(presetItemId){
       </div>
       <div class="fg" style="margin:0"><label>이동 수량</label><input class="fi" id="wm-qty" type="number" min="1" placeholder="0" oninput="_wmOnItem()"></div>
       <div id="wm-avail" style="font-size:11px;color:#64748b;margin-top:5px"></div>
+      <!-- v2.3.767: 이동 사유 — 입출고 내역의 비고에 함께 기록된다 -->
+      <div class="fg" style="margin:10px 0 0"><label>이동 사유 <span style="font-size:10px;color:var(--gray-400);font-weight:400">(선택)</span></label>
+        <input class="fi" id="wm-reason" placeholder="예: 바로팜 위탁 출고분 보충, 본사 샘플용 이관 등" maxlength="120"></div>
     </div>
     <div class="modal-ft"><button class="btn btn-outline" onclick="closeModal('stock-move-modal')">취소</button><button class="btn btn-primary" onclick="saveStockMove()">이동 처리</button></div>
   </div>`;
@@ -28682,7 +28685,7 @@ window._repairConsignMoveHistory = async function(apply){
   return { missing: missing.length, applied: missing.length };
 };
 
-function _applyStockMove(it, from, to, qty){
+function _applyStockMove(it, from, to, qty, reason){   // v2.3.767: reason(선택) — 비고에 덧붙는다
   if(!it) return {ok:false, err:'품목을 선택하세요'};
   if(!from) return {ok:false, err:'출발 창고를 선택하세요'};
   if(!to) return {ok:false, err:'창고를 선택하세요'};
@@ -28703,7 +28706,7 @@ function _applyStockMove(it, from, to, qty){
   const fromName = from==='__un__'?'미지정':_whName(from);
   const toName = to==='__un__'?'미지정':_whName(to);
   DB.stockHistory=DB.stockHistory||[];
-  const _mvRec = { id: nextId('stock'), itemId: it.id, type:'move', qty: qty, price: it.price||0, fromWh: from, toWh: to, date: new Date().toISOString().slice(0,10), lot: it.lot||'', note:`재고이동: ${fromName} → ${toName}` };
+  const _mvRec = { id: nextId('stock'), itemId: it.id, type:'move', qty: qty, price: it.price||0, fromWh: from, toWh: to, date: new Date().toISOString().slice(0,10), lot: it.lot||'', note:`재고이동: ${fromName} → ${toName}` + (reason && String(reason).trim() ? ` — ${String(reason).trim()}` : '') };
   DB.stockHistory.push(_mvRec);
   _whMoveVaultAdd(Object.assign({ _vts: Date.now() }, _mvRec));   // v2.3.634: 유실 대비 금고 기록
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }catch(_){}
@@ -28713,7 +28716,8 @@ async function saveStockMove(){
   const sel=document.getElementById('wm-item'); const it=(DB.items||[]).find(i=>String(i.id)===String(sel&&sel.value));
   const from=(document.getElementById('wm-from')||{}).value, to=(document.getElementById('wm-to')||{}).value;
   const qty=parseInt((document.getElementById('wm-qty')||{}).value)||0;
-  const r=_applyStockMove(it, from, to, qty);
+  const reason=((document.getElementById('wm-reason')||{}).value||'').trim();   // v2.3.767
+  const r=_applyStockMove(it, from, to, qty, reason);
   if(!r.ok){ showNotif(r.err,'warning'); return; }
   closeModal('stock-move-modal');
   if(typeof renderStock==='function') renderStock();
