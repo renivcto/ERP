@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.778';
+const ERP_VERSION = 'v2.3.779';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26030,9 +26030,16 @@ function renderPartSpecList() {
       <td style="text-align:center;vertical-align:middle;font-size:13px">${liveVol}</td>
       <td style="text-align:center;vertical-align:middle;font-size:13px">${p.manufacturer||'-'}</td>
       <td style="text-align:center;vertical-align:middle;white-space:nowrap">
-        <button title="수정" onclick="editPartSpec(${p.id})" style="background:#eef2ff;color:#6366f1;border:1px solid #e0e7ff;width:24px;height:22px;padding:0;border-radius:5px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1;vertical-align:middle">✏️</button>
-        <button class="btn btn-xs" style="font-size:11px;padding:3px 10px;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;vertical-align:middle" onclick="printPartSpec(${p.id})">🖨️ 인쇄</button>
-        <button class="btn btn-outline btn-xs" style="font-size:11px;padding:3px 10px;color:var(--red-500);border-color:var(--red-200);vertical-align:middle" onclick="deletePartSpecById(${p.id})">삭제</button>
+        <div style="display:inline-flex;align-items:center;gap:6px;vertical-align:middle">
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <button class="btn btn-xs" style="font-size:11px;padding:3px 10px;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa" onclick="printPartSpec(${p.id})">🖨️ 인쇄</button>
+            <button class="btn btn-xs" style="font-size:11px;padding:3px 10px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe" onclick="emailPartSpec(${p.id})">📧 이메일</button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <button class="btn btn-xs" style="font-size:11px;padding:3px 10px;background:#eef2ff;color:#6366f1;border:1px solid #e0e7ff" onclick="editPartSpec(${p.id})">✏️ 수정</button>
+            <button class="btn btn-outline btn-xs" style="font-size:11px;padding:3px 10px;color:var(--red-500);border-color:var(--red-200)" onclick="deletePartSpecById(${p.id})">삭제</button>
+          </div>
+        </div>
       </td>
     </tr>`;
   }).join('');
@@ -26785,9 +26792,10 @@ function deletePartSpecById(id) {
 function _esc(s) { return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function _nl2br(s) { return _esc(s).replace(/\n/g, '<br>'); }
 
-function printPartSpec(id) {
+// v2.3.779: 인쇄 HTML 조립을 분리 — 인쇄(printPartSpec)와 이메일 PDF(emailPartSpec)가 함께 쓴다
+function _partSpecPrintHtml(id) {
   const p = (DB.partSpecs||[]).find(x => x.id === id);
-  if (!p) { showNotif('사양서를 찾을 수 없습니다', 'warning'); return; }
+  if (!p) { showNotif('사양서를 찾을 수 없습니다', 'warning'); return ''; }
   const comps = p.components || [];
   const today = new Date().toISOString().slice(0,10);
 
@@ -26973,10 +26981,123 @@ function printPartSpec(id) {
 
 <div class="footer-meta">출력일: ${today}</div>
 </body></html>`;
+  return html;
+}
+function printPartSpec(id) {
+  const html = _partSpecPrintHtml(id);
+  if (!html) return;
   const w = window.open('', '_blank');
   if (!w) { showNotif('팝업이 차단되었습니다. 팝업 허용 후 다시 시도해주세요.', 'warning'); return; }
   w.document.open(); w.document.write(html); w.document.close();
   w.onload = () => { setTimeout(() => { try { w.focus(); w.print(); } catch(e){} }, 300); };
+}
+/* v2.3.779: 사양서 이메일 — 발주서와 동일한 방식. 인쇄 문서를 화면 밖 iframe 에 그려
+   html2canvas + jsPDF 로 PDF(A4 여러 페이지 분할)를 만들고, PDF 첨부 .eml 을 내려받는다.
+   .eml 을 더블클릭하면 받는 사람·제목·본문·첨부가 채워진 새 메일이 열린다(Outlook). */
+async function emailPartSpec(id){
+  const p = (DB.partSpecs||[]).find(x => x.id === id);
+  if (!p) { showNotif('사양서를 찾을 수 없습니다', 'warning'); return; }
+  const html = _partSpecPrintHtml(id);
+  if (!html) return;
+  const utf8Base64 = s2 => btoa(unescape(encodeURIComponent(s2)));
+  let to = '';
+  try {
+    const norm = x => String(x||'').replace(/주식회사|\(주\)|㈜/g,'').replace(/\s+/g,'');
+    const v = (DB.vendors||[]).find(x => x && x.company && norm(x.company) === norm(p.manufacturer));
+    const cs = (v && Array.isArray(v.contacts)) ? v.contacts : [];
+    to = (cs.find(c => c && c.email) || {}).email || (v && v.email) || '';
+  } catch(_){}
+  const prodName = p.productNameKo || '';
+  let pdfBase64 = '';
+  const baseName = '부자재사양서_' + (prodName || p.productCode || id);
+  const pdfName = baseName + '.pdf';
+  try {
+    showNotif('🔄 사양서 PDF 생성 중… (~2-3초)', 'info');
+    await _ensurePdfLibs();
+    const fr = document.createElement('iframe');
+    fr.style.cssText = 'position:fixed;left:-10000px;top:0;width:820px;height:1200px;border:0;z-index:-1';
+    document.body.appendChild(fr);
+    try {
+      fr.contentDocument.open(); fr.contentDocument.write(html); fr.contentDocument.close();
+      await new Promise(r => setTimeout(r, 400));
+      const body = fr.contentDocument.body;
+      const canvas = await window.html2canvas(body, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+      const jsPDF = window.jspdf.jsPDF;
+      const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      const pdfW = pdf.internal.pageSize.getWidth(), pdfH = pdf.internal.pageSize.getHeight();
+      const margin = 8;
+      const imgW = pdfW - 2 * margin;
+      const pageHpx = Math.floor(canvas.width * ((pdfH - 2 * margin) / imgW));
+      let sy = 0, first = true;
+      while (sy < canvas.height) {
+        const sliceH = Math.min(pageHpx, canvas.height - sy);
+        const pc = document.createElement('canvas');
+        pc.width = canvas.width; pc.height = sliceH;
+        pc.getContext('2d').drawImage(canvas, 0, sy, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+        if (!first) pdf.addPage();
+        pdf.addImage(pc.toDataURL('image/jpeg', 0.92), 'JPEG', margin, margin, imgW, sliceH * (imgW / canvas.width));
+        first = false; sy += sliceH;
+      }
+      const blob = pdf.output('blob');
+      const dataUrl = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result);
+        r.onerror = () => rej(new Error('FileReader 실패'));
+        r.readAsDataURL(blob);
+      });
+      const m = String(dataUrl).match(/;base64,([\s\S]+)$/);
+      if (!m) throw new Error('PDF 데이터 형식 오류');
+      pdfBase64 = m[1];
+    } finally { try { fr.remove(); } catch(_){} }
+  } catch(e) {
+    console.error('사양서 PDF 생성 실패:', e);
+    showNotif('PDF 생성 실패: ' + (e && e.message || e), 'error');
+    return;
+  }
+  const subject = '[르니브] 부자재 사양서 — ' + (prodName || p.productCode || '');
+  const mailBody = (p.manufacturer ? p.manufacturer + ' ' : '') + '담당자님, 안녕하세요.\n\n' +
+    '르니브에서 부자재 사양서를 송부드립니다. 첨부 파일 확인 부탁드립니다.\n\n' +
+    '· 제품명: ' + (prodName || '-') + '\n' +
+    '· 품목코드: ' + (p.productCode || '-') + '\n\n' +
+    '궁금한 사항은 언제든 연락 주십시오.\n\n' +
+    '감사합니다.\n\n' +
+    '르니브 송 희강 드림\n\n' +
+    '────────────────────────\n' +
+    '㈜르니브 송 희강 이사\n' +
+    'E-mail : cto@reniv.co.kr\n' +
+    'Phone : 070-8065-3279     Mobile : 010-3328-3652\n' +
+    '서울특별시 성동구 성수동2가 301-94 8층';
+  const encSubject = '=?UTF-8?B?' + utf8Base64(subject) + '?=';
+  const encPdfName = '=?UTF-8?B?' + utf8Base64(pdfName) + '?=';
+  const bodyBase64 = utf8Base64(mailBody);
+  const boundary = '----=_RenivERP_' + Date.now().toString(36);
+  const eml =
+    (to ? ('To: ' + to + '\r\n') : '') +
+    'X-Unsent: 1\r\n' +
+    'Subject: ' + encSubject + '\r\n' +
+    'MIME-Version: 1.0\r\n' +
+    'Content-Type: multipart/mixed; boundary="' + boundary + '"\r\n' +
+    '\r\n' +
+    '--' + boundary + '\r\n' +
+    'Content-Type: text/plain; charset=UTF-8\r\n' +
+    'Content-Transfer-Encoding: base64\r\n' +
+    '\r\n' +
+    bodyBase64.match(/.{1,76}/g).join('\r\n') + '\r\n' +
+    '\r\n--' + boundary + '\r\n' +
+    'Content-Type: application/pdf; name="' + encPdfName + '"\r\n' +
+    'Content-Transfer-Encoding: base64\r\n' +
+    'Content-Disposition: attachment; filename="' + encPdfName + '"\r\n' +
+    '\r\n' +
+    pdfBase64.match(/.{1,76}/g).join('\r\n') + '\r\n' +
+    '\r\n--' + boundary + '--\r\n';
+  const eblob = new Blob([eml], { type: 'message/rfc822' });
+  const url = URL.createObjectURL(eblob);
+  const a = document.createElement('a');
+  a.href = url; a.download = baseName + '.eml';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => { try { URL.revokeObjectURL(url); } catch(_){} }, 60000);
+  showNotif('📧 사양서 PDF 첨부 메일(.eml) 다운로드 — 더블클릭하면 새 메일이 열립니다'
+    + (to ? '' : ' (제조사 이메일이 거래처에 없어 받는 사람은 비워 두었습니다)'), 'success');
 }
 
 // ───── 인쇄 (BOM — 발주용) ─────
