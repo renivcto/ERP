@@ -6322,7 +6322,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.771';
+const ERP_VERSION = 'v2.3.772';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28258,17 +28258,23 @@ function _ensureOverlay(id){
 // v2.3.770: 입출고 기록에 시각·작성자·IP — 표시는 renderStockHistory(비고 아래 작게).
 //   IP 는 부팅 시 1회 조회(직원용 출퇴근과 같은 api.ipify.org). 실패해도 기록은 계속된다.
 window._myIp = window._myIp || '';
-// v2.3.771: 소스 2곳 폴백 — ipify 가 막힌 환경(확장프로그램 차단 등)에서도 IP 를 확보한다.
+// v2.3.772: 소스 3곳 폴백 — 실측에서 ipify 가 통째로 막힌 네트워크가 있었다(Failed to fetch).
+//   checkip.amazonaws.com(평문)은 같은 환경에서 정상이라 1순위로 둔다.
 window._fetchMyIp = function(){
   if (window._myIp || window._myIpBusy) return;
   window._myIpBusy = true;
-  const urls = ['https://api.ipify.org?format=json', 'https://api64.ipify.org?format=json'];
+  const urls = [
+    ['https://checkip.amazonaws.com', 'text'],
+    ['https://api.ipify.org?format=json', 'json'],
+    ['https://api64.ipify.org?format=json', 'json'],
+  ];
+  const IPRE = /^[0-9a-fA-F:.]{3,45}$/;
   (function next(i){
     if (i >= urls.length) { window._myIpBusy = false; return; }
     try {
-      fetch(urls[i]).then(r => r.json()).then(j => {
-        const ip = (j && j.ip) || '';
-        if (ip) { window._myIp = ip; window._myIpBusy = false; } else next(i + 1);
+      fetch(urls[i][0]).then(r => urls[i][1] === 'json' ? r.json() : r.text()).then(v => {
+        const ip = (urls[i][1] === 'json' ? (v && v.ip) : String(v || '').trim()) || '';
+        if (ip && IPRE.test(ip)) { window._myIp = ip; window._myIpBusy = false; } else next(i + 1);
       }).catch(() => next(i + 1));
     } catch(_) { next(i + 1); }
   })(0);
