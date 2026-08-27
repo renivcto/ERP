@@ -939,6 +939,7 @@ async function fetchCafe24OrdersRaw({ mallId, accessToken, startDate, endDate, l
     + `?start_date=${startDate}`
     + `&end_date=${endDate}`
     + `&date_type=order_date`
+    + `&paid=T`   // v2.28.2: 결제(입금)완료 주문만 — 입금 전 주문이 섞여 들어오던 문제
     + `&limit=${limit}`
     + `&offset=${offset}`
     + `&embed=items,buyer,receivers`;
