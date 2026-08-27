@@ -2089,7 +2089,7 @@ exports.scheduledPlusclStock = functions
 exports.fetchPlusclCoupangOrders = functions
   .region(REGION)
   .runWith({ secrets: ['PLUSCL_AUTH_KEY', 'SLACK_ORDERS_WEBHOOK'], timeoutSeconds: 300, memory: '256MB' })
-  .pubsub.schedule('30 17 * * 1-5')
+  .pubsub.schedule('0 16 * * 1-5')   // v2.28.1: 17:30 -> 16:00
   .timeZone('Asia/Seoul')
   .onRun(async () => {
     try {
