@@ -1185,7 +1185,15 @@ async function ingestCafe24Orders({ daysBack = 1 } = {}) {
   // v2.8: 응답을 active/취소·반품으로 분리
   const activeOrders = [];
   const canceledIds = new Set();
+  let unpaidSkipped = 0;
   for (const c of allOrders) {
+    // v2.28.3: 입금 전 주문 이중 차단 — 쿼리(paid=T)가 무시되는 경우까지 응답 레벨에서 거른다
+    //   (무통장입금 '입금전' 주문이 ERP에 들어와 삭제해도 다음 수집에 되살아나던 문제)
+    if (c && c.paid !== undefined && String(c.paid) !== 'T') {
+      unpaidSkipped++;
+      console.log('[CAFE24] 입금 전 주문 제외:', c.order_id, '(paid=' + c.paid + ')');
+      continue;
+    }
     const status = (c && c.order_status) || '';
     if (status.startsWith('C') || status.startsWith('R')) {
       if (c && c.order_id) canceledIds.add(String(c.order_id));
@@ -1193,7 +1201,7 @@ async function ingestCafe24Orders({ daysBack = 1 } = {}) {
       activeOrders.push(c);
     }
   }
-  console.log('[CAFE24] active:', activeOrders.length, '건 / 취소·반품:', canceledIds.size, '건');
+  console.log('[CAFE24] active:', activeOrders.length, '건 / 취소·반품:', canceledIds.size, '건 / 입금전 제외:', unpaidSkipped, '건');
 
   // 4) ERP 형식 매핑 + Firestore 머지
   const erpOrders = activeOrders.flatMap(c => mapCafe24ToErpOrder(c, shopId, shopName));  // v2.19: 다중 상품 분리
