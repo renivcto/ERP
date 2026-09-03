@@ -6329,7 +6329,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.809';
+const ERP_VERSION = 'v2.3.810';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -24294,7 +24294,7 @@ function renderItemTable() {
   // v2.3.116: OEM 은 실제 재고가 아니라 제조 발주이므로 평가액 계산에서 제외
   // v2.3.117: 외주가공도 가공 서비스라 재고 아님 → 제외
   const _isPhantomStock = t => t === 'OEM' || t === '외주가공';
-  const totalVal = filtered.reduce((s,i) => s + (_isPhantomStock(i.type) ? 0 : (i.stock||0)*(i.price||0)), 0);
+  const totalVal = filtered.reduce((s,i) => s + ((_isPhantomStock(i.type) || i.parentId) ? 0 : (i.stock||0)*(i.price||0)), 0);
   const tvEl = $('item-total-stock-value');
   if (tvEl) tvEl.textContent = fmtW(totalVal);
   // ── v2.3.529: 완제품 탭 전용 열 구성 ──
@@ -24332,7 +24332,9 @@ function renderItemTable() {
     // v2.3.116: OEM 은 실제 재고가 아님 → 표시·평가액 모두 0/숨김
     // v2.3.117: 외주가공도 같은 처리
     const _isOemRow = (i.type === 'OEM' || i.type === '외주가공');
-    const stockVal = _isOemRow ? 0 : (i.stock||0) * (i.price||0);
+    // v2.3.810: 하위 품목은 금액을 대표에서만 관리 — 단가·평가액 표시/합계 제외
+    const _noMoney = _isOemRow || !!i.parentId;
+    const stockVal = _noMoney ? 0 : (i.stock||0) * (i.price||0);
     const rowBg = i.parentId ? '#faf8ff' : (typeRowBg[i.type] || '#fff');
     const _imgVal = (typeof i.image === 'string') ? i.image : '';
     const _needsIdb = (_imgVal === '__idb__');
@@ -24349,9 +24351,9 @@ function renderItemTable() {
       <td class="lnk" style="text-align:center;word-break:keep-all;white-space:normal;line-height:1.45;padding:6px 8px;font-size:12.5px" onclick="showItemDetail(${i.id})">${i.parentId?`<span style="color:#a78bfa;margin-right:4px;font-weight:700">↳</span>`:''}${i.name}${(function(){if(i.parentId)return '';const kids=(DB.items||[]).filter(x=>x&&x.parentId===i.id);return kids.length?`<div style="font-size:10.5px;color:#94a3b8;font-weight:500;margin-top:2px;line-height:1.4">구성 : ${kids.map(k=>k.name).join(' · ')}</div>`:'';})()}</td>
       <td style="text-align:center;padding:6px 2px">${imgHtml}</td>
       <td style="font-size:12px;color:#475569;text-align:center;white-space:pre-wrap;word-break:break-word;vertical-align:middle;line-height:1.55;padding:6px 4px">${(i.spec||'-').replace(/\n/g,'<br>').replace(/\*/g,'<span style="vertical-align:middle;font-size:12px;line-height:1">*</span>')}</td>
-      <td style="text-align:center;font-size:12.5px;font-variant-numeric:tabular-nums;padding:6px 2px;white-space:nowrap">${fmtW(i.price)}</td>
+      <td style="text-align:center;font-size:12.5px;font-variant-numeric:tabular-nums;padding:6px 2px;white-space:nowrap">${i.parentId ? '<span style="color:#cbd5e1">-</span>' : fmtW(i.price)}</td>
       ${_finTab ? _itemFinStockCell(i) : `<td style="text-align:center;font-size:12.5px;font-variant-numeric:tabular-nums;padding:6px 2px"><strong>${_isOemRow ? '<span style="color:#cbd5e1">-</span>' : fmt(i.stock)}</strong></td>`}
-      <td style="text-align:center;color:var(--sky-700);font-weight:600;font-size:12.5px;font-variant-numeric:tabular-nums;padding:6px 2px;white-space:nowrap">${_isOemRow ? '<span style="color:#cbd5e1">-</span>' : fmtW(stockVal)}</td>
+      <td style="text-align:center;color:var(--sky-700);font-weight:600;font-size:12.5px;font-variant-numeric:tabular-nums;padding:6px 2px;white-space:nowrap">${_noMoney ? '<span style="color:#cbd5e1">-</span>' : fmtW(stockVal)}</td>
       ${_finTab ? _itemSellerPriceCells(i) : `<td class="lnk" onclick="viewVendor(${i.vendorId})" style="text-align:center;font-size:12px;padding:6px 4px;line-height:1.4;word-break:keep-all">${v.company||'-'}</td>
       <td style="text-align:center;padding:6px 2px">${i.quoteFileName ? `<button onclick="openItemQuoteFile(${i.id})" title="${i.quoteFileName}" style="display:inline-flex;align-items:center;gap:3px;background:#fdf2f8;color:#c4708a;border:1px solid #f0c0d4;padding:2px 7px;border-radius:5px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#d97b9a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>보기</button>` : '<span style="color:var(--gray-300);font-size:11px">-</span>'}</td>`}
       <td style="text-align:center;padding:6px 2px">
@@ -30318,10 +30320,23 @@ function renderStockTable() {
     const av = a && a._archived ? 1 : 0, bv = b && b._archived ? 1 : 0;
     return av !== bv ? av - bv : sortByCode(a, b);
   });
+  // v2.3.810: 하위 품목(parentId)을 대표 바로 아래로 붙인다 (품목 현황과 동일한 계층 표시)
+  {
+    const _byParent = {};
+    items.filter(x => x && x.parentId).forEach(k => { (_byParent[k.parentId] = _byParent[k.parentId] || []).push(k); });
+    const _out = [];
+    items.filter(x => x && !x.parentId).forEach(t => {
+      _out.push(t);
+      (_byParent[t.id] || []).forEach(k => _out.push(k));
+      delete _byParent[t.id];
+    });
+    Object.values(_byParent).forEach(arr => arr.forEach(k => _out.push(k)));
+    items = _out;
+  }
   // v1.9.384: 총 재고평가액 — 현재 표 합계와 일치하도록 검색·라인 필터 모두 반영된 items 기준
   // v2.3.116: OEM 제외 (제조 발주는 실재고 아님)
   // v2.3.117: 외주가공도 제외 (가공 서비스)
-  const totalVal = items.reduce((s,i) => s + ((i.type === 'OEM' || i.type === '외주가공') ? 0 : (i.stock||0)*(i.price||0)), 0);
+  const totalVal = items.reduce((s,i) => s + ((i.type === 'OEM' || i.type === '외주가공' || i.parentId) ? 0 : (i.stock||0)*(i.price||0)), 0);
   const tvEl = $('stock-total-value');
   if (tvEl) tvEl.textContent = fmtW(totalVal);
   // v2.3.361: PlusCL 현재고 열 — 완제품 탭에서만 노출
@@ -30340,17 +30355,19 @@ function renderStockTable() {
     // v2.3.116: OEM 표시·평가액 제외
     // v2.3.117: 외주가공도 제외
     const _isOemRow2 = (i.type === 'OEM' || i.type === '외주가공');
-    const stockVal = _isOemRow2 ? 0 : (i.stock||0) * (i.price||0);
-    const rowBg = i._archived ? '#f5f5f5' : (typeRowBg[i.type] || '#fff');
+    // v2.3.810: 하위 품목은 금액 없이 (대표 품목이 금액 담당)
+    const _noMoney2 = _isOemRow2 || !!i.parentId;
+    const stockVal = _noMoney2 ? 0 : (i.stock||0) * (i.price||0);
+    const rowBg = i._archived ? '#f5f5f5' : (i.parentId ? '#faf8ff' : (typeRowBg[i.type] || '#fff'));
     return `<tr style="background:${rowBg}${i._archived?';opacity:0.85':''}">
       <td style="text-align:center"><span class="badge ${typeBadge(i.type)}" style="font-size:11px">${i.type}</span></td>
       <td style="text-align:center;font-size:13px;font-weight:600;color:#0f172a;letter-spacing:.2px">${i.code}</td>
       ${_showCh ? `<td style="text-align:center;padding:6px 3px;line-height:1.6">${_itemChannelCellHtml(i)}</td>` : '<td style="padding:0;font-size:0;border:none"></td>'}
-      <td class="lnk" onclick="showItemDetail(${i.id})" style="text-align:center;font-size:13px">${i.name}</td>
+      <td class="lnk" onclick="showItemDetail(${i.id})" style="text-align:center;font-size:13px">${i.parentId?`<span style="color:#a78bfa;margin-right:4px;font-weight:700">↳</span>`:''}${i.name}</td>
       <td style="text-align:center;font-size:12.5px;color:#475569;line-height:1.55">${i.spec||'-'}</td>
       ${_stockWhCells(i, _isOemRow2)}
       <td style="text-align:center;font-size:13px;${_showPl?'':'display:none'}">${_showPl ? _plusclCellHtml(i) : ''}</td>
-      <td style="text-align:center;color:var(--sky-700);font-weight:600;font-size:13px;font-variant-numeric:tabular-nums">${fmtW(stockVal)}</td>
+      <td style="text-align:center;color:var(--sky-700);font-weight:600;font-size:13px;font-variant-numeric:tabular-nums">${_noMoney2 ? '<span style="color:#cbd5e1">-</span>' : fmtW(stockVal)}</td>
       <td style="text-align:center">
         ${i._archived ? '<span style="font-size:11px;color:var(--gray-400)">-</span>' : `<button title="수정" onclick="openStockEditModal(${i.id})" style="background:#eef2ff;color:#6366f1;border:1px solid #e0e7ff;width:24px;height:22px;padding:0;border-radius:5px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1">✏️</button>`}
       </td>
