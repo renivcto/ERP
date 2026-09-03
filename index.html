@@ -4637,8 +4637,8 @@ try{
         </div>
         <div class="fg"><label>용량/규격 <span style="font-size:10px;color:var(--gray-400);font-weight:400">(Shift+Enter 줄바꿈)</span></label><textarea class="fi" id="i-spec" rows="2" style="resize:vertical;min-height:38px;line-height:1.5" onkeydown="if((event.shiftKey||event.altKey)&&event.key==='Enter'){event.preventDefault();const s=this;const p=s.selectionStart;s.value=s.value.slice(0,p)+'\n'+s.value.slice(s.selectionEnd);s.selectionStart=s.selectionEnd=p+1;}else if(event.key==='Enter'&&!event.shiftKey&&!event.altKey){event.preventDefault();}"></textarea></div>
         <div class="fg"><label>재질</label><input class="fi" id="i-material"></div>
-        <!-- v2.3.808: 부자재 등 구성품 — 쉼표로 구분해 한 품목으로 묶어 관리 -->
-        <div class="fg full"><label>구성품 <span style="font-size:10px;color:var(--gray-400);font-weight:400">(쉼표로 구분 — 예 : 용기, 스포이드, 바킹)</span></label><input class="fi" id="i-components" placeholder="용기, 스포이드, 바킹"></div>
+        <!-- v2.3.809: 상위 품목 — 스포이드·바킹처럼 세트 구성품을 대표 품목 아래 하위로 묶는다 -->
+        <div class="fg full"><label>상위 품목 <span style="font-size:10px;color:var(--gray-400);font-weight:400">(이 품목을 대표 품목의 하위 구성품으로 묶을 때 선택)</span></label><select class="fi" id="i-parent"><option value="">(없음 — 독립 품목)</option></select></div>
         <!-- 바코드 번호 + 바코드 이미지 나란히 -->
         <div class="fg full">
           <label>바코드</label>
@@ -6329,7 +6329,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.808';
+const ERP_VERSION = 'v2.3.809';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -24183,6 +24183,17 @@ window.addEventListener('resize', () => {
 });
 
 // v1.9.885: 품목코드 있는 품목만 (발주서에서 자동 생성된 임시 품목 제외)
+/* v2.3.809: 상위 품목 select 채우기 — 대표(하위가 아닌) 품목만 후보 */
+window._popItemParentSelect = function(cur, selfId) {
+  var el = $('i-parent'); if (!el) return;
+  var opts = ['<option value="">(없음 — 독립 품목)</option>'];
+  (DB.items || []).filter(function(x){ return x && _hasItemCode(x) && x.id !== selfId && !x.parentId; })
+    .slice().sort(function(a,b){ return String(a.code||'').localeCompare(String(b.code||'')); })
+    .forEach(function(x){
+      opts.push('<option value="' + x.id + '"' + (String(cur || '') === String(x.id) ? ' selected' : '') + '>[' + x.type + '] ' + escapeHtml((x.code || '') + ' ' + (x.name || '')) + '</option>');
+    });
+  el.innerHTML = opts.join('');
+};
 function _hasItemCode(i) {
   if (!i) return false;
   const code = (i.code != null) ? String(i.code).trim() : '';
@@ -24264,6 +24275,19 @@ function renderItemTable() {
   }
   if (search) filtered = filtered.filter(i => i.name.toLowerCase().includes(search) || i.code.toLowerCase().includes(search));
   filtered = filtered.slice().sort((a,b) => sortByCode(a,b));
+  // v2.3.809: 하위 품목(parentId)을 대표 품목 바로 아래로 붙인다
+  {
+    const _byParent = {};
+    filtered.filter(x => x.parentId).forEach(k => { (_byParent[k.parentId] = _byParent[k.parentId] || []).push(k); });
+    const _out = [];
+    filtered.filter(x => !x.parentId).forEach(t => {
+      _out.push(t);
+      (_byParent[t.id] || []).forEach(k => _out.push(k));
+      delete _byParent[t.id];
+    });
+    Object.values(_byParent).forEach(arr => arr.forEach(k => _out.push(k)));  // 대표가 필터에 없으면 독립 표시
+    filtered = _out;
+  }
   const typeBadge = t => ({원자재:'green',부자재:'purple',OEM:'sky',완제품:'amber',반제품:'gray',외주가공:'gray',판촉물:'red'})[t]||'gray';
   // v1.9.377: 총 재고평가액 — 현재 필터/검색에 적용된 목록 기준으로 계산해 표 합계와 항상 일치하도록 변경
   //   (이전에는 DB.items 전체 기준이라 분류 탭/제품 라인/검색 적용 시 숫자가 표와 불일치)
@@ -24309,7 +24333,7 @@ function renderItemTable() {
     // v2.3.117: 외주가공도 같은 처리
     const _isOemRow = (i.type === 'OEM' || i.type === '외주가공');
     const stockVal = _isOemRow ? 0 : (i.stock||0) * (i.price||0);
-    const rowBg = typeRowBg[i.type] || '#fff';
+    const rowBg = i.parentId ? '#faf8ff' : (typeRowBg[i.type] || '#fff');
     const _imgVal = (typeof i.image === 'string') ? i.image : '';
     const _needsIdb = (_imgVal === '__idb__');
     const _hasValidImg = _imgVal && _imgVal !== '__idb__';
@@ -24322,7 +24346,7 @@ function renderItemTable() {
       <td style="text-align:center;padding:6px 2px"><span class="badge ${typeBadge(i.type)}" style="font-size:10.5px;padding:1px 6px">${i.type}</span></td>
       <td style="text-align:center;font-size:12.5px;font-weight:600;color:#0f172a;letter-spacing:.2px;padding:6px 2px;white-space:nowrap">${i.code}</td>
       ${_finTab ? `<td style="text-align:center;padding:6px 3px;line-height:1.6">${_itemChannelCellHtml(i)}</td>` : '<td style="padding:0;font-size:0;border:none"></td>'}
-      <td class="lnk" style="text-align:center;word-break:keep-all;white-space:normal;line-height:1.45;padding:6px 8px;font-size:12.5px" onclick="showItemDetail(${i.id})">${i.name}${i.components?`<div style="font-size:10.5px;color:#94a3b8;font-weight:500;margin-top:2px;line-height:1.4">${String(i.components).split(',').map(c=>c.trim()).filter(Boolean).join(' · ')}</div>`:''}</td>
+      <td class="lnk" style="text-align:center;word-break:keep-all;white-space:normal;line-height:1.45;padding:6px 8px;font-size:12.5px" onclick="showItemDetail(${i.id})">${i.parentId?`<span style="color:#a78bfa;margin-right:4px;font-weight:700">↳</span>`:''}${i.name}${(function(){if(i.parentId)return '';const kids=(DB.items||[]).filter(x=>x&&x.parentId===i.id);return kids.length?`<div style="font-size:10.5px;color:#94a3b8;font-weight:500;margin-top:2px;line-height:1.4">구성 : ${kids.map(k=>k.name).join(' · ')}</div>`:'';})()}</td>
       <td style="text-align:center;padding:6px 2px">${imgHtml}</td>
       <td style="font-size:12px;color:#475569;text-align:center;white-space:pre-wrap;word-break:break-word;vertical-align:middle;line-height:1.55;padding:6px 4px">${(i.spec||'-').replace(/\n/g,'<br>').replace(/\*/g,'<span style="vertical-align:middle;font-size:12px;line-height:1">*</span>')}</td>
       <td style="text-align:center;font-size:12.5px;font-variant-numeric:tabular-nums;padding:6px 2px;white-space:nowrap">${fmtW(i.price)}</td>
@@ -25019,7 +25043,7 @@ function saveItem() {
     // v2.3.342: 기본 창고(입고 기본 위치). whStock 분배 맵은 data 에 미포함 → edit 스프레드가 기존값 보존
     defaultWh: (function(){ var el=document.getElementById('i-default-wh'); var v=el?el.value:''; return v || (existingItem ? (existingItem.defaultWh||'') : ''); })(),
     vendorId: (() => { const v = $('i-vendor').value; if (!v) return null; const n = parseInt(v); return isNaN(n) ? v : n; })(), material:$('i-material').value,
-    components:(function(){var el=$('i-components');if(!el)return existingItem?(existingItem.components||''):'';return String(el.value||'').trim();})(),
+    parentId:(function(){var el=$('i-parent');if(!el)return existingItem?(existingItem.parentId||null):null;var v=el.value;if(!v)return null;var n=Number(v);return isNaN(n)?v:n;})(),
     note:(function(){var el=$('i-note');if(!el)return '';return (typeof el.innerHTML==='string')?el.innerHTML:(el.value||'');})(),
     image: existingItem ? (existingItem.image||'') : '',
     quoteFile: existingItem ? (existingItem.quoteFile||'') : '',
@@ -25622,7 +25646,7 @@ function editItem(id) {
   $('i-spec').value=''; $('i-price').value=''; $('i-stock').value=0;
   if ($('i-consumer-price')) $('i-consumer-price').value='';
   if ($('i-sale-price')) $('i-sale-price').value='';
-  $('i-material').value=''; if ($('i-components')) $('i-components').value=''; (function(){var el=$('i-note');if(el){if(el.contentEditable==='true')el.innerHTML='';else el.value='';}})();
+  $('i-material').value=''; if (typeof _popItemParentSelect === 'function') _popItemParentSelect('', null); (function(){var el=$('i-note');if(el){if(el.contentEditable==='true')el.innerHTML='';else el.value='';}})();
   if ($('i-barcode')) $('i-barcode').value='';
   if ($('i-vendor')) $('i-vendor').value='';
   const prevImg = $('i-img-preview'); if (prevImg) prevImg.innerHTML='📷';
@@ -25662,7 +25686,7 @@ function editItem(id) {
     if (typeof updatePriceKrwPreview === 'function') setTimeout(updatePriceKrwPreview, 50);
     $('i-stock').value = i.stock||0;
     $('i-material').value = i.material||'';
-    if ($('i-components')) $('i-components').value = i.components||'';
+    if (typeof _popItemParentSelect === 'function') _popItemParentSelect(i.parentId, i.id);
     (function(){var el=$('i-note');if(!el)return;var v=i.note||'';if(typeof el.innerHTML==='string'&&el.contentEditable==='true'){el.innerHTML=v;}else{el.value=v;}})();
     if ($('i-barcode')) $('i-barcode').value = i.barcode||'';
     // 분류 설정 후 해당 분류의 업체 리스트로 드롭박스 채우기
@@ -25930,7 +25954,8 @@ function showItemDetail(id) {
           + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:0 14px;border:1px solid var(--gray-200);border-radius:8px;overflow:hidden;background:#fff">' + rows + '</div>'
           + '</div>';
       })()}
-      ${i.components?`<div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">구성품</div><div style="display:flex;flex-wrap:wrap;gap:5px">${String(i.components).split(',').map(c=>c.trim()).filter(Boolean).map(c=>`<span style="background:#f6f0ff;border:1px solid #d4bfee;color:#7c4dbd;border-radius:5px;padding:2px 9px;font-size:12px;font-weight:600">${escapeHtml(c)}</span>`).join('')}</div></div>`:''}
+      ${i.parentId?(function(){const p=(DB.items||[]).find(x=>x&&x.id===i.parentId);return p?`<div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">상위 품목</div><span class="lnk" onclick="closeModal('item-detail');showItemDetail(${p.id})" style="font-size:13px;font-weight:600;color:#4338ca;cursor:pointer">↖ ${escapeHtml(p.name)}</span></div>`:'';})():''}
+      ${(function(){const kids=(DB.items||[]).filter(x=>x&&x.parentId===i.id);return kids.length?`<div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">구성품 (하위 품목)</div><div style="display:flex;flex-wrap:wrap;gap:5px">${kids.map(k=>`<span class="lnk" onclick="closeModal('item-detail');showItemDetail(${k.id})" style="background:#f6f0ff;border:1px solid #d4bfee;color:#7c4dbd;border-radius:5px;padding:2px 9px;font-size:12px;font-weight:600;cursor:pointer">↳ ${escapeHtml(k.name)}</span>`).join('')}</div></div>`:'';})()}
       ${i.material?`<div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">재질</div><span style="font-size:13px;font-weight:400">${i.material}</span></div>`:''}
     </div>
 
