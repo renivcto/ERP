@@ -4637,6 +4637,8 @@ try{
         </div>
         <div class="fg"><label>용량/규격 <span style="font-size:10px;color:var(--gray-400);font-weight:400">(Shift+Enter 줄바꿈)</span></label><textarea class="fi" id="i-spec" rows="2" style="resize:vertical;min-height:38px;line-height:1.5" onkeydown="if((event.shiftKey||event.altKey)&&event.key==='Enter'){event.preventDefault();const s=this;const p=s.selectionStart;s.value=s.value.slice(0,p)+'\n'+s.value.slice(s.selectionEnd);s.selectionStart=s.selectionEnd=p+1;}else if(event.key==='Enter'&&!event.shiftKey&&!event.altKey){event.preventDefault();}"></textarea></div>
         <div class="fg"><label>재질</label><input class="fi" id="i-material"></div>
+        <!-- v2.3.808: 부자재 등 구성품 — 쉼표로 구분해 한 품목으로 묶어 관리 -->
+        <div class="fg full"><label>구성품 <span style="font-size:10px;color:var(--gray-400);font-weight:400">(쉼표로 구분 — 예 : 용기, 스포이드, 바킹)</span></label><input class="fi" id="i-components" placeholder="용기, 스포이드, 바킹"></div>
         <!-- 바코드 번호 + 바코드 이미지 나란히 -->
         <div class="fg full">
           <label>바코드</label>
@@ -6327,7 +6329,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.807';
+const ERP_VERSION = 'v2.3.808';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -24320,7 +24322,7 @@ function renderItemTable() {
       <td style="text-align:center;padding:6px 2px"><span class="badge ${typeBadge(i.type)}" style="font-size:10.5px;padding:1px 6px">${i.type}</span></td>
       <td style="text-align:center;font-size:12.5px;font-weight:600;color:#0f172a;letter-spacing:.2px;padding:6px 2px;white-space:nowrap">${i.code}</td>
       ${_finTab ? `<td style="text-align:center;padding:6px 3px;line-height:1.6">${_itemChannelCellHtml(i)}</td>` : '<td style="padding:0;font-size:0;border:none"></td>'}
-      <td class="lnk" style="text-align:center;word-break:keep-all;white-space:normal;line-height:1.45;padding:6px 8px;font-size:12.5px" onclick="showItemDetail(${i.id})">${i.name}</td>
+      <td class="lnk" style="text-align:center;word-break:keep-all;white-space:normal;line-height:1.45;padding:6px 8px;font-size:12.5px" onclick="showItemDetail(${i.id})">${i.name}${i.components?`<div style="font-size:10.5px;color:#94a3b8;font-weight:500;margin-top:2px;line-height:1.4">${String(i.components).split(',').map(c=>c.trim()).filter(Boolean).join(' · ')}</div>`:''}</td>
       <td style="text-align:center;padding:6px 2px">${imgHtml}</td>
       <td style="font-size:12px;color:#475569;text-align:center;white-space:pre-wrap;word-break:break-word;vertical-align:middle;line-height:1.55;padding:6px 4px">${(i.spec||'-').replace(/\n/g,'<br>').replace(/\*/g,'<span style="vertical-align:middle;font-size:12px;line-height:1">*</span>')}</td>
       <td style="text-align:center;font-size:12.5px;font-variant-numeric:tabular-nums;padding:6px 2px;white-space:nowrap">${fmtW(i.price)}</td>
@@ -25017,6 +25019,7 @@ function saveItem() {
     // v2.3.342: 기본 창고(입고 기본 위치). whStock 분배 맵은 data 에 미포함 → edit 스프레드가 기존값 보존
     defaultWh: (function(){ var el=document.getElementById('i-default-wh'); var v=el?el.value:''; return v || (existingItem ? (existingItem.defaultWh||'') : ''); })(),
     vendorId: (() => { const v = $('i-vendor').value; if (!v) return null; const n = parseInt(v); return isNaN(n) ? v : n; })(), material:$('i-material').value,
+    components:(function(){var el=$('i-components');if(!el)return existingItem?(existingItem.components||''):'';return String(el.value||'').trim();})(),
     note:(function(){var el=$('i-note');if(!el)return '';return (typeof el.innerHTML==='string')?el.innerHTML:(el.value||'');})(),
     image: existingItem ? (existingItem.image||'') : '',
     quoteFile: existingItem ? (existingItem.quoteFile||'') : '',
@@ -25619,7 +25622,7 @@ function editItem(id) {
   $('i-spec').value=''; $('i-price').value=''; $('i-stock').value=0;
   if ($('i-consumer-price')) $('i-consumer-price').value='';
   if ($('i-sale-price')) $('i-sale-price').value='';
-  $('i-material').value=''; (function(){var el=$('i-note');if(el){if(el.contentEditable==='true')el.innerHTML='';else el.value='';}})();
+  $('i-material').value=''; if ($('i-components')) $('i-components').value=''; (function(){var el=$('i-note');if(el){if(el.contentEditable==='true')el.innerHTML='';else el.value='';}})();
   if ($('i-barcode')) $('i-barcode').value='';
   if ($('i-vendor')) $('i-vendor').value='';
   const prevImg = $('i-img-preview'); if (prevImg) prevImg.innerHTML='📷';
@@ -25659,6 +25662,7 @@ function editItem(id) {
     if (typeof updatePriceKrwPreview === 'function') setTimeout(updatePriceKrwPreview, 50);
     $('i-stock').value = i.stock||0;
     $('i-material').value = i.material||'';
+    if ($('i-components')) $('i-components').value = i.components||'';
     (function(){var el=$('i-note');if(!el)return;var v=i.note||'';if(typeof el.innerHTML==='string'&&el.contentEditable==='true'){el.innerHTML=v;}else{el.value=v;}})();
     if ($('i-barcode')) $('i-barcode').value = i.barcode||'';
     // 분류 설정 후 해당 분류의 업체 리스트로 드롭박스 채우기
@@ -25926,6 +25930,7 @@ function showItemDetail(id) {
           + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:0 14px;border:1px solid var(--gray-200);border-radius:8px;overflow:hidden;background:#fff">' + rows + '</div>'
           + '</div>';
       })()}
+      ${i.components?`<div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">구성품</div><div style="display:flex;flex-wrap:wrap;gap:5px">${String(i.components).split(',').map(c=>c.trim()).filter(Boolean).map(c=>`<span style="background:#f6f0ff;border:1px solid #d4bfee;color:#7c4dbd;border-radius:5px;padding:2px 9px;font-size:12px;font-weight:600">${escapeHtml(c)}</span>`).join('')}</div></div>`:''}
       ${i.material?`<div class="full"><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">재질</div><span style="font-size:13px;font-weight:400">${i.material}</span></div>`:''}
     </div>
 
