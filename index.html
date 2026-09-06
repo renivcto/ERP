@@ -6331,7 +6331,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.822';
+const ERP_VERSION = 'v2.3.823';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27404,6 +27404,36 @@ function renderBOM() {
     return;
   }
   const product = getItem(productId);
+  // v2.3.823: 구성품(하위 품목)은 항상 대표 품목 바로 아래에 붙인다 — 저장 순서 자체를 정규화
+  try {
+    var _b = DB.boms[productId] || [];
+    var _inBom = {};
+    _b.forEach(function(r){ if (r) _inBom[String(r.itemId)] = 1; });
+    var _kidsOf = {}, _isKid = new Set();
+    _b.forEach(function(r){
+      var it = r ? getItem(r.itemId) : null;
+      if (it && it.parentId && _inBom[String(it.parentId)]) {
+        (_kidsOf[String(it.parentId)] = _kidsOf[String(it.parentId)] || []).push(r);
+        _isKid.add(r);
+      }
+    });
+    if (_isKid.size) {
+      var _out = [];
+      _b.forEach(function(r){
+        if (_isKid.has(r)) return;
+        _out.push(r);
+        var ks = _kidsOf[String(r.itemId)];
+        if (ks) ks.forEach(function(k){ _out.push(k); });
+      });
+      if (_out.length === _b.length && _out.some(function(r, i){ return r !== _b[i]; })) {
+        DB.boms[productId] = _out;
+        DB.bomTimestamps = DB.bomTimestamps || {};
+        DB.bomTimestamps[productId] = Date.now();
+        console.log('[v2.3.823] BOM 구성품을 대표 품목 아래로 정렬:', product.name);
+        try { if (typeof saveData === 'function') saveData(); } catch(_){}
+      }
+    }
+  } catch(e) { console.warn('BOM 구성품 정렬 실패:', e); }
   const bom = DB.boms[productId] || [];
   $('bom-card-title').textContent = '🔧 ' + product.name + ' — BOM';
 
