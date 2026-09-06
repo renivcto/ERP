@@ -6331,7 +6331,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.821';
+const ERP_VERSION = 'v2.3.822';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27427,8 +27427,8 @@ function renderBOM() {
     allRows.push(`
       <tr style="background:${item.type==='원자재'?'#fafef9':item.type==='OEM'?'#fafcff':'#fffafc'}">
         <td style="text-align:center"><span class="badge ${typeCls}" style="font-size:11px">${item.type}</span></td>
-        <td style="font-family:monospace;font-size:12px;white-space:nowrap;font-weight:500;text-align:center">${item.code||'-'}</td>
-        <td class="lnk" onclick="showItemDetail(${item.id})">${item.name}</td>
+        <td style="font-family:monospace;font-size:${item.parentId?'10.5px':'12px'};white-space:nowrap;font-weight:500;text-align:center;color:${item.parentId?'#94a3b8':'inherit'}">${(item.parentId ? _kidCodeOf(item) : item.code) || '-'}</td>
+        <td class="lnk" onclick="showItemDetail(${item.id})" style="${item.parentId?'color:#64748b':''}">${item.parentId?'<span style="color:#a78bfa;margin-right:4px;font-weight:700">↳</span>':''}${item.name}</td>
         <td style="text-align:center;font-size:12px;color:var(--gray-600);white-space:nowrap" title="${_esc(specFull)}">${specShort}</td>
         <td style="text-align:center;padding:4px">${imgHtml}</td>
         <td style="text-align:center" title="${row.qtyDisplay&&row.qtyDisplay!==String(row.qty)?row.qtyDisplay:''}">${formatQty(row.qty)} ${row.unit}</td>
@@ -27667,6 +27667,46 @@ function fmtCost(val) {
   if (Math.abs(val) < 1) return '₩' + val.toFixed(2);
   return fmtW(Math.round(val));
 }
+/* v2.3.822: 하위(구성품) 품목의 표시 코드 = 대표코드-순번 */
+window._kidCodeOf = function(item) {
+  try {
+    if (!item || !item.parentId) return (item && item.code) || '';
+    var p = (DB.items || []).find(function(x){ return x && x.id === item.parentId; });
+    if (!p) return item.code || '';
+    var sibs = (DB.items || []).filter(function(x){ return x && x.parentId === p.id; })
+      .sort(function(a, b){ return String(a.code || '').localeCompare(String(b.code || '')); });
+    var ix = sibs.findIndex(function(x){ return x.id === item.id; });
+    return (p.code || '') + '-' + (ix >= 0 ? ix + 1 : 1);
+  } catch(_) { return (item && item.code) || ''; }
+};
+/* v2.3.822: BOM 에서 대표 품목을 고르면 그 구성품(하위 품목)도 자동으로 행에 추가한다. */
+window._bomAutoAddKids = function(sel) {
+  try {
+    if (!sel || !sel.value) return;
+    var pid = parseInt(sel.value);
+    var kids = (DB.items || []).filter(function(x){ return x && x.parentId === pid; })
+      .sort(function(a, b){ return String(a.code || '').localeCompare(String(b.code || '')); });
+    if (!kids.length) return;
+    var tbody = document.getElementById('bom-modal-rows');
+    if (!tbody) return;
+    var have = {};
+    tbody.querySelectorAll('.bom-item-sel').forEach(function(s2){ if (s2.value) have[String(s2.value)] = 1; });
+    var ref = sel.closest('tr'), added = 0;
+    var pRow = ref, pQty = pRow ? pRow.querySelector('.bom-qty') : null;
+    var qv = (pQty && pQty.value.trim()) ? pQty.value.trim() : '1';
+    var pUnit = pRow ? pRow.querySelector('.bom-unit') : null;
+    var uv = (pUnit && pUnit.value.trim()) ? pUnit.value.trim() : 'EA';
+    kids.forEach(function(k){
+      if (have[String(k.id)]) return;
+      var prevLast = tbody.lastElementChild;
+      addBOMRow(k.id, qv, uv);
+      var row = tbody.lastElementChild;
+      if (row && row !== prevLast && ref && ref.parentNode === tbody) { ref.after(row); ref = row; }
+      added++;
+    });
+    if (added) { try { showNotif('구성품 ' + added + '개를 함께 추가했습니다', 'info'); } catch(_){} }
+  } catch(e) { console.warn('_bomAutoAddKids:', e); }
+};
 function getBOMItemOptions(typeFilter, searchQ) {
   return '<option value="">— 구성 품목을 선택하세요 —</option>' + DB.items.filter(i => {
     return (!typeFilter||i.type===typeFilter) && (!searchQ||i.name.toLowerCase().includes(searchQ.toLowerCase())||(i.code||'').toLowerCase().includes(searchQ.toLowerCase()));
@@ -27710,7 +27750,7 @@ function addBOMRow(itemId, qty, unit, note) {
       <input id="${sId}" class="fi" placeholder="품목을 검색하세요." style="flex:1;font-size:11px"
         oninput="(()=>{const s=document.getElementById('${selId}');s.innerHTML=getBOMItemOptions(document.getElementById('${fId}').value,this.value);_bomRowPriceSync(s);})()">
     </div>
-    <select id="${selId}" class="fs bom-item-sel" style="width:100%;font-size:12px" onchange="_bomRowPriceSync(this)">${getBOMItemOptions('','')}</select>
+    <select id="${selId}" class="fs bom-item-sel" style="width:100%;font-size:12px" onchange="_bomRowPriceSync(this);_bomAutoAddKids(this)">${getBOMItemOptions('','')}</select>
   </td>
   <td><input class="fi bom-qty" value="${qty!==undefined?qty:''}" placeholder="" style="width:95px;font-size:12px;text-align:center"></td>
   <td><input class="fi bom-unit" value="${unit||'EA'}" style="width:45px;font-size:12px;text-align:center"></td>
