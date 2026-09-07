@@ -6331,7 +6331,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.826';
+const ERP_VERSION = 'v2.3.827';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -24229,7 +24229,7 @@ window._alignKidNames = function() {
 window._kidAlignSchedule = function() {
   try {
     requestAnimationFrame(function(){ window._alignKidNames(); });
-    [80, 300, 900].forEach(function(ms){ setTimeout(function(){ window._alignKidNames(); }, ms); });
+    [80, 300, 900, 2000].forEach(function(ms){ setTimeout(function(){ window._alignKidNames(); }, ms); });
     if (window.ResizeObserver) {
       if (!window._kidAlignRO) {
         window._kidAlignRO = new ResizeObserver(function() {
@@ -24243,7 +24243,23 @@ window._kidAlignSchedule = function() {
         if (el) window._kidAlignRO.observe(el);
       });
     }
-    // 비동기로 뜨는 품목 이미지 — 로드되면 열 너비가 변한다
+    // v2.3.827: 품목 이미지는 IDB 에서 늦게 들어와 '표를 그린 뒤' 열 너비를 바꾼다.
+    //   (load 훅만으로는 나중에 '새로 꽂히는' img 를 못 잡아 정렬이 어긋난 채 남았다)
+    //   표의 자식 변화를 감시해 그때마다 다시 맞춘다. 정렬은 style.left 만 바꾸므로
+    //   childList 감시에는 걸리지 않아 되먹임이 없다.
+    if (window.MutationObserver) {
+      if (!window._kidAlignMO) {
+        window._kidAlignMO = new MutationObserver(function() {
+          clearTimeout(window._kidAlignT3);
+          window._kidAlignT3 = setTimeout(function(){ window._alignKidNames(); }, 60);
+        });
+      }
+      window._kidAlignMO.disconnect();
+      ['stock-table', 'item-table'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) window._kidAlignMO.observe(el, { childList: true, subtree: true });
+      });
+    }
     document.querySelectorAll('#item-table img, #stock-table img').forEach(function(im) {
       if (im.complete || im._kidHook) return;
       im._kidHook = 1;
