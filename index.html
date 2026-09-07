@@ -2630,7 +2630,7 @@ try{
         <!-- v2.3.590: 정기 결제 — 사이드바 페이지와 동일 데이터·렌더를 결재 관리 탭으로 편입 -->
         <button id="ap-tab-rpay" onclick="switchApprovalTab('rpay')" class="ap-tab" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">🔁 정기 결제</button><button onclick="openUnpaidUnifiedView()" class="btn btn-primary btn-sm" style="margin-left:12px;padding:5px 12px;font-size:12.5px">📋 미결재 모아보기</button>
         <!-- v1.9.418: 월별 → 월/주/일/기간별/전체 5종 필터로 확장 — 발주서 결재 / 일반 결재 / 지출 결의서 / 샘플 구매 공용 -->
-        <div class="period-filter" data-prefix="ap" style="margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:nowrap">
+        <div class="period-filter" data-prefix="ap" style="margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:nowrap;flex-shrink:0;white-space:nowrap">
           <span style="font-size:12px;color:var(--gray-500);font-weight:500;flex-shrink:0">📅</span>
           <select class="fs period-mode" onchange="_periodOnChange('ap')" style="width:80px;font-size:12px;height:32px;padding:5px 8px;flex-shrink:0">
             <option value="all" selected>전체</option><option value="month">월별</option><option value="week">주별</option><option value="day">일별</option><option value="range">기간별</option>
@@ -6333,7 +6333,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.830';
+const ERP_VERSION = 'v2.3.831';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -37383,8 +37383,45 @@ function _staffInboxOnApproval() {
     setTimeout(() => { _staffInboxDrain().catch(() => {}); }, 300);
   } catch (_) {}
 }
+/* v2.3.831: 결재 관리 기간 기본값 = 이번 달. 이번 달에 아무 건도 없으면 전월.
+   사용자가 한 번이라도 기간을 바꾸면 다시 건드리지 않는다. */
+function _apMonthHasData(ym) {
+  try {
+    const inYm = (d) => {
+      if (!d) return false;
+      const n = (typeof _periodNormDate === 'function') ? _periodNormDate(d) : String(d).slice(0, 10);
+      return n.slice(0, 7) === ym;
+    };
+    if ((DB.expenses || []).some(e => e && inYm(e.dueDate))) return true;
+    if ((DB.orders || []).some(o => o && inYm(o.orderDate))) return true;
+    if ((DB.approvals || []).some(a => a && inYm(a.date || a.createdAt))) return true;
+    if ((DB.samples || []).some(x => x && inYm(x.date || x.dueDate))) return true;
+    return false;
+  } catch(_) { return true; }
+}
+function _apInitPeriodDefault() {
+  try {
+    if (window._apPeriodInited) return;
+    const wrap = document.querySelector('#page-approval .period-filter[data-prefix="ap"]');
+    if (!wrap) return;
+    const sel = wrap.querySelector('.period-mode'), mi = wrap.querySelector('.period-month');
+    if (!sel || !mi) return;
+    if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) return;  // 데이터 로드 후에 판단
+    window._apPeriodInited = true;
+    const d = new Date(Date.now() + 9 * 3600 * 1000);          // KST 기준
+    const ym = d.toISOString().slice(0, 7);
+    const pm = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
+    const use = _apMonthHasData(ym) ? ym : pm;
+    sel.value = 'month';
+    mi.value = use;
+    if (typeof _periodToggleVisibility === 'function') _periodToggleVisibility('ap');
+    console.log('[v2.3.831] 결재 관리 기간 기본값:', use, use === pm ? '(이번 달 자료 없음 → 전월)' : '');
+    if (typeof renderApprovalPage === 'function') setTimeout(renderApprovalPage, 0);
+  } catch(e) { console.warn('_apInitPeriodDefault:', e); }
+}
 function renderApprovalPage() {
   _staffInboxOnApproval();
+  _apInitPeriodDefault();
   // v2.2.73: Firestore 머지 완료 전엔 절대 stale 데이터 표시 안 함 — 타임아웃 없이 무한 대기
   //   v2.2.71 의 800ms 타임아웃은 fast-path stale 데이터가 잠깐 표시되는 문제 발생 → 제거
   if (typeof _firestoreDataLoaded !== 'undefined' && !_firestoreDataLoaded) {
@@ -38606,7 +38643,7 @@ function switchApprovalTab(tab, skipSwitch) {
   // v2.3.590: 정기 결제 — 사이드바 페이지와 동일 렌더 함수 재사용
   else if (tab === 'rpay') { try { renderRecurringPage(); } catch(e) { console.warn('renderRecurringPage 실패:', e); } }
   // 기간 필터는 결재 목록 전용 — 정기 결제 탭에서는 숨김
-  try { const _pf = document.querySelector('#page-approval .period-filter[data-prefix="ap"]'); if (_pf) _pf.style.display = (tab === 'rpay') ? 'none' : ''; } catch(_){}
+  try { const _pf = document.querySelector('#page-approval .period-filter[data-prefix="ap"]'); if (_pf) _pf.style.display = (tab === 'rpay') ? 'none' : 'flex'; } catch(_){}
   updateApprovalStats();
 }
 
