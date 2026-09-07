@@ -6331,7 +6331,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.825';
+const ERP_VERSION = 'v2.3.826';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -24208,9 +24208,46 @@ window._alignKidNames = function() {
       var pLeft;
       if (tn) { var rg = document.createRange(); rg.selectNodeContents(tn); pLeft = rg.getBoundingClientRect().left; }
       else pLeft = pCell.getBoundingClientRect().left;
+      var cellRect = cell.getBoundingClientRect();
+      if (!cellRect.width) return;                      // 화면에 없으면(숨김) 건드리지 않는다
       var cs = getComputedStyle(cell);
-      var base = cell.getBoundingClientRect().left + (parseFloat(cs.paddingLeft) || 0);
-      span.style.marginLeft = Math.max(0, Math.round(pLeft - base)) + 'px';
+      var padL = parseFloat(cs.paddingLeft) || 0, padR = parseFloat(cs.paddingRight) || 0;
+      var base = cellRect.left + padL;
+      // v2.3.826: margin 은 열 너비를 키워 대표 이름(가운데 정렬)을 다시 밀어내는 되먹임을 만든다.
+      //   → 레이아웃에 영향이 없는 position:relative + left 로 이동시킨다.
+      var wrapW = span.offsetWidth || 0;
+      var room = Math.max(0, cellRect.width - padL - padR - wrapW);
+      var off = Math.max(0, Math.min(Math.round(pLeft - base), Math.round(room)));
+      span.style.marginLeft = '0';
+      span.style.position = 'relative';
+      if (span.style.left !== off + 'px') span.style.left = off + 'px';
+    });
+  } catch(_) {}
+};
+/* v2.3.826: 이미지·폰트가 나중에 로드되면 열 너비가 바뀐다 — 렌더 직후 한 번으로는 어긋난다.
+   rAF + 지연 재계산 + 표 크기 감시로 항상 맞춘다(정렬 자체는 레이아웃을 바꾸지 않아 무한루프 없음). */
+window._kidAlignSchedule = function() {
+  try {
+    requestAnimationFrame(function(){ window._alignKidNames(); });
+    [80, 300, 900].forEach(function(ms){ setTimeout(function(){ window._alignKidNames(); }, ms); });
+    if (window.ResizeObserver) {
+      if (!window._kidAlignRO) {
+        window._kidAlignRO = new ResizeObserver(function() {
+          clearTimeout(window._kidAlignT2);
+          window._kidAlignT2 = setTimeout(function(){ window._alignKidNames(); }, 60);
+        });
+      }
+      window._kidAlignRO.disconnect();
+      ['stock-table', 'item-table'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) window._kidAlignRO.observe(el);
+      });
+    }
+    // 비동기로 뜨는 품목 이미지 — 로드되면 열 너비가 변한다
+    document.querySelectorAll('#item-table img, #stock-table img').forEach(function(im) {
+      if (im.complete || im._kidHook) return;
+      im._kidHook = 1;
+      im.addEventListener('load', function(){ window._alignKidNames(); }, { once: true });
     });
   } catch(_) {}
 };
@@ -25528,7 +25565,7 @@ function _renderRawDocList() {
       + keys.map(([k, cap]) => docs[k] ? filed(k, docs[k], dual ? cap : '') : empty(k, cap)).join('') + '</span>';
     return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;border-bottom:1px solid var(--gray-100);background:' + (any ? '#f6fefb' : '#fff') + '">' + left + right + '</div>';
   }).join('');
-  try { _alignKidNames(); } catch(_){}
+  try { _kidAlignSchedule(); } catch(_){}
 }
 function _rawDocPick(idx) {
   _rawDocPendingSlot = idx;
@@ -30521,7 +30558,7 @@ function renderStockTable() {
       </td>
     </tr>`;
   }).join('');
-  try { _alignKidNames(); } catch(_){}
+  try { _kidAlignSchedule(); } catch(_){}
 }
 
 function renderStockHistory() {
