@@ -798,6 +798,10 @@ tbody tr:last-child{border-bottom:none}
 .pg-chip{display:inline-flex;align-items:center;padding:7px 18px;border-radius:8px 8px 0 0;cursor:pointer;font-size:12.5px;font-weight:600;border:1px solid transparent;border-bottom:1px solid transparent;transition:all .15s;line-height:1.2;height:34px;box-sizing:border-box}
 .pg-chip.active{border-bottom:3px solid currentColor}
 /* v2.3.794: 재고 화면의 분류·창고 탭은 한 단계 낮게 */
+/* v2.3.834: 비고 이미지 — 저장된 인라인 width(%) 를 살리고 넘침만 막는다 */
+.item-note-view img{max-width:100%;height:auto;border-radius:6px;cursor:zoom-in}
+#i-note img{cursor:pointer}
+#i-note img.i-note-sel{outline:2px solid #0ea5e9;outline-offset:1px}
 tr.kid-row td, tr.kid-row td *{color:#64748b !important}
 tr.kid-row .kid-code{color:#94a3b8 !important}
 /* v2.3.828: 발주 품목의 수량·단가는 실제 0 이 아니라 가이드 문구 — 지우지 않고 바로 입력 */
@@ -6337,7 +6341,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.833';
+const ERP_VERSION = 'v2.3.834';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26054,7 +26058,7 @@ function showItemDetail(id) {
           <img id="item-detail-img" src="${_itemImgSrc||''}" style="width:100%;height:100%;object-fit:cover;display:block" data-full-src="${_itemImgSrc||''}">
         </div>
       </div>
-      ${i.note?`<div><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">비고</div><div class="item-note-view" style="font-size:13px;font-weight:400;white-space:pre-wrap;line-height:1.7">${String(i.note).replace(/<img\s/gi,'<img onclick="openFeedLightbox(encodeURIComponent(this.src))" style="max-width:100%;height:auto;display:block;margin:6px 0;border-radius:6px;cursor:zoom-in" ')}</div></div>`:''}
+      ${i.note?`<div><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">비고</div><div class="item-note-view" style="font-size:13px;font-weight:400;white-space:pre-wrap;line-height:1.7">${String(i.note).replace(/<img\s/gi,'<img onclick="openFeedLightbox(encodeURIComponent(this.src))" ')}</div></div>`:''}
       ${(function(){
         // v2.3.629: 판매업체별 판매가·공급가 표 (등록/수정 모달의 supplyPrices 를 읽기전용으로)
         const rows = Array.isArray(i.supplyPrices) ? i.supplyPrices.filter(r => r && r.sellerId) : [];
@@ -35733,6 +35737,7 @@ function _iNoteSaveRange() {
 }
 document.addEventListener('selectionchange', _iNoteSaveRange);
 window._iNoteImgPick = function() { const f = document.getElementById('i-note-img'); if (f) f.click(); };
+window.addEventListener('keydown', function(e) { if (e.key === 'Escape' && window._iNoteImgDeselect) window._iNoteImgDeselect(); });
 function _iNoteShrink(file) {
   // 긴 변 1400px 로 줄여 올린다 — 비고 사진이 수 MB 씩 쌓이지 않게
   return new Promise(res => {
@@ -35789,6 +35794,100 @@ function _iNoteInsertImg(url) {
     ed.addEventListener('dragover', e => { if (Array.from((e.dataTransfer || {}).types || []).indexOf('Files') >= 0) { e.preventDefault(); ed.style.outline = '2px dashed #38bdf8'; } });
     ed.addEventListener('dragleave', () => { ed.style.outline = ''; });
     ed.addEventListener('drop', e => { ed.style.outline = ''; const fs = (e.dataTransfer || {}).files; if (fs && fs.length) { e.preventDefault(); _iNoteImgFiles(fs); } });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
+})();
+/* ── v2.3.834: 비고 이미지 크기 조절 ────────────────────────────────
+   이미지를 클릭하면 위에 크기 버튼(25/50/75/100%·원본)이 뜨고,
+   오른쪽 아래 모서리를 끌어 자유롭게 줄이거나 키울 수 있다.
+   폭은 % 로 저장해 화면 폭이 달라져도 비율이 유지된다. */
+(function() {
+  var sel = null, ui = null, hd = null, drag = null;
+  function ed() { return document.getElementById('i-note'); }
+  function edW() { var e = ed(); if (!e) return 600; var cs = getComputedStyle(e); return e.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0); }
+  function mkBtn(p, label) {
+    return '<button type="button" data-p="' + p + '" style="background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">' + label + '</button>';
+  }
+  function ensure() {
+    if (ui) return;
+    ui = document.createElement('div');
+    ui.id = 'i-note-img-ui';
+    ui.style.cssText = 'position:fixed;z-index:100000;display:none;gap:4px;align-items:center;background:#0f172a;border-radius:8px;padding:5px 7px;box-shadow:0 6px 18px rgba(15,23,42,.35)';
+    ui.innerHTML = mkBtn('25', '25%') + mkBtn('50', '50%') + mkBtn('75', '75%') + mkBtn('100', '100%')
+      + '<span style="width:1px;height:15px;background:#334155;margin:0 2px"></span>' + mkBtn('orig', '원본');
+    document.body.appendChild(ui);
+    ui.addEventListener('mousedown', function(e) { e.preventDefault(); });
+    ui.addEventListener('click', function(e) {
+      var b = e.target.closest && e.target.closest('[data-p]');
+      if (!b || !sel) return;
+      var p = b.getAttribute('data-p');
+      if (p === 'orig') { sel.style.width = ''; } else { sel.style.width = p + '%'; }
+      sel.style.height = 'auto';
+      setTimeout(place, 0);
+    });
+    hd = document.createElement('div');
+    hd.id = 'i-note-img-handle';
+    hd.title = '끌어서 크기 조절';
+    hd.style.cssText = 'position:fixed;z-index:100000;display:none;width:14px;height:14px;background:#fff;border:2px solid #0ea5e9;border-radius:3px;cursor:nwse-resize;box-shadow:0 1px 5px rgba(15,23,42,.35)';
+    document.body.appendChild(hd);
+    hd.addEventListener('mousedown', function(e) {
+      if (!sel) return;
+      e.preventDefault(); e.stopPropagation();
+      drag = { x: e.clientX, w: sel.getBoundingClientRect().width };
+      document.body.style.userSelect = 'none';
+    });
+    window.addEventListener('mousemove', function(e) {
+      if (!drag || !sel) return;
+      var w = Math.max(60, drag.w + (e.clientX - drag.x));
+      var pct = Math.max(8, Math.min(100, Math.round(w / Math.max(1, edW()) * 100)));
+      sel.style.width = pct + '%'; sel.style.height = 'auto';
+      place();
+    });
+    window.addEventListener('mouseup', function() {
+      if (drag) { drag = null; document.body.style.userSelect = ''; }
+    });
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+  }
+  function place() {
+    if (!sel || !ui) return;
+    var e = ed();
+    var r = sel.getBoundingClientRect();
+    var er = e ? e.getBoundingClientRect() : null;
+    // 편집기 밖으로 스크롤돼 안 보이면 UI 도 숨긴다
+    if (er && (r.bottom < er.top - 4 || r.top > er.bottom + 4)) { ui.style.display = 'none'; hd.style.display = 'none'; return; }
+    ui.style.display = 'flex';
+    ui.style.left = Math.round(r.left) + 'px';
+    var top = r.top - ui.offsetHeight - 6;
+    ui.style.top = Math.round(top < 8 ? r.top + 6 : top) + 'px';
+    hd.style.display = 'block';
+    hd.style.left = Math.round(r.right - 8) + 'px';
+    hd.style.top = Math.round(r.bottom - 8) + 'px';
+  }
+  window._iNoteImgSelect = function(img) {
+    ensure();
+    if (sel && sel !== img) sel.classList.remove('i-note-sel');
+    sel = img;
+    if (sel) { sel.classList.add('i-note-sel'); place(); }
+  };
+  window._iNoteImgDeselect = function() {
+    if (sel) sel.classList.remove('i-note-sel');
+    sel = null;
+    if (ui) ui.style.display = 'none';
+    if (hd) hd.style.display = 'none';
+  };
+  function wire() {
+    var e = ed(); if (!e || e._resizeWired) return; e._resizeWired = 1;
+    e.addEventListener('click', function(ev) {
+      if (ev.target && ev.target.tagName === 'IMG') { ev.preventDefault(); window._iNoteImgSelect(ev.target); }
+      else window._iNoteImgDeselect();
+    });
+    document.addEventListener('mousedown', function(ev) {
+      if (!sel) return;
+      var t = ev.target;
+      if (t === sel || (ui && ui.contains(t)) || (hd && hd.contains(t))) return;
+      window._iNoteImgDeselect();
+    });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
 })();
