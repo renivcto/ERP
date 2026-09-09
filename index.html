@@ -6337,7 +6337,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.832';
+const ERP_VERSION = 'v2.3.833';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -7718,6 +7718,26 @@ function _mergeServerSideChanges(key, val, srvArr, payload) {
         console.warn('🔄 [SRV-MERGE] 재고 서버값 채택:', si.code || si.id);
       }
     });
+  } else if (key === 'orders') {
+    // v2.3.833: 발주서 필드 되돌림 방지 — 건수가 같으면 통째 덮어쓰기라, 먼저 로드해 둔(stale) 탭이
+    //   나중에 저장하면 다른 기기에서 고친 잔금예정일·당일잔금 등이 옛 값으로 돌아갔다(2026-09-08 실제).
+    //   서버 사본이 이 세션 시작 이후에 갱신됐고 로컬보다 새로우면(updatedAt) 서버 레코드를 채택한다.
+    //   items 의 재고 채택(위 분기)과 같은 원칙. saveOrder 가 updatedAt 을 찍으므로 비교가 성립한다.
+    const locById = new Map(val.map(o => [o && o.id, o]));
+    let adopted = 0;
+    srvArr.forEach(so => {
+      if (!so) return;
+      const lo = locById.get(so.id);
+      if (!lo) return;
+      const su = Number(so.updatedAt) || 0, lu = Number(lo.updatedAt) || 0;
+      if (su > lu && su >= _SRV_SESSION_START) {
+        const idx = val.indexOf(lo);
+        if (idx >= 0) { val[idx] = so; adopted++; changed = true; }
+        // 메모리(DB.orders)도 같이 갱신 — 이 탭 화면이 옛 값을 계속 보여주지 않게
+        try { const mi = (DB.orders || []).findIndex(x => x && x.id === so.id); if (mi >= 0) DB.orders[mi] = JSON.parse(JSON.stringify(so)); } catch(_){}
+      }
+    });
+    if (adopted) console.warn('🔄 [SRV-MERGE] 발주서 서버 최신본 채택 ' + adopted + '건 — 다른 기기에서 먼저 수정됨');
   } else if (key === 'shopOrders' || key === 'stockHistory') {
     const ids = new Set(val.map(o => o && o.id));
     let added = 0;
