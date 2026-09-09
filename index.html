@@ -6341,7 +6341,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.834';
+const ERP_VERSION = 'v2.3.835';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -25225,7 +25225,35 @@ function saveItem() {
     if (id) {
       const idx = DB.items.findIndex(i=>i.id===id);
       // v2.3.106: updatedAt 명시 → 머지 시 local-wins (이전 Firestore 데이터가 덮어쓰는 revert 차단)
-      if (idx>=0) DB.items[idx] = {...DB.items[idx], ...data, updatedAt: _now};
+      if (idx>=0) {
+        // v2.3.835: 품목명·코드가 바뀌면 이 품목을 쓰는 부자재 사양서에도 반영한다.
+        //   사양서는 등록 당시 이름을 사본으로 갖고 있어(직접 수정도 가능) 품목을 고쳐도 옛 이름이 남았다.
+        //   ⚠️ 사본이 '옛 품목명 그대로' 일 때만 바꾼다 — 사양서에서 일부러 다르게 적은 이름은 건드리지 않는다.
+        try {
+          const _oldName = String((DB.items[idx] || {}).name || '').trim();
+          const _oldCode = String((DB.items[idx] || {}).code || '').trim();
+          const _newName = String(data.name || '').trim();
+          const _newCode = String(data.code || '').trim();
+          if ((_newName && _newName !== _oldName) || (_newCode && _newCode !== _oldCode)) {
+            let _hit = 0;
+            (DB.partSpecs || []).forEach(p => {
+              if (!p || p.productId !== id) return;
+              let touched = false;
+              if (_newName && _newName !== _oldName
+                  && (!p.productNameKo || String(p.productNameKo).trim() === _oldName)) {
+                p.productNameKo = _newName; touched = true;
+              }
+              if (_newCode && _newCode !== _oldCode
+                  && (!p.productCode || String(p.productCode).trim() === _oldCode)) {
+                p.productCode = _newCode; touched = true;
+              }
+              if (touched) { p.updatedAt = _now; _hit++; }
+            });
+            if (_hit) console.log('🔗 [v2.3.835] 부자재 사양서 ' + _hit + '건에 품목 변경 반영: ' + _oldName + ' → ' + _newName);
+          }
+        } catch(e) { console.warn('[v2.3.835] 사양서 동기화 실패:', e); }
+        DB.items[idx] = {...DB.items[idx], ...data, updatedAt: _now};
+      }
     } else {
       // v2.3.106: 신규 등록도 updatedAt 명시
       // v2.3.179: 충돌-안전 item id — _nextId.item 카운터가 어긋나(예: 카운터 < 실제 max id)
@@ -26214,7 +26242,12 @@ function renderPartSpecList() {
     // 품목 ID로 현재 등록된 품목에서 최신 코드·품명을 끌어옴
     const live = (p.productId && (DB.items||[]).find(it => it.id === p.productId)) || null;
     // v2.3.267: 사용자가 수정한 제품명(국문) 우선 — 없으면 live 품명 fallback
-    const liveName = p.productNameKo || (live && live.name) || '-';
+    // v2.3.835: 다만 사본이 '띄어쓰기·쉼표만 다른' 옛 품목명이면 현재 품목명을 보여준다
+    //   (품목 정보에서 이름을 고쳤는데 사양서 목록만 옛 이름으로 남던 문제)
+    const _norm = t => String(t || '').replace(/[\s,·:()\[\]/-]/g, '').toLowerCase();
+    const liveName = (live && live.name && (!p.productNameKo || _norm(p.productNameKo) === _norm(live.name)))
+      ? live.name
+      : (p.productNameKo || (live && live.name) || '-');
     const liveCode = (live && live.code) || p.productCode || '-';
     const liveVol = (live && live.spec) || p.displayVolume || p.volume || '-';
     const liveImg = (live && live.image && live.image !== '__idb__') ? live.image : '';
