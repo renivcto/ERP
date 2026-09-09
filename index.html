@@ -4702,6 +4702,10 @@ try{
             <button type="button" onmousedown="event.preventDefault()" onclick="_richExec('i-note','insertOrderedList')" title="번호 목록" style="background:transparent;border:0;padding:4px 7px;border-radius:5px;cursor:pointer;font-size:11.5px;font-weight:700;color:#334155;min-width:26px;line-height:1">1.≡</button>
             <span style="width:1px;height:18px;background:#cbd5e1;margin:0 4px"></span>
             <button type="button" onmousedown="event.preventDefault()" onclick="_richExec('i-note','removeFormat')" title="서식 지우기" style="background:transparent;border:0;padding:4px 7px;border-radius:5px;cursor:pointer;font-size:11px;color:#94a3b8">✕서식</button>
+            <span style="width:1px;height:18px;background:#cbd5e1;margin:0 4px"></span>
+            <!-- v2.3.832: 본문 중간에 이미지 삽입 — Storage 업로드 후 URL 만 넣는다 -->
+            <button type="button" onmousedown="event.preventDefault()" onclick="_iNoteImgPick()" title="이미지 삽입 (붙여넣기·드래그앤드롭도 됩니다)" style="background:transparent;border:0;padding:4px 7px;border-radius:5px;cursor:pointer;font-size:14px;color:#334155">🖼</button>
+            <input type="file" id="i-note-img" accept="image/*" multiple style="display:none" onchange="_iNoteImgFiles(this.files);this.value=''">
           </div>
           <div id="i-note" contenteditable="true" style="min-height:120px;max-height:280px;overflow-y:auto;padding:10px 12px;background:#fff;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 6px 6px;font-size:13.5px;line-height:1.7;color:#1f2937;outline:none;resize:vertical;white-space:pre-wrap"></div>
         </div>
@@ -6333,7 +6337,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.831';
+const ERP_VERSION = 'v2.3.832';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26030,7 +26034,7 @@ function showItemDetail(id) {
           <img id="item-detail-img" src="${_itemImgSrc||''}" style="width:100%;height:100%;object-fit:cover;display:block" data-full-src="${_itemImgSrc||''}">
         </div>
       </div>
-      ${i.note?`<div><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">비고</div><div style="font-size:13px;font-weight:400;white-space:pre-wrap;line-height:1.7">${i.note}</div></div>`:''}
+      ${i.note?`<div><div style="font-size:10.5px;color:var(--gray-500);margin-bottom:3px">비고</div><div class="item-note-view" style="font-size:13px;font-weight:400;white-space:pre-wrap;line-height:1.7">${String(i.note).replace(/<img\s/gi,'<img onclick="openFeedLightbox(encodeURIComponent(this.src))" style="max-width:100%;height:auto;display:block;margin:6px 0;border-radius:6px;cursor:zoom-in" ')}</div></div>`:''}
       ${(function(){
         // v2.3.629: 판매업체별 판매가·공급가 표 (등록/수정 모달의 supplyPrices 를 읽기전용으로)
         const rows = Array.isArray(i.supplyPrices) ? i.supplyPrices.filter(r => r && r.sellerId) : [];
@@ -35695,6 +35699,79 @@ window._richEnsureSelection = function(editorId) {
   return editor;
 };
 
+/* ── v2.3.832: 품목 비고에 이미지 삽입 ──────────────────────────────
+   커서 위치에 <img> 를 넣는다. 파일은 Firebase Storage 에 올리고 본문엔 URL 만 남긴다
+   (base64 인라인은 erp_data/items 1MB 한도를 깨뜨리는 '유실 클래스' — CLAUDE.md).
+   툴바 버튼 · 클립보드 붙여넣기 · 드래그앤드롭 세 경로 모두 같은 함수를 탄다. */
+window._iNoteSavedRange = null;
+function _iNoteSaveRange() {
+  try {
+    const sel = window.getSelection(); if (!sel || !sel.rangeCount) return;
+    const r = sel.getRangeAt(0), ed = document.getElementById('i-note');
+    if (ed && ed.contains(r.commonAncestorContainer)) window._iNoteSavedRange = r.cloneRange();
+  } catch(_){}
+}
+document.addEventListener('selectionchange', _iNoteSaveRange);
+window._iNoteImgPick = function() { const f = document.getElementById('i-note-img'); if (f) f.click(); };
+function _iNoteShrink(file) {
+  // 긴 변 1400px 로 줄여 올린다 — 비고 사진이 수 MB 씩 쌓이지 않게
+  return new Promise(res => {
+    const img = new Image(), u = URL.createObjectURL(file);
+    img.onload = () => {
+      let w = img.width, h = img.height; const M = 1400;
+      if (w > M || h > M) { const k = Math.min(M / w, M / h); w = Math.round(w * k); h = Math.round(h * k); }
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h); URL.revokeObjectURL(u);
+      const keepPng = /png|gif|webp/i.test(file.type) && file.size < 400 * 1024;
+      res(keepPng ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.86));
+    };
+    img.onerror = () => { URL.revokeObjectURL(u); const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file); };
+    img.src = u;
+  });
+}
+window._iNoteImgFiles = async function(files) {
+  const ed = document.getElementById('i-note'); if (!ed) return;
+  const list = Array.from(files || []).filter(f => f && /^image\//.test(f.type));
+  if (!list.length) { showNotif('이미지 파일만 넣을 수 있습니다', 'warning'); return; }
+  if (typeof window._storageUploadDataUrl !== 'function') { showNotif('Storage 미초기화 — 이미지를 올릴 수 없습니다', 'error'); return; }
+  for (const f of list) {
+    try {
+      showNotif('이미지 업로드 중…', 'info');
+      const dataUrl = await _iNoteShrink(f);
+      const safe = String(f.name || 'img').replace(/[^\w.\-가-힣]/g, '_');
+      const key = (typeof editingId !== 'undefined' && editingId && editingId['add-item']) || 'new';
+      const path = 'itemNotes/' + key + '/' + Date.now() + '_' + safe;
+      const url = await window._storageUploadDataUrl(path, dataUrl, dataUrl.indexOf('data:image/png') === 0 ? 'image/png' : 'image/jpeg');
+      _iNoteInsertImg(url);
+    } catch(e) { console.warn('[비고 이미지] 업로드 실패:', e); showNotif('이미지 업로드 실패: ' + ((e && e.message) || e), 'error'); }
+  }
+};
+function _iNoteInsertImg(url) {
+  const ed = document.getElementById('i-note'); ed.focus();
+  const sel = window.getSelection(); let r = window._iNoteSavedRange;
+  if (!r || !ed.contains(r.commonAncestorContainer)) { r = document.createRange(); r.selectNodeContents(ed); r.collapse(false); }
+  sel.removeAllRanges(); sel.addRange(r);
+  const img = document.createElement('img'); img.src = url;
+  img.style.cssText = 'max-width:100%;height:auto;display:block;margin:6px 0;border-radius:6px;border:1px solid #e2e8f0';
+  r.deleteContents(); r.insertNode(img);
+  const br = document.createElement('br'); img.after(br);
+  r.setStartAfter(br); r.collapse(true); sel.removeAllRanges(); sel.addRange(r); _iNoteSaveRange();
+  showNotif('이미지를 넣었습니다 — [저장] 을 눌러야 반영됩니다', 'success');
+}
+(function() {
+  function wire() {
+    const ed = document.getElementById('i-note'); if (!ed || ed._imgWired) return; ed._imgWired = 1;
+    ed.addEventListener('paste', e => {
+      const it = Array.from((e.clipboardData || {}).items || []).filter(x => x.kind === 'file' && /^image\//.test(x.type));
+      if (!it.length) return; e.preventDefault();
+      _iNoteImgFiles(it.map(x => x.getAsFile()).filter(Boolean));
+    });
+    ed.addEventListener('dragover', e => { if (Array.from((e.dataTransfer || {}).types || []).indexOf('Files') >= 0) { e.preventDefault(); ed.style.outline = '2px dashed #38bdf8'; } });
+    ed.addEventListener('dragleave', () => { ed.style.outline = ''; });
+    ed.addEventListener('drop', e => { ed.style.outline = ''; const fs = (e.dataTransfer || {}).files; if (fs && fs.length) { e.preventDefault(); _iNoteImgFiles(fs); } });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
+})();
 window._richExec = function(editorId, cmd, arg) {
   try {
     const editor = _richEnsureSelection(editorId);
