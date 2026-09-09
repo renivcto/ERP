@@ -6341,7 +6341,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.836';
+const ERP_VERSION = 'v2.3.837';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -27051,9 +27051,13 @@ function _partSpecPrintHtml(id) {
   const _liveBarcode = p.barcodeNumber || (product && product.barcode) || '';
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${_esc(_liveNameKo)} — 부자재 사양서</title>
+<meta name="color-scheme" content="light">
 <style>
+  /* v2.3.837: 브라우저의 자동 어둡게(force-dark)가 인쇄본 이미지를 뒤집지 않도록 고정 */
+  :root { color-scheme: only light; }
   @page { size: A4; margin: 14mm; }
   * { box-sizing: border-box; }
+  img { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; filter: none !important; }
   /* 인쇄 시 배경색 유지 */
   html, body, table, th, td, div, tr { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
   body { font-family: 'Malgun Gothic', '맑은 고딕', Arial, sans-serif; font-size: 11px; color:#111; margin:0; padding:0; }
@@ -27226,13 +27230,49 @@ function _partSpecPrintHtml(id) {
 </body></html>`;
   return html;
 }
+/* v2.3.837: 인쇄본의 JPEG 을 PNG 로 다시 굽는다.
+   화면·캔버스 렌더는 정상인데 PDF 인쇄에서만 이미지가 검게/반전돼 나오는 사례가 있었다
+   (프린터·PDF 엔진의 JPEG 디코딩 차이). 캔버스로 다시 그린 PNG 는 그 편차를 타지 않는다. */
+async function _psPrintImgsToPng(html) {
+  try {
+    const srcs = [];
+    html.replace(/src="(data:image\/(?:jpeg|jpg);base64,[^"]+)"/gi, (m, d) => { srcs.push(d); return m; });
+    if (!srcs.length) return html;
+    const uniq = [...new Set(srcs)];
+    const map = {};
+    await Promise.all(uniq.map(d => new Promise(res => {
+      const im = new Image();
+      im.onload = () => {
+        try {
+          const c = document.createElement('canvas');
+          c.width = im.naturalWidth || 1; c.height = im.naturalHeight || 1;
+          const g = c.getContext('2d');
+          g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+          g.drawImage(im, 0, 0);
+          map[d] = c.toDataURL('image/png');
+        } catch(_) {}
+        res();
+      };
+      im.onerror = () => res();
+      im.src = d;
+    })));
+    let out = html;
+    uniq.forEach(d => { if (map[d]) out = out.split(d).join(map[d]); });
+    return out;
+  } catch(e) { console.warn('[v2.3.837] 인쇄 이미지 변환 실패 — 원본으로 인쇄:', e); return html; }
+}
 function printPartSpec(id) {
   const html = _partSpecPrintHtml(id);
   if (!html) return;
+  // 팝업은 클릭 제스처가 살아있는 지금 열어 둔다(변환을 기다린 뒤 열면 차단된다)
   const w = window.open('', '_blank');
   if (!w) { showNotif('팝업이 차단되었습니다. 팝업 허용 후 다시 시도해주세요.', 'warning'); return; }
-  w.document.open(); w.document.write(html); w.document.close();
-  w.onload = () => { setTimeout(() => { try { w.focus(); w.print(); } catch(e){} }, 300); };
+  try { w.document.write('<meta charset="utf-8"><p style="font-family:sans-serif;color:#64748b;padding:24px">인쇄 문서를 준비하는 중…</p>'); } catch(_){}
+  _psPrintImgsToPng(html).then(finalHtml => {
+    w.document.open(); w.document.write(finalHtml); w.document.close();
+    const go = () => setTimeout(() => { try { w.focus(); w.print(); } catch(e){} }, 400);
+    if (w.document.readyState === 'complete') go(); else w.onload = go;
+  });
 }
 /* v2.3.779: 사양서 이메일 — 발주서와 동일한 방식. 인쇄 문서를 화면 밖 iframe 에 그려
    html2canvas + jsPDF 로 PDF(A4 여러 페이지 분할)를 만들고, PDF 첨부 .eml 을 내려받는다.
