@@ -6341,7 +6341,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.837';
+const ERP_VERSION = 'v2.3.838';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -28797,6 +28797,32 @@ function _stockWhCells(item, isOem){
   const click = `onclick="openItemWhPanel(${item.id})" title="클릭 — 창고 이동 · 이동 히스토리 보기" style="${tdBase};cursor:pointer;transition:background .12s" onmouseover="this.style.background='#f5f3ff'" onmouseout="this.style.background=''"`;
   return `<td ${click}>${nameRows}</td><td ${click}>${qtyRows}</td>`;
 }
+/* v2.3.838: 재고평가액도 창고별로 — 수량 셀과 똑같은 줄 구성(창고별 + 합계).
+   단가는 품목 하나이므로 창고별 평가액 = 그 창고 수량 x 단가.
+   합계는 창고 합이 아니라 '품목 총재고 x 단가' 를 쓴다(수량 열의 합계와 같은 기준). */
+function _stockWhValueCell(item, noMoney){
+  const tdBase = 'text-align:center;line-height:1.9;padding-top:6px;padding-bottom:6px';
+  if (noMoney) return `<td style="${tdBase}"><span style="color:#cbd5e1">-</span></td>`;
+  const price = Number(item && item.price) || 0;
+  const stock = Number(item && item.stock) || 0;
+  const eff = _itemWhEffective(item);
+  const rows = [];
+  Object.keys(eff).forEach(k => {
+    if (k === '__un__') return;
+    rows.push({ t: fmtW((Number(eff[k]) || 0) * price), muted: false });
+  });
+  if (eff['__un__'] != null && eff['__un__'] !== 0) {
+    rows.push({ t: fmtW((Number(eff['__un__']) || 0) * price), muted: true });
+  }
+  if (rows.length === 0) {
+    return `<td style="${tdBase};color:var(--sky-700);font-weight:600;font-size:13px;font-variant-numeric:tabular-nums">${fmtW(stock * price)}</td>`;
+  }
+  const multi = rows.length > 1;
+  const sep = 'border-top:1px solid #e2e8f0;margin-top:2px;padding-top:2px';
+  const html = rows.map(r => `<div style="font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;color:${r.muted ? '#94a3b8' : 'var(--sky-700)'}">${r.t}</div>`).join('')
+    + (multi ? `<div style="${sep};font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;color:#b0b7c3">${fmtW(stock * price)}</div>` : '');
+  return `<td style="${tdBase}">${html}</td>`;
+}
 function _ensureOverlay(id){
   let o = document.getElementById('overlay-'+id);
   if (!o){ o = document.createElement('div'); o.className='overlay'; o.id='overlay-'+id; document.body.appendChild(o); }
@@ -30674,7 +30700,7 @@ function renderStockTable() {
       <td style="text-align:center;font-size:12.5px;color:#475569;line-height:1.55">${i.spec||'-'}</td>
       ${_stockWhCells(i, _isOemRow2)}
       <td style="text-align:center;font-size:13px;${_showPl?'':'display:none'}">${_showPl ? _plusclCellHtml(i) : ''}</td>
-      <td style="text-align:center;color:var(--sky-700);font-weight:600;font-size:13px;font-variant-numeric:tabular-nums">${_noMoney2 ? '<span style="color:#cbd5e1">-</span>' : fmtW(stockVal)}</td>
+      ${_stockWhValueCell(i, _noMoney2)}
       <td style="text-align:center">
         ${i._archived ? '<span style="font-size:11px;color:var(--gray-400)">-</span>' : `<button title="수정" onclick="openStockEditModal(${i.id})" style="background:#eef2ff;color:#6366f1;border:1px solid #e0e7ff;width:24px;height:22px;padding:0;border-radius:5px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1">✏️</button>`}
       </td>
