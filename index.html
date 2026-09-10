@@ -6341,7 +6341,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.838';
+const ERP_VERSION = 'v2.3.839';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -24437,7 +24437,14 @@ function renderItemTable() {
     filtered.filter(x => !x.parentId).forEach(t => {
       _out.push(t);
       const _ks = _byParent[t.id] || [];
-      _ks.forEach((k, ix) => _kidCodeMap.set(k.id, (t.code || '') + '-' + (ix + 1)));
+      // v2.3.839: 실제 코드가 이미 '대표코드-…' 형식이면 그 코드를 그대로 보여준다
+      //   (복사로 만든 구성품은 M-3X-09-01 처럼 진짜 코드를 갖는다)
+      _ks.forEach((k, ix) => {
+        const base = String(t.code || '');
+        const own = String(k.code || '');
+        const real = base && own.toUpperCase().indexOf(base.toUpperCase() + '-') === 0;
+        _kidCodeMap.set(k.id, real ? own : (base + '-' + (ix + 1)));
+      });
       if (window._kidsOpen[t.id] || search) _ks.forEach(k => _out.push(k));
       delete _byParent[t.id];
     });
@@ -25443,17 +25450,40 @@ function previewItemImg(input) {
 
 // v2.3.638: 복사는 '틀'만 가져온다 — 품목명·품목코드·분류·공급업체(+이미지)만 남기고 나머지는 초기화.
 //   예전엔 통째로 복제해 단가·바코드·유통기한·재고 같은 원본 값이 남아 새 품목에 잘못 딸려갔다.
+/* v2.3.839: 이 품목의 다음 구성품 코드 — 대표코드-01, -02 … (빈 번호를 채운다) */
+window._nextChildCode = function(parent) {
+  const base = String((parent && parent.code) || '').trim();
+  if (!base) return '';
+  const used = new Set((DB.items || [])
+    .filter(x => x && x.parentId === parent.id && x.code)
+    .map(x => String(x.code).trim().toUpperCase()));
+  for (let n = 1; n < 100; n++) {
+    const c = base + '-' + String(n).padStart(2, '0');
+    if (!used.has(c.toUpperCase())) return c;
+  }
+  return base + '-' + Date.now().toString().slice(-3);
+};
 async function copyItem(id) {
   const src = DB.items.find(i => i.id === id);
   if (!src) return;
+  // v2.3.839: 그냥 복사할지, 이 품목의 '구성품(하위 품목)' 으로 만들지 고른다.
+  //   구성품이면 상위로 묶이고 코드는 대표코드-01 형식으로 자동 부여된다.
+  let asChild = false;
+  if (!src.parentId) {
+    const childCode = window._nextChildCode(src);
+    asChild = confirm('[' + (src.name || '') + '] 의 구성품으로 등록할까요?\n\n'
+      + '확인 — 구성품으로 등록 (품목코드 ' + (childCode || '자동') + ')\n'
+      + '취소 — 일반 복사');
+  }
   const maxId = Math.max(...(DB.items||[]).map(i=>parseInt(i.id)||0), 0);
   const newId = maxId + 1;
   const copy = {
     id: newId,
     // ── 유지 ──
     type: src.type,
-    name: (src.name || '') + ' (복사)',
-    code: src.code ? src.code + '_1' : '',
+    name: asChild ? ((src.name || '') + ' 구성품') : ((src.name || '') + ' (복사)'),
+    code: asChild ? (window._nextChildCode(src) || '') : (src.code ? src.code + '_1' : ''),
+    parentId: asChild ? src.id : null,
     vendorId: src.vendorId,
     vendorName: src.vendorName,
     image: src.image || '',
@@ -25480,8 +25510,14 @@ async function copyItem(id) {
   DB.items.push(copy);
   saveData();
   // 필터와 검색어 모두 유지한 채로 렌더링
+  if (asChild) { try { window._kidsOpen[src.id] = true; } catch(_){} }   // 방금 만든 구성품이 보이게 펼친다
   renderItemTable();
-  showNotif(`[${src.name}] 복사되었습니다. (품목명·코드·분류·공급업체만 유지)`, 'success');
+  if (asChild) {
+    showNotif(`[${src.name}] 의 구성품으로 등록했습니다 — ${copy.code} · 이어서 이름·단가를 수정하세요`, 'success');
+    setTimeout(() => { try { editItem(newId); } catch(_){} }, 250);
+  } else {
+    showNotif(`[${src.name}] 복사되었습니다. (품목명·코드·분류·공급업체만 유지)`, 'success');
+  }
 }
 
 // v2.3.109: 강제 item 부활 도구 — tombstone 청소 + sentinel 등록
@@ -27890,10 +27926,13 @@ window._kidCodeOf = function(item) {
     if (!item || !item.parentId) return (item && item.code) || '';
     var p = (DB.items || []).find(function(x){ return x && x.id === item.parentId; });
     if (!p) return item.code || '';
+    var base = String(p.code || '');
+    var own = String(item.code || '');
+    if (base && own.toUpperCase().indexOf(base.toUpperCase() + '-') === 0) return own;
     var sibs = (DB.items || []).filter(function(x){ return x && x.parentId === p.id; })
       .sort(function(a, b){ return String(a.code || '').localeCompare(String(b.code || '')); });
     var ix = sibs.findIndex(function(x){ return x.id === item.id; });
-    return (p.code || '') + '-' + (ix >= 0 ? ix + 1 : 1);
+    return base + '-' + (ix >= 0 ? ix + 1 : 1);
   } catch(_) { return (item && item.code) || ''; }
 };
 /* v2.3.822: BOM 에서 대표 품목을 고르면 그 구성품(하위 품목)도 자동으로 행에 추가한다. */
@@ -30659,7 +30698,14 @@ function renderStockTable() {
     items.filter(x => x && !x.parentId).forEach(t => {
       _out.push(t);
       const _ks = _byParent[t.id] || [];
-      _ks.forEach((k, ix) => _kidCodeMap.set(k.id, (t.code || '') + '-' + (ix + 1)));
+      // v2.3.839: 실제 코드가 이미 '대표코드-…' 형식이면 그 코드를 그대로 보여준다
+      //   (복사로 만든 구성품은 M-3X-09-01 처럼 진짜 코드를 갖는다)
+      _ks.forEach((k, ix) => {
+        const base = String(t.code || '');
+        const own = String(k.code || '');
+        const real = base && own.toUpperCase().indexOf(base.toUpperCase() + '-') === 0;
+        _kidCodeMap.set(k.id, real ? own : (base + '-' + (ix + 1)));
+      });
       if (window._kidsOpen[t.id] || searchQ) _ks.forEach(k => _out.push(k));
       delete _byParent[t.id];
     });
