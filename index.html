@@ -6341,7 +6341,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.839';
+const ERP_VERSION = 'v2.3.840';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -40571,6 +40571,42 @@ function _applyNonPoBackup(raw) {
 }
 // v1.9.916: 백업에서 누락된 일반 결재 복구 — localStorage(sync) → IndexedDB(async)
 let _nonpoRestoring = false;
+/* v2.3.840: 일반결재 저장이 '성공'으로 보였는데 서버에 안 올라가 작성자만 보이던 사고.
+   saveDataNow() 는 실패해도 예외를 던지지 않고 _lastFsWriteOk=false 만 남긴다 —
+   그래서 등록 완료 알림만 뜨고 아무도 모른 채 유실됐다(2026-09-10 권다빈 건).
+   저장 후 '서버에 그 건이 실제로 있는지' 까지 확인하고, 없으면 크게 알린다. */
+async function _verifyApprovalOnServer(id, label) {
+  try {
+    if (typeof saveDataNow === 'function') await saveDataNow();
+  } catch(e) {
+    console.error('[v2.3.840] 저장 호출 실패:', e);
+  }
+  let ok = (window._lastFsWriteOk !== false);
+  try {
+    const get = window._firestoreGetDocFromServer || window._firestoreGetDoc;
+    if (ok && get && window._firestoreDoc && window._firebaseDb) {
+      const snap = await get(window._firestoreDoc(window._firebaseDb, 'erp_data', 'approvals'));
+      const arr = snap.exists() ? JSON.parse((snap.data() || {}).data || '[]') : [];
+      ok = arr.some(x => x && String(x.id) === String(id));
+    }
+  } catch(e) { console.warn('[v2.3.840] 서버 확인 실패:', e); ok = false; }
+  if (!ok) {
+    console.error('[v2.3.840] 서버 미반영:', label, id);
+    try {
+      showNotif('⚠️ 서버에 저장되지 않았습니다 — 다른 직원에게 보이지 않습니다.\n'
+        + '인터넷 연결을 확인하고 [다시 저장] 을 눌러 주세요. (' + (label || '') + ')', 'error');
+    } catch(_){}
+    try {
+      if (confirm('⚠️ 서버 저장에 실패했습니다.\n\n이대로 두면 작성자 본인에게만 보입니다.\n지금 다시 시도할까요?')) {
+        try { if (typeof saveDataNow === 'function') await saveDataNow(); } catch(_){}
+        try { showNotif(window._lastFsWriteOk === false ? '⚠️ 여전히 실패했습니다. 새로고침 후 다시 시도해 주세요.' : '✅ 다시 저장했습니다.',
+                        window._lastFsWriteOk === false ? 'error' : 'success'); } catch(_){}
+      }
+    } catch(_){}
+    return false;
+  }
+  return true;
+}
 async function _restoreNonPoApprovalsFromBackup() {
   if (_nonpoRestoring) return 0;
   _nonpoRestoring = true;
@@ -40617,7 +40653,9 @@ function renderApprovalNonPoTable() {
   const list = DB.approvals.filter(a => a.type === 'non_po_approval')
     .filter(a => {
       if (!_apMonthFilterValue()) return true;
-      const ts = a && a.createdAt ? new Date(Number(a.createdAt)).toISOString().slice(0,10) : '';
+      // v2.3.840: toISOString() 은 UTC 라 새벽에 만든 건이 전날(전월)로 밀렸다 — KST 기준으로 본다
+      const ts = a && a.createdAt
+        ? new Date(Number(a.createdAt) + 9 * 3600 * 1000).toISOString().slice(0, 10) : '';
       return _apMatchMonth(ts);
     })
     .sort((a,b) => {
@@ -41843,7 +41881,7 @@ async function saveNonPoApproval() {
       renderApprovalPage();
       updateApprovalBadges();
       showNotif('✅ 결재 요청 수정 완료', 'success');
-      try { if (typeof saveDataNow === 'function') await saveDataNow(); } catch(e) { console.error('일반결재 수정 저장 실패:', e); }
+      await _verifyApprovalOnServer(a.id, a.title || '일반결재');
       return;
     }
     _editingNonPoId = null;
@@ -41900,7 +41938,8 @@ async function saveNonPoApproval() {
   renderApprovalPage();
   updateApprovalBadges();
   showNotif('✅ 결재 요청 등록 완료', 'success');
-  try { if (typeof saveDataNow === 'function') await saveDataNow(); } catch(e) { console.error('일반결재 신규 저장 실패:', e); try { showNotif('⚠️ 저장 실패: ' + (e.message||e), 'error'); } catch(_){} }
+  // v2.3.840: 서버 반영까지 확인 — 실패하면 조용히 넘어가지 않는다
+  await _verifyApprovalOnServer(a.id, a.title || '일반결재');
 }
 
 // v1.9.229: 일반 결재 수정
