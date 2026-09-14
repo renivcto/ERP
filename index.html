@@ -6341,7 +6341,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.842';
+const ERP_VERSION = 'v2.3.843';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -26932,63 +26932,66 @@ async function _recoverPartSpecsFromIdb(){
     }
   } catch(e){ console.warn('[partSpec] IDB 복구 실패:', e); }
 }
-async function savePartSpec() {
-  if (!requireWrite()) return null;
+// v2.3.843: 사양서 저장을 두 단계로 나눈다.
+//   ① 화면 데이터(DB)·IDB 백업에 즉시 반영하고 창을 바로 닫는다 — 인쇄도 이 데이터로 바로 된다.
+//   ② 서버 저장 확인은 뒤에서 한다. saveDataNow 는 ERP 전체를 차례로 쓰느라 실측 37초가 걸려,
+//      v2.3.841 처럼 그걸 기다리게 하면 [인쇄]가 '준비 중' 에서 멈춘 것처럼 보였다.
+//   실패하면 성공 알림 없이 오류를 띄우고 사양서를 다시 열어 재저장하게 한다(내용은 DB·IDB 에 남아 있다).
+function _psCommitLocal() {
   if (!DB.partSpecs) DB.partSpecs = [];
   const data = collectPartSpecForm();
   if (!data.productId) { showNotif('제품을 선택하세요', 'warning'); return null; }
-  if (window._psSaving) return null;   // v2.3.841: 서버 확인을 기다리는 동안 중복 클릭 방지
-  window._psSaving = true;
-  try {
-    const now = Date.now();
-    let savedId = window._editingPartSpecId;
-    if (window._editingPartSpecId) {
-      const idx = DB.partSpecs.findIndex(x => x.id === window._editingPartSpecId);
-      if (idx >= 0) {
-        DB.partSpecs[idx] = { ...DB.partSpecs[idx], ...data, id: window._editingPartSpecId, updatedAt: now };
-      }
-    } else {
-      if (!DB._nextId) DB._nextId = {};
-      // v2.3.841: 카운터만 믿지 않는다 — 실제 최댓값+1 과 비교해 큰 값을 쓰고, 그래도 겹치면 비켜 간다.
-      //   (카운터가 뒤처져 기존 14번을 새 사양서에 줬고, 병합이 그 사양서를 덮어 유실됐다)
-      const _max = DB.partSpecs.reduce((m,p)=>Math.max(m, Number(p && p.id)||0), 0);
-      let newId = Math.max(Number(DB._nextId.partSpec)||0, _max + 1, 1);
-      while (DB.partSpecs.some(p => p && p.id === newId)) newId++;
-      DB._nextId.partSpec = newId + 1;
-      DB.partSpecs.push({ id: newId, ...data, createdAt: now, updatedAt: now });
-      savedId = newId;
-      // 서버 저장이 실패해 다시 누르면 새로 또 만들지 않고 이 사양서를 고치게 한다
-      window._editingPartSpecId = newId;
+  const now = Date.now();
+  let savedId = window._editingPartSpecId;
+  if (savedId) {
+    const idx = DB.partSpecs.findIndex(x => x.id === savedId);
+    if (idx >= 0) {
+      DB.partSpecs[idx] = { ...DB.partSpecs[idx], ...data, id: savedId, updatedAt: now };
     }
-    _psBackupToIdb();  // v2.3.268: IDB 안전망 백업 — 서버 저장보다 먼저
-    renderPartSpecList();
-    // v2.3.841: 서버에 실제로 반영된 걸 확인한 뒤에만 성공 알림. 실패면 창을 닫지 않는다(작성 내용 보존).
-    let ok = true;
-    try {
-      window._lastFsWriteOk = false;
-      await saveDataNow();
-      ok = (window._lastFsWriteOk !== false);
-    } catch (e) { console.error('partSpec 즉시저장 실패:', e); ok = false; }
-    if (!ok) {
-      showNotif('⚠️ 부자재 사양서가 서버에 저장되지 않았습니다 — 창을 닫지 말고 잠시 후 [저장] 을 다시 눌러 주세요', 'error');
-      return null;
-    }
-    showNotif('부자재 사양서 저장 완료', 'success');
-    closeModal('add-partspec');
-    return savedId;
-  } finally {
-    window._psSaving = false;
+  } else {
+    if (!DB._nextId) DB._nextId = {};
+    // v2.3.841: 카운터만 믿지 않는다 — 실제 최댓값+1 과 비교해 큰 값을 쓰고, 그래도 겹치면 비켜 간다.
+    //   (카운터가 뒤처져 기존 14번을 새 사양서에 줬고, 병합이 그 사양서를 덮어 유실됐다)
+    const _max = DB.partSpecs.reduce((m,p)=>Math.max(m, Number(p && p.id)||0), 0);
+    let newId = Math.max(Number(DB._nextId.partSpec)||0, _max + 1, 1);
+    while (DB.partSpecs.some(p => p && p.id === newId)) newId++;
+    DB._nextId.partSpec = newId + 1;
+    DB.partSpecs.push({ id: newId, ...data, createdAt: now, updatedAt: now });
+    savedId = newId;
   }
+  _psBackupToIdb();  // v2.3.268: IDB 안전망 백업 — 서버 저장보다 먼저
+  renderPartSpecList();
+  return savedId;
+}
+async function _psPersist(id) {
+  let ok = true;
+  try {
+    window._lastFsWriteOk = false;
+    await saveDataNow();
+    ok = (window._lastFsWriteOk !== false);
+  } catch (e) { console.error('partSpec 서버 저장 실패:', e); ok = false; }
+  if (ok) { showNotif('부자재 사양서 저장 완료', 'success'); return true; }
+  showNotif('⚠️ 부자재 사양서가 서버에 저장되지 않았습니다 — 사양서를 다시 열었으니 [저장] 을 한 번 더 눌러 주세요', 'error');
+  try { editPartSpec(id); } catch(_){}
+  return false;
+}
+function savePartSpec() {
+  if (!requireWrite()) return null;
+  const id = _psCommitLocal();
+  if (!id) return null;
+  closeModal('add-partspec');
+  showNotif('💾 저장 중… 서버 반영 확인까지 30초 정도 걸릴 수 있습니다', 'info');
+  window._psLastPersist = _psPersist(id);   // 뒤에서 서버 저장 확인
+  return id;
 }
 
-async function saveAndPrintPartSpec() {
-  // v2.3.842: 인쇄 창은 클릭 순간에 먼저 연다. v2.3.841 에서 저장을 '서버 반영 확인 후' 로 바꾸자
-  //   창을 여는 시점이 수 초 뒤로 밀려 클릭 권한이 만료됐고, 브라우저가 팝업으로 막아 인쇄가 안 됐다.
-  const w = window.open('', '_blank');
-  if (w) { try { w.document.write('<meta charset="utf-8"><p style="font-family:sans-serif;color:#64748b;padding:24px">사양서를 저장하고 인쇄 문서를 준비하는 중…</p>'); } catch(_){} }
-  const id = await savePartSpec();
-  if (!id) { try { if (w) w.close(); } catch(_){} return; }   // 저장 실패면 빈 창을 닫는다(오류 알림은 savePartSpec 이 띄움)
-  printPartSpec(id, w);
+function saveAndPrintPartSpec() {
+  // v2.3.843: 저장이 화면에 즉시 반영되므로 서버 확인을 기다리지 않고 바로 인쇄한다.
+  //   클릭 흐름 안에서 곧장 printPartSpec 이 창을 열어 팝업 차단도 없다.
+  //   (v2.3.841~842 는 37초짜리 서버 확인을 기다려 '준비 중' 화면에서 멈춘 것처럼 보였다)
+  const id = savePartSpec();
+  if (!id) return;
+  printPartSpec(id);
 }
 
 function editPartSpec(id) {
