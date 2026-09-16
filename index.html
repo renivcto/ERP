@@ -6341,7 +6341,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.844';
+const ERP_VERSION = 'v2.3.845';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -11378,6 +11378,9 @@ const uid = () => Date.now();
 
 function getVendor(id) { return DB.vendors.find(v => v.id == id || String(v.id) === String(id)) || {}; }
 function getItem(id) { return DB.items.find(i => i.id == id) || (DB.archivedItems||[]).find(i => i.id == id) || {}; }
+// v2.3.845: 재고평가액에 넣는 품목 — OEM·외주가공(가공비·운송비 등 서비스)과 코드 없는 부자재(필름·목형·물류비)는 실물 재고가 아니다.
+//   재고관리 총액·표 행·품목 현황 총액·재고 리포트가 모두 이 한 함수를 쓴다 (기준이 흩어져 숫자가 달랐던 사고 방지).
+function _isStockValueItem(i) { return !!i && !['OEM','외주가공'].includes(i.type) && !(i.type === '부자재' && !String(i.code||'').trim()); }
 function nextId(key) { return DB._nextId[key]++; }
 
 function statusBadge(s) {
@@ -24430,6 +24433,7 @@ function renderItemTable() {
   // v2.3.809: 하위 품목(parentId)을 대표 품목 바로 아래로 붙인다
   // v2.3.811: 기본은 접힘 — [구성품 N] 버튼으로 펼친다. 하위 코드는 대표코드-순번 자동 표시.
   const _kidCodeMap = new Map();
+  const _allItemsForTotal = filtered;   // v2.3.845: 접기 전 목록 (총액용)
   {
     const _byParent = {};
     filtered.filter(x => x.parentId).forEach(k => { (_byParent[k.parentId] = _byParent[k.parentId] || []).push(k); });
@@ -24456,8 +24460,8 @@ function renderItemTable() {
   //   (이전에는 DB.items 전체 기준이라 분류 탭/제품 라인/검색 적용 시 숫자가 표와 불일치)
   // v2.3.116: OEM 은 실제 재고가 아니라 제조 발주이므로 평가액 계산에서 제외
   // v2.3.117: 외주가공도 가공 서비스라 재고 아님 → 제외
-  const _isPhantomStock = t => t === 'OEM' || t === '외주가공';
-  const totalVal = filtered.reduce((s,i) => s + ((_isPhantomStock(i.type)) ? 0 : (i.stock||0)*(i.price||0)), 0);
+  // v2.3.845: 접힌 구성품 포함 + _isStockValueItem 으로 재고관리·리포트와 통일 + 원 단위 반올림
+  const totalVal = Math.round(_allItemsForTotal.reduce((s,i) => s + (_isStockValueItem(i) ? (i.stock||0)*(i.price||0) : 0), 0));
   const tvEl = $('item-total-stock-value');
   if (tvEl) tvEl.textContent = fmtW(totalVal);
   // ── v2.3.529: 완제품 탭 전용 열 구성 ──
@@ -30740,6 +30744,7 @@ function renderStockTable() {
   // v2.3.810: 하위 품목(parentId)을 대표 바로 아래로 붙인다 (품목 현황과 동일한 계층 표시)
   // v2.3.811: 기본은 접힘 — [구성품 N] 버튼으로 펼친다. 하위 코드는 대표코드-순번 자동 표시.
   const _kidCodeMap = new Map();
+  const _allRowsForTotal = items;   // v2.3.845: 접기 전 목록 — 총액은 구성품이 접혀 있어도 포함해야 한다
   {
     const _byParent = {};
     items.filter(x => x && x.parentId).forEach(k => { (_byParent[k.parentId] = _byParent[k.parentId] || []).push(k); });
@@ -30764,7 +30769,9 @@ function renderStockTable() {
   // v1.9.384: 총 재고평가액 — 현재 표 합계와 일치하도록 검색·라인 필터 모두 반영된 items 기준
   // v2.3.116: OEM 제외 (제조 발주는 실재고 아님)
   // v2.3.117: 외주가공도 제외 (가공 서비스)
-  const totalVal = items.reduce((s,i) => s + ((i.type === 'OEM' || i.type === '외주가공') ? 0 : (i.stock||0)*(i.price||0)), 0);
+  // v2.3.845: 접힌 구성품도 합산(v2.3.811 접힘 기본값 이후 화면 총액이 리포트보다 작게 나오던 원인),
+  //           판정은 _isStockValueItem 으로 리포트와 통일, 원 단위 반올림(원자재 kg 소수로 .606 같은 꼬리 방지)
+  const totalVal = Math.round(_allRowsForTotal.reduce((s,i) => s + (_isStockValueItem(i) ? (i.stock||0)*(i.price||0) : 0), 0));
   const tvEl = $('stock-total-value');
   if (tvEl) tvEl.textContent = fmtW(totalVal);
   // v2.3.361: PlusCL 현재고 열 — 완제품 탭에서만 노출
@@ -30784,7 +30791,8 @@ function renderStockTable() {
     // v2.3.117: 외주가공도 제외
     const _isOemRow2 = (i.type === 'OEM' || i.type === '외주가공');
     // v2.3.824: 하위(구성품)도 단가·평가액을 표시한다 (v2.3.810 되돌림 — 사용자 요청)
-    const _noMoney2 = _isOemRow2;
+    // v2.3.845: 코드 없는 부자재도 평가액 '-' — 총액·리포트와 같은 기준
+    const _noMoney2 = !_isStockValueItem(i);
     const stockVal = _noMoney2 ? 0 : (i.stock||0) * (i.price||0);
     const rowBg = i._archived ? '#f5f5f5' : (i.parentId ? '#faf8ff' : (typeRowBg[i.type] || '#fff'));
     return `<tr class="${i.parentId?'kid-row':''}" style="background:${rowBg}${i._archived?';opacity:0.85':''}">
@@ -31090,9 +31098,8 @@ function exportStockReport() {
   const archivedList = (DB.archivedItems||[]).map(i => ({...i, _archived:true}));
   // v2.3.844: OEM·외주가공(가공비·운송비 등 서비스 항목)과 코드 없는 부자재(필름·목형·물류비 등)는
   //           실물 재고가 아니므로 리포트에서 제외
-  const _isRealStock = i => !['OEM','외주가공'].includes(i.type) && !(i.type === '부자재' && !String(i.code||'').trim());
-  const allItems = [...DB.items, ...archivedList].filter(_isRealStock);
-  const totalVal = allItems.reduce((s,i) => s + (i.stock||0)*(i.price||0), 0);
+  const allItems = [...DB.items, ...archivedList].filter(_isStockValueItem);   // v2.3.845: 화면과 같은 판정 함수
+  const totalVal = Math.round(allItems.reduce((s,i) => s + (i.stock||0)*(i.price||0), 0));
   const totalCount = allItems.length;
   const esc = v => `"${String(v||'').replace(/"/g,'""')}"`;
   const csv = [];
