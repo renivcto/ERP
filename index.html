@@ -6341,7 +6341,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.845';
+const ERP_VERSION = 'v2.3.846';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10399,7 +10399,12 @@ if (DB == null) {
 // v1.9.203: 기존 발주서의 누락된 결재/지출결의서 백필 (1회성) — prepayPercent/balanceDueDate가 있는데 expense가 없으면 생성
 (function backfillOrderApprovalsAndExpensesV203() {
   try {
-    if (DB._orderApprovalBackfilledV203) return;
+    // v2.3.846: DB._orderApprovalBackfilledV203 은 Firestore 머지(DB = merged) 때 떨어져 나가 매 로드마다
+    //   전체 발주서가 재동기화됐다 → 발주서에 ⚡즉시 지급이 켜진 옛 건이 로드 때마다 슬랙 '즉시 지급 요청'을 다시 쏨(2026-09-16).
+    //   완료 표시는 별도 localStorage 키(기기당 1회)로, 그리고 백필은 절대 알림을 보내지 않는다(notify 없음).
+    const _V203_KEY = 'reniv_backfill_v203_done';
+    let _doneLocal = false; try { _doneLocal = localStorage.getItem(_V203_KEY) === '1'; } catch(_){}
+    if (DB._orderApprovalBackfilledV203 || _doneLocal) return;
     if (!Array.isArray(DB.orders)) return;
     // syncOrderApprovalAndExpense는 함수 선언이라 호이스팅되어 사용 가능
     if (typeof syncOrderApprovalAndExpense !== 'function') return;
@@ -10408,6 +10413,7 @@ if (DB == null) {
       try { syncOrderApprovalAndExpense(o.id, true); } catch(_){}
     });
     DB._orderApprovalBackfilledV203 = true;
+    try { localStorage.setItem(_V203_KEY, '1'); } catch(_){}
     try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(_){}
     console.log('✅ v1.9.203 발주서 결재/지출결의서 백필 완료');
   } catch (e) { console.warn('order backfill skipped:', e); }
@@ -35105,7 +35111,7 @@ function saveOrder() {
   // v1.9.196 — 결재 요청 그룹웨어: 자동 결재서/지출결의서 생성·동기화
   try {
     if (typeof syncOrderApprovalAndExpense === 'function') {
-      syncOrderApprovalAndExpense(_savedOrderId, isEdit);
+      syncOrderApprovalAndExpense(_savedOrderId, isEdit, { notify: true });   // v2.3.846: 사용자가 저장한 발주서만 즉시 지급 알림
     }
   } catch(e) { console.warn('syncOrderApprovalAndExpense skipped:', e); }
 
@@ -37557,7 +37563,9 @@ function _healOverseasExpenseFx() {
 function vendorName(id) { const v = getVendor ? getVendor(id) : null; return v && v.company ? v.company : '-'; }
 
 // 발주서 저장 시 approval/expense 자동 생성/동기화
-function syncOrderApprovalAndExpense(orderId, isEdit) {
+function syncOrderApprovalAndExpense(orderId, isEdit, opts) {
+  // v2.3.846: opts.notify 가 true 일 때만 ⚡즉시 지급 슬랙을 보낸다 — 로드 백필·수동 재동기화는 데이터만 맞추고 알림은 안 보냄
+  const _notify = !!(opts && opts.notify);
   const o = DB.orders.find(x => x.id === orderId);
   if (!o) return;
 
@@ -37651,7 +37659,7 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
       expPre.payNow = !!o.payNowPrepay;
       if (expPre.payNow && !_wasPN) {
         expPre.payNowAt = Date.now();
-        try { slackNotify('pay_now', { title: expPre.title || '-', vendor: expPre.vendor || '-', amount: expPre.amount || 0, dueDate: expPre.dueDate || '' }); } catch(_){}
+        if (_notify) { try { slackNotify('pay_now', { title: expPre.title || '-', vendor: expPre.vendor || '-', amount: expPre.amount || 0, dueDate: expPre.dueDate || '' }); } catch(_){} }
       }
     }
   } else if (expPre) {
@@ -37703,7 +37711,7 @@ function syncOrderApprovalAndExpense(orderId, isEdit) {
       expBal.payNow = !!o.payNowBalance;
       if (expBal.payNow && !_wasPNB) {
         expBal.payNowAt = Date.now();
-        try { slackNotify('pay_now', { title: expBal.title || '-', vendor: expBal.vendor || '-', amount: expBal.amount || 0, dueDate: expBal.dueDate || '' }); } catch(_){}
+        if (_notify) { try { slackNotify('pay_now', { title: expBal.title || '-', vendor: expBal.vendor || '-', amount: expBal.amount || 0, dueDate: expBal.dueDate || '' }); } catch(_){} }
       }
     }
   } else if (expBal && expBal.paidStatus !== 'paid') {
@@ -39812,6 +39820,7 @@ async function togglePayStatus(expenseId, orderId, category) {
     if (!d) return;
     e.paidStatus = 'paid';
     e.paidDate = d;
+    e.payNow = false;   // v2.3.846: 지급된 건은 즉시 지급 대상이 아니다
     slackNotify('pay_done', e);
   }
   e.updatedAt = Date.now();
@@ -45051,6 +45060,13 @@ async function toggleExpensePayNow(expenseId) {
   } else {
     if (!confirm('⚡ 즉시 지급을 해제할까요?')) return;
     e.payNow = false;
+    // v2.3.846: 연결된 발주서의 ⚡즉시 지급 체크도 함께 해제 — 남겨두면 발주서 재저장·재동기화 때 다시 켜지고 슬랙이 또 나간다
+    try {
+      if (e.orderId && (e.category === 'po_prepay' || e.category === 'po_balance')) {
+        const _lo = (DB.orders||[]).find(o => o && String(o.id) === String(e.orderId));
+        if (_lo) { if (e.category === 'po_prepay') _lo.payNowPrepay = false; else _lo.payNowBalance = false; _lo.updatedAt = Date.now(); }
+      }
+    } catch(_){}
   }
   e.updatedAt = Date.now();
   try { renderApprovalExpenseTable(); } catch(_){}
