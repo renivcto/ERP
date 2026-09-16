@@ -6341,7 +6341,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.843';
+const ERP_VERSION = 'v2.3.844';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -31088,7 +31088,10 @@ function saveStockOut() {
 function exportStockReport() {
   // 활성 + 아카이브 품목 모두 포함
   const archivedList = (DB.archivedItems||[]).map(i => ({...i, _archived:true}));
-  const allItems = [...DB.items, ...archivedList];
+  // v2.3.844: OEM·외주가공(가공비·운송비 등 서비스 항목)과 코드 없는 부자재(필름·목형·물류비 등)는
+  //           실물 재고가 아니므로 리포트에서 제외
+  const _isRealStock = i => !['OEM','외주가공'].includes(i.type) && !(i.type === '부자재' && !String(i.code||'').trim());
+  const allItems = [...DB.items, ...archivedList].filter(_isRealStock);
   const totalVal = allItems.reduce((s,i) => s + (i.stock||0)*(i.price||0), 0);
   const totalCount = allItems.length;
   const esc = v => `"${String(v||'').replace(/"/g,'""')}"`;
