@@ -1229,6 +1229,7 @@ try{
       <div class="nav-item" onclick="go('production')"><span class="ico">📊</span>생산 현황</div>
       <div class="nav-item" onclick="go('bom')"><span class="ico">⚙️</span>BOM 관리</div>
       <div class="nav-item" onclick="go('order')"><span class="ico">📋</span>발주서</div>
+      <div class="nav-item" onclick="go('partspec')"><span class="ico">📑</span>부자재 사양서</div><!-- v2.3.855: BOM 관리 탭에서 독립 -->
       <div class="nav-item" onclick="go('vendor')"><span class="ico">🏢</span>생산 업체</div>
     </div>
     <div class="nav-item" onclick="go('stock')"><span class="ico">📦</span>재고 관리</div>
@@ -1947,12 +1948,6 @@ try{
 
     <!-- ══════════════ BOM ══════════════ -->
     <div class="page" id="page-bom">
-      <!-- 하위 탭 -->
-      <div style="display:flex;gap:4px;border-bottom:1px solid var(--gray-200);margin-bottom:14px">
-        <button id="bom-tab-bom" class="bom-subtab bom-subtab-active" onclick="switchBomSubtab('bom')" style="padding:8px 16px;border:1px solid #0f172a;background:#0f172a;font-size:13px;font-weight:700;cursor:pointer;color:#fff;border-radius:7px;line-height:1.2;transition:all .12s">🔧 BOM</button>
-        <button id="bom-tab-spec" class="bom-subtab" onclick="switchBomSubtab('spec')" style="padding:8px 16px;border:1px solid #e2e8f0;background:#f1f5f9;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-radius:7px;line-height:1.2;transition:all .12s">📋 부자재 사양서</button>
-      </div>
-
       <!-- ───── BOM 서브페이지 ───── -->
       <div id="bom-subpage-bom">
         <div style="display:flex;justify-content:space-between;margin-bottom:14px;gap:8px">
@@ -1990,8 +1985,12 @@ try{
         </div>
       </div>
 
-      <!-- ───── 부자재 사양서 서브페이지 ───── -->
-      <div id="bom-subpage-spec" style="display:none">
+    </div>
+
+    <!-- ══════════════ 부자재 사양서 (v2.3.855) ══════════════ -->
+    <div class="page" id="page-partspec">
+      <!-- v2.3.855: 부자재 사양서 — 생산 관리 > 부자재 사양서 독립 메뉴 (구 BOM 관리 탭). id 는 그대로 둔다 -->
+      <div id="bom-subpage-spec">
         <div style="display:flex;justify-content:space-between;margin-bottom:14px;gap:8px">
           <div style="display:flex;align-items:center;gap:8px">
             <button class="btn btn-sm" onclick="if(requireWrite())openPartSpecForm()" style="background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;font-size:14px;padding:6px 14px">+ 부자재 사양서 작성</button>
@@ -6277,7 +6276,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.854';
+const ERP_VERSION = 'v2.3.855';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12745,7 +12744,7 @@ const PAGE_TITLES = {
   dashboard:'',feedshare:'📰 운영 업무 공유',workflow:'🔀 워크플로우',calendar:'📅 르니브 캘린더',gdrive:'📁 르니브 자료실',partners:'🏢 거래처 정보',
   vendor:'생산 업체',item:'품목 현황',
   archive:'📥 아카이브',
-  bom:'BOM 관리',production:'생산 현황',stock:'재고 관리',quote:'견적서',
+  bom:'BOM 관리',partspec:'📑 부자재 사양서',production:'생산 현황',stock:'재고 관리',quote:'견적서',
   order:'발주서',sites:'사이트 / 계정',insight:'🌱 신제품 개발',accounts:'🔑 외부 계정',users:'사용자 관리',qc:'품질 관리',cost:'원가 분석',settings:'설정 프로필',
   metaads:'📣 메타 광고',cs:'CS 관리',customers:'👥 고객 리스트',pharmacies:'💊 약국 리스트',claims:'⚠️ 클레임 관리',consign:'🧾 위탁 재고이동',sales:'판매 관리',approval:'🖋️ 결재 관리',ads:'📢 광고비 관리',
   costest:'💰 생산 예상 비용',
@@ -12800,11 +12799,11 @@ function go(page) {
   // Auto-open production sub-nav when on production / bom / vendor / order pages
   const prodSub = $('production-sub');
   if (prodSub) {
-    if (page === 'production' || page === 'bom' || page === 'vendor' || page === 'order') prodSub.classList.add('open');
+    if (page === 'production' || page === 'bom' || page === 'vendor' || page === 'order' || page === 'partspec') prodSub.classList.add('open');
     else prodSub.classList.remove('open');
   }
   // 생산 관리 nav item도 하위 페이지(bom/vendor/order)에서 active 유지
-  if (page === 'bom' || page === 'vendor' || page === 'order') {
+  if (page === 'bom' || page === 'vendor' || page === 'order' || page === 'partspec') {
     const np = $('nav-production');
     if (np) np.classList.add('active');
   }
@@ -12865,6 +12864,7 @@ function go(page) {
     item: renderItemTable,
     archive: renderArchivePage,
     bom: renderBOMPage,
+    partspec: () => { try { renderPartSpecList(); } catch(e) { console.warn('renderPartSpecList 실패:', e); } },   // v2.3.855
     production: renderProdTable,
     stock: renderStock,
     quote: renderQuoteTable,
@@ -15810,7 +15810,7 @@ function clickNavItem(page, subId) {
   const currentId = activePage ? activePage.id : '';
   const onSection = (page === 'item' && (currentId === 'page-item' || currentId === 'page-archive'))
     || (page === 'sales' && currentId === 'page-sales')
-    || (page === 'production' && (currentId === 'page-production' || currentId === 'page-bom' || currentId === 'page-order' || currentId === 'page-quote'))
+    || (page === 'production' && (currentId === 'page-production' || currentId === 'page-bom' || currentId === 'page-order' || currentId === 'page-quote' || currentId === 'page-partspec'))
     || (page === 'customer' && (currentId === 'page-cs' || currentId === 'page-customers' || currentId === 'page-pharmacies'))
     || (page === 'work' && (currentId === 'page-workflow' || currentId === 'page-calendar' || currentId === 'page-gdrive'))
     // v1.9.234: 결재 요청 — 같은 페이지에서 재클릭 시 서브메뉴 토글(닫기) 가능
@@ -26185,31 +26185,9 @@ function renderBOMPage() {
 // 부자재 사양서 — 탭 전환 & 목록/폼/인쇄
 // ═══════════════════════════════════════════════════════
 function switchBomSubtab(which) {
-  const bomSub = document.getElementById('bom-subpage-bom');
-  const specSub = document.getElementById('bom-subpage-spec');
-  const tabBom = document.getElementById('bom-tab-bom');
-  const tabSpec = document.getElementById('bom-tab-spec');
-  if (!bomSub || !specSub) return;
-  // v1.9.696 박스 버튼 스타일
-  const _setBomTab = (btn, active) => {
-    btn.style.background = active ? '#0f172a' : '#f1f5f9';
-    btn.style.color = active ? '#fff' : '#475569';
-    btn.style.border = active ? '1px solid #0f172a' : '1px solid #e2e8f0';
-    btn.style.fontWeight = active ? '700' : '600';
-    btn.style.borderBottomColor = active ? '#0f172a' : '#e2e8f0';
-  };
-  if (which === 'spec') {
-    bomSub.style.display = 'none';
-    specSub.style.display = '';
-    _setBomTab(tabBom, false);
-    _setBomTab(tabSpec, true);
-    renderPartSpecList();
-  } else {
-    bomSub.style.display = '';
-    specSub.style.display = 'none';
-    _setBomTab(tabBom, true);
-    _setBomTab(tabSpec, false);
-  }
+  // v2.3.855: 부자재 사양서는 생산 관리 > 부자재 사양서 독립 메뉴로 옮겼다 (BOM 관리의 탭 줄은 없앰)
+  if (which === 'spec') { go('partspec'); return; }
+  go('bom');
 }
 
 function renderPartSpecList() {
@@ -61120,7 +61098,7 @@ function initERPWhenReady() {
     try { updateBadges(); } catch(e) { console.warn('updateBadges 실패:', e); }
     // v1.9.316 — 새로고침 시 마지막 머물렀던 페이지 복원 (기본: dashboard)
     try {
-      const KNOWN_PAGES = ['dashboard','feedshare','workflow','calendar','gdrive','vendor','item','archive','bom','production','stock','quote','order','approval','sites','accounts','insight','users','qc','cost','cs','claims','consign','sales','settings','recurring'];
+      const KNOWN_PAGES = ['dashboard','feedshare','workflow','calendar','gdrive','vendor','item','archive','bom','partspec','production','stock','quote','order','approval','sites','accounts','insight','users','qc','cost','cs','claims','consign','sales','settings','recurring'];
       // v1.9.976: 같은 탭 새로고침이면 마지막 페이지 복원, 처음 접속/새 탭/브라우저 재시작이면 dashboard
       //   sessionStorage 는 같은 탭이 살아있는 동안만 유지(새로고침=유지, 탭닫기/재시작=초기화)
       if (typeof window._v976_freshSession === 'undefined') {
