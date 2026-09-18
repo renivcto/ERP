@@ -62,6 +62,7 @@ function _periodToggleVisibility(prefix) {
   if (!wrap) return;
   const mode = wrap.querySelector('.period-mode')?.value || 'month';
   const setDisp = (cls, show) => { const el = wrap.querySelector(cls); if (el) el.style.display = show ? '' : 'none'; };
+  setDisp('.period-year',  mode === 'year');   // v2.3.851: 연별 (메타 광고)
   setDisp('.period-month', mode === 'month');
   setDisp('.period-week',  mode === 'week');
   setDisp('.period-day',   mode === 'day');
@@ -80,6 +81,7 @@ function _periodOnChange(prefix) {
   else if (prefix === 'ap' && typeof renderApprovalPage === 'function') renderApprovalPage();
   else if (prefix === 'ad' && typeof renderAdsPage === 'function') renderAdsPage();  // v2.3.138
   else if (prefix === 'cg' && typeof renderConsignPage === 'function') renderConsignPage();  // v2.3.695 위탁
+  else if (prefix === 'ma' && typeof renderMetaAdsPage === 'function') renderMetaAdsPage();  // v2.3.851 메타 광고
 }
 
 function _periodComputeRange(prefix) {
@@ -109,6 +111,11 @@ function _periodComputeRange(prefix) {
     sunday.setDate(monday.getDate() + 6);
     return { start: _periodFmtDate(monday), end: _periodFmtDate(sunday) };
   }
+  if (mode === 'year') {  // v2.3.851
+    const y = parseInt(wrap.querySelector('.period-year')?.value || '');
+    if (!y) return { start: '', end: '' };
+    return { start: `${y}-01-01`, end: `${y}-12-31` };
+  }
   if (mode === 'month') {
     const m = wrap.querySelector('.period-month')?.value || '';
     if (!m) return { start: '', end: '' };
@@ -133,6 +140,8 @@ function _periodInit(prefix) {
   const yyyy = today.getFullYear();
   const mm = String(today.getMonth()+1).padStart(2,'0');
   const dd = String(today.getDate()).padStart(2,'0');
+  const yearEl = wrap.querySelector('.period-year');  // v2.3.851
+  if (yearEl && !yearEl.value) yearEl.value = String(yyyy);
   const monthEl = wrap.querySelector('.period-month');
   if (monthEl && !monthEl.value) monthEl.value = `${yyyy}-${mm}`;
   const dayEl = wrap.querySelector('.period-day');

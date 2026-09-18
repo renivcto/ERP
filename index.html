@@ -14,6 +14,7 @@
 <script src="shared/margin-analysis.js"></script>
 <!-- v2.3.741: 광고비 KPI 카드 8개 — 임원용·직원용이 함께 읽는 한 벌 -->
 <script src="shared/ads-kpi.js"></script>
+<script src="shared/meta-ads.js"></script><!-- v2.3.851: 메타 광고 일일 리포트 (서버가 Firestore 에 쓴 결과만 읽는다) -->
 <!-- Firebase -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
@@ -1188,6 +1189,7 @@ try{
       <div class="nav-item" onclick="go('sales');switchSalesTab('margin')"><span class="ico">💰</span>마진 분석</div>
       <!-- v2.2.8: 쇼핑몰 메뉴는 거래처 정보 > 쇼핑몰 탭에서만 노출 (판매 관리에서 제거) -->
       <div class="nav-item" onclick="go('ads')"><span class="ico">📢</span>광고비 관리</div>
+      <div class="nav-item" onclick="go('metaads')" title="매일 06:00 서버가 만드는 메타 광고 전환 최적화 리포트"><span class="ico">📣</span>메타 광고</div><!-- v2.3.851 -->
       <div class="nav-item" onclick="go('sales');switchSalesTab('channel')"><span class="ico">🧮</span>유통채널 수익계산</div>
     </div>
     <div class="nav-item" onclick="clickNavItem('customer','customer-sub')" id="nav-customer"><span class="ico" style="display:inline-flex;align-items:center;justify-content:center;color:#fff"><svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>고객 관리</div>
@@ -3598,6 +3600,8 @@ try{
     </div>
 
     <!-- ══════════════ v1.9.773: 광고비 관리 페이지 (별도 페이지) ══════════════ -->
+    <!-- v2.3.851: 메타 광고 일일 리포트 — 화면·계산은 shared/meta-ads.js 한 곳에만 있다 -->
+    <div class="page" id="page-metaads"><div id="metaads-root"></div></div>
     <div class="page" id="page-ads">
       <!-- v2.3.138: 매출 대시보드와 동일한 공용 기간 필터 (prefix='ad') -->
       <div class="period-filter" data-prefix="ad" style="display:flex;align-items:center;gap:5px;flex-wrap:nowrap;margin-bottom:10px">
@@ -6269,7 +6273,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.850';
+const ERP_VERSION = 'v2.3.851';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12739,7 +12743,7 @@ const PAGE_TITLES = {
   archive:'📥 아카이브',
   bom:'BOM 관리',production:'생산 현황',stock:'재고 관리',quote:'견적서',
   order:'발주서',sites:'사이트 / 계정',insight:'🌱 신제품 개발',accounts:'🔑 외부 계정',users:'사용자 관리',qc:'품질 관리',cost:'원가 분석',settings:'설정 프로필',
-  cs:'CS 관리',customers:'👥 고객 리스트',pharmacies:'💊 약국 리스트',claims:'⚠️ 클레임 관리',consign:'🧾 위탁 재고이동',sales:'판매 관리',approval:'🖋️ 결재 관리',ads:'📢 광고비 관리',
+  metaads:'📣 메타 광고',cs:'CS 관리',customers:'👥 고객 리스트',pharmacies:'💊 약국 리스트',claims:'⚠️ 클레임 관리',consign:'🧾 위탁 재고이동',sales:'판매 관리',approval:'🖋️ 결재 관리',ads:'📢 광고비 관리',
   costest:'💰 생산 예상 비용',
   recurring:'🔁 정기 결제',
   finance:'💰 재무 관리'
@@ -12751,6 +12755,8 @@ function go(page) {
   if (page === 'pharmacies') setTimeout(() => { try { renderPharmaciesList(); } catch(_){} }, 0);
   // v1.9.773 — 광고비 관리 페이지 진입 시 자동 렌더
   if (page === 'ads') setTimeout(() => { try { renderAdsPage(); } catch(_){} }, 0);
+  // v2.3.851 — 메타 광고 페이지 진입 시 자동 렌더
+  if (page === 'metaads') setTimeout(() => { try { renderMetaAdsPage(); } catch(_){} }, 0);
   // v2.3.463 — 클레임 관리 페이지 진입 시 자동 렌더
   if (page === 'claims') setTimeout(() => { try { renderClaims(); } catch(_){} }, 0);
   // v2.3.500 — 위탁 재고이동 페이지 진입 시 자동 렌더
