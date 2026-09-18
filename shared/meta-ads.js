@@ -155,8 +155,8 @@ function _mPeriodSection(rows) {
   const by = {};
   rows.forEach(r => { const k = r.adId || r.ad; (by[k] = by[k] || { ad: r.ad, campaign: r.campaign, rows: [] }).rows.push(r); });
   const list = Object.values(by).map(g => Object.assign({ ad: g.ad, campaign: g.campaign }, _mAgg(g.rows))).sort((a, b) => b.spend - a.spend);
-  const th = (x) => '<th style="padding:8px 6px;font-size:11px;color:#475569;white-space:nowrap">' + x + '</th>';
-  const td = (x, al) => '<td style="padding:7px 6px;font-size:12px;white-space:nowrap;text-align:' + (al || 'right') + '">' + x + '</td>';
+  const th = (x) => '<th style="padding:8px 6px;font-size:11px;color:#475569;white-space:nowrap;text-align:center">' + x + '</th>';
+  const td = (x) => '<td style="padding:7px 6px;font-size:12px;white-space:nowrap;text-align:center">' + x + '</td>';   // v2.3.856: 모든 열 가운데 정렬
   h += '<div style="font-size:13px;font-weight:800;color:#0f172a;margin:4px 0 6px">광고별 합계</div><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">' +
     th('광고') + th('일수') + th('지출') + th('노출') + th('훅률') + th('유지율') + th('링크 클릭') + th('링크 CTR') + th('CPC') + th('랜딩 조회') + th('랜딩율') + th('구매') + th('전환율') + th('CPA') + th('ROAS') + '</tr></thead><tbody>';
   list.forEach(a => { h += '<tr style="border-bottom:1px solid #f1f5f9">' + td('<b>' + _mEsc(a.ad) + '</b><div style="font-size:10.5px;color:#94a3b8">' + _mEsc(a.campaign) + '</div>', 'left') + td(a.days) + td(_mWon(a.spend)) + td(_mNum(a.impressions)) + td(_mPct(a.hookRate, 1)) + td(_mPct(a.holdRate, 1)) + td(_mNum(a.linkClicks)) + td(_mPct(a.linkCtr)) + td(_mWon(a.cpc)) + td(_mNum(a.landingPageViews)) + td(_mPct(a.lpvRate, 0)) + td(_mNum(a.purchases)) + td(_mPct(a.cvr)) + td(a.purchases ? _mWon(a.cpa) : '-') + td(_mNum(a.roas, 2)) + '</tr>'; });
