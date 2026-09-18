@@ -1241,7 +1241,9 @@ tr:last-child td { border-bottom:none; }
           <label style="margin:0">비고 / 상세 내용</label>
           <button type="button" class="btn btn-sm" id="btn-apx-tpl">🔄 기본 포맷</button>
         </div>
-        <textarea class="fi ap-ta" id="apx-note" rows="8" placeholder="분류를 선택하면 기본 포맷이 자동 채워집니다"></textarea>
+        <!-- v0.93.8: 서식 편집기 — id 그대로, .value 는 _rtBridge 가 이어 준다 -->
+        <div class="rt-toolbar" data-for="apx-note"></div>
+        <div class="rt-editor fi" id="apx-note" contenteditable="true" data-ph="분류를 선택하면 기본 포맷이 자동 채워집니다" style="min-height:200px"></div>
       </div>
       <div class="fld"><label>📎 영수증 / 이미지 / 파일 첨부</label>
         <div class="up-list" id="apx-files"></div>
@@ -1286,7 +1288,9 @@ tr:last-child td { border-bottom:none; }
           <label style="margin:0">상세 내용</label>
           <button type="button" class="btn btn-sm" id="btn-apn2-tpl">🔄 기본 포맷</button>
         </div>
-        <textarea class="fi ap-ta" id="apn2-note" rows="10" placeholder="분류를 선택하면 기본 포맷이 자동 채워집니다"></textarea>
+        <!-- v0.93.8: 서식 편집기 -->
+        <div class="rt-toolbar" data-for="apn2-note"></div>
+        <div class="rt-editor fi" id="apn2-note" contenteditable="true" data-ph="분류를 선택하면 기본 포맷이 자동 채워집니다" style="min-height:240px"></div>
       </div>
       <div class="fld"><label>📎 파일 / 이미지 첨부</label>
         <div class="up-list" id="apn2-files"></div>
@@ -1540,7 +1544,7 @@ import { getStorage, ref as sRef, uploadBytes, getDownloadURL }
 import { getFunctions, httpsCallable }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
-const STAFF_VERSION = 'v0.93.7';
+const STAFF_VERSION = 'v0.93.8';
 console.log('[르니브 직원 ERP] ' + STAFF_VERSION);
 
 /* 데모 모드 — 로그인 없이 화면 확인용 (world 앱의 ?demo=1 과 같은 원칙: 유일한 더미 데이터 예외)
@@ -4041,6 +4045,9 @@ const RT_BTNS = `
   <button type="button" data-cmd="underline" title="밑줄"><u>U</u></button>
   <button type="button" data-cmd="strikeThrough" title="취소선"><s>S</s></button>
   <span class="sep"></span>
+  <select data-cmd="fontSize" title="글자 크기"><option value="">크기</option><option value="2">작게</option><option value="3">보통</option><option value="5">크게</option><option value="6">제목</option></select>
+  <select data-cmd="foreColor" title="글자색"><option value="">글자색</option><option value="#dc2626">빨강</option><option value="#2563eb">파랑</option><option value="#16a34a">초록</option><option value="#d97706">주황</option><option value="#7c3aed">보라</option><option value="#0f172a">검정</option></select>
+  <span class="sep"></span>
   <button type="button" data-cmd="insertUnorderedList" title="글머리 목록">• 목록</button>
   <button type="button" data-cmd="insertOrderedList" title="번호 목록">1. 목록</button>
   <span class="sep"></span>
@@ -4062,16 +4069,44 @@ function _rtInsert(ed, range, html) {
   if (range) { s.removeAllRanges(); s.addRange(range); }
   document.execCommand('insertHTML', false, html);
 }
+/* v0.93.8: 결재 문서 편집기 — 서식 본문을 문자열로 저장·표시 */
+function _rtIsHtml(s) { return /<\/?[a-z][^>]*>/i.test(String(s == null ? '' : s)); }
+function _rtNoteHtml(s) {
+  s = String(s == null ? '' : s);
+  if (!_rtIsHtml(s)) return esc(s);
+  return '<div class="rt-view" style="white-space:normal;font-family:inherit;font-size:13px;line-height:1.7">' + _rtSanitize(s) + '</div>';
+}
+function _rtBridge(id) {
+  const ed = $(id);
+  if (!ed || ed._rtBridged) return;
+  ed._rtBridged = true;
+  Object.defineProperty(ed, 'value', {
+    configurable: true,
+    get() { const h = ed.innerHTML; if (!_plainText(h) && !/<img/i.test(h)) return ''; return _rtSanitize(h); },
+    set(v) { v = String(v == null ? '' : v); if (_rtIsHtml(v)) ed.innerHTML = _rtSanitize(v); else ed.innerText = v; }
+  });
+}
 function buildRtToolbars() {
+  ['apx-note', 'apn2-note'].forEach(_rtBridge);
   document.querySelectorAll('.rt-toolbar[data-for]').forEach(tb => {
   if (tb.dataset.rtReady === '1') return;      // 이미 배선됨
   tb.dataset.rtReady = '1';
   tb.innerHTML = RT_BTNS;
   const ed = $(tb.dataset.for);
   tb.querySelectorAll('button').forEach(b => b.onmousedown = e => e.preventDefault());   // 선택영역 유지
-  tb.querySelectorAll('[data-cmd]').forEach(b => b.onclick = () => {
+  tb.querySelectorAll('button[data-cmd]').forEach(b => b.onclick = () => {
     ed.focus();
     document.execCommand(b.dataset.cmd, false, null);
+  });
+  // v0.93.8: 글자색·크기 select — 누르는 순간 선택영역을 잡아 두고 바꾼 뒤 복원
+  tb.querySelectorAll('select[data-cmd]').forEach(sl => {
+    sl.onmousedown = () => { sl._range = _rtSaveRange(ed); };
+    sl.onchange = () => {
+      const v = sl.value; sl.value = ''; if (!v) return;
+      ed.focus();
+      if (sl._range) { const s = window.getSelection(); s.removeAllRanges(); s.addRange(sl._range); }
+      document.execCommand(sl.dataset.cmd, false, v);
+    };
   });
   tb.querySelector('[data-img]').onclick = () => {
     const range = _rtSaveRange(ed);
@@ -6854,15 +6889,16 @@ function apxAdBox() {
   if (on) $('apx-ad-shop').innerHTML = '<option value="">— 쇼핑몰 선택 —</option>'
     + (PT.shop || []).map(s => `<option value="${esc(s.id)}">${esc(s.company || s.name || '')}</option>`).join('');
 }
+const _tplNorm = v => String(v || '').replace(/\s+/g, ' ').trim();   // v0.93.8: 서식 본문은 글자만 비교
 function apxSetTpl(force) {
   const ta = $('apx-note'), cat = $('apx-cat').value;
-  const cur = (ta.value || '').trim();
-  if (force || !cur || Object.values(APX_TPL).some(x => x.trim() === cur)) ta.value = APX_TPL[cat] || APX_TPL.other;
+  const cur = _tplNorm(_plainText(ta.value || ''));
+  if (force || !cur || Object.values(APX_TPL).some(x => _tplNorm(x) === cur)) ta.value = APX_TPL[cat] || APX_TPL.other;
 }
 function apn2SetTpl(force) {
   const ta = $('apn2-note'), cat = $('apn2-cat').value;
-  const cur = (ta.value || '').trim();
-  if (force || !cur || Object.values(APN_TPL).some(x => x.trim() === cur)) ta.value = APN_TPL[cat] || APN_TPL['기타'];
+  const cur = _tplNorm(_plainText(ta.value || ''));
+  if (force || !cur || Object.values(APN_TPL).some(x => _tplNorm(x) === cur)) ta.value = APN_TPL[cat] || APN_TPL['기타'];
 }
 function apnPhase() {
   const el = document.querySelector('input[name="apn2-phase"]:checked');
@@ -7055,7 +7091,7 @@ function ap1SheetHtml(kind, r) {
             + '</span>') : ''}
       ${isExp && r.category === 'ad' ? row('광고 집행',
           esc(r.adPlatform || '') + ' · ' + esc(r.adStartDate || '') + ' ~ ' + esc(r.adEndDate || '')) : ''}
-      <tr><th>${isExp ? '비고 / 상세' : '상세 내용'}</th><td class="body">${esc(r.note || '')}</td></tr>
+      <tr><th>${isExp ? '비고 / 상세' : '상세 내용'}</th><td class="body">${_rtNoteHtml(r.note || '')}</td></tr>
       ${files.length ? row('첨부', files.map(f =>
         `<a href="${esc(f.url)}" target="_blank" rel="noopener" style="color:var(--brand-deep)">${upIcon(f.name)} ${esc(f.name)}</a>`).join('<br>')) : ''}
     </table>

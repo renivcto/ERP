@@ -790,6 +790,19 @@ tbody tr:last-child{border-bottom:none}
 .fi,.fs,.fta{width:100%;padding:9px 13px;border:1px solid var(--gray-200);border-radius:9px;font-size:13px;font-family:var(--font);color:var(--gray-800);outline:none;transition:border .12s,box-shadow .12s;background:#fff;letter-spacing:-0.15px}
 .fi:focus,.fs:focus,.fta:focus{border-color:#0a0a0a;box-shadow:0 0 0 3px rgba(10,10,10,.06)}
 .fta{resize:vertical;min-height:72px;line-height:1.6}
+/* v2.3.850: 결재 문서 서식 편집기 */
+.rt-toolbar{display:flex;gap:3px;flex-wrap:wrap;align-items:center;border:1px solid #e2e8f0;border-bottom:none;border-radius:8px 8px 0 0;background:#f8fafc;padding:5px 8px}
+.rt-toolbar button,.rt-toolbar select{border:1px solid transparent;background:none;border-radius:6px;padding:3px 8px;font-size:12px;color:#475569;font-weight:600;cursor:pointer;height:26px;line-height:1}
+.rt-toolbar button:hover,.rt-toolbar select:hover{background:#fff;border-color:#e2e8f0}
+.rt-toolbar .sep{width:1px;background:#e2e8f0;margin:2px 3px;align-self:stretch}
+.rt-editor{min-height:200px;max-height:46vh;overflow-y:auto;border:1px solid #e2e8f0;border-radius:0 0 8px 8px;padding:10px 12px;background:#fff;line-height:1.7;font-size:13px;color:#0f172a;outline:none;word-break:break-word}
+.rt-editor:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.15)}
+.rt-editor:empty:before{content:attr(data-ph);color:#94a3b8;pointer-events:none}
+.rt-editor img,.rt-view img{max-width:100%;height:auto;display:block;margin:6px 0;border-radius:6px}
+.rt-editor table,.rt-view table{border-collapse:collapse;margin:6px 0}
+.rt-editor td,.rt-editor th,.rt-view td,.rt-view th{border:1px solid #cbd5e1;padding:4px 8px;min-width:40px}
+.rt-editor ul,.rt-editor ol,.rt-view ul,.rt-view ol{padding-left:22px;margin:4px 0}
+.rt-editor p,.rt-view p{margin:0}
 .fg2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .fg3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
 .full{grid-column:1/-1}
@@ -5748,7 +5761,9 @@ EXP YYYYMMDD 까지</textarea></div>
           <label style="margin:0">상세 내용</label>
           <button type="button" onclick="resetApnNoteToTemplate()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:3px 9px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer" title="선택한 분류의 기본 포맷으로 되돌리기">🔄 기본 포맷</button>
         </div>
-        <textarea class="fta" id="apn-note" rows="10" placeholder="분류를 선택하면 기본 포맷이 자동 채워집니다" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.55"></textarea>
+        <!-- v2.3.850: 서식 편집기 (굵게·색·크기·목록·표·링크·이미지). id 는 그대로 — .value 를 JS 에서 이어 준다 -->
+        <div class="rt-toolbar" data-for="apn-note"></div>
+        <div class="rt-editor" id="apn-note" contenteditable="true" data-ph="분류를 선택하면 기본 포맷이 자동 채워집니다" style="min-height:240px"></div>
       </div>
       <div class="fg">
         <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
@@ -5922,7 +5937,9 @@ EXP YYYYMMDD 까지</textarea></div>
           <label style="margin:0">비고 / 상세 내용</label>
           <button type="button" onclick="resetApeNoteToTemplate()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;padding:3px 9px;border-radius:5px;font-size:10.5px;font-weight:700;cursor:pointer" title="선택한 분류의 기본 포맷으로 되돌리기">🔄 기본 포맷</button>
         </div>
-        <textarea class="fta" id="ape-note" rows="8" placeholder="분류를 선택하면 기본 포맷이 자동 채워집니다" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.55"></textarea>
+        <!-- v2.3.850: 서식 편집기 -->
+        <div class="rt-toolbar" data-for="ape-note"></div>
+        <div class="rt-editor" id="ape-note" contenteditable="true" data-ph="분류를 선택하면 기본 포맷이 자동 채워집니다" style="min-height:200px"></div>
       </div>
       <!-- v1.9.694: 견적서 첨부 (다중) -->
       <div class="fg">
@@ -6252,7 +6269,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.849';
+const ERP_VERSION = 'v2.3.850';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -41435,14 +41452,8 @@ let _apnAttachments = [];
 function onApnCategoryChange() {
   const cat = ($('apn-category') && $('apn-category').value) || '기타';
   const ta = $('apn-note');
-  if (ta) {
-    const cur = (ta.value || '').trim();
-    // 현재 내용이 비어있거나 다른 템플릿과 일치하면 자동 교체, 그렇지 않으면 확인 후 교체
-    const isTemplate = !cur || Object.values(APN_TEMPLATES).some(t => t.trim() === cur);
-    if (isTemplate) {
-      ta.value = APN_TEMPLATES[cat] || APN_TEMPLATES['기타'];
-    }
-  }
+  // v2.3.850: 서식 편집기 — 비어 있거나 손대지 않은 템플릿이면 자동 교체 (글자만 비교)
+  if (ta && _rtIsTemplate(ta, APN_TEMPLATES)) ta.value = APN_TEMPLATES[cat] || APN_TEMPLATES['기타'];
   // v1.9.307: 단계(phase) 행은 '기안서' 분류일 때만 노출
   const phaseRow = $('apn-phase-row');
   if (phaseRow) phaseRow.style.display = (cat === '기안서') ? '' : 'none';
@@ -41464,8 +41475,7 @@ function resetApnNoteToTemplate() {
   const cat = ($('apn-category') && $('apn-category').value) || '기타';
   const ta = $('apn-note');
   if (!ta) return;
-  const cur = (ta.value || '').trim();
-  if (cur && !Object.values(APN_TEMPLATES).some(t => t.trim() === cur)) {
+  if (!_rtIsTemplate(ta, APN_TEMPLATES)) {   // v2.3.850
     if (!confirm('작성 중인 내용이 있습니다. 기본 포맷으로 덮어쓸까요?')) return;
   }
   ta.value = APN_TEMPLATES[cat] || APN_TEMPLATES['기타'];
@@ -42184,12 +42194,8 @@ function onApeCategoryChange() {
     }
   }
   if (!ta) return;
-  const cur = (ta.value || '').trim();
-  // 비어있거나 이전 템플릿과 일치하면 자동 교체
-  const isTemplate = !cur || Object.values(APE_TEMPLATES).some(t => t.trim() === cur);
-  if (isTemplate) {
-    ta.value = APE_TEMPLATES[cat] || APE_TEMPLATES['other'];
-  }
+  // v2.3.850: 서식 편집기 — 비어 있거나 손대지 않은 템플릿이면 자동 교체 (글자만 비교)
+  if (_rtIsTemplate(ta, APE_TEMPLATES)) ta.value = APE_TEMPLATES[cat] || APE_TEMPLATES['other'];
 }
 
 // v1.9.500: 지출결의서 광고비 — 쇼핑몰 드롭다운 채우기
@@ -42206,8 +42212,7 @@ function resetApeNoteToTemplate() {
   const cat = ($('ape-category') && $('ape-category').value) || 'other';
   const ta = $('ape-note');
   if (!ta) return;
-  const cur = (ta.value || '').trim();
-  if (cur && !Object.values(APE_TEMPLATES).some(t => t.trim() === cur)) {
+  if (!_rtIsTemplate(ta, APE_TEMPLATES)) {   // v2.3.850
     if (!confirm('작성 중인 내용이 있습니다. 기본 포맷으로 덮어쓸까요?')) return;
   }
   ta.value = APE_TEMPLATES[cat] || APE_TEMPLATES['other'];
@@ -42285,6 +42290,175 @@ function _apePasteHandler(ev) {
   if (handled) { ev.preventDefault(); showNotif('📷 이미지가 첨부되었습니다','success'); }
 }
 try { document.addEventListener('paste', _apePasteHandler); } catch(_){}
+
+// ═══════════ v2.3.850: 결재 문서 상세 내용 서식 편집기 (지출결의서·일반결재) ═══════════
+//   본문은 HTML 문자열로 저장한다(서식 태그가 있을 때). 옛 문서(일반 텍스트)는 그대로 읽힌다.
+//   이미지는 Firebase Storage 에 올리고 URL 만 넣는다 — base64 를 본문에 넣으면 Firestore 문서(1MB)가 터진다.
+//   편집기 요소에 .value 를 정의해 두어, 기존 코드의 $('ape-note').value 읽기/쓰기가 그대로 동작한다.
+function _rtIsHtml(s) { return /<\/?[a-z][^>]*>/i.test(String(s == null ? '' : s)); }
+function _rtSanitize(html) {
+  const t = document.createElement('div');
+  t.innerHTML = String(html == null ? '' : html);
+  t.querySelectorAll('script,style,iframe,object,embed,link,meta,form,input,button,textarea,select').forEach(n => n.remove());
+  const okStyle = /^(color|background-color|background|font-weight|font-size|font-style|text-decoration|text-align|text-decoration-line)$/i;
+  t.querySelectorAll('*').forEach(n => {
+    Array.from(n.attributes).forEach(a => {
+      const nm = a.name.toLowerCase();
+      if (nm.indexOf('on') === 0 || nm === 'class' || nm === 'id' || nm === 'contenteditable') { n.removeAttribute(a.name); return; }
+      if ((nm === 'href' || nm === 'src') && !/^\s*(https?:|mailto:|tel:|#)/i.test(a.value)) { n.removeAttribute(a.name); return; }
+      if (nm === 'style') {
+        const kept = a.value.split(';').map(d => d.trim()).filter(d => { const k = d.split(':')[0]; return k && okStyle.test(k.trim()) && !/url\(|expression/i.test(d); });
+        if (kept.length) n.setAttribute('style', kept.join(';')); else n.removeAttribute('style');
+      }
+    });
+    if (n.tagName === 'A') { n.setAttribute('target', '_blank'); n.setAttribute('rel', 'noopener'); }
+  });
+  t.querySelectorAll('img:not([src])').forEach(n => n.remove());   // src 가 걸러진(data: 등) 빈 이미지 제거
+  return t.innerHTML;
+}
+function _rtPlainText(s) {
+  s = String(s == null ? '' : s);
+  if (!_rtIsHtml(s)) return s;
+  const t = document.createElement('div');
+  t.innerHTML = _rtSanitize(s).replace(/<br\s*\/?>/gi, '\n').replace(/<\/(div|p|li|tr|h[1-6]|blockquote)>/gi, '\n');
+  return (t.textContent || '').replace(/\u00a0/g, ' ');
+}
+const _RT_VIEW_CSS = '<style>.rt-view img{max-width:100%;height:auto;display:block;margin:6px 0;border-radius:6px}.rt-view table{border-collapse:collapse;margin:6px 0}.rt-view td,.rt-view th{border:1px solid #cbd5e1;padding:4px 8px;min-width:40px}.rt-view ul,.rt-view ol{padding-left:22px;margin:4px 0}.rt-view p{margin:0}</style>';
+// 본문 표시 — 서식이면 정화된 HTML, 일반 텍스트면 줄바꿈 보존 + 링크화. mode 'mono' = 지출결의서 상세표(고정폭)
+function _rtNoteHtml(s, mode) {
+  s = String(s == null ? '' : s);
+  if (!s.trim()) return '';
+  if (_rtIsHtml(s)) return _RT_VIEW_CSS + '<div class="rt-view" style="line-height:1.7;font-size:13px;color:#1e293b;word-break:break-word">' + _rtSanitize(s) + '</div>';
+  const font = (mode === 'mono') ? 'font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.65'
+                                 : "line-height:1.85;font-size:13.5px;color:#1e293b;font-family:'Noto Sans KR','Nanum Gothic',sans-serif;min-height:60px";
+  return '<div style="white-space:pre-wrap;' + font + '">' + _linkifyText(s) + '</div>';
+}
+// 템플릿 판정 — 비어 있거나(이미지 없음) 글자가 어떤 기본 포맷과 같으면 true
+function _rtIsTemplate(ed, TEMPLATES) {
+  const norm = v => String(v || '').replace(/\s+/g, ' ').trim();
+  const cur = norm(_rtPlainText(ed.value || ''));
+  if (!cur) return !/<img/i.test(String(ed.value || ''));
+  return Object.values(TEMPLATES || {}).some(t => norm(t) === cur);
+}
+async function _rtUploadImage(file) {
+  if (!file || !/^image\//.test(file.type || '')) throw new Error('이미지 파일만 넣을 수 있습니다');
+  if (file.size > 10 * 1024 * 1024) throw new Error('이미지는 10MB 이하만 넣을 수 있습니다');
+  if (typeof window._storageUploadDataUrl !== 'function') throw new Error('저장소 연결 전입니다 — 잠시 후 다시 시도해 주세요');
+  const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(file); });
+  const ext = (String(file.name || '').split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'png';
+  const path = 'erp/note_img/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
+  const url = await window._storageUploadDataUrl(path, dataUrl, file.type);
+  if (!_stoIsHttp(url)) throw new Error('업로드 결과가 올바르지 않습니다');
+  return url;
+}
+function _rtSaveRange(ed) {
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount) { const r = sel.getRangeAt(0); if (ed.contains(r.commonAncestorContainer)) return r.cloneRange(); }
+  return null;
+}
+function _rtRestore(ed, range) {
+  ed.focus();
+  if (range) { const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
+}
+function _rtExec(ed, range, cmd, val) { _rtRestore(ed, range); document.execCommand(cmd, false, val == null ? null : val); }
+function _rtInsertHtml(ed, range, html) { _rtRestore(ed, range); document.execCommand('insertHTML', false, html); }
+async function _rtInsertImageFile(ed, range, file) {
+  try {
+    showNotif('🖼 이미지 올리는 중…', 'info');
+    const url = await _rtUploadImage(file);
+    _rtInsertHtml(ed, range, '<img src="' + url + '" alt="' + escapeHtml(file.name || 'image') + '"><br>');
+    showNotif('🖼 이미지를 넣었습니다', 'success');
+  } catch (e) { showNotif('⚠️ 이미지 넣기 실패: ' + (e && e.message ? e.message : e), 'error'); }
+}
+const _RT_BTNS = '<button type="button" data-cmd="bold" title="굵게"><b>B</b></button>'
+  + '<button type="button" data-cmd="italic" title="기울임"><i>I</i></button>'
+  + '<button type="button" data-cmd="underline" title="밑줄"><u>U</u></button>'
+  + '<button type="button" data-cmd="strikeThrough" title="취소선"><s>S</s></button>'
+  + '<span class="sep"></span>'
+  + '<select data-cmd="fontSize" title="글자 크기"><option value="">크기</option><option value="2">작게</option><option value="3">보통</option><option value="5">크게</option><option value="6">제목</option></select>'
+  + '<select data-cmd="foreColor" title="글자색"><option value="">글자색</option><option value="#dc2626">빨강</option><option value="#2563eb">파랑</option><option value="#16a34a">초록</option><option value="#d97706">주황</option><option value="#7c3aed">보라</option><option value="#64748b">회색</option><option value="#0f172a">검정</option></select>'
+  + '<button type="button" data-hilite title="형광펜 (다시 누르면 해제)">🖍 형광</button>'
+  + '<span class="sep"></span>'
+  + '<button type="button" data-cmd="insertUnorderedList" title="글머리 목록">• 목록</button>'
+  + '<button type="button" data-cmd="insertOrderedList" title="번호 목록">1. 목록</button>'
+  + '<span class="sep"></span>'
+  + '<button type="button" data-table title="표 삽입">⊞ 표</button>'
+  + '<button type="button" data-img title="이미지 삽입 (붙여넣기·끌어놓기도 됩니다)">🖼 이미지</button>'
+  + '<button type="button" data-link title="링크">🔗 링크</button>'
+  + '<button type="button" data-cmd="removeFormat" title="서식 지우기">지우기</button>';
+function _rtWireEditors() {
+  document.querySelectorAll('.rt-editor[contenteditable]').forEach(ed => {
+    if (ed._rtWired) return; ed._rtWired = true;
+    Object.defineProperty(ed, 'value', {
+      configurable: true,
+      get() { const h = ed.innerHTML; if (!_rtPlainText(h).trim() && !/<img/i.test(h)) return ''; return _rtSanitize(h); },
+      set(v) { v = String(v == null ? '' : v); if (_rtIsHtml(v)) ed.innerHTML = _rtSanitize(v); else ed.innerText = v; }
+    });
+    ed.addEventListener('paste', ev => {
+      const items = (ev.clipboardData && ev.clipboardData.items) || [];
+      for (const it of items) {
+        if (it.kind === 'file' && /^image\//.test(it.type || '')) {
+          const f = it.getAsFile();
+          if (f) { ev.preventDefault(); ev.stopPropagation(); _rtInsertImageFile(ed, _rtSaveRange(ed), f); return; }
+        }
+      }
+      const html = ev.clipboardData ? ev.clipboardData.getData('text/html') : '';
+      if (html) { ev.preventDefault(); ev.stopPropagation(); _rtInsertHtml(ed, _rtSaveRange(ed), _rtSanitize(html).replace(/<img[^>]*src="data:[^"]*"[^>]*>/gi, '')); }
+      else ev.stopPropagation();   // 일반 텍스트 붙여넣기는 브라우저 기본 동작(첨부 핸들러로는 안 넘김)
+    });
+    ed.addEventListener('drop', ev => {
+      const files = (ev.dataTransfer && ev.dataTransfer.files) || [];
+      const imgs = Array.from(files).filter(f => /^image\//.test(f.type || ''));
+      if (!imgs.length) return;
+      ev.preventDefault(); ev.stopPropagation();
+      let range = null;
+      try { range = document.caretRangeFromPoint ? document.caretRangeFromPoint(ev.clientX, ev.clientY) : null; } catch(_){}
+      imgs.forEach(f => _rtInsertImageFile(ed, range, f));
+    });
+  });
+  document.querySelectorAll('.rt-toolbar[data-for]').forEach(tb => {
+    if (tb.dataset.rtReady === '1') return;
+    tb.dataset.rtReady = '1';
+    tb.innerHTML = _RT_BTNS;
+    const ed = document.getElementById(tb.dataset.for);
+    if (!ed) return;
+    tb.querySelectorAll('button').forEach(b => b.onmousedown = e => e.preventDefault());   // 선택영역 유지
+    tb.querySelectorAll('button[data-cmd]').forEach(b => b.onclick = () => _rtExec(ed, null, b.dataset.cmd));
+    tb.querySelectorAll('select[data-cmd]').forEach(sl => {
+      sl.onmousedown = () => { sl._range = _rtSaveRange(ed); };
+      sl.onchange = () => { const v = sl.value; sl.value = ''; if (!v) return; _rtExec(ed, sl._range, sl.dataset.cmd, v); };
+    });
+    tb.querySelector('[data-hilite]').onclick = () => {
+      _rtRestore(ed, null);
+      let cur = ''; try { cur = String(document.queryCommandValue('hiliteColor') || ''); } catch(_){}
+      const on = /254,\s*240,\s*138|#fef08a/i.test(cur);
+      document.execCommand('hiliteColor', false, on ? 'transparent' : '#fef08a');
+    };
+    tb.querySelector('[data-img]').onclick = () => {
+      const range = _rtSaveRange(ed);
+      const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.multiple = true;
+      inp.onchange = () => { Array.from(inp.files || []).forEach(f => _rtInsertImageFile(ed, range, f)); };
+      inp.click();
+    };
+    tb.querySelector('[data-link]').onclick = () => {
+      const range = _rtSaveRange(ed);
+      let url = prompt('링크 주소 (https://…)', 'https://'); if (!url || url === 'https://') return;
+      if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+      _rtRestore(ed, range);
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) document.execCommand('insertHTML', false, '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + escapeHtml(url) + '</a>');
+      else document.execCommand('createLink', false, url);
+    };
+    tb.querySelector('[data-table]').onclick = () => {
+      const range = _rtSaveRange(ed);
+      const r = Math.min(Math.max(parseInt(prompt('행 수 (1~10)', '3') || 0, 10) || 0, 1), 10); if (!r) return;
+      const c = Math.min(Math.max(parseInt(prompt('열 수 (1~8)', '3') || 0, 10) || 0, 1), 8); if (!c) return;
+      const row = '<tr>' + '<td><br></td>'.repeat(c) + '</tr>';
+      _rtInsertHtml(ed, range, '<table><tbody>' + row.repeat(r) + '</tbody></table><br>');
+    };
+  });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _rtWireEditors); else _rtWireEditors();
 
 function openExpenseModal() {
   _editingExpenseId = null; // v1.9.229: 신규 등록 모드
@@ -42639,7 +42813,8 @@ function saveExpense() {
   }
   // v1.9.229: 수정 모드 지원 / v1.9.233: 계좌번호 · 다중 첨부 지원
   if (_editingExpenseId) {
-    const ex = (DB.expenses||[]).find(x => x.id === _editingExpenseId);
+    // v2.3.850: String 비교 — 직원용 문자열 id('SX…')·onclick 문자열 id 가 === 에서 빠져 '수정'이 새 문서로 저장되던 사고(#193→#194 중복)
+    const ex = (DB.expenses||[]).find(x => x && String(x.id) === String(_editingExpenseId));
     if (ex) {
       const _prevCat = ex.category;
       ex.category = _category;
@@ -42720,7 +42895,10 @@ function saveExpense() {
       showNotif('✅ 지출결의서 수정 완료', 'success');
       return;
     }
+    // v2.3.850: 수정 대상을 못 찾으면 새 문서로 떨어지지 않는다 (중복 생성 차단)
     _editingExpenseId = null;
+    showNotif('⚠️ 수정 대상 지출결의서를 찾지 못했습니다 — 새로고침 후 다시 열어 주세요', 'error');
+    return;
   }
   // v1.9.308: 지급 방법 저장. 법인카드면 카드전표 자동 수령 처리(taxInvoice='수령완료')
   const _newPm = ($('ape-paymethod') && $('ape-paymethod').value) || '계좌이체';
@@ -44575,10 +44753,10 @@ function openNonPoApprovalDetail(approvalId) {
   const attachBlock = _apnAttachBlockHtml(a);  // v2.3.334: 첨부 열기/다운로드 통일(마커 해석)
 
   // ── 본문 (legacy "1. 구분" 블록 제거 + 번호 재정렬) ──
-  const sanitizedNote = _sanitizeDraftNote(a.note||'');
-  const noteHtml = sanitizedNote
-    ? `<div style="white-space:pre-wrap;line-height:1.85;font-size:13.5px;color:#1e293b;font-family:'Noto Sans KR','Nanum Gothic',sans-serif;min-height:60px">${_linkifyText(sanitizedNote)}</div>`
-    : `<div style="color:#94a3b8;font-size:12.5px;font-style:italic;text-align:center;padding:30px 0">(본문 내용 없음)</div>`;
+  // v2.3.850: 서식(HTML) 본문은 그대로 표시, 일반 텍스트만 legacy 정리(_sanitizeDraftNote)
+  const sanitizedNote = _rtIsHtml(a.note||'') ? (a.note||'') : _sanitizeDraftNote(a.note||'');
+  const noteHtml = _rtNoteHtml(sanitizedNote)
+    || `<div style="color:#94a3b8;font-size:12.5px;font-style:italic;text-align:center;padding:30px 0">(본문 내용 없음)</div>`;
 
   // ── 결어 (v1.9.328 — 기안자 이름 대신 회사명 + 원형 인감으로 공식 문서화) ──
   //   기안자는 위 메타 표에 이미 명시되어 있으므로 하단은 회사 공식 서명으로 대체
@@ -45378,10 +45556,10 @@ function _nonPoDocInner(a, signMode) {
   const attaches = Array.isArray(a.attachments) ? a.attachments : [];
   const attachBlock = _apnAttachBlockHtml(a);  // v2.3.334: 첨부 열기/다운로드 통일(마커 해석)
 
-  const sanitizedNote = _sanitizeDraftNote(a.note||'');
-  const noteHtml = sanitizedNote
-    ? `<div style="white-space:pre-wrap;line-height:1.85;font-size:13.5px;color:#1e293b;font-family:'Noto Sans KR','Nanum Gothic',sans-serif;min-height:60px">${_linkifyText(sanitizedNote)}</div>`
-    : `<div style="color:#94a3b8;font-size:12.5px;font-style:italic;text-align:center;padding:30px 0">(본문 내용 없음)</div>`;
+  // v2.3.850: 서식(HTML) 본문은 그대로 표시, 일반 텍스트만 legacy 정리(_sanitizeDraftNote)
+  const sanitizedNote = _rtIsHtml(a.note||'') ? (a.note||'') : _sanitizeDraftNote(a.note||'');
+  const noteHtml = _rtNoteHtml(sanitizedNote)
+    || `<div style="color:#94a3b8;font-size:12.5px;font-style:italic;text-align:center;padding:30px 0">(본문 내용 없음)</div>`;
 
   const signBlock = _nonPoSignBoxHtml(a, signMode);
 
@@ -47593,8 +47771,8 @@ function openApprovalSheet(kind, id) {
           return h; })()
     +   (!isExp && r.phase ? row('단계', r.phase === 'planning' ? '📋 사전 품의' : '🚀 실행 기안') : '')
     +   '<tr><th style="background:#f1f5f9;border:1px solid #cbd5e1;padding:7px 10px;text-align:left;width:118px;font-weight:700">'
-    +   (isExp ? '비고 / 상세' : '상세 내용') + '</th><td style="border:1px solid #cbd5e1;padding:7px 10px;white-space:pre-wrap;'
-    +   'font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.65">' + _linkifyText(r.note || '') + '</td></tr>'   // v2.3.849: 비고의 URL(결제 링크 등)을 바로 클릭 가능하게
+    +   (isExp ? '비고 / 상세' : '상세 내용') + '</th><td style="border:1px solid #cbd5e1;padding:7px 10px">'
+    +   _rtNoteHtml(r.note || '', 'mono') + '</td></tr>'   // v2.3.849 링크화 → v2.3.850 서식(HTML) 본문 표시
     + '</table>'
     // v2.3.729: 인쇄본에는 있는데 모달에서 빠져 있던 아랫부분 — 집행내역·적요·첨부
     +   (isExp ? _apSheetExecHtml(r) : '')
@@ -59695,10 +59873,13 @@ async function _staffInboxDrain(verbose) {
         // 1차 결재 흔적을 본문 맨 위에 남긴다 — 임원용 결재 시트에서 바로 보인다
         if (box.requireL1 && r.l1By && String(r.note || '').indexOf('[1차 결재 완료]') < 0) {
           const _d = new Date(Number(r.l1At) || Date.now());
-          r.note = '[1차 결재 완료] ' + (r.l1Name || r.l1By) + ' · '
+          const _l1Line = '[1차 결재 완료] ' + (r.l1Name || r.l1By) + ' · '
             + _d.getFullYear() + '-' + String(_d.getMonth() + 1).padStart(2, '0') + '-' + String(_d.getDate()).padStart(2, '0')
-            + (r.l1Note ? ' · ' + r.l1Note : '')
-            + '\n(직원용 ERP 상신 — 작성자 ' + (r._byName || '-') + ')\n\n' + String(r.note || '');
+            + (r.l1Note ? ' · ' + r.l1Note : '');
+          const _byLine = '(직원용 ERP 상신 — 작성자 ' + (r._byName || '-') + ')';
+          // v2.3.850: 직원이 서식 편집기로 쓴 본문(HTML)이면 HTML 로 앞에 붙인다
+          r.note = _rtIsHtml(r.note) ? ('<div><b>' + escapeHtml(_l1Line) + '</b></div><div>' + escapeHtml(_byLine) + '</div><div><br></div>' + String(r.note || ''))
+                                    : (_l1Line + '\n' + _byLine + '\n\n' + String(r.note || ''));
         }
         if (!have.has(String(r.id))) {
           DB[box.arr].push(Object.assign({}, r, { applied: undefined })); added++;
