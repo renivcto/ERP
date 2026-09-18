@@ -134,11 +134,13 @@ function _mReportHtml(rep) {
 function _mPeriodHtml() {
   const on = "_periodOnChange('ma')";
   const inp = (cls, type, show, extra) => '<input class="fi period-' + cls + '" type="' + type + '" onchange="' + on + '" oninput="' + on + '" style="' + (show ? '' : 'display:none;') + 'width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0"' + (extra || '') + '>';
+  // v2.3.854: 기본값 = 월별 · 이번 달 (첫 렌더의 기간 계산이 _periodInit 보다 먼저라 값을 미리 넣어 둔다)
+  const _now = new Date(), _ym = _now.getFullYear() + '-' + String(_now.getMonth() + 1).padStart(2, '0');
   return '<div class="period-filter" data-prefix="ma" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">' +
     '<span style="font-size:12px;color:#475569;font-weight:700;flex-shrink:0">📅 기간</span>' +
     '<select class="fs period-mode" onchange="' + on + '" style="width:90px;font-size:12px;height:32px;padding:5px 8px;flex-shrink:0">' +
-    '<option value="all" selected>전체</option><option value="year">연별</option><option value="month">월별</option><option value="week">주별</option><option value="day">일별</option><option value="range">기간별</option></select>' +
-    inp('year', 'number', false, ' min="2024" max="2100" step="1"') + inp('month', 'month', false) + inp('week', 'week', false) + inp('day', 'date', false) + inp('from', 'date', false) +
+    '<option value="all">전체</option><option value="year">연별</option><option value="month" selected>월별</option><option value="week">주별</option><option value="day">일별</option><option value="range">기간별</option></select>' +
+    inp('year', 'number', false, ' min="2024" max="2100" step="1"') + inp('month', 'month', true, ' value="' + _ym + '"') + inp('week', 'week', false) + inp('day', 'date', false) + inp('from', 'date', false) +
     '<span class="period-tilde" style="display:none;color:var(--gray-400);font-size:12px;flex-shrink:0">~</span>' + inp('to', 'date', false) +
     '<button class="btn btn-primary btn-sm" onclick="' + on + '" style="height:32px;padding:5px 12px;font-size:12px;flex-shrink:0;white-space:nowrap">🔍 조회</button></div>';
 }
