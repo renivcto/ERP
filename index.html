@@ -3266,7 +3266,7 @@ try{
               <th style="width:110px">작성일자</th><th style="width:70px">구분</th><th>공급받는자</th>
               <th style="width:120px">과세기간</th><th style="width:56px">건수</th>
               <th style="width:110px">공급가액</th><th style="width:100px">세액</th><th style="width:110px">합계</th>
-              <th style="width:86px">상황</th><th style="width:250px">작업</th>
+              <th style="width:132px">작업</th><th style="width:56px"></th>
             </tr></thead>
             <tbody id="tax-tbody"></tbody>
           </table>
@@ -6358,7 +6358,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.862';
+const ERP_VERSION = 'v2.3.863';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30140,6 +30140,8 @@ async function taxBuildMonthly(silent){
       ym: ym, from: rng.from, to: rng.to, issueDate: _taxIssueDate(ym), dueDate: _taxDueDate(ym),
       supply: supply, tax: tax, total: supply + tax,
       lines: lines, srcIds: list.map(x => x.id), source: info.source,
+      // v2.3.863: 수정 화면에서 수량·단가를 다시 계산할 때 쓴다 (원천 출고 기준)
+      vatMode: (list[0] && list[0].vatMode) || 'exclude',
       purpose: '청구'
     };
     if (exist) { Object.assign(exist, base); exist.updatedAt = Date.now(); updated++; }
@@ -30187,6 +30189,7 @@ async function taxBuildSelected(){
       dueDate: _taxDueDate(String(sh.date||'').slice(0,7)),
       supply: A.supplySum, tax: A.taxSum, total: A.total,
       lines: _taxShipLines(sh), srcIds: [sh.id], source: 'consign', purpose: '청구',
+      vatMode: sh.vatMode || 'exclude',
       status: 'draft', createdAt: Date.now(), createdBy: _taxMe()
     });
     made++;
@@ -30211,39 +30214,44 @@ async function renderTaxInvoicePage(){
   _taxMirrorWebhook();
   const ym = _taxYm();
   const won = n => '₩' + (Number(n)||0).toLocaleString();
-  const badge = st => st === 'issued' ? '<span class="badge" style="background:#dcfce7;color:#166534;font-size:11px">발행 완료</span>'
-    : st === 'issuing' ? '<span class="badge" style="background:#ede9fe;color:#5b21b6;font-size:11px" title="팝빌로 발행 중입니다 — 보통 1분 안에 끝납니다">발행 중…</span>'
-    : st === 'ready' ? '<span class="badge" style="background:#dbeafe;color:#1e40af;font-size:11px" title="검토 후 [발행하기] 를 눌러야 실제로 발행됩니다">발행 대기</span>'
-    : '<span class="badge" style="background:#fef3c7;color:#92400e;font-size:11px">작성중</span>';
   const oldTag = v => _taxTooOld(v.ym) ? '<div style="font-size:10.5px;color:var(--gray-400);margin-top:3px">🔒 기간 외</div>' : '';
 
   const list = (window._tax.invoices||[]).filter(v => v && (v.ym === ym || String(v.issueDate||'').slice(0,7) === ym))
     .slice().sort((a,b) => String(b.issueDate||'').localeCompare(String(a.issueDate||'')) || String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
   document.getElementById('tax-count').textContent = list.length ? (list.length + '건 · 합계 ' + won(list.reduce((s,v)=>s+(Number(v.total)||0),0))) : '';
   tb.innerHTML = list.length ? list.map(v => {
+    // v2.3.863: 작업 칸은 세로로 쌓고, 삭제는 오른쪽 전용 칸으로 뺀다.
+    const _bs = 'width:100%;padding:4px 8px;font-size:11px;white-space:nowrap';
     const acts = [];
-    acts.push('<button class="btn btn-outline btn-sm" onclick="taxPreview(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px">👁️ 미리보기</button>');
-    if (v.status === 'draft') acts.push('<button class="btn btn-sm" onclick="taxMarkReady(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px;background:#1e40af;color:#fff;border:1px solid #1e40af">✅ 발행 대기로</button>');
-    if (v.status === 'ready') acts.push('<button class="btn btn-sm" onclick="taxIssue(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px;background:#0f766e;color:#fff;border:1px solid #0f766e">🔐 발행하기</button>');
-    if (v.status === 'issuing') acts.push('<button class="btn btn-outline btn-sm" onclick="taxCancelIssue(\'' + v.id + '\')" title="발행 요청을 되돌립니다 (아직 팝빌에 넘어가지 않은 경우)" style="padding:3px 8px;font-size:11px">↩️ 요청 취소</button>');
-    if (v.status === 'issued') acts.push('<button class="btn btn-outline btn-sm" onclick="taxEmail(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px">📧 이메일</button>');
-    if (v.status === 'draft' || v.status === 'ready') acts.push('<button class="btn btn-outline btn-sm" onclick="taxDelete(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px;color:#b91c1c">🗑️</button>');
+    const editable = (v.status === 'draft' || v.status === 'ready');
+    if (v.status !== 'issuing') acts.push('<button class="btn btn-outline btn-sm" onclick="taxPreview(\'' + v.id + '\')" style="' + _bs + '">👁️ 미리보기</button>');
+    if (editable) acts.push('<button class="btn btn-outline btn-sm" onclick="taxEdit(\'' + v.id + '\')" style="' + _bs + '">✏️ 수정</button>');
+    if (v.status === 'draft') acts.push('<button class="btn btn-sm" onclick="taxMarkReady(\'' + v.id + '\')" style="' + _bs + ';background:#1e40af;color:#fff;border:1px solid #1e40af;font-weight:600">✅ 발행 대기로</button>');
+    if (v.status === 'ready') acts.push('<button class="btn btn-sm" onclick="taxIssue(\'' + v.id + '\')" style="' + _bs + ';background:#0f766e;color:#fff;border:1px solid #0f766e;font-weight:600">🔐 발행하기</button>');
+    if (v.status === 'issuing') acts.push('<div style="font-size:11.5px;color:#5b21b6;font-weight:700;padding:2px 0">발행 중…</div>'
+      + '<button class="btn btn-outline btn-sm" onclick="taxCancelIssue(\'' + v.id + '\')" title="발행 요청을 되돌립니다 (아직 팝빌에 넘어가지 않은 경우)" style="' + _bs + '">↩️ 요청 취소</button>');
+    if (v.status === 'issued') acts.push('<button class="btn btn-outline btn-sm" onclick="taxEmail(\'' + v.id + '\')" style="' + _bs + '">📧 이메일</button>');
+    const delCell = editable
+      ? '<button class="btn btn-outline btn-sm" onclick="taxDelete(\'' + v.id + '\')" title="이 계산서를 삭제합니다" style="padding:3px 8px;font-size:11px;color:#b91c1c">🗑️</button>'
+      : '';
     const period = v.kind === 'monthly' ? (v.from + ' ~ ' + v.to) : (v.from || '-');
     return '<tr>'
       + '<td>' + escapeHtml(v.issueDate||'-')
         + (v.dueDate ? '<div style="font-size:10.5px;color:var(--gray-400);margin-top:2px">~' + escapeHtml(v.dueDate) + ' 발행</div>' : '') + '</td>'
       + '<td>' + (v.kind === 'monthly' ? '월 합계' : '건별') + '</td>'
-      + '<td style="text-align:left">' + escapeHtml(v.sellerName||'-') + (v.bizno ? ' <span style="color:var(--gray-400);font-size:11px">' + escapeHtml(v.bizno) + '</span>' : ' <span style="color:#b91c1c;font-size:11px">사업자번호 없음</span>') + '</td>'
+      + '<td style="text-align:left">' + escapeHtml(v.sellerName||'-')
+        + (v.bizno ? ' <span style="color:var(--gray-400);font-size:11px">' + escapeHtml(v.bizno) + '</span>' : ' <span style="color:#b91c1c;font-size:11px">사업자번호 없음</span>')
+        + (v.status === 'issued' ? '<div style="font-size:11px;color:#166534;font-weight:700;margin-top:3px">✅ 발행 완료' + (v.ntsNo ? ' <span style="font-weight:400;color:var(--gray-400)">' + escapeHtml(v.ntsNo) + '</span>' : '') + '</div>' : '')
+        + oldTag(v)
+        + (v.issueError ? '<div style="font-size:10.5px;color:#b91c1c;margin-top:3px;white-space:normal;line-height:1.35" title="' + escapeHtml(v.issueError) + '">⚠️ ' + escapeHtml(String(v.issueError).slice(0,70)) + '</div>' : '')
+        + '</td>'
       + '<td style="font-size:11.5px">' + escapeHtml(period) + '</td>'
       + '<td>' + ((v.srcIds||[]).length || 1) + '</td>'
       + '<td style="text-align:right">' + won(v.supply) + '</td>'
       + '<td style="text-align:right">' + won(v.tax) + '</td>'
       + '<td style="text-align:right;font-weight:700">' + won(v.total) + '</td>'
-      + '<td>' + badge(v.status) + oldTag(v)
-        + (v.ntsNo ? '<div style="font-size:10.5px;color:var(--gray-400);margin-top:2px">' + escapeHtml(v.ntsNo) + '</div>' : '')
-        + (v.issueError ? '<div style="font-size:10.5px;color:#b91c1c;margin-top:3px;max-width:150px;white-space:normal;line-height:1.35" title="' + escapeHtml(v.issueError) + '">⚠️ ' + escapeHtml(String(v.issueError).slice(0,60)) + '</div>' : '')
-        + '</td>'
-      + '<td><div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center">' + acts.join('') + '</div></td>'
+      + '<td><div style="display:flex;flex-direction:column;gap:4px;align-items:stretch">' + acts.join('') + '</div></td>'
+      + '<td>' + delCell + '</td>'
       + '</tr>';
   }).join('') : '<tr><td colspan="10" style="padding:26px;color:var(--gray-400)">이 달에 만들어진 세금계산서가 없습니다 — [월 합계 계산서 만들기] 를 누르세요</td></tr>';
 
@@ -30301,6 +30309,143 @@ async function taxMarkReady(id){
   renderTaxInvoicePage();
   await _taxSlackReady([v]);
   showNotif('✅ 발행 대기 — 검토 후 [🔐 발행하기] 를 누르면 실제로 발행됩니다 (#세금계산서 알림 발송)', 'success');
+}
+
+// ── 계산서 수정 (작성중 · 발행 대기 건만) ──
+//   발행 전에 작성일자·영수/청구·비고·품목을 손볼 수 있어야 한다.
+//   수량·단가를 고치면 부가세 기준(별도/포함)에 따라 그 줄만 다시 계산하고,
+//   공급가액·세액을 직접 적으면 적은 값을 그대로 쓴다(할인·조정용).
+function taxEdit(id){
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  const v = (window._tax.invoices||[]).find(x => x && x.id === id);
+  if (!v) return;
+  if (v.status === 'issued' || v.status === 'issuing') { showNotif('발행했거나 발행 중인 계산서는 수정할 수 없습니다', 'warning'); return; }
+  window._taxEditId = id;
+  const esc = s => escapeHtml(s == null ? '' : String(s));
+  const rowHtml = (l) => '<tr>'
+    + '<td><input class="fi te-date" type="date" value="' + esc(l.date||v.issueDate||'') + '" style="height:28px;font-size:11.5px;padding:3px 5px"></td>'
+    + '<td><input class="fi te-name" value="' + esc(l.name) + '" placeholder="품목명" style="height:28px;font-size:11.5px;padding:3px 6px"></td>'
+    + '<td><input class="fi te-spec" value="' + esc(l.spec) + '" placeholder="규격" style="height:28px;font-size:11.5px;padding:3px 6px"></td>'
+    + '<td><input class="fi te-qty" type="number" step="any" value="' + (Number(l.qty)||0) + '" oninput="_taxEditLine(this)" style="height:28px;font-size:11.5px;padding:3px 6px;text-align:right"></td>'
+    + '<td><input class="fi te-price" type="number" step="any" value="' + (Number(l.price)||0) + '" oninput="_taxEditLine(this)" style="height:28px;font-size:11.5px;padding:3px 6px;text-align:right"></td>'
+    + '<td><input class="fi te-supply" type="number" step="any" value="' + (Number(l.supply)||0) + '" oninput="_taxEditSum()" style="height:28px;font-size:11.5px;padding:3px 6px;text-align:right"></td>'
+    + '<td><input class="fi te-tax" type="number" step="any" value="' + (Number(l.tax)||0) + '" oninput="_taxEditSum()" style="height:28px;font-size:11.5px;padding:3px 6px;text-align:right"></td>'
+    + '<td><button class="btn btn-outline btn-sm" onclick="this.closest(\'tr\').remove();_taxEditSum()" style="padding:2px 7px;font-size:11px;color:#b91c1c">🗑️</button></td>'
+    + '</tr>';
+  document.getElementById('tax-edit-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'tax-edit-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:100002;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto';
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:1020px;width:100%;padding:22px 24px">'
+    + '<div style="font-size:16px;font-weight:800;margin-bottom:4px">✏️ 세금계산서 수정</div>'
+    + '<div style="font-size:12.5px;color:var(--gray-500);margin-bottom:14px">' + esc(v.sellerName||'') + ' · ' + esc(v.kind === 'monthly' ? (v.from + ' ~ ' + v.to) : v.from) + '</div>'
+    + '<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">'
+    + '<div class="fg" style="margin:0;min-width:160px"><label style="font-size:12px">작성일자</label><input class="fi" type="date" id="te-issue-date" value="' + esc(v.issueDate||'') + '"></div>'
+    + '<div class="fg" style="margin:0;min-width:120px"><label style="font-size:12px">영수/청구</label><select class="fs" id="te-purpose">'
+    + '<option value="청구"' + ((v.purpose||'청구') === '청구' ? ' selected' : '') + '>청구</option>'
+    + '<option value="영수"' + (v.purpose === '영수' ? ' selected' : '') + '>영수</option></select></div>'
+    + '<div class="fg" style="margin:0;min-width:150px"><label style="font-size:12px">부가세 기준</label><select class="fs" id="te-vat" onchange="_taxEditAll()">'
+    + '<option value="exclude"' + (v.vatMode !== 'include' ? ' selected' : '') + '>별도 (단가 × 10%)</option>'
+    + '<option value="include"' + (v.vatMode === 'include' ? ' selected' : '') + '>포함 (단가에 세액 포함)</option></select>'
+    + '<div style="font-size:11px;color:var(--gray-400);margin-top:3px">수량·단가를 고칠 때 적용</div></div>'
+    + '<div class="fg" style="margin:0;flex:1;min-width:220px"><label style="font-size:12px">비고</label><input class="fi" id="te-remark" value="' + esc(v.remark||'') + '" placeholder="계산서 비고란에 들어갑니다"></div>'
+    + '</div>'
+    + '<div style="overflow-x:auto;max-height:44vh;overflow-y:auto"><table class="tbl" style="text-align:center"><thead><tr>'
+    + '<th style="width:130px">거래일</th><th>품목명</th><th style="width:110px">규격</th><th style="width:90px">수량</th>'
+    + '<th style="width:110px">단가</th><th style="width:120px">공급가액</th><th style="width:110px">세액</th><th style="width:44px"></th>'
+    + '</tr></thead><tbody id="te-tbody">' + ((v.lines||[]).map(rowHtml).join('') || '') + '</tbody></table></div>'
+    + '<div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">'
+    + '<button class="btn btn-outline btn-sm" onclick="taxEditAddLine()">➕ 품목 추가</button>'
+    + '<div id="te-sum" style="margin-left:auto;font-size:13px;font-weight:700"></div>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
+    + '<button class="btn btn-outline" onclick="document.getElementById(\'tax-edit-overlay\').remove()">취소</button>'
+    + '<button class="btn btn-primary" onclick="taxEditSave()">💾 저장</button>'
+    + '</div></div>';
+  document.body.appendChild(ov);
+  _taxEditSum();
+}
+function taxEditAddLine(){
+  const v = (window._tax.invoices||[]).find(x => x && x.id === window._taxEditId) || {};
+  const tb = document.getElementById('te-tbody');
+  if (!tb) return;
+  const d = (document.getElementById('te-issue-date')?.value) || v.issueDate || '';
+  tb.insertAdjacentHTML('beforeend', '<tr>'
+    + '<td><input class="fi te-date" type="date" value="' + escapeHtml(d) + '" style="height:28px;font-size:11.5px;padding:3px 5px"></td>'
+    + '<td><input class="fi te-name" placeholder="품목명" style="height:28px;font-size:11.5px;padding:3px 6px"></td>'
+    + '<td><input class="fi te-spec" placeholder="규격" style="height:28px;font-size:11.5px;padding:3px 6px"></td>'
+    + '<td><input class="fi te-qty" type="number" step="any" value="0" oninput="_taxEditLine(this)" style="height:28px;font-size:11.5px;padding:3px 6px;text-align:right"></td>'
+    + '<td><input class="fi te-price" type="number" step="any" value="0" oninput="_taxEditLine(this)" style="height:28px;font-size:11.5px;padding:3px 6px;text-align:right"></td>'
+    + '<td><input class="fi te-supply" type="number" step="any" value="0" oninput="_taxEditSum()" style="height:28px;font-size:11.5px;padding:3px 6px;text-align:right"></td>'
+    + '<td><input class="fi te-tax" type="number" step="any" value="0" oninput="_taxEditSum()" style="height:28px;font-size:11.5px;padding:3px 6px;text-align:right"></td>'
+    + '<td><button class="btn btn-outline btn-sm" onclick="this.closest(\'tr\').remove();_taxEditSum()" style="padding:2px 7px;font-size:11px;color:#b91c1c">🗑️</button></td>'
+    + '</tr>');
+  _taxEditSum();
+}
+// 한 줄의 수량·단가가 바뀌면 그 줄의 공급가액·세액을 다시 계산한다
+function _taxEditLine(el){
+  const tr = el && el.closest('tr');
+  if (!tr) return;
+  const inc = (document.getElementById('te-vat')?.value === 'include');
+  const qty = Number(tr.querySelector('.te-qty')?.value) || 0;
+  const price = Number(tr.querySelector('.te-price')?.value) || 0;
+  const line = qty * price;
+  const supply = inc ? Math.round(line / 1.1) : Math.round(line);
+  const tax = inc ? (Math.round(line) - supply) : Math.round(line * 0.1);
+  tr.querySelector('.te-supply').value = supply;
+  tr.querySelector('.te-tax').value = tax;
+  _taxEditSum();
+}
+function _taxEditAll(){ document.querySelectorAll('#te-tbody .te-qty').forEach(el => _taxEditLine(el)); }
+function _taxEditSum(){
+  let s = 0, t = 0;
+  document.querySelectorAll('#te-tbody tr').forEach(tr => {
+    s += Number(tr.querySelector('.te-supply')?.value) || 0;
+    t += Number(tr.querySelector('.te-tax')?.value) || 0;
+  });
+  const el = document.getElementById('te-sum');
+  if (el) el.innerHTML = '공급가액 <span style="color:#0f766e">₩' + s.toLocaleString() + '</span>'
+    + '　세액 <span style="color:#0f766e">₩' + t.toLocaleString() + '</span>'
+    + '　합계 <span style="color:#b45309;font-size:15px">₩' + (s + t).toLocaleString() + '</span>';
+}
+async function taxEditSave(){
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  const v = (window._tax.invoices||[]).find(x => x && x.id === window._taxEditId);
+  if (!v) return;
+  const g = (tr, cls) => { const e = tr.querySelector('.' + cls); return e ? String(e.value || '').trim() : ''; };
+  const lines = [];
+  document.querySelectorAll('#te-tbody tr').forEach(tr => {
+    const name = g(tr, 'te-name');
+    const supply = Number(g(tr, 'te-supply')) || 0;
+    const tax = Number(g(tr, 'te-tax')) || 0;
+    if (!name && !supply) return;                       // 빈 줄은 버린다
+    lines.push({ date: g(tr, 'te-date'), name: name, spec: g(tr, 'te-spec'),
+      qty: Number(g(tr, 'te-qty')) || 0, price: Number(g(tr, 'te-price')) || 0,
+      supply: supply, tax: tax, note: '' });
+  });
+  if (!lines.length) { alert('품목이 하나도 없습니다. 최소 한 줄은 있어야 합니다.'); return; }
+  const issueDate = (document.getElementById('te-issue-date')?.value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(issueDate)) { alert('작성일자를 확인해 주세요.'); return; }
+  const newYm = issueDate.slice(0, 7);
+  if (_taxTooOld(newYm)) { alert('🔒 ' + newYm + ' 은 발행 시작 월(' + _taxStartYm() + ') 이전입니다. 작성일자를 다시 확인해 주세요.'); return; }
+  v.issueDate = issueDate;
+  v.purpose = document.getElementById('te-purpose')?.value || '청구';
+  v.vatMode = document.getElementById('te-vat')?.value || 'exclude';
+  v.remark = (document.getElementById('te-remark')?.value || '').trim();
+  v.lines = lines;
+  v.supply = lines.reduce((a, l) => a + l.supply, 0);
+  v.tax = lines.reduce((a, l) => a + l.tax, 0);
+  v.total = v.supply + v.tax;
+  v.issueError = '';
+  v.updatedAt = Date.now();
+  v.updatedBy = _taxMe();
+  // 건별이면 과세기간도 작성일자를 따라간다 (월 합계는 그 달 그대로)
+  if (v.kind !== 'monthly') { v.ym = newYm; v.from = issueDate; v.to = issueDate; v.dueDate = _taxDueDate(newYm); }
+  await _taxSaveInvoices();
+  document.getElementById('tax-edit-overlay')?.remove();
+  renderTaxInvoicePage();
+  showNotif('✅ 수정 저장됨 — 합계 ₩' + v.total.toLocaleString(), 'success');
 }
 
 // ── 실제 발행 요청 — 서버(팝빌)가 1분 안에 처리한다 ──
@@ -30514,7 +30659,7 @@ function _taxInvoiceHtml(v){
     + '<table class="ti-items"><thead><tr><th style="width:52px">일자</th><th>품목</th><th style="width:90px">규격</th>'
     + '<th style="width:60px">수량</th><th style="width:80px">단가</th><th style="width:100px">공급가액</th><th style="width:90px">세액</th></tr></thead>'
     + '<tbody>' + (rows || '<tr><td colspan="7">-</td></tr>') + '</tbody></table>'
-    + '<div class="ti-foot">' + esc(v.kind === 'monthly' ? (v.from + ' ~ ' + v.to + ' 거래분 합계 세금계산서입니다.') : '') + '</div>'
+    + '<div class="ti-foot">' + esc(v.remark || (v.kind === 'monthly' ? (v.from + ' ~ ' + v.to + ' 거래분 합계 세금계산서입니다.') : '')) + '</div>'
     + '</div>';
 }
 const _TAX_PRINT_CSS = '.ti-doc{width:740px;margin:0 auto;padding:22px 26px;background:#fff;color:#111;font-family:"Malgun Gothic","맑은 고딕",sans-serif;font-size:12px;box-sizing:border-box}'
