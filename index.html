@@ -1177,7 +1177,13 @@ try{
       <div class="nav-item" onclick="go('approval');switchApprovalTab('sample')"><span class="ico">🧪</span>샘플 구매</div>
       <div class="nav-item" onclick="go('recurring')"><span class="ico">🔁</span>정기 결제</div>
     </div>
-    <div class="nav-item" id="nav-finance" onclick="go('finance')"><span class="ico">💰</span>재무 관리</div>
+    <!-- v2.3.857: 재무 관리 → 상위 메뉴. 하위: 자금 현황 · 위탁 재고이동(판매 관리에서 이동) · 세금계산서 -->
+    <div class="nav-item" id="nav-finance" onclick="clickNavItem('finance','finance-sub')"><span class="ico">💰</span>재무 관리</div>
+    <div class="nav-sub" id="finance-sub">
+      <div class="nav-item" onclick="go('finance')"><span class="ico">📈</span>자금 현황</div>
+      <div class="nav-item" onclick="go('consign')" title="바로팜 등 위탁 판매처 창고로 재고이동 + 거래명세서 발행"><span class="ico">🧾</span>위탁 재고이동</div>
+      <div class="nav-item" onclick="go('taxinvoice')" title="업체별 월 합계 / 건별 전자세금계산서 발행 준비"><span class="ico">🧾</span>세금계산서</div>
+    </div>
   </div>
 
   <!-- 2️⃣ 판매 관리 · 고객 관리 -->
@@ -1185,7 +1191,6 @@ try{
     <div class="nav-item" onclick="clickNavItem('sales','sales-sub')" id="nav-sales"><span class="ico">📊</span>판매 관리</div>
     <div class="nav-sub" id="sales-sub">
       <div class="nav-item" onclick="go('sales');switchSalesTab('orders')"><span class="ico">📦</span>주문 관리</div>
-      <div class="nav-item" onclick="go('consign')" title="바로팜 등 위탁 판매처 창고로 재고이동 + 거래명세서 발행"><span class="ico">🧾</span>위탁 재고이동</div>
       <div class="nav-item" onclick="go('sales');switchSalesTab('margin')"><span class="ico">💰</span>마진 분석</div>
       <!-- v2.2.8: 쇼핑몰 메뉴는 거래처 정보 > 쇼핑몰 탭에서만 노출 (판매 관리에서 제거) -->
       <div class="nav-item" onclick="go('ads')"><span class="ico">📢</span>광고비 관리</div>
@@ -3238,6 +3243,56 @@ try{
     </div>
 
     <!-- ══════════════ 🧾 위탁 재고이동 ══════════════ v2.3.500 -->
+    <div class="page" id="page-taxinvoice">
+      <!-- v2.3.857 전자세금계산서 — 업체별 월 합계(익월 3일 자동) + 거래 건별 -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <div class="fg" style="margin:0">
+          <label style="font-size:11px;color:var(--gray-500)">과세 대상 월</label>
+          <input class="fi" type="month" id="tax-ym" onchange="renderTaxInvoicePage()" style="width:150px;height:32px;font-size:12px;padding:5px 10px">
+        </div>
+        <button class="btn" id="tax-build-btn" onclick="taxBuildMonthly()" style="background:#0f766e;color:#fff;border:1px solid #0f766e;font-weight:700;font-size:13px;padding:8px 16px;border-radius:8px;margin-top:14px">🔄 월 합계 계산서 만들기</button>
+        <button class="btn btn-outline btn-sm" onclick="openTaxConfig()" style="margin-top:14px">⚙️ 발행 설정</button>
+        <span style="font-size:12px;color:var(--gray-400);margin-top:14px">업제별 한 달 거래를 모아 익월 3일 자동 생성 · 건별 발행도 가능</span>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-hdr">
+          <span class="card-title">🧾 발행 목록</span>
+          <span id="tax-count" style="margin-left:8px;font-size:12px;color:var(--gray-400)"></span>
+        </div>
+        <div class="card-body" style="overflow-x:auto">
+          <table class="tbl" style="text-align:center">
+            <thead><tr>
+              <th style="width:96px">발행일</th><th style="width:70px">구분</th><th>공급받는자</th>
+              <th style="width:120px">과세기간</th><th style="width:56px">건수</th>
+              <th style="width:110px">공급가액</th><th style="width:100px">세액</th><th style="width:110px">합계</th>
+              <th style="width:86px">상황</th><th style="width:250px">작업</th>
+            </tr></thead>
+            <tbody id="tax-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hdr">
+          <span class="card-title">📦 건별 발행 — 이 달 거래 내역</span>
+          <span id="tax-src-count" style="margin-left:8px;font-size:12px;color:var(--gray-400)"></span>
+          <button class="btn btn-outline btn-sm" onclick="taxBuildSelected()" style="margin-left:auto">🧾 선택 건별 생성</button>
+        </div>
+        <div class="card-body" style="overflow-x:auto">
+          <table class="tbl" style="text-align:center">
+            <thead><tr>
+              <th style="width:38px"><input type="checkbox" id="tax-src-all" onclick="taxSrcToggleAll(this.checked)"></th>
+              <th style="width:96px">거래일</th><th>공급받는자</th><th>항목</th>
+              <th style="width:110px">공급가액</th><th style="width:100px">세액</th><th style="width:110px">합계</th>
+              <th style="width:110px">명세서</th><th style="width:110px">세금계산서</th>
+            </tr></thead>
+            <tbody id="tax-src-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div class="page" id="page-consign">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
         <button class="btn" style="background:#0f766e;color:#fff;border:1px solid #0f766e;font-weight:700;font-size:13px;padding:8px 18px;border-radius:8px" onclick="openConsignShip()">＋ 위탁 재고이동 추가</button>
@@ -3994,6 +4049,32 @@ try{
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <button class="btn btn-primary" onclick="saveSlackApprovalSettings()" style="flex:1;min-width:120px">💾 저장</button>
               <button class="btn btn-outline" onclick="testSlackApprovalRelay()">🧪 연결 테스트</button>
+            </div>
+          </div>
+        </div>
+        <!-- v2.3.857: 슬랙 — #세금계산서 알림 -->
+        <div class="card" id="slack-tax-settings-card">
+          <div class="card-hdr">
+            <span class="card-title">🧾 슬랭 — 세금계산서 알림</span>
+            <span class="badge" id="slack-tax-status-badge" style="font-size:11px;background:#fef3c7;color:#92400e">미설정</span>
+          </div>
+          <div class="card-body">
+            <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12.5px;color:#475569;line-height:1.65">
+              📌 업제별 월 합계 전자세금계산서가 <strong>익월 3일에 자동 생성</strong>되어 발행 준믄가 끝나면
+              지정한 슬랭 추동(권장: <strong>#세금계산서</strong>)으로 알림을 보냅니다.<br>
+              발행 버튼을 눌러 공인인증서로 최종 콘퐆하는 것은 사람이 합니다.
+            </div>
+            <div class="fg" style="margin-bottom:10px">
+              <label>Webhook URL</label>
+              <input class="fi" id="slack-tax-url" placeholder="https://hooks.slack.com/services/...">
+            </div>
+            <div class="fg" style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+              <input type="checkbox" id="slack-tax-enabled">
+              <label for="slack-tax-enabled" style="cursor:pointer;font-weight:600">세금계산서 알림 사용</label>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-primary" onclick="saveSlackTaxSettings()" style="flex:1;min-width:120px">💾 저장</button>
+              <button class="btn btn-outline" onclick="testSlackTaxWebhook()">🧪 연결 테스트</button>
             </div>
           </div>
         </div>
@@ -6276,7 +6357,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.856';
+const ERP_VERSION = 'v2.3.857';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -10152,6 +10233,8 @@ const DEFAULT_DB = {
     slackApprovalRelayUrl: '',   // v2.3.205: 결재 전용 양방향 릴레이
     slackApprovalRelaySecret: '',// v2.3.205
     slackApprovalEnabled: false, // v2.3.205
+    slackTaxWebhookUrl: '',      // v2.3.857: #세금계산서 채널
+    slackTaxEnabled: false,      // v2.3.857
     slackDigestWebhookUrl: '',   // v2.3.125: 데일리 브리핑
     slackDigestEnabled: false,   // v2.3.125
     slackDigestTime: '07:00',    // v2.3.164: 매일 오전 7시 (KST)
@@ -10235,6 +10318,9 @@ if (DB == null) {
       if (typeof DB.appSettings.slackWebhookUrl !== 'string') DB.appSettings.slackWebhookUrl = '';
       if (typeof DB.appSettings.slackEnabled !== 'boolean') DB.appSettings.slackEnabled = false;
       if (typeof DB.appSettings.lastWebhookTestAt !== 'number') DB.appSettings.lastWebhookTestAt = 0;
+      // v2.3.857: 세금계산서 알림 기본값
+      if (typeof DB.appSettings.slackTaxWebhookUrl !== 'string') DB.appSettings.slackTaxWebhookUrl = '';
+      if (typeof DB.appSettings.slackTaxEnabled !== 'boolean') DB.appSettings.slackTaxEnabled = false;
       // v2.3.125: 데일리 브리핑 기본값
       if (typeof DB.appSettings.slackDigestWebhookUrl !== 'string') DB.appSettings.slackDigestWebhookUrl = '';
       if (typeof DB.appSettings.slackDigestEnabled !== 'boolean') DB.appSettings.slackDigestEnabled = false;
@@ -12749,7 +12835,8 @@ const PAGE_TITLES = {
   metaads:'📣 메타 광고',cs:'CS 관리',customers:'👥 고객 리스트',pharmacies:'💊 약국 리스트',claims:'⚠️ 클레임 관리',consign:'🧾 위탁 재고이동',sales:'판매 관리',approval:'🖋️ 결재 관리',ads:'📢 광고비 관리',
   costest:'💰 생산 예상 비용',
   recurring:'🔁 정기 결제',
-  finance:'💰 재무 관리'
+  finance:'💰 재무 관리',
+  taxinvoice:'🧾 세금계산서'
 };
 
 function go(page) {
@@ -12764,6 +12851,8 @@ function go(page) {
   if (page === 'claims') setTimeout(() => { try { renderClaims(); } catch(_){} }, 0);
   // v2.3.500 — 위탁 재고이동 페이지 진입 시 자동 렌더
   if (page === 'consign') setTimeout(() => { try { renderConsignPage(); } catch(_){} }, 0);
+  // v2.3.857 — 세금계산서 페이지 진입 시 자동 렌더
+  if (page === 'taxinvoice') setTimeout(() => { try { renderTaxInvoicePage(); } catch(_){} }, 0);
 
   // v1.9.152 — '업무 현황'은 부모 전용(자체 페이지 없음) → 기본 워크플로우로 리다이렉트
   if (page === 'work') page = 'workflow';
@@ -12808,7 +12897,11 @@ function go(page) {
     if (np) np.classList.add('active');
   }
   // v2.3.258: 생산 예상 비용은 재무 관리로 이동 → 해당 페이지에서 '재무 관리' nav 활성
-  if (page === 'finance' || page === 'costest') {
+  // v2.3.857: 위탁 재고이동·세금계산서도 재무 관리 하위 → 하위메뉴 자동 열기 + 상위 active
+  const _isFinSubPage = (page === 'finance' || page === 'costest' || page === 'consign' || page === 'taxinvoice');
+  const _finSub = $('finance-sub');
+  if (_finSub) { if (_isFinSubPage) _finSub.classList.add('open'); else _finSub.classList.remove('open'); }
+  if (_isFinSubPage) {
     const nf = $('nav-finance');
     if (nf) nf.classList.add('active');
   }
@@ -12906,6 +12999,7 @@ function go(page) {
         if (typeof _updateSlackDriveStatusBadge === 'function') _updateSlackDriveStatusBadge();
         if (typeof _updateSlackBoardStatusBadge === 'function') _updateSlackBoardStatusBadge();
         if (typeof _updateSlackDigestStatusBadge === 'function') _updateSlackDigestStatusBadge();  // v2.3.125
+        if (typeof _updateSlackTaxStatusBadge === 'function') _updateSlackTaxStatusBadge();  // v2.3.857
       } catch(_){}
       const saved = localStorage.getItem('reniv_sheets_webapp_url');
       if (saved && $('webapp-url')) $('webapp-url').value = saved;
@@ -15818,7 +15912,9 @@ function clickNavItem(page, subId) {
     // v2.3.31: 신제품 개발 — 같은 페이지에서 재클릭 시 토글
     || (page === 'insight' && currentId === 'page-insight')
     // v2.3.852: 광고 관리 — 메타 광고 화면에서 재클릭 시 토글
-    || (page === 'adsmgmt' && currentId === 'page-metaads');
+    || (page === 'adsmgmt' && currentId === 'page-metaads')
+    // v2.3.857: 재무 관리 — 하위 화면(자금 현황/위탁 재고이동/세금계산서)에서 재클릭 시 토글
+    || (page === 'finance' && (currentId === 'page-finance' || currentId === 'page-consign' || currentId === 'page-taxinvoice'));
   if (onSection && subId) {
     const sub = $(subId);
     if (sub) sub.classList.toggle('open');
@@ -15828,6 +15924,13 @@ function clickNavItem(page, subId) {
       const sub = $('customer-sub');
       if (sub) sub.classList.add('open');
       go('cs');
+      return;
+    }
+    // v2.3.857 — '재무 관리' 클릭 시 서브메뉴 펼침 + 자금 현황으로 이동
+    if (page === 'finance') {
+      const sub = $('finance-sub');
+      if (sub) sub.classList.add('open');
+      go('finance');
       return;
     }
     // v2.3.852 — '광고 관리' 클릭 시 서브메뉴 펼침 + 메타 광고로 이동 (전용 페이지 없음)
@@ -29846,6 +29949,698 @@ async function _generateConsignPdf(sh){
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// v2.3.857 전자세금계산서 — 업체별 월 합계(익월 3일 자동) + 거래 건별
+//   · 발행 데이터는 공유 설정(finance_tax_invoices / finance_tax_config)에 저장 → 전 직원 공유
+//   · '발행 준비' 까지 ERP 가 만들고, 공인인증서 컨펌은 홈택스에서 사람이 한다(법적 요건).
+//     준비가 끝나면 #세금계산서 채널로 알림을 보낸다.
+// ══════════════════════════════════════════════════════════════════════════════
+window._tax = window._tax || { invoices: [], cfg: null, loaded: false, autoRan: false };
+const _TAX_CFG_KEY = 'finance_tax_config';
+const _TAX_INV_KEY = 'finance_tax_invoices';
+const _TAX_AUTO_DAY = 3;          // 익월 3일 자동 생성
+
+function _taxDefaultCfg(){
+  return { supplierBizType:'', supplierBizItem:'', lastAutoYm:'', lastAutoBy:'', vendors:{} };
+}
+async function _taxLoad(force){
+  if (window._tax.loaded && !force) return;
+  try {
+    const c = await loadSharedSetting(_TAX_CFG_KEY);
+    window._tax.cfg = Object.assign(_taxDefaultCfg(), (c && typeof c === 'object' && !Array.isArray(c)) ? c : {});
+  } catch(_){ window._tax.cfg = window._tax.cfg || _taxDefaultCfg(); }
+  if (!window._tax.cfg.vendors || typeof window._tax.cfg.vendors !== 'object') window._tax.cfg.vendors = {};
+  try {
+    const v = await loadSharedSetting(_TAX_INV_KEY);
+    window._tax.invoices = Array.isArray(v) ? v : [];
+  } catch(_){ window._tax.invoices = window._tax.invoices || []; }
+  window._tax.loaded = true;
+}
+async function _taxSaveInvoices(){
+  try { await saveSharedSetting(_TAX_INV_KEY, window._tax.invoices || []); }
+  catch(e){ console.warn('[tax] 계산서 저장 실패', e); showNotif('세금계산서 저장 실패 — 새로고침 후 다시 시도해 주세요', 'error'); }
+}
+async function _taxSaveCfg(){
+  try { return await saveSharedSetting(_TAX_CFG_KEY, window._tax.cfg || _taxDefaultCfg()); }
+  catch(e){ console.warn('[tax] 설정 저장 실패', e); return false; }
+}
+function _taxMe(){ return (window._currentUser && (window._currentUser.name || window._currentUser.email)) || ''; }
+
+// 공급받는자 정보 — 판매업체(DB.sellers) / 쇼핑몰(shop:<id>) + 발행 설정의 보강값
+function _taxSellerInfo(sellerId){
+  let s = (DB.sellers||[]).find(x => String(x.id) === String(sellerId));
+  if (!s && String(sellerId||'').indexOf('shop:') === 0) s = (DB.shops||[]).find(x => String(x.id) === String(sellerId).slice(5));
+  s = s || {};
+  let email = '';
+  try {
+    const cs = (typeof _partnerNormalizeContacts === 'function') ? _partnerNormalizeContacts(s) : [];
+    email = (cs.find(c => c.email) || {}).email || '';
+  } catch(_){}
+  if (!email && s.email) email = String(s.email).split('\n')[0].trim();
+  const ov = (window._tax.cfg && window._tax.cfg.vendors && window._tax.cfg.vendors[String(sellerId)]) || {};
+  return {
+    name:    ov.name    || s.company || s.name || '',
+    bizno:   ov.bizno   || s.bizno || s.bizNo || '',
+    ceo:     ov.ceo     || s.ceo || '',
+    addr:    ov.addr    || s.address || '',
+    bizType: ov.bizType || '',
+    bizItem: ov.bizItem || '',
+    email:   ov.email   || email,
+    mode:    ov.mode    || 'monthly',      // monthly = 월 합계, single = 건별
+    source:  ov.source  || 'consign'       // consign = 재고이동 금액 그대로 / statement = 거래명세서 발행분만
+  };
+}
+function _taxSupplier(){
+  const ci = DB._companyInfo || {};
+  const cfg = window._tax.cfg || _taxDefaultCfg();
+  return {
+    name:  ci.company || '㈜르니브',
+    bizno: ci.bizNo || '',
+    ceo:   ci.ceo || '',
+    addr:  String(ci.addr||'').replace(/\s*\(\d{5}\)\s*$/,'').trim(),
+    bizType: cfg.supplierBizType || '',
+    bizItem: cfg.supplierBizItem || '',
+    email: String(ci.contacts && ci.contacts[0] && ci.contacts[0].email || '').trim()
+  };
+}
+
+// ── 기간 유틸 ──
+function _taxPrevYm(){
+  const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+}
+function _taxYm(){
+  const el = document.getElementById('tax-ym');
+  let v = el ? String(el.value||'') : '';
+  if (!/^\d{4}-\d{2}$/.test(v)) { v = _taxPrevYm(); if (el) el.value = v; }
+  return v;
+}
+function _taxMonthRange(ym){
+  const y = Number(ym.slice(0,4)), m = Number(ym.slice(5,7));
+  const last = new Date(y, m, 0).getDate();
+  return { from: ym + '-01', to: ym + '-' + String(last).padStart(2,'0') };
+}
+// 발행일 = 익월 3일 (거래 월 기준). 3일이 주말이면 그대로 둔다(홈택스 발행은 가능).
+function _taxIssueDate(ym){
+  const y = Number(ym.slice(0,4)), m = Number(ym.slice(5,7));
+  const d = new Date(y, m, _TAX_AUTO_DAY);   // m 은 0-base 로 보면 다음 달
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function _taxTodayStr(){ const d = new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+
+// ── 과세 원천: 위탁 재고이동(= 거래명세서) ──
+function _taxSourceRows(ym){
+  const r = _taxMonthRange(ym);
+  return (window._consign.shipments||[])
+    .filter(sh => sh && String(sh.date||'') >= r.from && String(sh.date||'') <= r.to)
+    .slice().sort((a,b) => String(a.date).localeCompare(String(b.date)) || (a.id - b.id));
+}
+function _taxShipLines(sh){
+  const A = _consignAmounts(sh);
+  return A.rows.map(r => ({
+    date: sh.date||'', name: r.ln.name||'', spec: r.ln.spec||'',
+    qty: Number(r.ln.qty)||0, price: Number(r.ln.price)||0,
+    supply: r.supply, tax: r.tax, note: ''
+  }));
+}
+function _taxInvFor(kind, sellerId, ym, srcId){
+  return (window._tax.invoices||[]).find(v => v && v.kind === kind && String(v.sellerId) === String(sellerId)
+    && (kind === 'monthly' ? v.ym === ym : (v.srcIds||[]).indexOf(srcId) >= 0));
+}
+
+// ── 월 합계 계산서 만들기 ──
+async function taxBuildMonthly(silent){
+  if (typeof requireWrite === 'function' && !requireWrite()) return 0;
+  await _consignLoad();
+  await _taxLoad();
+  const ym = silent ? silent : _taxYm();
+  const rng = _taxMonthRange(ym);
+  const rows = _taxSourceRows(ym);
+  const byS = {};
+  rows.forEach(sh => {
+    const info = _taxSellerInfo(sh.sellerId);
+    if (info.mode !== 'monthly') return;                                 // 건별 발행 업체는 제외
+    if (info.source === 'statement' && !sh.stmtIssuedAt) return;         // 거래명세서 발행분만
+    (byS[String(sh.sellerId)] = byS[String(sh.sellerId)] || []).push(sh);
+  });
+  let made = 0, updated = 0, locked = [];
+  for (const sid of Object.keys(byS)) {
+    const list = byS[sid];
+    const info = _taxSellerInfo(sid);
+    const lines = []; let supply = 0, tax = 0;
+    list.forEach(sh => { const L = _taxShipLines(sh); L.forEach(x => { lines.push(x); supply += x.supply; tax += x.tax; }); });
+    const exist = _taxInvFor('monthly', sid, ym);
+    if (exist && exist.status === 'issued') { locked.push(info.name); continue; }
+    const base = {
+      kind:'monthly', sellerId: sid, sellerName: info.name,
+      bizno: info.bizno, ceo: info.ceo, addr: info.addr, bizType: info.bizType, bizItem: info.bizItem, email: info.email,
+      ym: ym, from: rng.from, to: rng.to, issueDate: _taxIssueDate(ym),
+      supply: supply, tax: tax, total: supply + tax,
+      lines: lines, srcIds: list.map(x => x.id), source: info.source,
+      purpose: '청구'
+    };
+    if (exist) { Object.assign(exist, base); exist.updatedAt = Date.now(); updated++; }
+    else {
+      window._tax.invoices.push(Object.assign({
+        id: 'TI' + Date.now().toString(36) + Math.floor(Math.random()*1000),
+        status: 'draft', createdAt: Date.now(), createdBy: _taxMe()
+      }, base));
+      made++;
+    }
+  }
+  if (made || updated) await _taxSaveInvoices();
+  if (!silent) {
+    renderTaxInvoicePage();
+    const msg = [];
+    if (made) msg.push('신규 ' + made + '건');
+    if (updated) msg.push('갱신 ' + updated + '건');
+    if (locked.length) msg.push('발행완료라 건너뜀: ' + locked.join(', '));
+    showNotif(msg.length ? ('🧾 ' + ym + ' 월 합계 — ' + msg.join(' · ')) : ('해당 월(' + ym + ')에 집계할 거래가 없습니다'), msg.length ? 'success' : 'warning');
+  }
+  return made + updated;
+}
+
+// ── 건별 계산서 만들기 (체크한 거래) ──
+async function taxBuildSelected(){
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  await _consignLoad(); await _taxLoad();
+  const ids = Array.from(document.querySelectorAll('#tax-src-tbody input.tax-src-ck:checked')).map(el => el.value);
+  if (!ids.length) { showNotif('건별로 발행할 거래를 선택해 주세요', 'warning'); return; }
+  let made = 0, skipped = 0;
+  for (const sid of ids) {
+    const sh = (window._consign.shipments||[]).find(x => x && String(x.id) === String(sid));
+    if (!sh) continue;
+    if (_taxInvFor('single', sh.sellerId, '', sh.id)) { skipped++; continue; }
+    const info = _taxSellerInfo(sh.sellerId);
+    const A = _consignAmounts(sh);
+    window._tax.invoices.push({
+      id: 'TI' + Date.now().toString(36) + Math.floor(Math.random()*1000),
+      kind:'single', sellerId: String(sh.sellerId), sellerName: info.name,
+      bizno: info.bizno, ceo: info.ceo, addr: info.addr, bizType: info.bizType, bizItem: info.bizItem, email: info.email,
+      ym: String(sh.date||'').slice(0,7), from: sh.date||'', to: sh.date||'', issueDate: sh.date||'',
+      supply: A.supplySum, tax: A.taxSum, total: A.total,
+      lines: _taxShipLines(sh), srcIds: [sh.id], source: 'consign', purpose: '청구',
+      status: 'draft', createdAt: Date.now(), createdBy: _taxMe()
+    });
+    made++;
+  }
+  if (made) await _taxSaveInvoices();
+  renderTaxInvoicePage();
+  showNotif(made ? ('🧾 건별 세금계산서 ' + made + '건 생성' + (skipped ? ' (이미 있음 ' + skipped + '건 제외)' : '')) : '이미 모두 생성된 거래입니다', made ? 'success' : 'warning');
+}
+
+function taxSrcToggleAll(ck){ document.querySelectorAll('#tax-src-tbody input.tax-src-ck').forEach(el => { el.checked = !!ck; }); }
+
+// ── 목록 렌더 ──
+async function renderTaxInvoicePage(){
+  const tb = document.getElementById('tax-tbody');
+  if (!tb) return;
+  await _consignLoad(); await _taxLoad();
+  const ym = _taxYm();
+  const won = n => '₩' + (Number(n)||0).toLocaleString();
+  const badge = st => st === 'issued' ? '<span class="badge" style="background:#dcfce7;color:#166534;font-size:11px">발행완료</span>'
+    : st === 'ready' ? '<span class="badge" style="background:#dbeafe;color:#1e40af;font-size:11px">발행 준비</span>'
+    : '<span class="badge" style="background:#fef3c7;color:#92400e;font-size:11px">작성중</span>';
+
+  const list = (window._tax.invoices||[]).filter(v => v && (v.ym === ym || String(v.issueDate||'').slice(0,7) === ym))
+    .slice().sort((a,b) => String(b.issueDate||'').localeCompare(String(a.issueDate||'')) || String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  document.getElementById('tax-count').textContent = list.length ? (list.length + '건 · 합계 ' + won(list.reduce((s,v)=>s+(Number(v.total)||0),0))) : '';
+  tb.innerHTML = list.length ? list.map(v => {
+    const acts = [];
+    acts.push('<button class="btn btn-outline btn-sm" onclick="taxPreview(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px">👁️ 미리보기</button>');
+    if (v.status === 'draft') acts.push('<button class="btn btn-sm" onclick="taxMarkReady(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px;background:#1e40af;color:#fff;border:1px solid #1e40af">✅ 발행 준비</button>');
+    if (v.status === 'ready') acts.push('<button class="btn btn-sm" onclick="taxIssue(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px;background:#0f766e;color:#fff;border:1px solid #0f766e">🔐 발행하기</button>');
+    if (v.status === 'issued') acts.push('<button class="btn btn-outline btn-sm" onclick="taxEmail(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px">📧 이메일</button>');
+    if (v.status !== 'issued') acts.push('<button class="btn btn-outline btn-sm" onclick="taxDelete(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px;color:#b91c1c">🗑️</button>');
+    const period = v.kind === 'monthly' ? (v.from + ' ~ ' + v.to) : (v.from || '-');
+    return '<tr>'
+      + '<td>' + escapeHtml(v.issueDate||'-') + '</td>'
+      + '<td>' + (v.kind === 'monthly' ? '월 합계' : '건별') + '</td>'
+      + '<td style="text-align:left">' + escapeHtml(v.sellerName||'-') + (v.bizno ? ' <span style="color:var(--gray-400);font-size:11px">' + escapeHtml(v.bizno) + '</span>' : ' <span style="color:#b91c1c;font-size:11px">사업자번호 없음</span>') + '</td>'
+      + '<td style="font-size:11.5px">' + escapeHtml(period) + '</td>'
+      + '<td>' + ((v.srcIds||[]).length || 1) + '</td>'
+      + '<td style="text-align:right">' + won(v.supply) + '</td>'
+      + '<td style="text-align:right">' + won(v.tax) + '</td>'
+      + '<td style="text-align:right;font-weight:700">' + won(v.total) + '</td>'
+      + '<td>' + badge(v.status) + (v.ntsNo ? '<div style="font-size:10.5px;color:var(--gray-400);margin-top:2px">' + escapeHtml(v.ntsNo) + '</div>' : '') + '</td>'
+      + '<td><div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center">' + acts.join('') + '</div></td>'
+      + '</tr>';
+  }).join('') : '<tr><td colspan="10" style="padding:26px;color:var(--gray-400)">이 달에 만들어진 세금계산서가 없습니다 — [월 합계 계산서 만들기] 를 누르세요</td></tr>';
+
+  // 건별 발행용 원천 거래
+  const stb = document.getElementById('tax-src-tbody');
+  const rows = _taxSourceRows(ym);
+  document.getElementById('tax-src-count').textContent = rows.length ? (rows.length + '건') : '';
+  stb.innerHTML = rows.length ? rows.map(sh => {
+    const A = _consignAmounts(sh);
+    const inv = _taxInvFor('single', sh.sellerId, '', sh.id);
+    const mon = (window._tax.invoices||[]).find(v => v && v.kind === 'monthly' && (v.srcIds||[]).indexOf(sh.id) >= 0);
+    const names = (sh.lines||[]).map(l => l.name).filter(Boolean);
+    const itemTxt = names.length > 1 ? (names[0] + ' 외 ' + (names.length-1)) : (names[0] || '-');
+    const state = inv ? '<span style="color:#0f766e;font-weight:600;font-size:11.5px">건별 생성됨</span>'
+      : mon ? '<span style="color:var(--gray-400);font-size:11.5px">월 합계 포함</span>'
+      : '<span style="color:var(--gray-400);font-size:11.5px">-</span>';
+    return '<tr>'
+      + '<td>' + ((inv||mon) ? '' : '<input type="checkbox" class="tax-src-ck" value="' + sh.id + '">') + '</td>'
+      + '<td>' + escapeHtml(sh.date||'-') + '</td>'
+      + '<td style="text-align:left">' + escapeHtml(sh.sellerName||'-') + '</td>'
+      + '<td style="text-align:left;font-size:12px">' + escapeHtml(itemTxt) + '</td>'
+      + '<td style="text-align:right">' + won(A.supplySum) + '</td>'
+      + '<td style="text-align:right">' + won(A.taxSum) + '</td>'
+      + '<td style="text-align:right;font-weight:600">' + won(A.total) + '</td>'
+      + '<td style="font-size:11.5px">' + (sh.stmtIssuedAt ? '✅ 발행' : '<span style="color:var(--gray-400)">미발행</span>') + '</td>'
+      + '<td>' + state + '</td>'
+      + '</tr>';
+  }).join('') : '<tr><td colspan="9" style="padding:22px;color:var(--gray-400)">이 달 위탁 재고이동(거래명세서) 내역이 없습니다</td></tr>';
+  const allCk = document.getElementById('tax-src-all'); if (allCk) allCk.checked = false;
+}
+
+// ── 발행 준비 (필수값 점검 → 슬랙 알림) ──
+function _taxMissing(v){
+  const sup = _taxSupplier();
+  const m = [];
+  if (!sup.bizno) m.push('공급자 사업자등록번호(회사정보)');
+  if (!sup.bizType || !sup.bizItem) m.push('공급자 업태·종목(발행 설정)');
+  if (!v.bizno) m.push('공급받는자 사업자등록번호');
+  if (!v.email) m.push('공급받는자 이메일');
+  if (!(Number(v.total) > 0)) m.push('금액');
+  return m;
+}
+async function taxMarkReady(id){
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  await _taxLoad();
+  const v = (window._tax.invoices||[]).find(x => x && x.id === id);
+  if (!v) { showNotif('계산서를 찾을 수 없습니다', 'warning'); return; }
+  const miss = _taxMissing(v);
+  if (miss.length && !confirm('아래 항목이 비어 있습니다.\n\n· ' + miss.join('\n· ') + '\n\n그래도 발행 준비로 표시할까요?\n(홈택스 발행 전에 채워야 합니다)')) return;
+  v.status = 'ready'; v.preparedAt = Date.now(); v.preparedBy = _taxMe();
+  await _taxSaveInvoices();
+  renderTaxInvoicePage();
+  await _taxSlackReady([v]);
+  showNotif('✅ 발행 준비 완료 — 슬랙 #세금계산서 채널에 알림을 보냈습니다', 'success');
+}
+
+// ── 발행 (공인인증서 컨펌 직전까지) ──
+async function taxIssue(id){
+  await _taxLoad();
+  const v = (window._tax.invoices||[]).find(x => x && x.id === id);
+  if (!v) return;
+  const miss = _taxMissing(v);
+  const won = n => '₩' + (Number(n)||0).toLocaleString();
+  document.getElementById('tax-issue-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'tax-issue-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:100002;display:flex;align-items:center;justify-content:center;padding:24px';
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:620px;width:100%;max-height:90vh;overflow:auto;padding:22px 24px">'
+    + '<div style="font-size:16px;font-weight:800;margin-bottom:4px">🔐 전자세금계산서 발행</div>'
+    + '<div style="font-size:12.5px;color:var(--gray-500);margin-bottom:14px">' + escapeHtml(v.sellerName||'') + ' · ' + escapeHtml(v.kind==='monthly' ? (v.from+' ~ '+v.to) : v.from) + ' · 합계 <strong>' + won(v.total) + '</strong></div>'
+    + (miss.length ? '<div style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px 12px;font-size:12.5px;margin-bottom:12px">⚠️ 비어 있는 항목: ' + escapeHtml(miss.join(', ')) + '</div>' : '<div style="background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:8px;padding:10px 12px;font-size:12.5px;margin-bottom:12px">✅ 필수 항목이 모두 채워졌습니다 — 바로 발행할 수 있습니다</div>')
+    + '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:12.5px;color:#475569;line-height:1.75;margin-bottom:14px">'
+    + '<strong>발행 순서</strong><br>'
+    + '1️⃣ 아래 [일괄발행 파일 내려받기] 로 계산서 데이터를 받습니다.<br>'
+    + '2️⃣ [홈택스 전자세금계산서 열기] → 공인인증서(공동인증서) 로그인 → <em>계산서 일괄발행</em> 에 파일을 올립니다.<br>'
+    + '3️⃣ 내용 확인 후 <strong>인증서로 컨펌 · 발행</strong> 합니다. (전자서명은 법적으로 사람이 해야 합니다)<br>'
+    + '4️⃣ 발행 후 받은 <strong>국세청 승인번호</strong> 를 아래에 넣고 [발행 완료 처리] 를 누르면 이력에 남고 이메일 전송이 열립니다.'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'
+    + '<button class="btn btn-outline btn-sm" onclick="taxCsv(\'' + v.id + '\')">📥 일괄발행 파일 내려받기</button>'
+    + '<button class="btn btn-outline btn-sm" onclick="window.open(\'https://www.hometax.go.kr\',\'_blank\')">🔗 홈택스 전자세금계산서 열기</button>'
+    + '<button class="btn btn-outline btn-sm" onclick="taxPreview(\'' + v.id + '\')">👁️ 계산서 미리보기</button>'
+    + '</div>'
+    + '<div class="fg" style="margin-bottom:12px"><label style="font-size:12px">국세청 승인번호 (발행 후 입력)</label>'
+    + '<input class="fi" id="tax-nts-no" value="' + escapeHtml(v.ntsNo||'') + '" placeholder="예: 20261003-12345678-12345678"></div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end">'
+    + '<button class="btn btn-outline" onclick="document.getElementById(\'tax-issue-overlay\').remove()">닫기</button>'
+    + '<button class="btn btn-primary" onclick="taxConfirmIssued(\'' + v.id + '\')">✅ 발행 완료 처리</button>'
+    + '</div></div>';
+  document.body.appendChild(ov);
+}
+async function taxConfirmIssued(id){
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  const v = (window._tax.invoices||[]).find(x => x && x.id === id);
+  if (!v) return;
+  const no = (document.getElementById('tax-nts-no')?.value || '').trim();
+  if (!no && !confirm('국세청 승인번호 없이 발행 완료로 처리할까요?')) return;
+  v.ntsNo = no; v.status = 'issued'; v.issuedAt = Date.now(); v.issuedBy = _taxMe();
+  await _taxSaveInvoices();
+  document.getElementById('tax-issue-overlay')?.remove();
+  renderTaxInvoicePage();
+  await _taxSlackIssued(v);
+  if (confirm('발행 완료로 처리했습니다.\n\n지금 공급받는자에게 이메일로 보내시겠습니까?')) taxEmail(id);
+}
+async function taxDelete(id){
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  if (!confirm('이 세금계산서 초안을 삭제하시겠습니까?')) return;
+  window._tax.invoices = (window._tax.invoices||[]).filter(x => x && x.id !== id);
+  await _taxSaveInvoices();
+  renderTaxInvoicePage();
+}
+
+// ── 홈택스 일괄발행용 CSV (UTF-8 BOM — 엑셀에서 바로 열림) ──
+const _TAX_CSV_HEAD = ['작성일자','공급자등록번호','공급자상호','공급자성명','공급자사업장주소','공급자업태','공급자종목','공급자이메일',
+  '공급받는자등록번호','공급받는자상호','공급받는자성명','공급받는자사업장주소','공급받는자업태','공급받는자종목','공급받는자이메일',
+  '품목일자','품목명','품목규격','품목수량','품목단가','품목공급가액','품목세액','품목비고',
+  '합계금액','공급가액','세액','영수청구구분','비고'];
+function _taxCsvRows(v){
+  const sup = _taxSupplier();
+  const memo = v.kind === 'monthly' ? (v.from + ' ~ ' + v.to + ' 거래분 합계') : '';
+  const d = String(v.issueDate||'').replace(/-/g,'');
+  return (v.lines||[]).map((l,i) => [
+    d, sup.bizno, sup.name, sup.ceo, sup.addr, sup.bizType, sup.bizItem, sup.email,
+    v.bizno||'', v.sellerName||'', v.ceo||'', v.addr||'', v.bizType||'', v.bizItem||'', v.email||'',
+    String(l.date||'').replace(/-/g,''), l.name||'', l.spec||'', l.qty||0, l.price||0, l.supply||0, l.tax||0, l.note||'',
+    i === 0 ? (v.total||0) : '', i === 0 ? (v.supply||0) : '', i === 0 ? (v.tax||0) : '',
+    i === 0 ? (v.purpose||'청구') : '', i === 0 ? memo : ''
+  ]);
+}
+function taxCsv(id){
+  const ids = Array.isArray(id) ? id : [id];
+  const invs = (window._tax.invoices||[]).filter(v => v && ids.indexOf(v.id) >= 0);
+  if (!invs.length) return;
+  const esc = x => { const s = String(x == null ? '' : x); return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; };
+  let out = [_TAX_CSV_HEAD.join(',')];
+  invs.forEach(v => _taxCsvRows(v).forEach(r => out.push(r.map(esc).join(','))));
+  const blob = new Blob(['﻿' + out.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url;
+  a.download = '세금계산서_일괄발행_' + (invs.length === 1 ? (invs[0].sellerName + '_' + invs[0].issueDate) : (_taxYm())) + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 200);
+  showNotif('📥 일괄발행 파일 내려받음 — 홈택스 [계산서 일괄발행] 에서 올려 주세요', 'info');
+}
+
+// ── 세금계산서 양식 HTML / 미리보기 / PDF ──
+function _taxInvoiceHtml(v){
+  const sup = _taxSupplier();
+  const esc = s => escapeHtml(s == null ? '' : String(s));
+  const won = n => (Number(n)||0).toLocaleString();
+  const rows = (v.lines||[]).map(l => '<tr>'
+    + '<td>' + esc(String(l.date||'').slice(5)) + '</td>'
+    + '<td style="text-align:left">' + esc(l.name) + '</td>'
+    + '<td>' + esc(l.spec) + '</td>'
+    + '<td style="text-align:right">' + won(l.qty) + '</td>'
+    + '<td style="text-align:right">' + won(l.price) + '</td>'
+    + '<td style="text-align:right">' + won(l.supply) + '</td>'
+    + '<td style="text-align:right">' + won(l.tax) + '</td>'
+    + '</tr>').join('');
+  const party = (label, p) => '<table class="ti-party"><tbody>'
+    + '<tr><th rowspan="4" class="ti-side">' + label + '</th><th>등록번호</th><td colspan="3" class="ti-mono">' + esc(p.bizno) + '</td></tr>'
+    + '<tr><th>상호</th><td>' + esc(p.name) + '</td><th>성명</th><td>' + esc(p.ceo) + '</td></tr>'
+    + '<tr><th>사업장</th><td colspan="3">' + esc(p.addr) + '</td></tr>'
+    + '<tr><th>업태</th><td>' + esc(p.bizType) + '</td><th>종목</th><td>' + esc(p.bizItem) + '</td></tr>'
+    + '</tbody></table>';
+  return '<div class="ti-doc">'
+    + '<div class="ti-title">전자세금계산서 <span>(공급받는자 보관용)</span></div>'
+    + '<div class="ti-meta">작성일자 <strong>' + esc(v.issueDate) + '</strong>'
+    + '　／　과세기간 <strong>' + esc(v.kind === 'monthly' ? (v.from + ' ~ ' + v.to) : v.from) + '</strong>'
+    + '　／　' + esc(v.purpose || '청구')
+    + (v.ntsNo ? '　／　승인번호 <strong>' + esc(v.ntsNo) + '</strong>' : '') + '</div>'
+    + party('공급자', sup) + party('공급받는자', { bizno:v.bizno, name:v.sellerName, ceo:v.ceo, addr:v.addr, bizType:v.bizType, bizItem:v.bizItem })
+    + '<table class="ti-sum"><tbody><tr>'
+    + '<th>공급가액</th><td>' + won(v.supply) + '</td>'
+    + '<th>세액</th><td>' + won(v.tax) + '</td>'
+    + '<th>합계금액</th><td class="ti-total">' + won(v.total) + '</td>'
+    + '</tr></tbody></table>'
+    + '<table class="ti-items"><thead><tr><th style="width:52px">일자</th><th>품목</th><th style="width:90px">규격</th>'
+    + '<th style="width:60px">수량</th><th style="width:80px">단가</th><th style="width:100px">공급가액</th><th style="width:90px">세액</th></tr></thead>'
+    + '<tbody>' + (rows || '<tr><td colspan="7">-</td></tr>') + '</tbody></table>'
+    + '<div class="ti-foot">' + esc(v.kind === 'monthly' ? (v.from + ' ~ ' + v.to + ' 거래분 합계 세금계산서입니다.') : '') + '</div>'
+    + '</div>';
+}
+const _TAX_PRINT_CSS = '.ti-doc{width:740px;margin:0 auto;padding:22px 26px;background:#fff;color:#111;font-family:"Malgun Gothic","맑은 고딕",sans-serif;font-size:12px;box-sizing:border-box}'
+  + '.ti-title{text-align:center;font-size:21px;font-weight:800;letter-spacing:6px;margin-bottom:6px}'
+  + '.ti-title span{font-size:11px;font-weight:500;letter-spacing:0;color:#555}'
+  + '.ti-meta{text-align:center;font-size:11.5px;color:#333;margin-bottom:12px}'
+  + '.ti-doc table{width:100%;border-collapse:collapse;margin-bottom:8px}'
+  + '.ti-doc th,.ti-doc td{border:1px solid #333;padding:5px 7px;font-size:11.5px}'
+  + '.ti-doc th{background:#f1f5f9;font-weight:700;white-space:nowrap;text-align:center}'
+  + '.ti-side{width:26px;background:#e2e8f0;font-size:11px;letter-spacing:2px;writing-mode:vertical-rl;text-orientation:upright}'
+  + '.ti-party th:not(.ti-side){width:70px}.ti-mono{font-family:Consolas,monospace;letter-spacing:1px}'
+  + '.ti-sum th{width:80px}.ti-sum td{text-align:right;font-weight:700}.ti-total{background:#fff7ed;font-size:13px}'
+  + '.ti-items td{text-align:center}.ti-foot{font-size:11px;color:#555;margin-top:6px}';
+function taxPreview(id){
+  const v = (window._tax.invoices||[]).find(x => x && x.id === id);
+  if (!v) return;
+  document.getElementById('tax-prev-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'tax-prev-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:100003;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto';
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  ov.innerHTML = '<div style="background:#fff;border-radius:12px;max-width:820px;width:100%;padding:16px">'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:10px">'
+    + '<button class="btn btn-outline btn-sm" onclick="taxPrint(\'' + v.id + '\')">🖨️ 인쇄</button>'
+    + '<button class="btn btn-outline btn-sm" onclick="taxEmail(\'' + v.id + '\')">📧 이메일</button>'
+    + '<button class="btn btn-outline btn-sm" onclick="document.getElementById(\'tax-prev-overlay\').remove()">닫기</button>'
+    + '</div><style>' + _TAX_PRINT_CSS + '</style>' + _taxInvoiceHtml(v) + '</div>';
+  document.body.appendChild(ov);
+}
+function taxPrint(id){
+  const v = (window._tax.invoices||[]).find(x => x && x.id === id);
+  if (!v) return;
+  const w = window.open('', '_blank');
+  if (!w) { showNotif('팝업이 차단되었습니다', 'warning'); return; }
+  w.document.write('<html><head><meta charset="utf-8"><title>전자세금계산서</title><style>' + _TAX_PRINT_CSS + '@page{size:A4;margin:10mm}</style></head><body>' + _taxInvoiceHtml(v) + '</body></html>');
+  w.document.close();
+  setTimeout(() => { try { w.print(); } catch(_){} }, 350);
+}
+async function _generateTaxPdf(v){
+  await _ensurePdfLibs();
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;background:#fff;z-index:-1';
+  host.innerHTML = '<style>' + _TAX_PRINT_CSS + '</style>' + _taxInvoiceHtml(v);
+  document.body.appendChild(host);
+  try {
+    await new Promise(r => setTimeout(r, 120));
+    const target = host.children[1] || host;
+    const canvas = await window.html2canvas(target, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+    const jsPDF = window.jspdf.jsPDF;
+    const pdf = new jsPDF({ unit:'mm', format:'a4', orientation:'portrait' });
+    const pdfW = pdf.internal.pageSize.getWidth(), pdfH = pdf.internal.pageSize.getHeight();
+    const ratio = canvas.height / canvas.width, margin = 8;
+    let imgW = pdfW - 2*margin, imgH = imgW * ratio;
+    if (imgH > pdfH - 2*margin) { imgH = pdfH - 2*margin; imgW = imgH / ratio; }
+    pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', (pdfW-imgW)/2, margin, imgW, imgH);
+    const blob = pdf.output('blob');
+    return await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(new Error('FileReader 실패')); r.readAsDataURL(blob); });
+  } finally { try { host.remove(); } catch(_){} }
+}
+// 세금계산서 이메일 — 거래명세서/발주서와 동일한 .eml(PDF 첨부) 방식
+async function taxEmail(id){
+  const v = (window._tax.invoices||[]).find(x => x && x.id === id);
+  if (!v) { showNotif('계산서를 찾을 수 없습니다', 'warning'); return; }
+  const utf8Base64 = s => btoa(unescape(encodeURIComponent(s)));
+  const to = String(v.email||'').trim();
+  const periodTxt = v.kind === 'monthly' ? (v.from + ' ~ ' + v.to) : (v.from || '');
+  const subject = '[르니브] 전자세금계산서 — ' + (v.sellerName||'') + ' (' + periodTxt + ')';
+  let pdfBase64 = '';
+  const pdfName = '전자세금계산서_' + (v.sellerName||'') + '_' + (v.issueDate||'') + '.pdf';
+  try {
+    showNotif('🔄 세금계산서 PDF 생성 중… (~1-2초)', 'info');
+    const m = String(await _generateTaxPdf(v)).match(/;base64,([\s\S]+)$/);
+    if (!m) throw new Error('PDF 데이터 형식 오류');
+    pdfBase64 = m[1];
+  } catch(e){ console.error('세금계산서 PDF 실패:', e); showNotif('PDF 생성 실패: ' + (e && e.message || e), 'error'); return; }
+  const ci = DB._companyInfo || {};
+  const coAddr = String(ci.addr||'').replace(/\s*\(\d{5}\)\s*$/,'').trim();
+  let sign = '────────────────────────\n' + (ci.company || '㈜르니브') + ' (RENIV)\n';
+  if (ci.email) sign += 'Phone : ' + ci.email + '\n';
+  if (coAddr) sign += coAddr;
+  const body = '안녕하세요, ' + (v.sellerName||'') + ' 담당자님\n\n'
+    + '르니브에서 전자세금계산서를 송부드립니다. 첨부 파일 확인 부탁드립니다.\n\n'
+    + '· 작성일자: ' + (v.issueDate||'-') + '\n'
+    + '· 과세기간: ' + (periodTxt||'-') + '\n'
+    + '· 공급가액: ₩' + (Number(v.supply)||0).toLocaleString() + '\n'
+    + '· 세액: ₩' + (Number(v.tax)||0).toLocaleString() + '\n'
+    + '· 합계금액: ₩' + (Number(v.total)||0).toLocaleString() + '\n'
+    + (v.ntsNo ? '· 국세청 승인번호: ' + v.ntsNo + '\n' : '')
+    + '\n국세청 전자세금계산서는 홈택스에서도 조회하실 수 있습니다.\n감사합니다.\n\n' + sign;
+  const encPdfName = '=?UTF-8?B?' + utf8Base64(pdfName) + '?=';
+  const boundary = '----=_RenivTax_' + Date.now().toString(36);
+  const eml = (to ? ('To: ' + to + '\r\n') : '')
+    + 'X-Unsent: 1\r\nSubject: =?UTF-8?B?' + utf8Base64(subject) + '?=\r\nMIME-Version: 1.0\r\n'
+    + 'Content-Type: multipart/mixed; boundary="' + boundary + '"\r\n\r\n'
+    + '--' + boundary + '\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n'
+    + utf8Base64(body).match(/.{1,76}/g).join('\r\n') + '\r\n'
+    + '\r\n--' + boundary + '\r\n'
+    + 'Content-Type: application/pdf; name="' + encPdfName + '"\r\n'
+    + 'Content-Transfer-Encoding: base64\r\n'
+    + 'Content-Disposition: attachment; filename="' + encPdfName + '"\r\n\r\n'
+    + pdfBase64.match(/.{1,76}/g).join('\r\n') + '\r\n'
+    + '\r\n--' + boundary + '--\r\n';
+  const blob = new Blob([eml], { type:'message/rfc822' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url;
+  a.download = '전자세금계산서_' + (v.sellerName||'') + '_' + (v.issueDate||'') + '.eml';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 200);
+  try { v.emailedAt = Date.now(); await _taxSaveInvoices(); } catch(_){}
+  showNotif('📧 세금계산서 PDF 첨부 메일(.eml) 다운로드 — 더블클릭하면 Outlook 이 열립니다' + (to ? '' : ' (받는사람 미설정 — 직접 입력)'), 'info');
+}
+
+// ── 발행 설정 (공급자 업태·종목 / 업체별 발행 방식) ──
+async function openTaxConfig(){
+  await _consignLoad(); await _taxLoad();
+  const cfg = window._tax.cfg;
+  const sellers = (DB.sellers||[]).slice().sort((a,b) => String(a.company||'').localeCompare(String(b.company||'')));
+  const esc = s => escapeHtml(s == null ? '' : String(s));
+  const rows = sellers.map(s => {
+    const i = _taxSellerInfo(s.id);
+    return '<tr data-sid="' + s.id + '">'
+      + '<td style="text-align:left;font-weight:600">' + esc(s.company) + '</td>'
+      + '<td><input class="fi tc-bizno" value="' + esc(i.bizno) + '" placeholder="000-00-00000" style="height:28px;font-size:11.5px;padding:3px 6px"></td>'
+      + '<td><input class="fi tc-biztype" value="' + esc(i.bizType) + '" placeholder="업태" style="height:28px;font-size:11.5px;padding:3px 6px"></td>'
+      + '<td><input class="fi tc-bizitem" value="' + esc(i.bizItem) + '" placeholder="종목" style="height:28px;font-size:11.5px;padding:3px 6px"></td>'
+      + '<td><input class="fi tc-email" value="' + esc(i.email) + '" placeholder="계산서 수신 이메일" style="height:28px;font-size:11.5px;padding:3px 6px"></td>'
+      + '<td><select class="fs tc-mode" style="height:28px;font-size:11.5px;padding:3px 6px">'
+      + '<option value="monthly"' + (i.mode==='monthly'?' selected':'') + '>월 합계 (익월 3일)</option>'
+      + '<option value="single"' + (i.mode==='single'?' selected':'') + '>건별</option></select></td>'
+      + '<td><select class="fs tc-source" style="height:28px;font-size:11.5px;padding:3px 6px">'
+      + '<option value="consign"' + (i.source==='consign'?' selected':'') + '>재고이동 금액 전체</option>'
+      + '<option value="statement"' + (i.source==='statement'?' selected':'') + '>거래명세서 발행분만</option></select></td>'
+      + '</tr>';
+  }).join('');
+  document.getElementById('tax-cfg-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'tax-cfg-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:100002;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto';
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:1020px;width:100%;padding:22px 24px">'
+    + '<div style="font-size:16px;font-weight:800;margin-bottom:12px">⚙️ 세금계산서 발행 설정</div>'
+    + '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:12.5px;color:#475569;line-height:1.7;margin-bottom:14px">'
+    + '공급자(르니브) 사업자번호·대표자·주소는 <strong>설정 &gt; 회사 정보</strong> 값을 그대로 씁니다. 세금계산서에 필요한 <strong>업태·종목</strong>만 아래에서 채워 주세요.<br>'
+    + '업체별로 <strong>월 합계 / 건별</strong>, 그리고 금액 기준을 <strong>재고이동 전체 / 거래명세서 발행분만</strong> 중에 고를 수 있습니다. (바로팜은 재고이동 금액 그대로)'
+    + '</div>'
+    + '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">'
+    + '<div class="fg" style="margin:0;min-width:200px"><label style="font-size:12px">공급자 업태</label><input class="fi" id="tax-sup-biztype" value="' + esc(cfg.supplierBizType) + '" placeholder="예: 도매 및 소매업"></div>'
+    + '<div class="fg" style="margin:0;min-width:200px"><label style="font-size:12px">공급자 종목</label><input class="fi" id="tax-sup-bizitem" value="' + esc(cfg.supplierBizItem) + '" placeholder="예: 화장품"></div>'
+    + '</div>'
+    + '<div style="overflow-x:auto;max-height:52vh;overflow-y:auto"><table class="tbl" style="text-align:center"><thead><tr>'
+    + '<th>업체</th><th style="width:130px">사업자등록번호</th><th style="width:130px">업태</th><th style="width:130px">종목</th>'
+    + '<th style="width:190px">계산서 수신 이메일</th><th style="width:150px">발행 방식</th><th style="width:170px">금액 기준</th>'
+    + '</tr></thead><tbody id="tax-cfg-tbody">' + (rows || '<tr><td colspan="7" style="padding:20px;color:#94a3b8">판매업체가 없습니다</td></tr>') + '</tbody></table></div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
+    + '<button class="btn btn-outline" onclick="document.getElementById(\'tax-cfg-overlay\').remove()">취소</button>'
+    + '<button class="btn btn-primary" onclick="saveTaxConfig()">💾 저장</button>'
+    + '</div></div>';
+  document.body.appendChild(ov);
+}
+async function saveTaxConfig(){
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  const cfg = window._tax.cfg || _taxDefaultCfg();
+  cfg.supplierBizType = (document.getElementById('tax-sup-biztype')?.value || '').trim();
+  cfg.supplierBizItem = (document.getElementById('tax-sup-bizitem')?.value || '').trim();
+  cfg.vendors = cfg.vendors || {};
+  document.querySelectorAll('#tax-cfg-tbody tr[data-sid]').forEach(tr => {
+    const sid = tr.getAttribute('data-sid');
+    const g = cls => (tr.querySelector('.' + cls) ? String(tr.querySelector('.' + cls).value || '').trim() : '');
+    const o = { bizno:g('tc-bizno'), bizType:g('tc-biztype'), bizItem:g('tc-bizitem'), email:g('tc-email'), mode:g('tc-mode'), source:g('tc-source') };
+    if (Object.keys(o).some(k => o[k])) cfg.vendors[sid] = Object.assign(cfg.vendors[sid] || {}, o);
+  });
+  window._tax.cfg = cfg;
+  await _taxSaveCfg();
+  document.getElementById('tax-cfg-overlay')?.remove();
+  renderTaxInvoicePage();
+  showNotif('✅ 세금계산서 발행 설정 저장됨', 'success');
+}
+
+// ── 슬랙 #세금계산서 ──
+function _slackTaxUrl(){
+  const s = DB.appSettings || {};
+  let u = (s.slackTaxEnabled && s.slackTaxWebhookUrl) ? s.slackTaxWebhookUrl : '';
+  if (!u && s.slackEnabled) u = s.slackWebhookUrl || '';    // 미설정이면 기본 결재 채널로 폴백
+  return _cleanWebhookUrl(u);
+}
+async function _slackTaxSend(text){
+  const url = _slackTaxUrl();
+  if (!url) { console.warn('[tax] 슬랙 웹훅 미설정 — 알림 생략'); return false; }
+  try {
+    const kind = _detectWebhookKind(url);
+    await _postWebhook(url, kind, kind === 'slack' ? { text: text, mrkdwn: true } : { body: text });
+    return true;
+  } catch(e){ console.warn('[tax] 슬랙 알림 실패', e); return false; }
+}
+async function _taxSlackReady(list){
+  if (!list || !list.length) return;
+  const won = n => '₩' + (Number(n)||0).toLocaleString();
+  const lines = list.map(v => '• *' + (v.sellerName||'') + '* — ' + (v.kind==='monthly' ? (v.from + ' ~ ' + v.to) : v.from)
+    + ' · 공급가액 ' + won(v.supply) + ' · 세액 ' + won(v.tax) + ' · 합계 *' + won(v.total) + '*'
+    + (v.bizno ? '' : ' ⚠️ 사업자번호 없음'));
+  const total = list.reduce((s,v) => s + (Number(v.total)||0), 0);
+  await _slackTaxSend('🧾 *세금계산서 발행이 준비되었습니다*\n\n' + lines.join('\n')
+    + '\n\n합계 ' + list.length + '건 · ' + won(total)
+    + '\n작성일자: ' + (list[0].issueDate || '-')
+    + '\n\nERP > 재무 관리 > 세금계산서 에서 [🔐 발행하기] 를 누르고 홈택스에서 공인인증서로 컨펌해 주세요.');
+}
+async function _taxSlackIssued(v){
+  const won = n => '₩' + (Number(n)||0).toLocaleString();
+  await _slackTaxSend('✅ *세금계산서 발행 완료*\n• ' + (v.sellerName||'') + ' · ' + (v.issueDate||'') + ' · 합계 ' + won(v.total)
+    + (v.ntsNo ? '\n• 승인번호: ' + v.ntsNo : '') + (v.issuedBy ? '\n• 처리: ' + v.issuedBy : ''));
+}
+function _updateSlackTaxStatusBadge(){
+  const s = DB.appSettings || {};
+  const badge = document.getElementById('slack-tax-status-badge');
+  if (badge) {
+    if (s.slackTaxWebhookUrl && s.slackTaxEnabled) { badge.textContent = '✅ 활성'; badge.style.background = '#dcfce7'; badge.style.color = '#166534'; }
+    else if (s.slackTaxWebhookUrl) { badge.textContent = '⏸️ 비활성'; badge.style.background = '#fef3c7'; badge.style.color = '#92400e'; }
+    else { badge.textContent = '미설정'; badge.style.background = '#fef3c7'; badge.style.color = '#92400e'; }
+  }
+  const u = document.getElementById('slack-tax-url'); if (u) u.value = s.slackTaxWebhookUrl || '';
+  const e = document.getElementById('slack-tax-enabled'); if (e) e.checked = !!s.slackTaxEnabled;
+}
+function saveSlackTaxSettings(){
+  const url = (document.getElementById('slack-tax-url')?.value || '').trim();
+  const en = !!document.getElementById('slack-tax-enabled')?.checked;
+  if (!DB.appSettings) DB.appSettings = {};
+  DB.appSettings.slackTaxWebhookUrl = url;
+  DB.appSettings.slackTaxEnabled = en;
+  DB.appSettings.slackCfgTs = Date.now();
+  try { localStorage.setItem('reniv_slack_tax_webhook_backup', url); } catch(_){}
+  try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
+  _updateSlackTaxStatusBadge();
+  showNotif('✅ 세금계산서 알림 설정 저장됨', 'success');
+}
+async function testSlackTaxWebhook(){
+  const raw = (document.getElementById('slack-tax-url')?.value || '') || (DB.appSettings && DB.appSettings.slackTaxWebhookUrl) || '';
+  const url = _cleanWebhookUrl(raw);
+  if (!url) { showNotif('Webhook URL 을 먼저 입력해 주세요', 'warning'); return; }
+  try {
+    const kind = _detectWebhookKind(url);
+    await _postWebhook(url, kind, kind === 'slack' ? { text: '🧪 르니브 ERP — 세금계산서 알림 연결 테스트', mrkdwn: true } : { body: '🧪 르니브 ERP — 세금계산서 알림 연결 테스트' });
+    showNotif('🧪 테스트 메시지를 보냈습니다 — 채널을 확인해 주세요', 'info');
+  } catch(e){ showNotif('전송 실패: ' + (e && e.message || e), 'error'); }
+}
+
+// ── 익월 3일 자동 생성 + 알림 (기기 중복 방지: 공유 설정의 lastAutoYm) ──
+async function _taxAutoRun(){
+  try {
+    const d = new Date();
+    if (d.getDate() < _TAX_AUTO_DAY) return;
+    await _taxLoad(true);
+    const ym = _taxPrevYm();
+    if (window._tax.cfg.lastAutoYm === ym) return;
+    if (!window._currentUser) return;                  // 로그인 전
+    if (!(DB.sellers||[]).length) return;              // 데이터 로드 전
+    // 먼저 '오늘 했다' 를 서버에 박아 둔다. 서버 기록이 안 되면(권한/네트워크)
+    // 기기마다 매시간 중복 발송된다 — 그럴 땐 조용히 빠진다.
+    const _prevYm = window._tax.cfg.lastAutoYm;
+    window._tax.cfg.lastAutoYm = ym;
+    window._tax.cfg.lastAutoBy = _taxMe();
+    if (!(await _taxSaveCfg())) { window._tax.cfg.lastAutoYm = _prevYm; console.warn('🧾 [TAX] 자동 생성 보류 — 공유 설정 저장 실패(중복 발송 방지)'); return; }
+    const n = await taxBuildMonthly(ym);               // silent 모드
+    if (!n) { console.log('🧾 [TAX] ' + ym + ' 자동 집계 — 대상 거래 없음'); return; }
+    const list = (window._tax.invoices||[]).filter(v => v && v.kind === 'monthly' && v.ym === ym);
+    list.forEach(v => { if (v.status === 'draft') { v.status = 'ready'; v.preparedAt = Date.now(); v.preparedBy = '자동(익월 ' + _TAX_AUTO_DAY + '일)'; } });
+    await _taxSaveInvoices();
+    await _taxSlackReady(list);
+    console.log('🧾 [TAX] ' + ym + ' 월 합계 세금계산서 ' + list.length + '건 자동 준비 + 슬랙 알림');
+  } catch(e){ console.warn('🧾 [TAX] 자동 생성 실패:', e); }
+}
+setTimeout(function(){
+  try { _taxAutoRun(); } catch(_){}
+  setInterval(function(){ try { _taxAutoRun(); } catch(_){} }, 60 * 60 * 1000);
+}, 75 * 1000);
+
 // 거래명세서 이메일 — v2.3.633: 발주서와 동일하게 PDF 첨부 .eml (본문은 텍스트)
 async function _consignEmail(shId){
   const sh=(window._consign.shipments||[]).find(x=>x&&String(x.id)===String(shId));
@@ -29916,6 +30711,8 @@ async function _consignEmail(shId){
   const a=document.createElement('a'); a.href=url; a.download='거래명세서_'+(sh.sellerName||'')+'_'+(sh.date||'')+'.eml';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(()=>URL.revokeObjectURL(url),200);
+  // v2.3.857: 거래명세서 발행 시각 기록 — 세금계산서를 '거래명세서 발행분만' 기준으로 뽑는 업체에 쓴다
+  try { if (!sh.stmtIssuedAt) { sh.stmtIssuedAt = Date.now(); await _consignSaveShipments(); } } catch(_){}
   showNotif('📧 거래명세서 PDF 첨부 메일(.eml) 다운로드 — 파일을 더블클릭하면 Outlook 이 열립니다'+(to?'':' (받는사람 미설정 — 직접 입력)'),'info');
 }
 async function _consignDelete(shId){
@@ -61098,7 +61895,7 @@ function initERPWhenReady() {
     try { updateBadges(); } catch(e) { console.warn('updateBadges 실패:', e); }
     // v1.9.316 — 새로고침 시 마지막 머물렀던 페이지 복원 (기본: dashboard)
     try {
-      const KNOWN_PAGES = ['dashboard','feedshare','workflow','calendar','gdrive','vendor','item','archive','bom','partspec','production','stock','quote','order','approval','sites','accounts','insight','users','qc','cost','cs','claims','consign','sales','settings','recurring'];
+      const KNOWN_PAGES = ['dashboard','feedshare','workflow','calendar','gdrive','vendor','item','archive','bom','partspec','production','stock','quote','order','approval','sites','accounts','insight','users','qc','cost','cs','claims','consign','taxinvoice','sales','settings','recurring'];
       // v1.9.976: 같은 탭 새로고침이면 마지막 페이지 복원, 처음 접속/새 탭/브라우저 재시작이면 dashboard
       //   sessionStorage 는 같은 탭이 살아있는 동안만 유지(새로고침=유지, 탭닫기/재시작=초기화)
       if (typeof window._v976_freshSession === 'undefined') {
@@ -61613,7 +62410,7 @@ function initERPWhenReady() {
         const mergedSettings = {};
         // string 필드: 비어있지 않은 값 우선 (Firestore > localStorage, 둘 다 있으면 Firestore)
         // v2.3.18: slackDriveWebhookUrl 추가 / v2.3.23: slackBoardWebhookUrl 추가
-        const strKeys = ['slackWebhookUrl','geminiApiKey','slackDriveWebhookUrl','slackBoardWebhookUrl','slackDigestWebhookUrl','slackDigestTime','slackBoardRelayUrl','slackBoardRelaySecret','slackApprovalRelayUrl','slackApprovalRelaySecret'];  // v2.3.173: board relay / v2.3.205: approval relay 추가
+        const strKeys = ['slackWebhookUrl','geminiApiKey','slackDriveWebhookUrl','slackBoardWebhookUrl','slackDigestWebhookUrl','slackTaxWebhookUrl','slackDigestTime','slackBoardRelayUrl','slackBoardRelaySecret','slackApprovalRelayUrl','slackApprovalRelaySecret'];  // v2.3.173: board relay / v2.3.205: approval relay 추가
         strKeys.forEach(k => {
           const fs = (typeof fsS[k] === 'string' && fsS[k].trim()) ? fsS[k] : '';
           const lc = (typeof lcS[k] === 'string' && lcS[k].trim()) ? lcS[k] : '';
@@ -61646,7 +62443,7 @@ function initERPWhenReady() {
           const _lApp = (localDB && localDB.appSettings) || {}, _fApp = (firestoreDB && firestoreDB.appSettings) || {};
           const _lts = Number(_lApp.slackCfgTs) || 0, _fts = Number(_fApp.slackCfgTs) || 0;
           if (_fts > _lts) {
-            ['slackWebhookUrl','slackEnabled','slackDriveWebhookUrl','slackDriveEnabled','slackBoardWebhookUrl','slackBoardEnabled','slackDigestWebhookUrl','slackDigestEnabled','slackDigestTime','slackBoardRelayUrl','slackBoardRelaySecret','slackApprovalRelayUrl','slackApprovalRelaySecret','slackApprovalEnabled','slackCfgTs'].forEach(k => { if (k in _fApp) merged.appSettings[k] = _fApp[k]; });
+            ['slackWebhookUrl','slackEnabled','slackDriveWebhookUrl','slackDriveEnabled','slackBoardWebhookUrl','slackBoardEnabled','slackDigestWebhookUrl','slackDigestEnabled','slackTaxWebhookUrl','slackTaxEnabled','slackDigestTime','slackBoardRelayUrl','slackBoardRelaySecret','slackApprovalRelayUrl','slackApprovalRelaySecret','slackApprovalEnabled','slackCfgTs'].forEach(k => { if (k in _fApp) merged.appSettings[k] = _fApp[k]; });
             console.warn('🔔 [SLACK CFG] 서버 설정이 더 최신(slackCfgTs) — 슬랙 알림 설정을 서버값으로 채택');
           }
         } catch(_){}
