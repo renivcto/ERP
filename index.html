@@ -3253,6 +3253,7 @@ try{
         <button class="btn" id="tax-build-btn" onclick="taxBuildMonthly()" style="background:#0f766e;color:#fff;border:1px solid #0f766e;font-weight:700;font-size:13px;padding:8px 16px;border-radius:8px;margin-top:14px">🔄 월 합계 계산서 만들기</button>
         <button class="btn btn-outline btn-sm" onclick="openTaxConfig()" style="margin-top:14px">⚙️ 발행 설정</button>
         <span style="font-size:12px;color:var(--gray-400);margin-top:14px">발행 설정에 등록한 업체의 한 달 거래를 말일자로 모아 작성 · 검토 후 [발행하기] 를 눌러야 실제 발행 · 건별도 가능</span>
+        <span id="tax-start-hint" style="font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:4px 10px;margin-top:14px"></span>
       </div>
 
       <div id="tax-unreg-warn" style="display:none;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:10px 12px;font-size:12.5px;margin-bottom:14px"></div>
@@ -6360,7 +6361,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.860';
+const ERP_VERSION = 'v2.3.861';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29964,9 +29965,17 @@ const _TAX_INV_KEY = 'finance_tax_invoices';
 const _TAX_AUTO_DAY = 1;          // 익월 1일부터 자동 생성 (작성일자는 당월 말일)
 const _TAX_DUE_DAY  = 3;          // 익월 3일까지 발행 (사내 마감 — 법정 기한은 익월 10일)
 
+// v2.3.861: 이 달(포함)부터 발행한다. 그 이전 거래분은 이미 수동으로 발행을 끝냈으므로 건드리지 않는다.
+const _TAX_START_YM_DEFAULT = '2026-09';
 function _taxDefaultCfg(){
-  return { supplierBizType:'', supplierBizItem:'', lastAutoYm:'', lastAutoBy:'', vendors:{} };
+  return { supplierBizType:'', supplierBizItem:'', startYm:_TAX_START_YM_DEFAULT, lastAutoYm:'', lastAutoBy:'', vendors:{} };
 }
+function _taxStartYm(){
+  const v = String((window._tax && window._tax.cfg && window._tax.cfg.startYm) || '').trim();
+  return /^\d{4}-\d{2}$/.test(v) ? v : _TAX_START_YM_DEFAULT;
+}
+// 이 기간은 이미 수동 발행이 끝난 구간인가
+function _taxTooOld(ym){ return !!ym && String(ym) < _taxStartYm(); }
 async function _taxLoad(force){
   if (window._tax.loaded && !force) return;
   try {
@@ -30101,6 +30110,10 @@ async function taxBuildMonthly(silent){
   await _consignLoad();
   await _taxLoad();
   const ym = silent ? silent : _taxYm();
+  if (_taxTooOld(ym)) {
+    if (!silent) showNotif('🔒 ' + ym + ' 은 발행 시작 월(' + _taxStartYm() + ') 이전입니다 — 이미 수동으로 발행을 끝낸 기간이라 만들지 않습니다', 'warning');
+    return 0;
+  }
   const rng = _taxMonthRange(ym);
   const rows = _taxSourceRows(ym);
   const reg = (window._tax.cfg && window._tax.cfg.vendors) || {};
@@ -30161,10 +30174,11 @@ async function taxBuildSelected(){
   await _consignLoad(); await _taxLoad();
   const ids = Array.from(document.querySelectorAll('#tax-src-tbody input.tax-src-ck:checked')).map(el => el.value);
   if (!ids.length) { showNotif('건별로 발행할 거래를 선택해 주세요', 'warning'); return; }
-  let made = 0, skipped = 0;
+  let made = 0, skipped = 0, old = 0;
   for (const sid of ids) {
     const sh = (window._consign.shipments||[]).find(x => x && String(x.id) === String(sid));
     if (!sh) continue;
+    if (_taxTooOld(String(sh.date||'').slice(0,7))) { old++; continue; }
     if (_taxInvFor('single', sh.sellerId, '', sh.id)) { skipped++; continue; }
     const info = _taxSellerInfo(sh.sellerId);
     const A = _consignAmounts(sh);
@@ -30182,7 +30196,12 @@ async function taxBuildSelected(){
   }
   if (made) await _taxSaveInvoices();
   renderTaxInvoicePage();
-  showNotif(made ? ('🧾 건별 세금계산서 ' + made + '건 생성' + (skipped ? ' (이미 있음 ' + skipped + '건 제외)' : '')) : '이미 모두 생성된 거래입니다', made ? 'success' : 'warning');
+  const _ex = [];
+  if (skipped) _ex.push('이미 있음 ' + skipped + '건');
+  if (old) _ex.push('발행 시작 월 이전 ' + old + '건');
+  showNotif(made ? ('🧾 건별 세금계산서 ' + made + '건 생성' + (_ex.length ? ' (' + _ex.join(' · ') + ' 제외)' : ''))
+    : (old ? ('🔒 선택한 거래는 발행 시작 월(' + _taxStartYm() + ') 이전입니다 — 이미 수동 발행한 기간입니다') : '이미 모두 생성된 거래입니다'),
+    made ? 'success' : 'warning');
 }
 
 function taxSrcToggleAll(ck){ document.querySelectorAll('#tax-src-tbody input.tax-src-ck').forEach(el => { el.checked = !!ck; }); }
@@ -30199,6 +30218,7 @@ async function renderTaxInvoicePage(){
     : st === 'issuing' ? '<span class="badge" style="background:#ede9fe;color:#5b21b6;font-size:11px" title="팝빌로 발행 중입니다 — 보통 1분 안에 끝납니다">발행 중…</span>'
     : st === 'ready' ? '<span class="badge" style="background:#dbeafe;color:#1e40af;font-size:11px" title="검토 후 [발행하기] 를 눌러야 실제로 발행됩니다">발행 대기</span>'
     : '<span class="badge" style="background:#fef3c7;color:#92400e;font-size:11px">작성중</span>';
+  const oldTag = v => _taxTooOld(v.ym) ? '<div style="font-size:10.5px;color:var(--gray-400);margin-top:3px">🔒 기간 외</div>' : '';
 
   const list = (window._tax.invoices||[]).filter(v => v && (v.ym === ym || String(v.issueDate||'').slice(0,7) === ym))
     .slice().sort((a,b) => String(b.issueDate||'').localeCompare(String(a.issueDate||'')) || String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
@@ -30222,7 +30242,7 @@ async function renderTaxInvoicePage(){
       + '<td style="text-align:right">' + won(v.supply) + '</td>'
       + '<td style="text-align:right">' + won(v.tax) + '</td>'
       + '<td style="text-align:right;font-weight:700">' + won(v.total) + '</td>'
-      + '<td>' + badge(v.status)
+      + '<td>' + badge(v.status) + oldTag(v)
         + (v.ntsNo ? '<div style="font-size:10.5px;color:var(--gray-400);margin-top:2px">' + escapeHtml(v.ntsNo) + '</div>' : '')
         + (v.issueError ? '<div style="font-size:10.5px;color:#b91c1c;margin-top:3px;max-width:150px;white-space:normal;line-height:1.35" title="' + escapeHtml(v.issueError) + '">⚠️ ' + escapeHtml(String(v.issueError).slice(0,60)) + '</div>' : '')
         + '</td>'
@@ -30236,8 +30256,13 @@ async function renderTaxInvoicePage(){
   // v2.3.858: 이 달 거래가 있는데 발행 설정에 없는 업체를 알려 준다 (등록된 업체만 월 합계 대상)
   const _reg = (window._tax.cfg && window._tax.cfg.vendors) || {};
   const _un = {};
-  rows.forEach(sh => { if (!_reg[String(sh.sellerId)]) _un[String(sh.sellerId)] = sh.sellerName || String(sh.sellerId); });
+  rows.forEach(sh => {
+    if (_taxTooOld(String(sh.date||'').slice(0,7))) return;
+    if (!_reg[String(sh.sellerId)]) _un[String(sh.sellerId)] = sh.sellerName || String(sh.sellerId);
+  });
   const _unNames = Object.values(_un);
+  const _hint = document.getElementById('tax-start-hint');
+  if (_hint) _hint.textContent = '🔒 ' + _taxStartYm() + ' 거래분부터 발행합니다 (이전은 수동 발행 완료)';
   const _warn = document.getElementById('tax-unreg-warn');
   if (_warn) {
     if (_unNames.length) {
@@ -30254,11 +30279,13 @@ async function renderTaxInvoicePage(){
     const mon = (window._tax.invoices||[]).find(v => v && v.kind === 'monthly' && (v.srcIds||[]).indexOf(sh.id) >= 0);
     const names = (sh.lines||[]).map(l => l.name).filter(Boolean);
     const itemTxt = names.length > 1 ? (names[0] + ' 외 ' + (names.length-1)) : (names[0] || '-');
-    const state = inv ? '<span style="color:#0f766e;font-weight:600;font-size:11.5px">건별 생성됨</span>'
+    const _old = _taxTooOld(String(sh.date||'').slice(0,7));
+    const state = _old ? '<span style="color:var(--gray-400);font-size:11.5px" title="발행 시작 월(' + _taxStartYm() + ') 이전 — 이미 수동으로 발행한 기간입니다">🔒 기간 외</span>'
+      : inv ? '<span style="color:#0f766e;font-weight:600;font-size:11.5px">건별 생성됨</span>'
       : mon ? '<span style="color:var(--gray-400);font-size:11.5px">월 합계 포함</span>'
       : '<span style="color:var(--gray-400);font-size:11.5px">-</span>';
-    return '<tr>'
-      + '<td>' + ((inv||mon) ? '' : '<input type="checkbox" class="tax-src-ck" value="' + sh.id + '">') + '</td>'
+    return '<tr' + (_old ? ' style="opacity:.55"' : '') + '>'
+      + '<td>' + ((inv||mon||_old) ? '' : '<input type="checkbox" class="tax-src-ck" value="' + sh.id + '">') + '</td>'
       + '<td>' + escapeHtml(sh.date||'-') + '</td>'
       + '<td style="text-align:left">' + escapeHtml(sh.sellerName||'-') + '</td>'
       + '<td style="text-align:left;font-size:12px">' + escapeHtml(itemTxt) + '</td>'
@@ -30306,6 +30333,12 @@ async function taxRequestIssue(id){
   const v = (window._tax.invoices||[]).find(x => x && x.id === id);
   if (!v) return;
   if (v.status === 'issued') { showNotif('이미 발행된 계산서입니다', 'warning'); return; }
+  if (_taxTooOld(v.ym)) {
+    alert('🔒 ' + v.ym + ' 은 발행 시작 월(' + _taxStartYm() + ') 이전입니다.\n\n'
+      + '이 기간은 이미 수동으로 발행을 끝냈기 때문에 여기서 발행할 수 없습니다.\n'
+      + '(정말 발행해야 한다면 발행 설정에서 시작 월을 바꿔 주세요)');
+    return;
+  }
   const miss = _taxMissing(v);
   if (miss.length) {
     alert('아래 항목이 비어 있어 발행할 수 없습니다.\n\n· ' + miss.join('\n· ') + '\n\n발행 설정 / 회사 정보에서 채운 뒤 다시 시도해 주세요.');
@@ -30367,7 +30400,8 @@ async function taxIssue(id){
   await _taxLoad();
   const v = (window._tax.invoices||[]).find(x => x && x.id === id);
   if (!v) return;
-  const miss = _taxMissing(v);
+  const _old = _taxTooOld(v.ym);
+  const miss = _old ? ['발행 시작 월(' + _taxStartYm() + ') 이전 — 이미 수동 발행한 기간'] : _taxMissing(v);
   const won = n => '₩' + (Number(n)||0).toLocaleString();
   document.getElementById('tax-issue-overlay')?.remove();
   const ov = document.createElement('div');
@@ -30377,7 +30411,8 @@ async function taxIssue(id){
   ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:620px;width:100%;max-height:90vh;overflow:auto;padding:22px 24px">'
     + '<div style="font-size:16px;font-weight:800;margin-bottom:4px">🔐 전자세금계산서 발행</div>'
     + '<div style="font-size:12.5px;color:var(--gray-500);margin-bottom:14px">' + escapeHtml(v.sellerName||'') + ' · ' + escapeHtml(v.kind==='monthly' ? (v.from+' ~ '+v.to) : v.from) + ' · 합계 <strong>' + won(v.total) + '</strong></div>'
-    + (miss.length ? '<div style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px 12px;font-size:12.5px;margin-bottom:12px">⚠️ 비어 있는 항목: ' + escapeHtml(miss.join(', ')) + '</div>' : '<div style="background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:8px;padding:10px 12px;font-size:12.5px;margin-bottom:12px">✅ 필수 항목이 모두 채워졌습니다 — 바로 발행할 수 있습니다</div>')
+    + (_old ? '<div style="background:#f1f5f9;border:1px solid #cbd5e1;color:#334155;border-radius:8px;padding:10px 12px;font-size:12.5px;margin-bottom:12px">🔒 <strong>' + escapeHtml(v.ym) + '</strong> 은 발행 시작 월(' + escapeHtml(_taxStartYm()) + ') 이전입니다 — 이미 수동으로 발행을 끝낸 기간이라 발행할 수 없습니다.</div>'
+      : miss.length ? '<div style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px 12px;font-size:12.5px;margin-bottom:12px">⚠️ 비어 있는 항목: ' + escapeHtml(miss.join(', ')) + '</div>' : '<div style="background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:8px;padding:10px 12px;font-size:12.5px;margin-bottom:12px">✅ 필수 항목이 모두 채워졌습니다 — 바로 발행할 수 있습니다</div>')
     + '<div style="background:#f0fdfa;border:1px solid #99f6e4;border-radius:8px;padding:12px;font-size:12.5px;color:#0f766e;line-height:1.75;margin-bottom:12px">'
     + '🔐 아래 <strong>[지금 발행하기]</strong> 를 누르면 팝빌을 통해 <strong>실제로 발행</strong>됩니다. '
     + '국세청에 신고되고 공급받는자에게 메일이 나갑니다. 승인번호는 자동으로 채워집니다.<br>'
@@ -30701,6 +30736,9 @@ async function openTaxConfig(){
     + '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">'
     + '<div class="fg" style="margin:0;min-width:220px"><label style="font-size:12px">공급자 업태</label><input class="fi" id="tax-sup-biztype" value="' + esc(cfg.supplierBizType) + '" placeholder="예: 도매 및 소매업"></div>'
     + '<div class="fg" style="margin:0;min-width:220px"><label style="font-size:12px">공급자 종목</label><input class="fi" id="tax-sup-bizitem" value="' + esc(cfg.supplierBizItem) + '" placeholder="예: 화장품"></div>'
+    + '<div class="fg" style="margin:0;min-width:190px"><label style="font-size:12px">발행 시작 월</label>'
+    + '<input class="fi" type="month" id="tax-start-ym" value="' + esc(_taxStartYm()) + '" title="이 달부터 발행합니다. 이전 거래분은 이미 수동 발행했으므로 만들지도, 발행하지도 않습니다">'
+    + '<div style="font-size:11px;color:var(--gray-400);margin-top:3px">이 달부터 발행 · 이전은 잠금</div></div>'
     + '</div>'
     + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">'
     + '<span style="font-size:13px;font-weight:700">발행 대상 업체</span>'
@@ -30724,6 +30762,8 @@ async function saveTaxConfig(){
   const cfg = window._tax.cfg || _taxDefaultCfg();
   cfg.supplierBizType = (document.getElementById('tax-sup-biztype')?.value || '').trim();
   cfg.supplierBizItem = (document.getElementById('tax-sup-bizitem')?.value || '').trim();
+  const _sy = (document.getElementById('tax-start-ym')?.value || '').trim();
+  if (/^\d{4}-\d{2}$/.test(_sy)) cfg.startYm = _sy;
   // 화면에 남아 있는 행 = 발행 대상. 지운 업체는 설정에서도 사라진다.
   const next = {};
   document.querySelectorAll('#tax-cfg-tbody tr[data-sid]').forEach(tr => {
@@ -30821,6 +30861,12 @@ async function _taxAutoRun(){
     await _taxLoad(true);
     const ym = _taxPrevYm();
     if (window._tax.cfg.lastAutoYm === ym) return;
+    if (_taxTooOld(ym)) {   // v2.3.861: 이미 수동 발행을 끝낸 기간 — 초안도 만들지 않는다
+      window._tax.cfg.lastAutoYm = ym;
+      await _taxSaveCfg();
+      console.log('🧾 [TAX] ' + ym + ' 은 발행 시작 월(' + _taxStartYm() + ') 이전 — 건너뜀');
+      return;
+    }
     if (!window._currentUser) return;                  // 로그인 전
     if (!(DB.sellers||[]).length) return;              // 데이터 로드 전
     // 먼저 '오늘 했다' 를 서버에 박아 둔다. 서버 기록이 안 되면(권한/네트워크)
