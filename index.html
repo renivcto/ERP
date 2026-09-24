@@ -3252,7 +3252,7 @@ try{
         </div>
         <button class="btn" id="tax-build-btn" onclick="taxBuildMonthly()" style="background:#0f766e;color:#fff;border:1px solid #0f766e;font-weight:700;font-size:13px;padding:8px 16px;border-radius:8px;margin-top:14px">🔄 월 합계 계산서 만들기</button>
         <button class="btn btn-outline btn-sm" onclick="openTaxConfig()" style="margin-top:14px">⚙️ 발행 설정</button>
-        <span style="font-size:12px;color:var(--gray-400);margin-top:14px">발행 설정에 등록한 업체의 한 달 거래를 말일자로 모아 작성 · 익월 3일까지 발행 · 건별 발행도 가능</span>
+        <span style="font-size:12px;color:var(--gray-400);margin-top:14px">발행 설정에 등록한 업체의 한 달 거래를 말일자로 모아 작성 · 검토 후 [발행하기] 를 눌러야 실제 발행 · 건별도 가능</span>
       </div>
 
       <div id="tax-unreg-warn" style="display:none;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:10px 12px;font-size:12.5px;margin-bottom:14px"></div>
@@ -4063,9 +4063,9 @@ try{
           </div>
           <div class="card-body">
             <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12.5px;color:#475569;line-height:1.65">
-              📌 업체별 월 합계 전자세금계산서가 <strong>말일자 기준으로 익월 1일에 자동 생성</strong>되어 발행 준비가 끝나면
-              지정한 슬랙 채널(권장: <strong>#세금계산서</strong>)으로 알림을 보냅니다.<br>
-              발행 기한은 익월 3일이며, 공인인증서로 최종 컨펌하는 것은 사람이 합니다.
+              📌 업체별 월 합계 전자세금계산서가 <strong>말일자 기준으로 익월 1일에 자동 생성</strong>되면
+              지정한 슬랙 채널(권장: <strong>#세금계산서</strong>)로 "발행 대기" 알림을 보냅니다.<br>
+              <strong>자동으로 발행되지는 않습니다.</strong> 사람이 내용을 확인하고 [발행하기] 를 눌러야 팝빌로 발행됩니다. (발행 기한 익월 3일)
             </div>
             <div class="fg" style="margin-bottom:10px">
               <label>Webhook URL</label>
@@ -6360,7 +6360,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.859';
+const ERP_VERSION = 'v2.3.860';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30195,8 +30195,9 @@ async function renderTaxInvoicePage(){
   _taxMirrorWebhook();
   const ym = _taxYm();
   const won = n => '₩' + (Number(n)||0).toLocaleString();
-  const badge = st => st === 'issued' ? '<span class="badge" style="background:#dcfce7;color:#166534;font-size:11px">발행완료</span>'
-    : st === 'ready' ? '<span class="badge" style="background:#dbeafe;color:#1e40af;font-size:11px" title="서버가 팝빌로 자동 발행합니다 (매월 1·2·3일 09:10)">발행 대기</span>'
+  const badge = st => st === 'issued' ? '<span class="badge" style="background:#dcfce7;color:#166534;font-size:11px">발행 완료</span>'
+    : st === 'issuing' ? '<span class="badge" style="background:#ede9fe;color:#5b21b6;font-size:11px" title="팝빌로 발행 중입니다 — 보통 1분 안에 끝납니다">발행 중…</span>'
+    : st === 'ready' ? '<span class="badge" style="background:#dbeafe;color:#1e40af;font-size:11px" title="검토 후 [발행하기] 를 눌러야 실제로 발행됩니다">발행 대기</span>'
     : '<span class="badge" style="background:#fef3c7;color:#92400e;font-size:11px">작성중</span>';
 
   const list = (window._tax.invoices||[]).filter(v => v && (v.ym === ym || String(v.issueDate||'').slice(0,7) === ym))
@@ -30205,10 +30206,11 @@ async function renderTaxInvoicePage(){
   tb.innerHTML = list.length ? list.map(v => {
     const acts = [];
     acts.push('<button class="btn btn-outline btn-sm" onclick="taxPreview(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px">👁️ 미리보기</button>');
-    if (v.status === 'draft') acts.push('<button class="btn btn-sm" onclick="taxMarkReady(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px;background:#1e40af;color:#fff;border:1px solid #1e40af">✅ 발행 준비</button>');
+    if (v.status === 'draft') acts.push('<button class="btn btn-sm" onclick="taxMarkReady(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px;background:#1e40af;color:#fff;border:1px solid #1e40af">✅ 발행 대기로</button>');
     if (v.status === 'ready') acts.push('<button class="btn btn-sm" onclick="taxIssue(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px;background:#0f766e;color:#fff;border:1px solid #0f766e">🔐 발행하기</button>');
+    if (v.status === 'issuing') acts.push('<button class="btn btn-outline btn-sm" onclick="taxCancelIssue(\'' + v.id + '\')" title="발행 요청을 되돌립니다 (아직 팝빌에 넘어가지 않은 경우)" style="padding:3px 8px;font-size:11px">↩️ 요청 취소</button>');
     if (v.status === 'issued') acts.push('<button class="btn btn-outline btn-sm" onclick="taxEmail(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px">📧 이메일</button>');
-    if (v.status !== 'issued') acts.push('<button class="btn btn-outline btn-sm" onclick="taxDelete(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px;color:#b91c1c">🗑️</button>');
+    if (v.status === 'draft' || v.status === 'ready') acts.push('<button class="btn btn-outline btn-sm" onclick="taxDelete(\'' + v.id + '\')" style="padding:3px 8px;font-size:11px;color:#b91c1c">🗑️</button>');
     const period = v.kind === 'monthly' ? (v.from + ' ~ ' + v.to) : (v.from || '-');
     return '<tr>'
       + '<td>' + escapeHtml(v.issueDate||'-')
@@ -30220,7 +30222,10 @@ async function renderTaxInvoicePage(){
       + '<td style="text-align:right">' + won(v.supply) + '</td>'
       + '<td style="text-align:right">' + won(v.tax) + '</td>'
       + '<td style="text-align:right;font-weight:700">' + won(v.total) + '</td>'
-      + '<td>' + badge(v.status) + (v.ntsNo ? '<div style="font-size:10.5px;color:var(--gray-400);margin-top:2px">' + escapeHtml(v.ntsNo) + '</div>' : '') + '</td>'
+      + '<td>' + badge(v.status)
+        + (v.ntsNo ? '<div style="font-size:10.5px;color:var(--gray-400);margin-top:2px">' + escapeHtml(v.ntsNo) + '</div>' : '')
+        + (v.issueError ? '<div style="font-size:10.5px;color:#b91c1c;margin-top:3px;max-width:150px;white-space:normal;line-height:1.35" title="' + escapeHtml(v.issueError) + '">⚠️ ' + escapeHtml(String(v.issueError).slice(0,60)) + '</div>' : '')
+        + '</td>'
       + '<td><div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center">' + acts.join('') + '</div></td>'
       + '</tr>';
   }).join('') : '<tr><td colspan="10" style="padding:26px;color:var(--gray-400)">이 달에 만들어진 세금계산서가 없습니다 — [월 합계 계산서 만들기] 를 누르세요</td></tr>';
@@ -30289,10 +30294,75 @@ async function taxMarkReady(id){
   await _taxSaveInvoices();
   renderTaxInvoicePage();
   await _taxSlackReady([v]);
-  showNotif('✅ 발행 대기로 올렸습니다 — 서버가 팝빌로 자동 발행합니다 (#세금계산서 알림 발송)', 'success');
+  showNotif('✅ 발행 대기 — 검토 후 [🔐 발행하기] 를 누르면 실제로 발행됩니다 (#세금계산서 알림 발송)', 'success');
 }
 
-// ── 발행 (공인인증서 컨펌 직전까지) ──
+// ── 실제 발행 요청 — 서버(팝빌)가 1분 안에 처리한다 ──
+//   ERP 는 정적 페이지라 팝빌 키를 가질 수 없다. 그래서 상태를 'issuing' 으로 올려 두면
+//   서버 크론(매분)이 그 건만 발행한다. 사람이 누르지 않으면 아무 것도 발행되지 않는다.
+async function taxRequestIssue(id){
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  await _taxLoad();
+  const v = (window._tax.invoices||[]).find(x => x && x.id === id);
+  if (!v) return;
+  if (v.status === 'issued') { showNotif('이미 발행된 계산서입니다', 'warning'); return; }
+  const miss = _taxMissing(v);
+  if (miss.length) {
+    alert('아래 항목이 비어 있어 발행할 수 없습니다.\n\n· ' + miss.join('\n· ') + '\n\n발행 설정 / 회사 정보에서 채운 뒤 다시 시도해 주세요.');
+    return;
+  }
+  const won = n => '₩' + (Number(n)||0).toLocaleString();
+  if (!confirm('전자세금계산서를 실제로 발행합니다.\n\n'
+    + '· 공급받는자: ' + (v.sellerName||'') + '\n'
+    + '· 작성일자: ' + (v.issueDate||'') + '\n'
+    + '· 합계금액: ' + won(v.total) + '\n\n'
+    + '발행하면 국세청에 신고되고 거래처에 메일이 발송됩니다.\n진행할까요?')) return;
+  v.status = 'issuing';
+  v.issueError = '';
+  v.issueRequestedAt = Date.now();
+  v.issueRequestedBy = _taxMe();
+  await _taxSaveInvoices();
+  document.getElementById('tax-issue-overlay')?.remove();
+  renderTaxInvoicePage();
+  showNotif('🔐 발행 요청됨 — 1분 안에 처리됩니다', 'info');
+  _taxPoll(id);
+}
+// 발행 결과가 서버에서 돌아올 때까지 지켜본다 (최대 5분)
+function _taxPoll(id){
+  clearInterval(window._taxPollTimer);
+  let n = 0;
+  window._taxPollTimer = setInterval(async () => {
+    n++;
+    try {
+      await _taxLoad(true);
+      const v = (window._tax.invoices||[]).find(x => x && x.id === id);
+      renderTaxInvoicePage();
+      if (!v || v.status === 'issuing') {
+        if (n >= 30) { clearInterval(window._taxPollTimer); showNotif('발행이 아직 끝나지 않았습니다 — 잠시 후 새로고침해 주세요', 'warning'); }
+        return;
+      }
+      clearInterval(window._taxPollTimer);
+      if (v.status === 'issued') showNotif('✅ ' + (v.sellerName||'') + ' 세금계산서 발행 완료' + (v.ntsNo ? ' (승인번호 ' + v.ntsNo + ')' : ''), 'success');
+      else showNotif('⚠️ 발행 실패 — ' + (v.issueError || '사유 미상'), 'error');
+    } catch(_){}
+  }, 10000);
+}
+async function taxCancelIssue(id){
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  await _taxLoad(true);
+  const v = (window._tax.invoices||[]).find(x => x && x.id === id);
+  if (!v) return;
+  if (v.status !== 'issuing') { renderTaxInvoicePage(); showNotif('이미 처리된 건입니다', 'warning'); return; }
+  if (!confirm('발행 요청을 되돌립니다.\n\n서버가 이미 팝빌로 넘겼다면 취소되지 않습니다.\n계속할까요?')) return;
+  clearInterval(window._taxPollTimer);
+  v.status = 'ready';
+  v.issueError = '';
+  await _taxSaveInvoices();
+  renderTaxInvoicePage();
+  showNotif('↩️ 발행 대기로 되돌렸습니다', 'info');
+}
+
+// ── 발행 창 (검토 → 발행 버튼 / 홈택스 수동 경로) ──
 async function taxIssue(id){
   await _taxLoad();
   const v = (window._tax.invoices||[]).find(x => x && x.id === id);
@@ -30308,29 +30378,37 @@ async function taxIssue(id){
     + '<div style="font-size:16px;font-weight:800;margin-bottom:4px">🔐 전자세금계산서 발행</div>'
     + '<div style="font-size:12.5px;color:var(--gray-500);margin-bottom:14px">' + escapeHtml(v.sellerName||'') + ' · ' + escapeHtml(v.kind==='monthly' ? (v.from+' ~ '+v.to) : v.from) + ' · 합계 <strong>' + won(v.total) + '</strong></div>'
     + (miss.length ? '<div style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px 12px;font-size:12.5px;margin-bottom:12px">⚠️ 비어 있는 항목: ' + escapeHtml(miss.join(', ')) + '</div>' : '<div style="background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:8px;padding:10px 12px;font-size:12.5px;margin-bottom:12px">✅ 필수 항목이 모두 채워졌습니다 — 바로 발행할 수 있습니다</div>')
-    + '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;font-size:12.5px;color:#1e40af;line-height:1.75;margin-bottom:12px">'
-    + '🤖 <strong>기본은 자동입니다.</strong> 상태를 <strong>발행 대기</strong> 로 두면 서버가 <strong>매월 1·2·3일 09:10</strong> 에 '
-    + '팝빌로 발행하고, 공급받는자에게 메일까지 보냅니다. 국세청 승인번호도 자동으로 채워집니다.<br>'
-    + '이 창은 <strong>지금 바로 발행해야 할 때</strong> 쓰는 수동 경로입니다.'
+    + '<div style="background:#f0fdfa;border:1px solid #99f6e4;border-radius:8px;padding:12px;font-size:12.5px;color:#0f766e;line-height:1.75;margin-bottom:12px">'
+    + '🔐 아래 <strong>[지금 발행하기]</strong> 를 누르면 팝빌을 통해 <strong>실제로 발행</strong>됩니다. '
+    + '국세청에 신고되고 공급받는자에게 메일이 나갑니다. 승인번호는 자동으로 채워집니다.<br>'
+    + '<strong>누르기 전까지는 아무 것도 발행되지 않습니다.</strong> 내용을 먼저 [계산서 미리보기] 로 확인해 주세요.'
     + '</div>'
-    + '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:12.5px;color:#475569;line-height:1.75;margin-bottom:14px">'
-    + '<strong>수동 발행 순서 (홈택스 직접)</strong><br>'
-    + '1️⃣ 아래 [일괄발행 파일 내려받기] 로 계산서 데이터를 받습니다.<br>'
-    + '2️⃣ [홈택스 전자세금계산서 열기] → 공인인증서(공동인증서) 로그인 → <em>계산서 일괄발행</em> 에 파일을 올립니다.<br>'
-    + '3️⃣ 내용 확인 후 <strong>인증서로 컨펌 · 발행</strong> 합니다.<br>'
-    + '4️⃣ 발행 후 받은 <strong>국세청 승인번호</strong> 를 아래에 넣고 [발행 완료 처리] 를 누르면 이력에 남습니다.'
-    + '</div>'
-    + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'
-    + '<button class="btn btn-outline btn-sm" onclick="taxCsv(\'' + v.id + '\')">📥 일괄발행 파일 내려받기</button>'
-    + '<button class="btn btn-outline btn-sm" onclick="window.open(\'https://www.hometax.go.kr\',\'_blank\')">🔗 홈택스 전자세금계산서 열기</button>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">'
     + '<button class="btn btn-outline btn-sm" onclick="taxPreview(\'' + v.id + '\')">👁️ 계산서 미리보기</button>'
     + '</div>'
-    + '<div class="fg" style="margin-bottom:12px"><label style="font-size:12px">국세청 승인번호 (발행 후 입력)</label>'
-    + '<input class="fi" id="tax-nts-no" value="' + escapeHtml(v.ntsNo||'') + '" placeholder="예: 20261003-12345678-12345678"></div>'
-    + '<div style="display:flex;gap:8px;justify-content:flex-end">'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:18px">'
     + '<button class="btn btn-outline" onclick="document.getElementById(\'tax-issue-overlay\').remove()">닫기</button>'
-    + '<button class="btn btn-primary" onclick="taxConfirmIssued(\'' + v.id + '\')">✅ 발행 완료 처리</button>'
-    + '</div></div>';
+    + '<button class="btn" ' + (miss.length ? 'disabled title="비어 있는 항목을 먼저 채워 주세요" style="padding:8px 18px;background:#cbd5e1;color:#fff;border:1px solid #cbd5e1;font-weight:700;border-radius:8px;cursor:not-allowed"'
+        : 'onclick="taxRequestIssue(\'' + v.id + '\')" style="padding:8px 18px;background:#0f766e;color:#fff;border:1px solid #0f766e;font-weight:700;border-radius:8px"') + '>🔐 지금 발행하기</button>'
+    + '</div>'
+    + '<details style="border-top:1px solid #e5e7eb;padding-top:12px">'
+    + '<summary style="cursor:pointer;font-size:12.5px;color:var(--gray-500);font-weight:600">팝빌이 안 될 때 — 홈택스에서 직접 발행하기</summary>'
+    + '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:12.5px;color:#475569;line-height:1.75;margin:10px 0">'
+    + '1️⃣ [일괄발행 파일 내려받기] 로 계산서 데이터를 받습니다.<br>'
+    + '2️⃣ [홈택스 열기] → 공동인증서 로그인 → <em>계산서 일괄발행</em> 에 파일을 올립니다.<br>'
+    + '3️⃣ 내용 확인 후 인증서로 컨펌·발행합니다.<br>'
+    + '4️⃣ 받은 <strong>국세청 승인번호</strong> 를 넣고 [발행 완료 처리] 를 누르면 이력에 남습니다.'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
+    + '<button class="btn btn-outline btn-sm" onclick="taxCsv(\'' + v.id + '\')">📥 일괄발행 파일 내려받기</button>'
+    + '<button class="btn btn-outline btn-sm" onclick="window.open(\'https://www.hometax.go.kr\',\'_blank\')">🔗 홈택스 열기</button>'
+    + '</div>'
+    + '<div class="fg" style="margin-bottom:10px"><label style="font-size:12px">국세청 승인번호</label>'
+    + '<input class="fi" id="tax-nts-no" value="' + escapeHtml(v.ntsNo||'') + '" placeholder="예: 20261003-12345678-12345678"></div>'
+    + '<div style="display:flex;justify-content:flex-end">'
+    + '<button class="btn btn-outline btn-sm" onclick="taxConfirmIssued(\'' + v.id + '\')">✅ 수동 발행 완료 처리</button>'
+    + '</div></details>'
+    + '</div>';
   document.body.appendChild(ov);
 }
 async function taxConfirmIssued(id){
@@ -30691,8 +30769,8 @@ async function _taxSlackReady(list){
     + '\n\n합계 ' + list.length + '건 · ' + won(total)
     + '\n작성일자: ' + (list[0].issueDate || '-') + ' (월 말일 기준)'
     + '\n발행 기한: ' + (list[0].dueDate || '-') + ' 까지'
-    + '\n\n서버가 매월 1·2·3일 09:10 에 팝빌로 자동 발행합니다.'
-    + '\n지금 바로 발행하려면 ERP > 재무 관리 > 세금계산서 에서 [🔐 발행하기] 를 쓰세요.');
+    + '\n\n⚠️ 자동으로 발행되지 않습니다. ERP > 재무 관리 > 세금계산서 에서 내용을 확인하고'
+    + '\n[🔐 발행하기] 를 눌러 주세요. 누르면 팝빌로 1분 안에 발행됩니다.');
 }
 async function _taxSlackIssued(v){
   const won = n => '₩' + (Number(n)||0).toLocaleString();
@@ -30754,7 +30832,7 @@ async function _taxAutoRun(){
     const n = await taxBuildMonthly(ym);               // silent 모드
     if (!n) { console.log('🧾 [TAX] ' + ym + ' 자동 집계 — 대상 거래 없음'); return; }
     const list = (window._tax.invoices||[]).filter(v => v && v.kind === 'monthly' && v.ym === ym);
-    list.forEach(v => { if (v.status === 'draft') { v.status = 'ready'; v.preparedAt = Date.now(); v.preparedBy = '자동(익월 ' + _TAX_AUTO_DAY + '일 생성 · ' + _TAX_DUE_DAY + '일까지 발행)'; } });
+    list.forEach(v => { if (v.status === 'draft') { v.status = 'ready'; v.preparedAt = Date.now(); v.preparedBy = '자동 생성(익월 ' + _TAX_AUTO_DAY + '일) · 발행은 사람이 확인 후'; } });
     await _taxSaveInvoices();
     await _taxSlackReady(list);
     console.log('🧾 [TAX] ' + ym + ' 월 합계 세금계산서 ' + list.length + '건 자동 준비 + 슬랙 알림');
