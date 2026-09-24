@@ -6365,7 +6365,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.868';
+const ERP_VERSION = 'v2.3.869';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30135,9 +30135,12 @@ async function taxBuildMonthly(silent){
   const rng = _taxMonthRange(ym);
   const rows = _taxSourceRows(ym);
   const byS = {};
+  const orphan = {};                     // v2.3.869: 거래처에서 찾을 수 없는 판매처
   rows.forEach(sh => {
     // v2.3.862: 거래가 있으면 모두 발행 대상. 빼려면 발행 설정에서 발행 방식을 '발행 안 함' 으로 둔다.
     const info = _taxSellerInfo(sh.sellerId);
+    // v2.3.869: 거래처에서 사라진 옛 id — 사업자번호·이메일을 알 수 없어 계산서를 만들 수 없다
+    if (!info.name) { orphan[String(sh.sellerId)] = sh.sellerName || String(sh.sellerId); return; }
     if (info.mode !== 'monthly') return;                  // 건별 발행 / 발행 안 함 업체는 제외
     if (info.source === 'statement' && !sh.stmtIssuedAt) return;         // 거래명세서 발행분만
     (byS[String(sh.sellerId)] = byS[String(sh.sellerId)] || []).push(sh);
@@ -30182,6 +30185,8 @@ async function taxBuildMonthly(silent){
     if (made) msg.push('신규 ' + made + '건');
     if (updated) msg.push('갱신 ' + updated + '건');
     if (locked.length) msg.push('발행완료라 건너뜀: ' + locked.join(', '));
+    const _orp = Object.values(orphan);
+    if (_orp.length) msg.push('거래처에 없는 판매처 제외: ' + _orp.join(', '));
     showNotif(msg.length ? ('🧾 ' + ym + ' 월 합계 — ' + msg.join(' · '))
       : ('해당 월(' + ym + ')에 집계할 거래가 없습니다'), msg.length ? 'success' : 'warning');
   }
@@ -30840,9 +30845,20 @@ async function openTaxConfig(){
   const nameOf = k => { const p = pool.find(x => x.key === String(k)); return (p && p.name) || _taxSellerInfo(k).name || String(k); };
   // v2.3.862: 저장해 둔 업체 + 거래 이력이 있는 업체를 함께 보여 준다.
   //   거래가 있으면 기본적으로 발행 대상이므로, 여기 없다고 빠지는 일은 없다.
+  // v2.3.869: 자동 후보는 '거래처(판매업체·쇼핑몰)에 실제로 있는 곳' + '발행 시작 월 이후 거래' 만.
+  //   거래처에서 지워진 옛 id(업체를 판매업체 → 쇼핑몰로 옮기면 옛 출고에 옛 id 가 남는다)까지
+  //   후보로 올라와, 행을 지우고 저장해도 창을 다시 열면 되살아났다.
   const keys = Object.keys(cfg.vendors || {});
+  const known = {};
+  pool.forEach(p => { known[p.key] = 1; });
   const seen = {};
-  (window._consign.shipments || []).forEach(sh => { if (sh && sh.sellerId != null) seen[String(sh.sellerId)] = 1; });
+  (window._consign.shipments || []).forEach(sh => {
+    if (!sh || sh.sellerId == null) return;
+    const k = String(sh.sellerId);
+    if (!known[k]) return;                                      // 거래처에 없는 옛 id
+    if (_taxTooOld(String(sh.date || '').slice(0, 7))) return;   // 발행 시작 월 이전 거래뿐
+    seen[k] = 1;
+  });
   Object.keys(seen).forEach(k => { if (keys.indexOf(k) < 0) keys.push(k); });
   const rows = keys.map(k => _taxCfgRowHtml(k, nameOf(k), _taxSellerInfo(k))).join('');
   document.getElementById('tax-cfg-overlay')?.remove();
