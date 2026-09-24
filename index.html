@@ -6365,7 +6365,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.867';
+const ERP_VERSION = 'v2.3.868';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30053,7 +30053,8 @@ function _taxSellerInfo(sellerId){
     bizItem: ov.bizItem || '',
     email:   ov.email   || email,
     mode:    ov.mode    || 'monthly',      // monthly = 월 합계, single = 건별
-    source:  ov.source  || 'consign'       // consign = 재고이동 금액 그대로 / statement = 거래명세서 발행분만
+    source:  ov.source  || 'consign',      // consign = 재고이동 금액 그대로 / statement = 거래명세서 발행분만
+    purpose: ov.purpose || '청구'          // v2.3.868: 영수 / 청구 기본값
   };
 }
 function _taxSupplier(){
@@ -30158,7 +30159,7 @@ async function taxBuildMonthly(silent){
       lines: lines, srcIds: list.map(x => x.id), source: info.source,
       // v2.3.863: 수정 화면에서 수량·단가를 다시 계산할 때 쓴다 (원천 출고 기준)
       vatMode: (list[0] && list[0].vatMode) || 'exclude',
-      purpose: '청구'
+      purpose: info.purpose || '청구'
     };
     if (exist) { Object.assign(exist, base); exist.updatedAt = Date.now(); updated++; }
     else {
@@ -30209,7 +30210,7 @@ async function taxBuildSelected(){
       ym: String(sh.date||'').slice(0,7), from: sh.date||'', to: sh.date||'', issueDate: sh.date||'',
       dueDate: _taxDueDate(String(sh.date||'').slice(0,7)),
       supply: A.supplySum, tax: A.taxSum, total: A.total,
-      lines: _taxShipLines(sh), srcIds: [sh.id], source: 'consign', purpose: '청구',
+      lines: _taxShipLines(sh), srcIds: [sh.id], source: 'consign', purpose: info.purpose || '청구',
       vatMode: sh.vatMode || 'exclude',
       status: 'ready', createdAt: Date.now(), createdBy: _taxMe(),
       preparedAt: Date.now(), preparedBy: _taxMe()
@@ -30259,7 +30260,7 @@ async function renderTaxInvoicePage(){
     return '<tr>'
       + '<td>' + escapeHtml(v.issueDate||'-')
         + (v.dueDate ? '<div class="ti-sub">~' + escapeHtml(v.dueDate) + ' 발행</div>' : '') + '</td>'
-      + '<td>' + (v.kind === 'monthly' ? '월 합계' : '건별') + '</td>'
+      + '<td>' + (v.kind === 'monthly' ? '월 합계' : '건별') + '<div class="ti-sub">' + escapeHtml(v.purpose || '청구') + '</div></td>'
       + '<td>' + escapeHtml(v.sellerName||'-')
         + (v.bizno ? '<div class="ti-sub">' + escapeHtml(v.bizno) + '</div>' : '<div class="ti-sub" style="color:#b91c1c">사업자번호 없음</div>')
         + (v.status === 'issued' ? '<div style="font-size:12px;color:#166534;font-weight:700;margin-top:3px">✅ 발행 완료' + (v.ntsNo ? '<div class="ti-sub">' + escapeHtml(v.ntsNo) + '</div>' : '') + '</div>' : '')
@@ -30673,7 +30674,7 @@ function _taxInvoiceHtml(v){
     return '<tr>'
       + '<td class="ti-c">' + esc(d.slice(5, 7)) + '</td>'
       + '<td class="ti-c">' + esc(d.slice(8, 10)) + '</td>'
-      + '<td class="ti-left">' + esc(l.name) + '</td>'
+      + '<td>' + esc(l.name) + '</td>'
       + '<td class="ti-c">' + esc(l.spec) + '</td>'
       + '<td class="ti-r">' + num(l.qty) + '</td>'
       + '<td class="ti-r">' + num(l.price) + '</td>'
@@ -30701,7 +30702,7 @@ function _taxInvoiceHtml(v){
       + '<tr><th style="width:150px">작성일자</th><th style="width:170px">공급가액</th><th style="width:150px">세액</th><th>수정사유</th></tr>'
       + '<tr><td class="ti-c">' + esc(v.issueDate) + '</td><td class="ti-r">' + num(v.supply) + '</td><td class="ti-r">' + num(v.tax) + '</td><td></td></tr>'
     + '</tbody></table>'
-    + '<table class="ti-remark"><tbody><tr><th style="width:62px">비 고</th><td class="ti-left">'
+    + '<table class="ti-remark"><tbody><tr><th style="width:62px">비 고</th><td>'
       + esc(v.remark || (v.kind === 'monthly' ? (v.from + ' ~ ' + v.to + ' 거래분 합계') : '')) + '</td></tr></tbody></table>'
     + '<table class="ti-items"><thead><tr>'
       + '<th style="width:30px">월</th><th style="width:30px">일</th><th>품 목</th><th style="width:96px">규 격</th>'
@@ -30733,7 +30734,9 @@ const _TAX_PRINT_CSS =
  + 'writing-mode:vertical-rl;text-orientation:upright;padding:2px 0}'
  + '.ti-l{width:58px}.ti-l2{width:42px}'
  + '.ti-mono{font-family:Consolas,monospace;letter-spacing:1.2px;text-align:center}'
- + '.ti-c{text-align:center}.ti-r{text-align:right}.ti-left{text-align:left}'
+ + '.ti-doc td{text-align:center}'                 /* v2.3.868: 글자는 가운데 */
+ + '.ti-doc td.ti-r{text-align:right}'              /* 금액 칸만 오른쪽 (우선순위 확보) */
+ + '.ti-c{text-align:center}.ti-left{text-align:left}'
  + '.ti-meta td{height:24px}'
  + '.ti-remark td{height:24px}'
  + '.ti-items td{height:24px}'
@@ -30791,6 +30794,9 @@ function _taxCfgRowHtml(key, name, i){
     + '<td><select class="fs tc-source" style="height:28px;font-size:11.5px;padding:3px 6px">'
     + '<option value="consign"' + (i.source === 'consign' ? ' selected' : '') + '>재고이동 금액 전체</option>'
     + '<option value="statement"' + (i.source === 'statement' ? ' selected' : '') + '>거래명세서 발행분만</option></select></td>'
+    + '<td><select class="fs tc-purpose" style="height:28px;font-size:11.5px;padding:3px 6px">'
+    + '<option value="청구"' + (i.purpose !== '영수' ? ' selected' : '') + '>청구</option>'
+    + '<option value="영수"' + (i.purpose === '영수' ? ' selected' : '') + '>영수</option></select></td>'
     + '<td><button class="btn btn-outline btn-sm" onclick="taxCfgRemoveVendor(this)" title="이 업체에 입력해 둔 내용을 지웁니다 — 발행에서 빼려면 발행 방식을 [발행 안 함] 으로 두세요" style="padding:2px 8px;font-size:11px;color:#b91c1c">🗑️</button></td>'
     + '</tr>';
 }
@@ -30849,7 +30855,7 @@ async function openTaxConfig(){
     + '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:12.5px;color:#475569;line-height:1.7;margin-bottom:14px">'
     + '공급자(르니브) 사업자번호·대표자·주소는 <strong>설정 &gt; 회사 정보</strong> 값을 그대로 씁니다. 세금계산서에 필요한 <strong>업태·종목</strong>만 아래에서 채워 주세요.<br>'
     + '거래가 있는 업체는 <strong>모두 발행 대상</strong>입니다. 아래에서 업체별 사업자번호·업태·종목·수신 이메일과 발행 방식을 채워 주세요.<br>'
-    + '특정 업체를 빼려면 발행 방식을 <strong>발행 안 함</strong> 으로 두면 됩니다. (🗑️ 는 입력해 둔 내용을 지우는 것입니다)'
+    + '특정 업체를 빼려면 발행 방식을 <strong>발행 안 함</strong> 으로 두면 됩니다. <strong>영수·청구</strong> 는 여기서 정한 값이 새 계산서에 들어가고, 건별로는 [수정] 에서 바꿀 수 있습니다.'
     + '</div>'
     + '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">'
     + '<div class="fg" style="margin:0;min-width:220px"><label style="font-size:12px">공급자 업태</label><input class="fi" id="tax-sup-biztype" value="' + esc(cfg.supplierBizType) + '" placeholder="예: 도매 및 소매업"></div>'
@@ -30865,7 +30871,7 @@ async function openTaxConfig(){
     + '</div>'
     + '<div style="overflow-x:auto;max-height:48vh;overflow-y:auto"><table class="tbl" style="text-align:center"><thead><tr>'
     + '<th style="min-width:130px">업체</th><th style="width:130px">사업자등록번호</th><th style="width:120px">업태</th><th style="width:120px">종목</th>'
-    + '<th style="width:190px">계산서 수신 이메일</th><th style="width:140px">발행 방식</th><th style="width:170px">금액 기준</th><th style="width:44px"></th>'
+    + '<th style="width:190px">계산서 수신 이메일</th><th style="width:140px">발행 방식</th><th style="width:170px">금액 기준</th><th style="width:88px">영수·청구</th><th style="width:44px"></th>'
     + '</tr></thead><tbody id="tax-cfg-tbody">' + rows + '</tbody></table>'
     + '<div id="tax-cfg-empty" style="display:none;padding:22px;color:#94a3b8;font-size:12.5px;text-align:center">발행 대상 업체가 없습니다 — 위에서 골라 [➕ 추가] 를 누르세요</div></div>'
     + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
@@ -30889,7 +30895,8 @@ async function saveTaxConfig(){
     const g = cls => { const el = tr.querySelector('.' + cls); return el ? String(el.value || '').trim() : ''; };
     next[sid] = Object.assign({}, cfg.vendors && cfg.vendors[sid], {
       bizno: g('tc-bizno'), bizType: g('tc-biztype'), bizItem: g('tc-bizitem'),
-      email: g('tc-email'), mode: g('tc-mode') || 'monthly', source: g('tc-source') || 'consign'
+      email: g('tc-email'), mode: g('tc-mode') || 'monthly', source: g('tc-source') || 'consign',
+      purpose: g('tc-purpose') || '청구'
     });
   });
   cfg.vendors = next;
