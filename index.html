@@ -6365,7 +6365,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.866';
+const ERP_VERSION = 'v2.3.867';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30632,54 +30632,114 @@ function taxCsv(id){
 }
 
 // ── 세금계산서 양식 HTML / 미리보기 / PDF ──
+// 표준 전자세금계산서 양식 (국세청 별지 제11호 서식 배치)
+//   공급자·공급받는자를 좌우로 나란히 두고, 작성일자·공급가액·세액·수정사유 → 비고 →
+//   품목(월/일 분리) → 합계금액·현금·수표·어음·외상미수금 + '이 금액을 (영수/청구) 함' 순서.
 function _taxInvoiceHtml(v){
   const sup = _taxSupplier();
   const esc = s => escapeHtml(s == null ? '' : String(s));
-  const won = n => (Number(n)||0).toLocaleString();
-  const rows = (v.lines||[]).map(l => '<tr>'
-    + '<td>' + esc(String(l.date||'').slice(5)) + '</td>'
-    + '<td style="text-align:left">' + esc(l.name) + '</td>'
-    + '<td>' + esc(l.spec) + '</td>'
-    + '<td style="text-align:right">' + won(l.qty) + '</td>'
-    + '<td style="text-align:right">' + won(l.price) + '</td>'
-    + '<td style="text-align:right">' + won(l.supply) + '</td>'
-    + '<td style="text-align:right">' + won(l.tax) + '</td>'
-    + '</tr>').join('');
-  const party = (label, p) => '<table class="ti-party"><tbody>'
-    + '<tr><th rowspan="4" class="ti-side">' + label + '</th><th>등록번호</th><td colspan="3" class="ti-mono">' + esc(p.bizno) + '</td></tr>'
-    + '<tr><th>상호</th><td>' + esc(p.name) + '</td><th>성명</th><td>' + esc(p.ceo) + '</td></tr>'
-    + '<tr><th>사업장</th><td colspan="3">' + esc(p.addr) + '</td></tr>'
-    + '<tr><th>업태</th><td>' + esc(p.bizType) + '</td><th>종목</th><td>' + esc(p.bizItem) + '</td></tr>'
+  const num = n => (Number(n) || 0).toLocaleString();
+  const buyer = { bizno: v.bizno, name: v.sellerName, ceo: v.ceo, addr: v.addr,
+                  bizType: v.bizType, bizItem: v.bizItem, email: v.email };
+  const claim = (v.purpose === '영수') ? '영수' : '청구';
+
+  // 공급자 / 공급받는자 — 한 표에 좌우로
+  const side = (label, p) =>
+      '<th rowspan="5" class="ti-side">' + label + '</th>'
+    + '<th class="ti-l">등록번호</th><td class="ti-mono" colspan="3">' + esc(p.bizno) + '</td>';
+  const party = '<table class="ti-party"><tbody>'
+    + '<tr>' + side('공급자', sup) + side('공급받는자', buyer) + '</tr>'
+    + '<tr>'
+      + '<th class="ti-l">상호<br>(법인명)</th><td>' + esc(sup.name) + '</td><th class="ti-l2">성명</th><td>' + esc(sup.ceo) + '</td>'
+      + '<th class="ti-l">상호<br>(법인명)</th><td>' + esc(buyer.name) + '</td><th class="ti-l2">성명</th><td>' + esc(buyer.ceo) + '</td>'
+    + '</tr>'
+    + '<tr>'
+      + '<th class="ti-l">사업장<br>주소</th><td colspan="3">' + esc(sup.addr) + '</td>'
+      + '<th class="ti-l">사업장<br>주소</th><td colspan="3">' + esc(buyer.addr) + '</td>'
+    + '</tr>'
+    + '<tr>'
+      + '<th class="ti-l">업태</th><td>' + esc(sup.bizType) + '</td><th class="ti-l2">종목</th><td>' + esc(sup.bizItem) + '</td>'
+      + '<th class="ti-l">업태</th><td>' + esc(buyer.bizType) + '</td><th class="ti-l2">종목</th><td>' + esc(buyer.bizItem) + '</td>'
+    + '</tr>'
+    + '<tr>'
+      + '<th class="ti-l">이메일</th><td colspan="3">' + esc(sup.email) + '</td>'
+      + '<th class="ti-l">이메일</th><td colspan="3">' + esc(buyer.email) + '</td>'
+    + '</tr>'
     + '</tbody></table>';
+
+  // 품목 — 최소 4줄로 채워 양식 모양을 유지한다
+  const rows = (v.lines || []).map(l => {
+    const d = String(l.date || v.issueDate || '');
+    return '<tr>'
+      + '<td class="ti-c">' + esc(d.slice(5, 7)) + '</td>'
+      + '<td class="ti-c">' + esc(d.slice(8, 10)) + '</td>'
+      + '<td class="ti-left">' + esc(l.name) + '</td>'
+      + '<td class="ti-c">' + esc(l.spec) + '</td>'
+      + '<td class="ti-r">' + num(l.qty) + '</td>'
+      + '<td class="ti-r">' + num(l.price) + '</td>'
+      + '<td class="ti-r">' + num(l.supply) + '</td>'
+      + '<td class="ti-r">' + num(l.tax) + '</td>'
+      + '<td class="ti-c">' + esc(l.note) + '</td>'
+      + '</tr>';
+  });
+  const blank = '<tr>' + '<td>&nbsp;</td>'.repeat(9) + '</tr>';
+  while (rows.length < 4) rows.push(blank);
+
+  // 청구면 외상미수금, 영수면 현금 칸에 합계금액을 적는다 (실무 관례)
+  const cash = (claim === '영수') ? num(v.total) : '';
+  const credit = (claim === '청구') ? num(v.total) : '';
+
   return '<div class="ti-doc">'
-    + '<div class="ti-title">전자세금계산서 <span>(공급받는자 보관용)</span></div>'
-    + '<div class="ti-meta">작성일자 <strong>' + esc(v.issueDate) + '</strong>'
-    + '　／　과세기간 <strong>' + esc(v.kind === 'monthly' ? (v.from + ' ~ ' + v.to) : v.from) + '</strong>'
-    + '　／　' + esc(v.purpose || '청구')
-    + (v.ntsNo ? '　／　승인번호 <strong>' + esc(v.ntsNo) + '</strong>' : '') + '</div>'
-    + party('공급자', sup) + party('공급받는자', { bizno:v.bizno, name:v.sellerName, ceo:v.ceo, addr:v.addr, bizType:v.bizType, bizItem:v.bizItem })
-    + '<table class="ti-sum"><tbody><tr>'
-    + '<th>공급가액</th><td>' + won(v.supply) + '</td>'
-    + '<th>세액</th><td>' + won(v.tax) + '</td>'
-    + '<th>합계금액</th><td class="ti-total">' + won(v.total) + '</td>'
-    + '</tr></tbody></table>'
-    + '<table class="ti-items"><thead><tr><th style="width:52px">일자</th><th>품목</th><th style="width:90px">규격</th>'
-    + '<th style="width:60px">수량</th><th style="width:80px">단가</th><th style="width:100px">공급가액</th><th style="width:90px">세액</th></tr></thead>'
-    + '<tbody>' + (rows || '<tr><td colspan="7">-</td></tr>') + '</tbody></table>'
-    + '<div class="ti-foot">' + esc(v.remark || (v.kind === 'monthly' ? (v.from + ' ~ ' + v.to + ' 거래분 합계 세금계산서입니다.') : '')) + '</div>'
+    + '<div class="ti-head">'
+      + '<div class="ti-hside"></div>'
+      + '<div class="ti-hmid"><span class="ti-title">전 자 세 금 계 산 서</span>'
+        + '<span class="ti-keep">(공급받는자 보관용)</span></div>'
+      + '<div class="ti-hside ti-appr">승인번호<span>' + esc(v.ntsNo || '') + '</span></div>'
+    + '</div>'
+    + party
+    + '<table class="ti-meta"><tbody>'
+      + '<tr><th style="width:150px">작성일자</th><th style="width:170px">공급가액</th><th style="width:150px">세액</th><th>수정사유</th></tr>'
+      + '<tr><td class="ti-c">' + esc(v.issueDate) + '</td><td class="ti-r">' + num(v.supply) + '</td><td class="ti-r">' + num(v.tax) + '</td><td></td></tr>'
+    + '</tbody></table>'
+    + '<table class="ti-remark"><tbody><tr><th style="width:62px">비 고</th><td class="ti-left">'
+      + esc(v.remark || (v.kind === 'monthly' ? (v.from + ' ~ ' + v.to + ' 거래분 합계') : '')) + '</td></tr></tbody></table>'
+    + '<table class="ti-items"><thead><tr>'
+      + '<th style="width:30px">월</th><th style="width:30px">일</th><th>품 목</th><th style="width:96px">규 격</th>'
+      + '<th style="width:60px">수량</th><th style="width:78px">단가</th><th style="width:104px">공급가액</th>'
+      + '<th style="width:92px">세액</th><th style="width:60px">비고</th>'
+    + '</tr></thead><tbody>' + rows.join('') + '</tbody></table>'
+    + '<table class="ti-sum"><tbody>'
+      + '<tr><th>합계금액</th><th>현금</th><th>수표</th><th>어음</th><th>외상미수금</th>'
+        + '<th rowspan="2" class="ti-claim">이 금액을 <strong>' + claim + '</strong> 함</th></tr>'
+      + '<tr><td class="ti-r ti-total">' + num(v.total) + '</td><td class="ti-r">' + cash + '</td><td></td><td></td><td class="ti-r">' + credit + '</td></tr>'
+    + '</tbody></table>'
     + '</div>';
 }
-const _TAX_PRINT_CSS = '.ti-doc{width:740px;margin:0 auto;padding:22px 26px;background:#fff;color:#111;font-family:"Malgun Gothic","맑은 고딕",sans-serif;font-size:12px;box-sizing:border-box}'
-  + '.ti-title{text-align:center;font-size:21px;font-weight:800;letter-spacing:6px;margin-bottom:6px}'
-  + '.ti-title span{font-size:11px;font-weight:500;letter-spacing:0;color:#555}'
-  + '.ti-meta{text-align:center;font-size:11.5px;color:#333;margin-bottom:12px}'
-  + '.ti-doc table{width:100%;border-collapse:collapse;margin-bottom:8px}'
-  + '.ti-doc th,.ti-doc td{border:1px solid #333;padding:5px 7px;font-size:11.5px}'
-  + '.ti-doc th{background:#f1f5f9;font-weight:700;white-space:nowrap;text-align:center}'
-  + '.ti-side{width:26px;background:#e2e8f0;font-size:11px;letter-spacing:2px;writing-mode:vertical-rl;text-orientation:upright}'
-  + '.ti-party th:not(.ti-side){width:70px}.ti-mono{font-family:Consolas,monospace;letter-spacing:1px}'
-  + '.ti-sum th{width:80px}.ti-sum td{text-align:right;font-weight:700}.ti-total{background:#fff7ed;font-size:13px}'
-  + '.ti-items td{text-align:center}.ti-foot{font-size:11px;color:#555;margin-top:6px}';
+const _TAX_PRINT_CSS =
+   '.ti-doc{width:748px;margin:0 auto;padding:18px 20px;background:#fff;color:#111;'
+ + 'font-family:"Malgun Gothic","맑은 고딕",sans-serif;font-size:11.5px;box-sizing:border-box}'
+ + '.ti-head{display:flex;align-items:flex-end;margin-bottom:10px}'
+ + '.ti-hside{flex:0 0 188px}.ti-hmid{flex:1;text-align:center;white-space:nowrap}'
+ + '.ti-title{font-size:20px;font-weight:800;letter-spacing:2px}'
+ + '.ti-keep{font-size:11px;color:#444;margin-left:8px}'
+ + '.ti-appr{text-align:right;font-size:10.5px;color:#555;line-height:1.5}'
+ + '.ti-appr span{display:block;font-family:Consolas,monospace;font-size:11px;color:#111;'
+ + 'letter-spacing:.5px;border-bottom:1px solid #999;min-height:15px}'
+ + '.ti-doc table{width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:5px}'
+ + '.ti-doc th,.ti-doc td{border:1px solid #444;padding:4px 6px;font-size:11.5px;'
+ + 'word-break:break-all;overflow-wrap:anywhere;vertical-align:middle}'
+ + '.ti-doc th{background:#eef2f7;font-weight:700;text-align:center;line-height:1.25}'
+ + '.ti-side{width:22px;background:#dde5ee;font-size:11px;font-weight:700;letter-spacing:1px;'
+ + 'writing-mode:vertical-rl;text-orientation:upright;padding:2px 0}'
+ + '.ti-l{width:58px}.ti-l2{width:42px}'
+ + '.ti-mono{font-family:Consolas,monospace;letter-spacing:1.2px;text-align:center}'
+ + '.ti-c{text-align:center}.ti-r{text-align:right}.ti-left{text-align:left}'
+ + '.ti-meta td{height:24px}'
+ + '.ti-remark td{height:24px}'
+ + '.ti-items td{height:24px}'
+ + '.ti-sum th{width:15%}.ti-sum td{height:24px}'
+ + '.ti-claim{width:25%;font-size:12px;background:#fff7ed;font-weight:500}'
+ + '.ti-total{font-weight:800;font-size:12.5px;background:#fff7ed}';
 function taxPreview(id){
   const v = (window._tax.invoices||[]).find(x => x && x.id === id);
   if (!v) return;
