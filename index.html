@@ -6360,7 +6360,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.858';
+const ERP_VERSION = 'v2.3.859';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29998,6 +29998,17 @@ async function _taxSaveCfg(){
   try { return await saveSharedSetting(_TAX_CFG_KEY, window._tax.cfg || _taxDefaultCfg()); }
   catch(e){ console.warn('[tax] 설정 저장 실패', e); return false; }
 }
+// v2.3.859: 서버(팝빌 자동발행)가 #세금계산서 로 알림을 보내려면 웹훅 주소를 공유 설정에 둬야 한다.
+//   설정 > 슬랙 — 세금계산서 알림 에 넣은 값을 finance_tax_config.slackWebhook 로 옮겨 준다.
+async function _taxMirrorWebhook(){
+  try {
+    const u = String((DB.appSettings && DB.appSettings.slackTaxWebhookUrl) || '').trim();
+    if (!window._tax.cfg) return;
+    if (String(window._tax.cfg.slackWebhook || '') === u) return;
+    window._tax.cfg.slackWebhook = u;
+    await _taxSaveCfg();
+  } catch(_){}
+}
 function _taxMe(){ return (window._currentUser && (window._currentUser.name || window._currentUser.email)) || ''; }
 
 // 공급받는자 정보 — 판매업체(DB.sellers) / 쇼핑몰(shop:<id>) + 발행 설정의 보강값
@@ -30181,10 +30192,11 @@ async function renderTaxInvoicePage(){
   const tb = document.getElementById('tax-tbody');
   if (!tb) return;
   await _consignLoad(); await _taxLoad();
+  _taxMirrorWebhook();
   const ym = _taxYm();
   const won = n => '₩' + (Number(n)||0).toLocaleString();
   const badge = st => st === 'issued' ? '<span class="badge" style="background:#dcfce7;color:#166534;font-size:11px">발행완료</span>'
-    : st === 'ready' ? '<span class="badge" style="background:#dbeafe;color:#1e40af;font-size:11px">발행 준비</span>'
+    : st === 'ready' ? '<span class="badge" style="background:#dbeafe;color:#1e40af;font-size:11px" title="서버가 팝빌로 자동 발행합니다 (매월 1·2·3일 09:10)">발행 대기</span>'
     : '<span class="badge" style="background:#fef3c7;color:#92400e;font-size:11px">작성중</span>';
 
   const list = (window._tax.invoices||[]).filter(v => v && (v.ym === ym || String(v.issueDate||'').slice(0,7) === ym))
@@ -30277,7 +30289,7 @@ async function taxMarkReady(id){
   await _taxSaveInvoices();
   renderTaxInvoicePage();
   await _taxSlackReady([v]);
-  showNotif('✅ 발행 준비 완료 — 슬랙 #세금계산서 채널에 알림을 보냈습니다', 'success');
+  showNotif('✅ 발행 대기로 올렸습니다 — 서버가 팝빌로 자동 발행합니다 (#세금계산서 알림 발송)', 'success');
 }
 
 // ── 발행 (공인인증서 컨펌 직전까지) ──
@@ -30296,12 +30308,17 @@ async function taxIssue(id){
     + '<div style="font-size:16px;font-weight:800;margin-bottom:4px">🔐 전자세금계산서 발행</div>'
     + '<div style="font-size:12.5px;color:var(--gray-500);margin-bottom:14px">' + escapeHtml(v.sellerName||'') + ' · ' + escapeHtml(v.kind==='monthly' ? (v.from+' ~ '+v.to) : v.from) + ' · 합계 <strong>' + won(v.total) + '</strong></div>'
     + (miss.length ? '<div style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px 12px;font-size:12.5px;margin-bottom:12px">⚠️ 비어 있는 항목: ' + escapeHtml(miss.join(', ')) + '</div>' : '<div style="background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:8px;padding:10px 12px;font-size:12.5px;margin-bottom:12px">✅ 필수 항목이 모두 채워졌습니다 — 바로 발행할 수 있습니다</div>')
+    + '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;font-size:12.5px;color:#1e40af;line-height:1.75;margin-bottom:12px">'
+    + '🤖 <strong>기본은 자동입니다.</strong> 상태를 <strong>발행 대기</strong> 로 두면 서버가 <strong>매월 1·2·3일 09:10</strong> 에 '
+    + '팝빌로 발행하고, 공급받는자에게 메일까지 보냅니다. 국세청 승인번호도 자동으로 채워집니다.<br>'
+    + '이 창은 <strong>지금 바로 발행해야 할 때</strong> 쓰는 수동 경로입니다.'
+    + '</div>'
     + '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:12.5px;color:#475569;line-height:1.75;margin-bottom:14px">'
-    + '<strong>발행 순서</strong><br>'
+    + '<strong>수동 발행 순서 (홈택스 직접)</strong><br>'
     + '1️⃣ 아래 [일괄발행 파일 내려받기] 로 계산서 데이터를 받습니다.<br>'
     + '2️⃣ [홈택스 전자세금계산서 열기] → 공인인증서(공동인증서) 로그인 → <em>계산서 일괄발행</em> 에 파일을 올립니다.<br>'
-    + '3️⃣ 내용 확인 후 <strong>인증서로 컨펌 · 발행</strong> 합니다. (전자서명은 법적으로 사람이 해야 합니다)<br>'
-    + '4️⃣ 발행 후 받은 <strong>국세청 승인번호</strong> 를 아래에 넣고 [발행 완료 처리] 를 누르면 이력에 남고 이메일 전송이 열립니다.'
+    + '3️⃣ 내용 확인 후 <strong>인증서로 컨펌 · 발행</strong> 합니다.<br>'
+    + '4️⃣ 발행 후 받은 <strong>국세청 승인번호</strong> 를 아래에 넣고 [발행 완료 처리] 를 누르면 이력에 남습니다.'
     + '</div>'
     + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'
     + '<button class="btn btn-outline btn-sm" onclick="taxCsv(\'' + v.id + '\')">📥 일괄발행 파일 내려받기</button>'
@@ -30674,7 +30691,8 @@ async function _taxSlackReady(list){
     + '\n\n합계 ' + list.length + '건 · ' + won(total)
     + '\n작성일자: ' + (list[0].issueDate || '-') + ' (월 말일 기준)'
     + '\n발행 기한: ' + (list[0].dueDate || '-') + ' 까지'
-    + '\n\nERP > 재무 관리 > 세금계산서 에서 [🔐 발행하기] 를 누르고 홈택스에서 공인인증서로 컨펌해 주세요.');
+    + '\n\n서버가 매월 1·2·3일 09:10 에 팝빌로 자동 발행합니다.'
+    + '\n지금 바로 발행하려면 ERP > 재무 관리 > 세금계산서 에서 [🔐 발행하기] 를 쓰세요.');
 }
 async function _taxSlackIssued(v){
   const won = n => '₩' + (Number(n)||0).toLocaleString();
@@ -30702,6 +30720,8 @@ function saveSlackTaxSettings(){
   try { localStorage.setItem('reniv_slack_tax_webhook_backup', url); } catch(_){}
   try { if (typeof saveDataNow === 'function') saveDataNow(); else saveData(); } catch(_){}
   _updateSlackTaxStatusBadge();
+  // v2.3.859: 서버 자동발행 알림용으로 공유 설정에도 반영
+  _taxLoad().then(() => _taxMirrorWebhook()).catch(() => {});
   showNotif('✅ 세금계산서 알림 설정 저장됨', 'success');
 }
 async function testSlackTaxWebhook(){
