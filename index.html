@@ -3266,7 +3266,7 @@ try{
               <th style="width:110px">작성일자</th><th style="width:70px">구분</th><th>공급받는자</th>
               <th style="width:120px">과세기간</th><th style="width:56px">건수</th>
               <th style="width:110px">공급가액</th><th style="width:100px">세액</th><th style="width:110px">합계</th>
-              <th style="width:132px">작업</th><th style="width:56px"></th>
+              <th style="width:120px">작업</th><th style="width:86px"></th>
             </tr></thead>
             <tbody id="tax-tbody"></tbody>
           </table>
@@ -6358,7 +6358,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.864';
+const ERP_VERSION = 'v2.3.865';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30220,19 +30220,19 @@ async function renderTaxInvoicePage(){
     .slice().sort((a,b) => String(b.issueDate||'').localeCompare(String(a.issueDate||'')) || String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
   document.getElementById('tax-count').textContent = list.length ? (list.length + '건 · 합계 ' + won(list.reduce((s,v)=>s+(Number(v.total)||0),0))) : '';
   tb.innerHTML = list.length ? list.map(v => {
-    // v2.3.863: 작업 칸은 세로로 쌓고, 삭제는 오른쪽 전용 칸으로 뺀다.
-    const _bs = 'width:100%;padding:4px 8px;font-size:11px;white-space:nowrap';
-    const acts = [];
+    // v2.3.865: 작업 칸은 가운데 정렬, 수정·삭제는 오른쪽 칸에 위아래로.
+    const _bs = 'padding:4px 10px;font-size:11px;white-space:nowrap';
+    const acts = [], side = [];
     const editable = (v.status === 'draft' || v.status === 'ready');
     if (v.status !== 'issuing') acts.push('<button class="btn btn-outline btn-sm" onclick="taxPreview(\'' + v.id + '\')" style="' + _bs + '">👁️ 미리보기</button>');
-    if (editable) acts.push('<button class="btn btn-outline btn-sm" onclick="taxEdit(\'' + v.id + '\')" style="' + _bs + '">✏️ 수정</button>');
-    if (v.status === 'draft') acts.push('<button class="btn btn-sm" onclick="taxMarkReady(\'' + v.id + '\')" style="' + _bs + ';background:#1e40af;color:#fff;border:1px solid #1e40af;font-weight:600">✅ 발행 대기로</button>');
+    if (v.status === 'draft') acts.push('<button class="btn btn-sm" onclick="taxMarkReady(\'' + v.id + '\')" style="' + _bs + ';background:#1e40af;color:#fff;border:1px solid #1e40af;font-weight:600">✅ 발행 대기</button>');
     if (v.status === 'ready') acts.push('<button class="btn btn-sm" onclick="taxIssue(\'' + v.id + '\')" style="' + _bs + ';background:#0f766e;color:#fff;border:1px solid #0f766e;font-weight:600">🔐 발행하기</button>');
     if (v.status === 'issuing') acts.push('<div style="font-size:11.5px;color:#5b21b6;font-weight:700;padding:2px 0">발행 중…</div>'
       + '<button class="btn btn-outline btn-sm" onclick="taxCancelIssue(\'' + v.id + '\')" title="발행 요청을 되돌립니다 (아직 팝빌에 넘어가지 않은 경우)" style="' + _bs + '">↩️ 요청 취소</button>');
-    const delCell = editable
-      ? '<button class="btn btn-outline btn-sm" onclick="taxDelete(\'' + v.id + '\')" title="이 계산서를 삭제합니다" style="padding:3px 8px;font-size:11px;color:#b91c1c">🗑️</button>'
-      : '';
+    if (editable) {
+      side.push('<button class="btn btn-outline btn-sm" onclick="taxEdit(\'' + v.id + '\')" style="' + _bs + '">✏️ 수정</button>');
+      side.push('<button class="btn btn-outline btn-sm" onclick="taxDelete(\'' + v.id + '\')" title="이 계산서를 삭제합니다" style="' + _bs + ';color:#b91c1c">🗑️ 삭제</button>');
+    }
     const period = v.kind === 'monthly' ? (v.from + ' ~ ' + v.to) : (v.from || '-');
     return '<tr>'
       + '<td>' + escapeHtml(v.issueDate||'-')
@@ -30249,8 +30249,8 @@ async function renderTaxInvoicePage(){
       + '<td style="text-align:right">' + won(v.supply) + '</td>'
       + '<td style="text-align:right">' + won(v.tax) + '</td>'
       + '<td style="text-align:right;font-weight:700">' + won(v.total) + '</td>'
-      + '<td><div style="display:flex;flex-direction:column;gap:4px;align-items:stretch">' + acts.join('') + '</div></td>'
-      + '<td>' + delCell + '</td>'
+      + '<td><div style="display:flex;flex-direction:column;gap:4px;align-items:center">' + acts.join('') + '</div></td>'
+      + '<td><div style="display:flex;flex-direction:column;gap:4px;align-items:center">' + side.join('') + '</div></td>'
       + '</tr>';
   }).join('') : '<tr><td colspan="10" style="padding:26px;color:var(--gray-400)">이 달에 만들어진 세금계산서가 없습니다 — [월 합계 계산서 만들기] 를 누르세요</td></tr>';
 
