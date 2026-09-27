@@ -44,7 +44,7 @@ const state = {
   user:null, profile:null, authorized:false, firestoreUnsubs:[], pollTimer:null, polling:false,
   erp:{approvals:[],expenses:[],orders:[],tasks:[],productions:[],items:[],poOverrides:{},expenseOverrides:{},sources:{},error:''},
   status:null, trello:{items:[],boards:[],me:null,fetchedAt:null,error:''},
-  slack:{channels:[],messages:[],channel:'',replies:new Map(),replyTarget:null,error:'',loading:false,partial:false,failedChannelCount:0,truncated:false,fetchedAt:null,canPost:false,canReply:false,requestSeq:0},
+  slack:{channels:[],messages:[],channel:'',replies:new Map(),replyTarget:null,error:'',loading:false,partial:false,failedChannelCount:0,truncated:false,fetchedAt:null,canPost:false,canReply:false,requestSeq:0,history:{channelId:'',messages:[],nextCursor:null,hasMore:false,loadingMore:false,error:''}},
   meetings:[], meetingError:'', meetingRequestId:null, meetingPayloadKey:null, scene:null, selectedPerson:'jaeho', selectedDate:ymdKst(), weekOffset:0, lastPollAt:null
 };
 
@@ -77,7 +77,7 @@ async function api(path,options={}){
 
 function stopFirestore(){ state.firestoreUnsubs.splice(0).forEach(fn=>{ try{fn();}catch{} }); }
 function stopPolling(){ if(state.pollTimer) clearInterval(state.pollTimer); state.pollTimer=null; state.polling=false; }
-function clearExternal(){ state.status=null; state.trello={items:[],boards:[],me:null,fetchedAt:null,error:''}; state.slack={channels:[],messages:[],channel:'',replies:new Map(),replyTarget:null,error:'',loading:false,partial:false,failedChannelCount:0,truncated:false,fetchedAt:null,canPost:false,canReply:false,requestSeq:(state.slack?.requestSeq||0)+1}; state.meetings=[]; state.meetingError=''; }
+function clearExternal(){ state.status=null; state.trello={items:[],boards:[],me:null,fetchedAt:null,error:''}; state.slack={channels:[],messages:[],channel:'',replies:new Map(),replyTarget:null,error:'',loading:false,partial:false,failedChannelCount:0,truncated:false,fetchedAt:null,canPost:false,canReply:false,requestSeq:(state.slack?.requestSeq||0)+1,history:{channelId:'',messages:[],nextCursor:null,hasMore:false,loadingMore:false,error:''}}; state.meetings=[]; state.meetingError=''; }
 function clearERP(error=''){ state.erp={approvals:[],expenses:[],orders:[],tasks:[],productions:[],items:[],poOverrides:{},expenseOverrides:{},sources:{},error}; if(window.NEXUS)window.NEXUS.workMode='offline'; renderAll(); }
 function clearAll(){ stopFirestore(); stopPolling(); clearExternal(); state.authorized=false; state.user=null; state.profile=null; state.meetingRequestId=null; state.meetingPayloadKey=null; if($('meeting-dialog').open)$('meeting-dialog').close(); $('slack-text').value=''; $('erp-shell37').hidden=true; $('erp-frame37').removeAttribute('src'); closeSubpage(); clearERP(''); $('viewer-name').textContent='사용자 확인 중'; $('viewer-role').textContent='읽기 전용'; $('logout-button').textContent='나'; if(state.scene) state.scene.returnSeats(); }
 
@@ -217,10 +217,59 @@ function sortSlackChannels(channels){ return [...channels].sort((a,b)=>slackTsNu
 function slackActivityTs(m){ return m?.activityTs||m?.latestReply||m?.ts||m?.timestamp||''; }
 function sortSlackMessages(messages){ return [...messages].sort((a,b)=>slackTsNumber(slackActivityTs(b))-slackTsNumber(slackActivityTs(a))||slackTsNumber(b?.ts||b?.timestamp)-slackTsNumber(a?.ts||a?.timestamp)); }
 function slackThreadKey(channelId,ts){ return `${String(channelId||'')}::${String(ts||'')}`; }
+function slackMsgKey(m){ return `${String(m?.channelId||'')}::${String(m?.ts||m?.timestamp||'')}`; }
+function mergeSlackMessages(base,incoming){ const map=new Map((base||[]).map(m=>[slackMsgKey(m),m])); for(const m of (incoming||[])) map.set(slackMsgKey(m),m); return sortSlackMessages([...map.values()]); }
+function resetSlackHistory(channelId){ state.slack.history={channelId:String(channelId||''),messages:[],nextCursor:null,hasMore:false,loadingMore:false,error:''}; }
+function renderSlackPreservingScroll(){ const feed=$('slack-feed'); const scrollTop=feed?feed.scrollTop:0; renderSlack(); if(feed) feed.scrollTop=scrollTop; }
 function slackRecipient(selectedChannel,replyTarget){ if(replyTarget?.channelId&&replyTarget?.ts)return {channelId:String(replyTarget.channelId),threadTs:String(replyTarget.ts)}; if(selectedChannel)return {channelId:String(selectedChannel),threadTs:''}; return null; }
-function normalizeChannels(data){ const rows=Array.isArray(data?.channels)?data.channels:(Array.isArray(data?.items)?data.items:[]); state.slack.channels=sortSlackChannels(rows.filter(c=>c?.id)); if(state.slack.channel&&!state.slack.channels.some(c=>String(c.id)===String(state.slack.channel))){state.slack.channel='';state.slack.messages=[];state.slack.replies.clear();state.slack.replyTarget=null;} }
+function normalizeChannels(data){ const rows=Array.isArray(data?.channels)?data.channels:(Array.isArray(data?.items)?data.items:[]); state.slack.channels=sortSlackChannels(rows.filter(c=>c?.id)); if(state.slack.channel&&!state.slack.channels.some(c=>String(c.id)===String(state.slack.channel))){state.slack.channel='';state.slack.messages=[];state.slack.replies.clear();state.slack.replyTarget=null;resetSlackHistory('');} }
 function applySlackMeta(data){ if(typeof data?.canPost==='boolean')state.slack.canPost=data.canPost;if(typeof data?.canReply==='boolean')state.slack.canReply=data.canReply;state.slack.fetchedAt=data?.fetchedAt||null;state.slack.partial=data?.partial===true;state.slack.failedChannelCount=Math.max(0,Number(data?.failedChannelCount)||0);state.slack.truncated=data?.truncated===true; }
-function normalizeMessages(data,{aggregate=false}={}){ const rows=Array.isArray(data?.messages)?data.messages:(Array.isArray(data?.items)?data.items:[]); const selected=String(state.slack.channel||''); state.slack.messages=sortSlackMessages(rows.filter(m=>!isSlackSystemMessage(m)).map(m=>({...m,channelId:m?.channelId||(!aggregate?selected:''),channelName:m?.channelName||''}))); applySlackMeta(data); state.slack.error=''; }
+function normalizeMessages(data,{aggregate=false}={}){
+  const rows=Array.isArray(data?.messages)?data.messages:(Array.isArray(data?.items)?data.items:[]);
+  const selected=String(state.slack.channel||'');
+  const cleaned=rows.filter(m=>!isSlackSystemMessage(m)).map(m=>({...m,channelId:m?.channelId||(!aggregate?selected:''),channelName:m?.channelName||''}));
+  if(!aggregate&&selected){
+    if(state.slack.history.channelId!==selected) resetSlackHistory(selected);
+    if(state.slack.history.expanded===true){
+      state.slack.history.messages=mergeSlackMessages(state.slack.history.messages,cleaned);
+    } else {
+      state.slack.history.messages=sortSlackMessages(cleaned);
+      state.slack.history.nextCursor=data?.responseMetadata?.nextCursor||null;
+      state.slack.history.hasMore=data?.hasMore===true;
+    }
+    state.slack.messages=state.slack.history.messages;
+  } else {
+    state.slack.messages=sortSlackMessages(cleaned);
+  }
+  applySlackMeta(data); state.slack.error='';
+}
+async function loadOlderSlackMessages(){
+  const channel=String(state.slack.channel||''); if(!channel) return;
+  const hist=state.slack.history;
+  if(hist.channelId!==channel||!hist.hasMore||hist.loadingMore||state.slack.loading||!hist.nextCursor) return;
+  const uid=String(auth.currentUser?.uid||''), requestId=++state.slack.requestSeq;
+  hist.loadingMore=true; hist.error=''; renderSlackPreservingScroll();
+  try{
+    const data=await api(`/slack/messages?channel=${encodeURIComponent(channel)}&cursor=${encodeURIComponent(hist.nextCursor)}`);
+    if(!slackRequestIsCurrent(requestId,uid,channel)||state.slack.history.channelId!==channel) return;
+    const rows=Array.isArray(data?.messages)?data.messages:(Array.isArray(data?.items)?data.items:[]);
+    const cleaned=rows.filter(m=>!isSlackSystemMessage(m)).map(m=>({...m,channelId:m?.channelId||channel,channelName:m?.channelName||''}));
+    state.slack.history.messages=mergeSlackMessages(state.slack.history.messages,cleaned);
+    state.slack.history.expanded=true;
+    state.slack.history.nextCursor=data?.responseMetadata?.nextCursor||null;
+    state.slack.history.hasMore=data?.hasMore===true;
+    state.slack.history.loadingMore=false;
+    state.slack.messages=state.slack.history.messages;
+    renderSlackPreservingScroll();
+  }catch(error){
+    if(!slackRequestIsCurrent(requestId,uid,channel)||state.slack.history.channelId!==channel) return;
+    state.slack.history.loadingMore=false;
+    state.slack.history.error=error.message;
+    renderSlackPreservingScroll();
+  }finally{
+    if(state.slack.history===hist&&hist.loadingMore){hist.loadingMore=false;renderSlackPreservingScroll();}
+  }
+}
 function slackAuthor(m){ return m?.user?.real_name||m?.user?.name||m?.userName||m?.username||m?.displayName||(typeof m?.user==='string'?m.user:'')||'사용자'; }
 function slackText(m){ return String(m?.text||m?.message||''); }
 function slackTimeValue(value){ if(!value)return ''; const sec=Number(String(value).split('.')[0]); const d=Number.isFinite(sec)&&sec>1000000000?new Date(sec*1000):new Date(value); return Number.isNaN(d.getTime())?String(value):new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(d); }
@@ -285,7 +334,9 @@ function renderSlackThreadFeed(feed,canReply){
     const ts=String(m.ts||m.timestamp||''),mChannelId=String(m.channelId||state.slack.channel||''),channelName=slackChannelName(m),threadTs=String(m.threadTs||ts),replies=state.slack.replies.get(slackThreadKey(mChannelId,threadTs))||[],preview=slackReplyPreview(m),replyCount=Number(m.reply_count||m.replyCount||0),activity=slackTimeValue(slackActivityTs(m));
     return `<article class="slack-message"><div class="slack-card-top"><span class="slack-channel-badge">#${escapeHtml(channelName)}</span><time>최근 활동 ${escapeHtml(activity||'-')}</time></div><header><b>${escapeHtml(slackAuthor(m))}</b><time>${escapeHtml(slackTime(m))}</time></header><p>${escapeHtml(slackText(m))}</p>${preview?`<div class="slack-thread-preview"><strong>최근 답글${preview.displayName||preview.userName||preview.user?' · '+escapeHtml(slackAuthor(preview)):''}</strong>${preview.ts?`<time>${escapeHtml(slackTime(preview))}</time>`:''}<p>${escapeHtml(slackText(preview))}</p></div>`:''}<div class="slack-actions">${mChannelId&&threadTs&&canReply?`<button class="text-button" type="button" data-reply-ts="${escapeHtml(threadTs)}" data-reply-channel="${escapeHtml(mChannelId)}" data-reply-channel-name="${escapeHtml(channelName)}" data-reply-name="${escapeHtml(slackAuthor(m))}">답글</button>`:''}${mChannelId&&threadTs&&replyCount>0?`<button class="text-button" type="button" data-load-replies="${escapeHtml(threadTs)}" data-reply-channel="${escapeHtml(mChannelId)}">답글 ${replyCount}</button>`:''}</div>${replies.filter(r=>!isSlackSystemMessage(r)).map(r=>`<article class="slack-message"><header><b>${escapeHtml(slackAuthor(r))}</b><time>${escapeHtml(slackTime(r))}</time></header><p>${escapeHtml(slackText(r))}</p></article>`).join('')}</article>`;
   }).join(''):`<div class="empty">이 채널에 표시할 메시지가 없습니다.</div>`;
-  feed.innerHTML=backRow+notices.join('')+body;
+  const hist=state.slack.history,showLoadMore=hist.channelId===channelId&&hist.hasMore;
+  const loadMoreRow=showLoadMore?`<div class="slack-loadmore-row"><button type="button" class="slack-loadmore-button" data-load-older ${hist.loadingMore||state.slack.loading?'disabled':''}>${hist.loadingMore?'불러오는 중…':'이전 대화 더보기'}</button>${hist.error?`<span class="slack-loadmore-error">${escapeHtml(hist.error)}</span>`:''}</div>`:'';
+  feed.innerHTML=backRow+notices.join('')+body+loadMoreRow;
 }
 function renderSlack(){
   const connected=flag(state.status,['slackConnected','slack.connected','flags.slackConnected','connections.slack.connected','integrations.slack.connected']);
@@ -340,18 +391,19 @@ async function loadSlackFeed({channelsOnly=false}={}){
   try{const data=await api('/slack/feed');if(!slackRequestIsCurrent(requestId,uid,channel))return false;normalizeChannels(data);applySlackMeta(data);if(!channelsOnly){normalizeMessages(data,{aggregate:true});state.slack.loading=false;}renderSlack();return true;}
   catch(error){if(!slackRequestIsCurrent(requestId,uid,channel))return false;if(!channelsOnly)state.slack.messages=[];state.slack.loading=false;state.slack.error=error.message;renderSlack();return false;}
 }
-async function loadSlackChannels(){
+async function loadSlackChannels({manual=false}={}){
+  if(state.slack.history.loadingMore)return;
   if(!flag(state.status,['slackConnected','slack.connected','flags.slackConnected','connections.slack.connected','integrations.slack.connected'])){ state.slack.channels=[]; state.slack.messages=[]; state.slack.loading=false; state.slack.error=''; renderSlack(); return; }
-  if(state.slack.channel){const feedOk=await loadSlackFeed({channelsOnly:true});if(feedOk&&state.slack.channel)await loadSlackMessages();}else await loadSlackFeed();
+  if(state.slack.channel){const feedOk=await loadSlackFeed({channelsOnly:true});if(feedOk&&state.slack.channel)await loadSlackMessages({resetHistory:manual});}else await loadSlackFeed();
 }
-async function loadSlackMessages(){
-  const channel=String(state.slack.channel||'');if(!channel)return;const uid=String(auth.currentUser?.uid||''),requestId=++state.slack.requestSeq;state.slack.loading=true;state.slack.error='';renderSlack();
+async function loadSlackMessages({resetHistory=false}={}){
+  const channel=String(state.slack.channel||'');if(!channel)return;const uid=String(auth.currentUser?.uid||''),requestId=++state.slack.requestSeq;if(resetHistory)resetSlackHistory(channel);state.slack.loading=true;state.slack.error='';renderSlack();
   try{const data=await api(`/slack/messages?channel=${encodeURIComponent(channel)}`);if(!slackRequestIsCurrent(requestId,uid,channel))return;normalizeMessages(data);state.slack.loading=false;renderSlack();}
   catch(error){if(!slackRequestIsCurrent(requestId,uid,channel))return;state.slack.messages=[];state.slack.loading=false;state.slack.error=error.message;renderSlack();}
 }
 async function pollAll({manual=false}={}){
   if(!state.user||document.hidden||state.polling)return; state.polling=true; if(manual) $('refresh-button').disabled=true;
-  try{ await loadStatus(); await Promise.all([loadTrello(),loadMeetings(),loadSlackChannels()]); state.lastPollAt=Date.now(); if(manual) toast('최신 서버 상태를 확인했습니다.'); }
+  try{ await loadStatus(); await Promise.all([loadTrello(),loadMeetings(),loadSlackChannels({manual})]); state.lastPollAt=Date.now(); if(manual) toast('최신 서버 상태를 확인했습니다.'); }
   catch(error){ if(manual) toast(error.message,true); }
   finally{ state.polling=false; $('refresh-button').disabled=false; }
 }
@@ -419,14 +471,15 @@ async function handleActiveUser(user){
 $('login-button').onclick=async()=>{ $('login-button').disabled=true; try{await signInWithPopup(auth,provider);}catch(error){if(error.code!=='auth/popup-closed-by-user')setAuthOverlay('로그인 오류',error.message,{login:true});}finally{$('login-button').disabled=false;}};
 $('auth-logout-button').onclick=async()=>{clearAll();await signOut(auth);}; $('logout-button').onclick=async()=>{clearAll();await signOut(auth);};
 function clearSlackThreadState({invalidate=false}={}){state.slack.replies.clear();state.slack.replyTarget=null;if(invalidate)state.slack.requestSeq++;renderReplyTarget();}
-async function selectSlackChannel(channelId){state.slack.channel=String(channelId||'');$('slack-search35').value='';state.slack.messages=[];state.slack.error='';state.slack.loading=false;clearSlackThreadState({invalidate:true});renderSlack();if(state.slack.channel)await loadSlackMessages();else await loadSlackFeed();}
-$('refresh-button').onclick=()=>pollAll({manual:true}); $('slack-reload-button').onclick=()=>state.slack.channel?loadSlackMessages():loadSlackFeed();
+async function selectSlackChannel(channelId){const channel=String(channelId||'');state.slack.channel=channel;$('slack-search35').value='';state.slack.messages=[];state.slack.error='';state.slack.loading=false;resetSlackHistory(channel);clearSlackThreadState({invalidate:true});renderSlack();$('slack-feed').scrollTop=0;if(state.slack.channel)await loadSlackMessages();else await loadSlackFeed();}
+$('refresh-button').onclick=()=>pollAll({manual:true}); $('slack-reload-button').onclick=()=>state.slack.channel?loadSlackMessages({resetHistory:true}):loadSlackFeed();
 $('calendar-source-filter').onchange=renderCalendar; $('calendar-title-filter').oninput=renderCalendar; $('week-prev32').onclick=()=>{state.weekOffset--;renderCalendar()}; $('week-next32').onclick=()=>{state.weekOffset++;renderCalendar()}; $('week-today32').onclick=()=>{state.weekOffset=0;state.selectedDate=ymdKst();renderCalendar()}; $('week-days32').onclick=e=>{const b=e.target.closest('[data-live-date]');if(b){state.selectedDate=b.dataset.liveDate;state.weekOffset=0;renderCalendar()}}; $('slack-search35').oninput=()=>{clearSlackThreadState();renderSlack();}; $('meeting-call').onclick=()=>{if(!$('meeting-dialog').open)openMeetingDialog();}; $('meeting-huddle34').onclick=()=>{const m=state.meetings.find(x=>String(x.id)===String($('meeting-huddle34').dataset.meetingId));if(m)state.scene?.callMeeting(m.title,m.attendeeIds||[]);};
 $('slack-channel-select').onchange=async e=>{await selectSlackChannel(e.target.value);};
 $('slack-connect-button').onclick=async()=>{ $('slack-connect-button').disabled=true; try{const data=await api('/slack/connect',{method:'POST',body:'{}'}),url=safeUrl(data?.url);if(!url||!/(^|\.)slack\.com$/.test(new URL(url).hostname))throw new Error('유효한 Slack OAuth 주소를 받지 못했습니다.');window.location.assign(url);}catch(error){toast(error.message,true);}finally{$('slack-connect-button').disabled=false;}};
 $('slack-feed').onclick=async e=>{
   const openCard=e.target.closest('[data-open-channel]'); if(openCard){await selectSlackChannel(openCard.dataset.openChannel||'');return;}
   const back=e.target.closest('[data-back-overview]'); if(back){await selectSlackChannel('');return;}
+  const loadOlder=e.target.closest('[data-load-older]'); if(loadOlder){await loadOlderSlackMessages();return;}
   const reply=e.target.closest('[data-reply-ts]'); if(reply){const channelId=String(reply.dataset.replyChannel||'');if(!channelId)return;state.slack.replyTarget={ts:String(reply.dataset.replyTs||''),channelId,channelName:reply.dataset.replyChannelName||channelId,name:reply.dataset.replyName||'사용자'};renderSlack();$('slack-text').focus();return;}
   const load=e.target.closest('[data-load-replies]'); if(load){const channelId=String(load.dataset.replyChannel||''),ts=String(load.dataset.loadReplies||''),uid=String(auth.currentUser?.uid||''),requestId=state.slack.requestSeq,filter=String(state.slack.channel||'');if(!channelId||!ts)return;try{const data=await api(`/slack/replies?channel=${encodeURIComponent(channelId)}&ts=${encodeURIComponent(ts)}`);if(!slackRequestIsCurrent(requestId,uid,filter))return;state.slack.replies.set(slackThreadKey(channelId,ts),(Array.isArray(data?.messages)?data.messages:(data?.items||[])).filter(m=>!isSlackSystemMessage(m)&&String(m.ts||'')!==ts));renderSlack();}catch(error){if(slackRequestIsCurrent(requestId,uid,filter))toast(error.message,true);}}
 };
