@@ -85,7 +85,7 @@ function clearExternal(){ state.status=null; state.trello={items:[],boards:[],me
 function clearERP(error=''){ state.erp={approvals:[],expenses:[],orders:[],tasks:[],productions:[],items:[],poOverrides:{},expenseOverrides:{},sources:{},error}; if(window.NEXUS)window.NEXUS.workMode='offline'; renderAll(); }
 function clearAll(){ stopFirestore(); stopPolling(); clearExternal(); state.authorized=false; state.user=null; state.profile=null; state.meetingRequestId=null; state.meetingPayloadKey=null; if($('meeting-dialog').open)$('meeting-dialog').close(); $('slack-text').value=''; $('erp-shell37').hidden=true; $('erp-frame37').removeAttribute('src'); closeSubpage(); clearERP(''); $('viewer-name').textContent='사용자 확인 중'; $('viewer-role').textContent='읽기 전용'; $('logout-button').textContent='나'; if(state.scene) state.scene.returnSeats();
   state.personalTasksSeq++; state.personalTasks={mode:null,items:[],count:0,warnings:[],error:'',fetchedAt:null,lastScanAt:null};
-  state.feed={posts:[],archPosts:{},loaded:false,error:''}; for(const k of Object.keys(FACE_CACHE)) delete FACE_CACHE[k]; if($('viewer-avatar')){ $('viewer-avatar').textContent=''; $('viewer-avatar').classList.remove('has-face40'); }
+  state.feed={posts:[],archPosts:{},loaded:false,error:''}; renderViewerFace.tries=0; for(const k of Object.keys(FACE_CACHE)) delete FACE_CACHE[k]; if($('viewer-avatar')){ $('viewer-avatar').textContent=''; $('viewer-avatar').classList.remove('has-face40'); }
   state.adminSeq++;
   state.admin={loading:false,scanning:false,error:'',config:null,allRules:[],view:'list',selectedUid:null,focusToken:0,employeeSeq:0,employee:{uid:null,data:null,loading:false,error:''},gen:{loading:false,error:'',summary:'',questions:[],requestId:null,lastUid:null,lastText:''}};
   if($('admin-tasks-dialog') && $('admin-tasks-dialog').open) $('admin-tasks-dialog').close();
@@ -924,7 +924,7 @@ function renderViewerFace(){
   let url=id?FACE_CACHE[id]:null;
   if(!url&&id&&window.NEXUS?.sceneReady&&typeof window.NEXUS.portrait==='function'){ url=window.NEXUS.portrait(id,128); if(url) FACE_CACHE[id]=url; }
   if(url){ const img=new Image(); img.alt=''; img.decoding='async'; img.src=url; el.replaceChildren(img); el.classList.add('has-face40'); el.setAttribute('aria-label',name+' 3D 아바타'); }
-  else { el.textContent=name.slice(0,1); el.classList.remove('has-face40'); el.setAttribute('aria-label','로그인 사용자'); }
+  else { el.textContent=name.slice(0,1); el.classList.remove('has-face40'); el.setAttribute('aria-label','로그인 사용자'); if(id&&(renderViewerFace.tries=(renderViewerFace.tries||0)+1)<=12) setTimeout(renderViewerFace,800); }
 }
 const FEED_CATS=Object.freeze({notice:{label:'공지',bg:'#fef3c7',fg:'#92400e'},meeting:{label:'회의록',bg:'#e0e7ff',fg:'#3730a3'},product:{label:'제품개발',bg:'#ede9fe',fg:'#5b21b6'},sales:{label:'영업',bg:'#dcfce7',fg:'#166534'},homeshopping:{label:'홈쇼핑',bg:'#e0f2fe',fg:'#075985'},free:{label:'자유',bg:'#eef2f6',fg:'#334155'}});
 const feedCat=key=>FEED_CATS[key]||FEED_CATS.free;
@@ -964,7 +964,7 @@ function renderFeedBoard(){
   if(!posts.length){ body.innerHTML='<p class="fb-empty40">아직 공유된 글이 없습니다.</p>'; return; }
   const top=posts[0], rest=posts.slice(1); const excerpt=feedText(top.content).replace(/\s+/g,' ').slice(0,160);
   body.innerHTML='<button type="button" class="fb-feature40" data-feed-id="'+escapeHtml(top.id)+'"><span class="fb-tags40">'+feedChip(top)+(top.pinned?'<span class="fb-pin40">고정</span>':'')+(feedIsNew(top)?'<span class="fb-new40">NEW</span>':'')+'<em>'+escapeHtml(top.authorName||'작성자 미상')+' · '+escapeHtml(feedWhen(top.createdAt))+'</em></span><strong>'+escapeHtml(top.title||'제목 없음')+'</strong>'+(excerpt?'<span class="fb-excerpt40">'+escapeHtml(excerpt)+'</span>':'')+'</button>'
-    +'<ul class="fb-list40">'+rest.slice(0,3).map(p=>'<li><button type="button" data-feed-id="'+escapeHtml(p.id)+'">'+feedChip(p)+'<b>'+escapeHtml(p.title||'제목 없음')+'</b><small>'+escapeHtml(p.authorName||'')+' · '+escapeHtml(feedWhen(p.createdAt,true))+'</small></button></li>').join('')+'</ul>';
+    +'<ul class="fb-list40">'+rest.slice(0,2).map(p=>'<li><button type="button" data-feed-id="'+escapeHtml(p.id)+'">'+feedChip(p)+'<b>'+escapeHtml(p.title||'제목 없음')+'</b><small>'+escapeHtml(p.authorName||'')+' · '+escapeHtml(feedWhen(p.createdAt,true))+'</small></button></li>').join('')+'</ul>';
 }
 function openFeedDrawer(id){
   const posts=feedAllPosts(); const p=id!=null?posts.find(x=>String(x.id)===String(id)):null;
