@@ -43,6 +43,7 @@ provider.setCustomParameters({ prompt:'select_account' });
 const state = {
   user:null, profile:null, authorized:false, firestoreUnsubs:[], pollTimer:null, polling:false,
   erp:{approvals:[],expenses:[],orders:[],tasks:[],productions:[],items:[],poOverrides:{},expenseOverrides:{},sources:{},error:''},
+  feed:{posts:[],archPosts:{},loaded:false,error:''},
   status:null, trello:{items:[],boards:[],me:null,fetchedAt:null,error:''},
   slack:{channels:[],messages:[],channel:'',replies:new Map(),replyTarget:null,error:'',loading:false,partial:false,failedChannelCount:0,truncated:false,fetchedAt:null,canPost:false,canReply:false,requestSeq:0,history:{channelId:'',messages:[],nextCursor:null,hasMore:false,loadingMore:false,error:''}},
   meetings:[], meetingError:'', meetingRequestId:null, meetingPayloadKey:null, scene:null, selectedPerson:'jaeho', selectedDate:ymdKst(), weekOffset:0, lastPollAt:null,
@@ -84,6 +85,7 @@ function clearExternal(){ state.status=null; state.trello={items:[],boards:[],me
 function clearERP(error=''){ state.erp={approvals:[],expenses:[],orders:[],tasks:[],productions:[],items:[],poOverrides:{},expenseOverrides:{},sources:{},error}; if(window.NEXUS)window.NEXUS.workMode='offline'; renderAll(); }
 function clearAll(){ stopFirestore(); stopPolling(); clearExternal(); state.authorized=false; state.user=null; state.profile=null; state.meetingRequestId=null; state.meetingPayloadKey=null; if($('meeting-dialog').open)$('meeting-dialog').close(); $('slack-text').value=''; $('erp-shell37').hidden=true; $('erp-frame37').removeAttribute('src'); closeSubpage(); clearERP(''); $('viewer-name').textContent='사용자 확인 중'; $('viewer-role').textContent='읽기 전용'; $('logout-button').textContent='나'; if(state.scene) state.scene.returnSeats();
   state.personalTasksSeq++; state.personalTasks={mode:null,items:[],count:0,warnings:[],error:'',fetchedAt:null,lastScanAt:null};
+  state.feed={posts:[],archPosts:{},loaded:false,error:''}; for(const k of Object.keys(FACE_CACHE)) delete FACE_CACHE[k]; if($('viewer-avatar')){ $('viewer-avatar').textContent=''; $('viewer-avatar').classList.remove('has-face40'); }
   state.adminSeq++;
   state.admin={loading:false,scanning:false,error:'',config:null,allRules:[],view:'list',selectedUid:null,focusToken:0,employeeSeq:0,employee:{uid:null,data:null,loading:false,error:''},gen:{loading:false,error:'',summary:'',questions:[],requestId:null,lastUid:null,lastText:''}};
   if($('admin-tasks-dialog') && $('admin-tasks-dialog').open) $('admin-tasks-dialog').close();
@@ -116,6 +118,7 @@ function subscribeERP(){
     });
     state.firestoreUnsubs.push(unsub);
   }
+  subscribeFeed();
 }
 
 function orderTotal(o){
@@ -406,7 +409,7 @@ function renderAll(){ renderMetrics(); renderPersonal(); renderCalendar(); rende
 function renderV45Status(){
   const mine=personalTasks(),sources=Object.keys(state.erp.sources).length,slackOn=flag(state.status,['flags.slackConnected','integrations.slack.connected']),trelloOn=flag(state.status,['flags.trelloConnected','integrations.trello.available']);
   $('led-tasks-live').textContent=mine.length+'건';$('erp-led-source').textContent=state.erp.error?'읽기 오류':sources?'실시간':'연결 대기';$('erp-work-state').textContent=state.erp.error|| (sources?'ERP 읽기 전용 연결':'실시간 연결 대기');
-  $('share-erp-state').textContent=state.erp.error?'ERP · 읽기 오류':sources?'ERP · 실시간 읽기':'ERP · 연결 대기';$('share-trello-state').textContent=state.trello.error?'Trello · 읽기 오류':trelloOn?'Trello · '+state.trello.items.length+'개 카드':'Trello · 설정 확인';$('share-slack-state').textContent=state.slack.error?'Slack · 읽기 오류':slackOn?'Slack · 연결됨':'Slack · OAuth 연결 필요';$('live-updated-at').textContent=state.lastPollAt?new Date(state.lastPollAt).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}):'확인 중';
+  renderFeedBoard();
   $('calendar-source32').textContent=trelloOn?'Trello + ERP':'ERP';$('company-source37').textContent=state.lastPollAt?'라이브 연결':'연결 대기';$('slack-scope35').textContent=slackOn?'내 참여 채널 · 최신 대화순':'OAuth 연결 필요';
   $('slack-result35').textContent=state.slack.loading?'불러오는 중':state.slack.error||(!state.slack.channel?(()=>{const total=state.slack.channels.length,filtered=filteredOverviewChannels().length;return overviewSearchQuery()?`${filtered}개 채널 (전체 ${total}개)`:`${total}개 채널`;})():(state.slack.partial?`일부 ${state.slack.messages.length}건`:state.slack.messages.length+'건'));
   const next=state.meetings.filter(m=>m?.status!=='canceled'&&new Date(m.endAt)>new Date()).sort((a,b)=>String(a.startAt).localeCompare(String(b.startAt)))[0];$('meeting-next').textContent=next?'예정 · '+formatDateTime(next.startAt,next.timezone||'Asia/Seoul')+' · '+(next.title||'회의'):'예정된 회의 없음';const candidate=safeUrl(next?.huddleUrl||next?.huddleURL);const h=next?(candidate===HUDDLE_URL?candidate:HUDDLE_URL):'';$('meeting-huddle34').hidden=!h;if(h){$('meeting-huddle34').href=h;$('meeting-huddle34').dataset.meetingId=next.id}else{$('meeting-huddle34').removeAttribute('href');delete $('meeting-huddle34').dataset.meetingId}
@@ -863,15 +866,15 @@ async function deleteMeeting(){ const id=$('meeting-id').value; if(!id)return; $
 const PEOPLE=STAFF.map(p=>({...p,type:p.kind,team:p.role.split(' ')[0]||'',tasks:[],messages:[],thread:'',color:p.color}));
 function syncScenePeople(counts){for(const p of PEOPLE){const n=counts[p.id]||0;p.tasks=Array.from({length:n},(_,i)=>({id:`live-${p.id}-${i}`,title:'명시 배정 업무',status:'진행 중',kind:'task',done:false,erp:true,url:ERP_URL}))}window.NEXUS?.refreshDeskDialog?.()}
 function selectV45Person(id){state.selectedPerson=id;document.querySelectorAll('[data-person]').forEach(el=>el.classList.toggle('selected',el.dataset.person===id));window.onPersonSelect?.(id)}
-window.NEXUS={PEOPLE,WAREHOUSES:[],workMode:'offline',workConnection:'unconnected',personalMode35:true,selectPerson:selectV45Person,renderTasks:()=>{},toast,openDeskWork:id=>showSubpage('tasks',id),openERPTask:t=>window.open(safeUrl(t?.url)||ERP_URL,'_blank','noopener'),openShare:()=>showSubpage('connections'),openWarehouse:()=>{},refreshCalendar32:renderCalendar,showLiveErpTip:()=>{},showLiveBoardTip:()=>{}};
+window.NEXUS={PEOPLE,WAREHOUSES:[],workMode:'offline',workConnection:'unconnected',personalMode35:true,selectPerson:selectV45Person,renderTasks:()=>{},toast,openDeskWork:id=>showSubpage('tasks',id),openERPTask:t=>window.open(safeUrl(t?.url)||ERP_URL,'_blank','noopener'),openShare:()=>openFeedDrawer(null),openWarehouse:()=>{},refreshCalendar32:renderCalendar,showLiveErpTip:()=>{},showLiveBoardTip:showFeedBoardTip};
 window.__resolveNexusBridge?.();
-function bindOriginalScene(){state.scene={setView:v=>window.NEXUS.setView?.(v),callMeeting:(title,ids)=>window.NEXUS.callMeeting?.(title,ids),returnSeats:()=>window.NEXUS.endMeeting?.(),updateWork:syncScenePeople};syncScenePeople(personWorkCounts())}
+function bindOriginalScene(){setTimeout(renderViewerFace,900);state.scene={setView:v=>window.NEXUS.setView?.(v),callMeeting:(title,ids)=>window.NEXUS.callMeeting?.(title,ids),returnSeats:()=>window.NEXUS.endMeeting?.(),updateWork:syncScenePeople};syncScenePeople(personWorkCounts())}
 window.addEventListener('nexus-scene-ready',bindOriginalScene,{once:true});if(window.NEXUS.sceneReady)bindOriginalScene();
 
 function lockApi(message){clearAll();setAuthOverlay('NEXUS 접근 차단',message||'NEXUS 서버 권한을 확인할 수 없습니다.',{logout:true})}
 async function handleActiveUser(user){
   clearExternal();stopFirestore();stopPolling();state.user=user;setAuthOverlay('NEXUS 권한 확인 중','서버의 nexus_access 권한과 활성 임원 계정을 확인하고 있습니다.');
-  try{const status=await api('/status');if(String(status?.identity?.uid||'')!==String(user.uid))throw Object.assign(new Error('서버 사용자와 현재 로그인 계정이 일치하지 않습니다.'),{status:403});state.status=status;state.profile={uid:user.uid,name:status.identity.displayName||user.displayName||'',email:status.identity.email||user.email||'',role:status.identity.isAdmin?'관리자':(status.identity.permission==='read'?'조회 권한':'임원')};state.authorized=true;$('viewer-name').textContent=`(${state.profile.name||state.profile.email})`;$('viewer-role').textContent=state.profile.role;$('viewer-avatar').textContent=(state.profile.name||'나').slice(0,1);$('logout-button').textContent=(state.profile.name||'나').slice(0,1);showApp();subscribeERP();if($('admin-tasks-btn'))$('admin-tasks-btn').hidden=!status.identity.isAdmin;await Promise.all([loadTrello(),loadMeetings(),loadSlackChannels(),loadPersonalTasks()]);state.lastPollAt=Date.now();renderAll();startPolling()}catch(error){clearAll();setAuthOverlay('접근할 수 없습니다',error.message,{logout:true})}
+  try{const status=await api('/status');if(String(status?.identity?.uid||'')!==String(user.uid))throw Object.assign(new Error('서버 사용자와 현재 로그인 계정이 일치하지 않습니다.'),{status:403});state.status=status;state.profile={uid:user.uid,name:status.identity.displayName||user.displayName||'',email:status.identity.email||user.email||'',role:status.identity.isAdmin?'관리자':(status.identity.permission==='read'?'조회 권한':'임원')};state.authorized=true;$('viewer-name').textContent=`(${state.profile.name||state.profile.email})`;$('viewer-role').textContent=state.profile.role;renderViewerFace();$('logout-button').textContent=(state.profile.name||'나').slice(0,1);showApp();subscribeERP();if($('admin-tasks-btn'))$('admin-tasks-btn').hidden=!status.identity.isAdmin;await Promise.all([loadTrello(),loadMeetings(),loadSlackChannels(),loadPersonalTasks()]);state.lastPollAt=Date.now();renderAll();startPolling()}catch(error){clearAll();setAuthOverlay('접근할 수 없습니다',error.message,{logout:true})}
 }
 
 $('login-button').onclick=async()=>{ $('login-button').disabled=true; try{await signInWithPopup(auth,provider);}catch(error){if(error.code!=='auth/popup-closed-by-user')setAuthOverlay('로그인 오류',error.message,{login:true});}finally{$('login-button').disabled=false;}};
@@ -896,7 +899,7 @@ document.querySelectorAll('[data-view]').forEach(button=>button.onclick=()=>{con
 document.querySelectorAll('.navicon[data-panel]').forEach(button=>button.onclick=()=>showSubpage(button.dataset.panel));
 $('subpage-content').onclick=e=>{const member=e.target.closest('[data-person]');if(member)selectV45Person(member.dataset.person);};
 $('home-button').onclick=()=>{closeSubpage();$('erp-shell37').hidden=true;$('erp-frame37').removeAttribute('src');state.scene?.returnSeats();}; $('subpage-close').onclick=closeSubpage;
-$('nav-erp37').onclick=()=>{$('erp-frame37').src=ERP_URL;$('erp-shell37').hidden=false;}; $('erp-home37').onclick=()=>{$('erp-shell37').hidden=true;$('erp-frame37').removeAttribute('src');};
+$('nav-erp37').onclick=()=>{$('erp-frame37').src=ERP_URL;$('erp-shell37').hidden=false;}; bindFeedBoard(); $('erp-home37').onclick=()=>{$('erp-shell37').hidden=true;$('erp-frame37').removeAttribute('src');};
 $('office-view-button').onclick=()=>state.scene?.setView('office'); $('meeting-view-button').onclick=()=>state.scene?.setView('meeting'); $('return-seats-button').onclick=()=>state.scene?.returnSeats();
 $('meeting-new-button').onclick=()=>openMeetingDialog(); $('meeting-close-button').onclick=()=>{$('meeting-dialog').close();state.meetingRequestId=null;state.meetingPayloadKey=null;}; $('meeting-cancel-button').onclick=()=>{state.meetingRequestId=null;state.meetingPayloadKey=null;$('meeting-dialog').close();}; $('meeting-form').onsubmit=e=>{e.preventDefault();saveMeeting();}; $('meeting-delete-button').onclick=deleteMeeting;
 $('meeting-list').onclick=e=>{
@@ -909,3 +912,78 @@ window.addEventListener('online',()=>{if(state.user){pollAll();startPolling();}}
 
 renderAll();
 onAuthStateChanged(auth,user=>{if(!user){clearAll();setAuthOverlay('RENIV NEXUS 로그인','Google 계정으로 로그인한 뒤 활성 사용자 권한을 확인합니다.',{login:true});return;}handleActiveUser(user);});
+
+
+/* live20: viewer 3D face + ERP 운영 업무 공유 전자칠판 (read-only) */
+const FACE_CACHE={};
+const FACE_ALIASES=Object.freeze({'juyeon lee':'juyeon','lee juyeon':'juyeon'});
+function viewerPersonId(){ const name=String(state.profile?.name||'').trim(); const hit=STAFF.find(s=>s.kind==='사람'&&s.name===name); return hit?hit.id:(FACE_ALIASES[name.toLowerCase()]||null); }
+function renderViewerFace(){
+  const el=$('viewer-avatar'); if(!el||!state.profile) return;
+  const name=state.profile.name||'나', id=viewerPersonId();
+  let url=id?FACE_CACHE[id]:null;
+  if(!url&&id&&window.NEXUS?.sceneReady&&typeof window.NEXUS.portrait==='function'){ url=window.NEXUS.portrait(id,128); if(url) FACE_CACHE[id]=url; }
+  if(url){ const img=new Image(); img.alt=''; img.decoding='async'; img.src=url; el.replaceChildren(img); el.classList.add('has-face40'); el.setAttribute('aria-label',name+' 3D 아바타'); }
+  else { el.textContent=name.slice(0,1); el.classList.remove('has-face40'); el.setAttribute('aria-label','로그인 사용자'); }
+}
+const FEED_CATS=Object.freeze({notice:{label:'공지',bg:'#fef3c7',fg:'#92400e'},meeting:{label:'회의록',bg:'#e0e7ff',fg:'#3730a3'},product:{label:'제품개발',bg:'#ede9fe',fg:'#5b21b6'},sales:{label:'영업',bg:'#dcfce7',fg:'#166534'},homeshopping:{label:'홈쇼핑',bg:'#e0f2fe',fg:'#075985'},free:{label:'자유',bg:'#eef2f6',fg:'#334155'}});
+const feedCat=key=>FEED_CATS[key]||FEED_CATS.free;
+const feedChip=p=>{ const c=feedCat(p?.category); return '<span class="fb-chip40" style="background:'+c.bg+';color:'+c.fg+'">'+escapeHtml(c.label)+'</span>'; };
+function feedAllPosts(){
+  const seen=new Map(); const f=state.feed||{};
+  [f.posts,...Object.values(f.archPosts||{})].forEach(arr=>(Array.isArray(arr)?arr:[]).forEach(p=>{ if(p&&p.id!=null&&!seen.has(String(p.id))) seen.set(String(p.id),p); }));
+  return [...seen.values()].sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0)||(Date.parse(b.createdAt)||0)-(Date.parse(a.createdAt)||0));
+}
+function feedText(html){
+  if(!html) return '';
+  const d=new DOMParser().parseFromString(String(html),'text/html');
+  d.querySelectorAll('script,style,iframe,object').forEach(n=>n.remove());
+  d.querySelectorAll('br').forEach(n=>n.replaceWith('\n'));
+  d.querySelectorAll('div,p,li,h1,h2,h3,h4,h5,tr,blockquote').forEach(n=>n.append('\n'));
+  return String(d.body?.textContent||'').replace(/\u00a0/g,' ').replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+}
+function feedWhen(v,short){ const t=Date.parse(v); if(!t) return ''; const o=short?{timeZone:'Asia/Seoul',month:'numeric',day:'numeric'}:{timeZone:'Asia/Seoul',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}; return new Intl.DateTimeFormat('ko-KR',o).format(new Date(t)); }
+const feedIsNew=p=>{ const t=Date.parse(p?.createdAt); return !!t&&Date.now()-t<48*3600000; };
+function subscribeFeed(){
+  state.feed={posts:[],archPosts:{},loaded:false,error:''}; const arch={};
+  const unsub=onSnapshot(doc(db,'erp_data','feedPosts'),snap=>{
+    const data=snap.exists()?(snap.data()||{}):{}; state.feed.posts=parseErpDoc(snap,[]); state.feed.loaded=true; state.feed.error='';
+    const n=Math.min(10,Math.max(0,Number(data.arch)||0));
+    for(const k of Object.keys(arch)) if(Number(k)>n){ arch[k](); delete arch[k]; delete state.feed.archPosts[k]; }
+    for(let i=1;i<=n;i++){ if(arch[i]) continue; const u=onSnapshot(doc(db,'erp_data','feedPosts_arch'+i),s=>{ state.feed.archPosts[i]=parseErpDoc(s,[]); renderFeedBoard(); },()=>{}); arch[i]=u; state.firestoreUnsubs.push(u); }
+    renderFeedBoard();
+  },error=>{ state.feed.loaded=true; state.feed.error=error?.code==='permission-denied'?'운영 업무 공유 게시판 읽기 권한이 없습니다.':'운영 업무 공유 게시판을 불러오지 못했습니다.'; renderFeedBoard(); });
+  state.firestoreUnsubs.push(unsub);
+}
+function renderFeedBoard(){
+  const body=$('feed-board-body40'), meta=$('feed-board-meta40'); if(!body||!meta) return; const f=state.feed||{};
+  if(f.error){ meta.textContent='읽기 오류'; body.innerHTML='<p class="fb-empty40">'+escapeHtml(f.error)+'</p>'; return; }
+  if(!f.loaded){ meta.textContent='연결 대기'; body.innerHTML='<p class="fb-empty40">운영 업무 공유 게시판을 불러오는 중입니다.</p>'; return; }
+  const posts=feedAllPosts(), fresh=posts.filter(feedIsNew).length;
+  meta.textContent='ERP 실시간 · '+posts.length+'건'+(fresh?' · 새 글 '+fresh:'');
+  if(!posts.length){ body.innerHTML='<p class="fb-empty40">아직 공유된 글이 없습니다.</p>'; return; }
+  const top=posts[0], rest=posts.slice(1); const excerpt=feedText(top.content).replace(/\s+/g,' ').slice(0,160);
+  body.innerHTML='<button type="button" class="fb-feature40" data-feed-id="'+escapeHtml(top.id)+'"><span class="fb-tags40">'+feedChip(top)+(top.pinned?'<span class="fb-pin40">고정</span>':'')+(feedIsNew(top)?'<span class="fb-new40">NEW</span>':'')+'<em>'+escapeHtml(top.authorName||'작성자 미상')+' · '+escapeHtml(feedWhen(top.createdAt))+'</em></span><strong>'+escapeHtml(top.title||'제목 없음')+'</strong>'+(excerpt?'<span class="fb-excerpt40">'+escapeHtml(excerpt)+'</span>':'')+'</button>'
+    +'<ul class="fb-list40">'+rest.slice(0,3).map(p=>'<li><button type="button" data-feed-id="'+escapeHtml(p.id)+'">'+feedChip(p)+'<b>'+escapeHtml(p.title||'제목 없음')+'</b><small>'+escapeHtml(p.authorName||'')+' · '+escapeHtml(feedWhen(p.createdAt,true))+'</small></button></li>').join('')+'</ul>';
+}
+function openFeedDrawer(id){
+  const posts=feedAllPosts(); const p=id!=null?posts.find(x=>String(x.id)===String(id)):null;
+  $('subpage-title').textContent='운영 업무 공유'; $('drawer-path-live').textContent='WORKSPACE / 운영 업무 공유';
+  let html='';
+  if(p){ const n=k=>Array.isArray(p[k])?p[k].length:0;
+    html+='<article class="fb-detail40"><div class="fb-detail-meta40">'+feedChip(p)+(p.pinned?'<span class="fb-pin40">고정</span>':'')+'<small>'+escapeHtml(p.authorName||'작성자 미상')+' · '+escapeHtml(feedWhen(p.createdAt))+'</small></div><h3>'+escapeHtml(p.title||'제목 없음')+'</h3><div class="fb-detail-body40">'+(escapeHtml(feedText(p.content))||'본문 없음')+'</div><p class="fb-detail-foot40">이미지 '+n('images')+'장 · 첨부 '+n('files')+'개 · 댓글 '+n('comments')+'개 · 이미지와 첨부 원본은 ERP에서 확인하세요.</p></article>'; }
+  html+='<div class="fb-drawer-actions40"><button type="button" id="feed-open-erp40">ERP 운영 업무 공유에서 열기</button></div><h4 class="fb-drawer-h40">최근 글</h4><ul class="fb-drawer-list40">'
+    +(posts.slice(0,30).map(x=>'<li><button type="button" data-feed-id="'+escapeHtml(x.id)+'"'+(p&&String(p.id)===String(x.id)?' class="active"':'')+'>'+feedChip(x)+'<b>'+escapeHtml(x.title||'제목 없음')+'</b><small>'+escapeHtml(x.authorName||'')+' · '+escapeHtml(feedWhen(x.createdAt))+'</small></button></li>').join('')||'<li class="fb-empty40">공유된 글이 없습니다.</li>')+'</ul>';
+  $('subpage-content').innerHTML=html; $('subpage').hidden=false; $('subpage').classList.add('open'); $('app').classList.add('subpage-open'); document.querySelectorAll('.navicon').forEach(b=>b.classList.remove('active')); $('subpage').focus();
+  $('subpage-content').scrollTop=0;
+}
+function showFeedBoardTip(e,tip,host){
+  if(!tip||!host) return; const p=feedAllPosts()[0]; const r=host.getBoundingClientRect();
+  tip.textContent=p?('운영 업무 공유 · '+(p.title||'제목 없음')+' (클릭하면 게시판 열기)'):'운영 업무 공유 게시판';
+  tip.style.left=(e.clientX-r.left+14)+'px'; tip.style.top=(e.clientY-r.top+14)+'px'; tip.style.display='block';
+}
+function bindFeedBoard(){
+  const body=$('feed-board-body40'); if(body) body.addEventListener('click',e=>{ const b=e.target.closest('[data-feed-id]'); if(b) openFeedDrawer(b.dataset.feedId); });
+  const all=$('feed-board-all40'); if(all) all.onclick=()=>openFeedDrawer(null);
+  $('subpage-content').addEventListener('click',e=>{ const b=e.target.closest('[data-feed-id]'); if(b&&b.closest('.fb-drawer-list40')){ openFeedDrawer(b.dataset.feedId); return; } if(e.target.closest('#feed-open-erp40')){ $('erp-frame37').src=ERP_URL; $('erp-shell37').hidden=false; } });
+}
