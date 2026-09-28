@@ -48,7 +48,7 @@ const state = {
   meetings:[], meetingError:'', meetingRequestId:null, meetingPayloadKey:null, scene:null, selectedPerson:'jaeho', selectedDate:ymdKst(), weekOffset:0, lastPollAt:null,
   personalTasks:{mode:null,items:[],count:0,warnings:[],error:'',fetchedAt:null,lastScanAt:null}, personalTasksSeq:0,
   adminSeq:0,
-  admin:{loading:false,saving:false,scanning:false,applying:false,error:'',config:null,dirty:false,rules:[],plan:{text:'',loading:false,result:null,draft:[],questions:[],planSeq:0}}
+  admin:{loading:false,scanning:false,error:'',config:null,allRules:[],view:'list',selectedUid:null,focusToken:0,employeeSeq:0,employee:{uid:null,data:null,loading:false,error:''},gen:{loading:false,error:'',summary:'',questions:[],requestId:null,lastUid:null,lastText:''}}
 };
 
 let toastTimer;
@@ -85,10 +85,10 @@ function clearERP(error=''){ state.erp={approvals:[],expenses:[],orders:[],tasks
 function clearAll(){ stopFirestore(); stopPolling(); clearExternal(); state.authorized=false; state.user=null; state.profile=null; state.meetingRequestId=null; state.meetingPayloadKey=null; if($('meeting-dialog').open)$('meeting-dialog').close(); $('slack-text').value=''; $('erp-shell37').hidden=true; $('erp-frame37').removeAttribute('src'); closeSubpage(); clearERP(''); $('viewer-name').textContent='사용자 확인 중'; $('viewer-role').textContent='읽기 전용'; $('logout-button').textContent='나'; if(state.scene) state.scene.returnSeats();
   state.personalTasksSeq++; state.personalTasks={mode:null,items:[],count:0,warnings:[],error:'',fetchedAt:null,lastScanAt:null};
   state.adminSeq++;
-  state.admin={loading:false,saving:false,scanning:false,applying:false,error:'',config:null,dirty:false,rules:[],plan:{text:'',loading:false,result:null,draft:[],questions:[],planSeq:0}};
+  state.admin={loading:false,scanning:false,error:'',config:null,allRules:[],view:'list',selectedUid:null,focusToken:0,employeeSeq:0,employee:{uid:null,data:null,loading:false,error:''},gen:{loading:false,error:'',summary:'',questions:[],requestId:null,lastUid:null,lastText:''}};
   if($('admin-tasks-dialog') && $('admin-tasks-dialog').open) $('admin-tasks-dialog').close();
   if($('admin-tasks-btn')) $('admin-tasks-btn').hidden=true;
-  if($('admin-plan-text')) $('admin-plan-text').value='';
+  if($('admin-gen-text')) $('admin-gen-text').value='';
   renderPersonal();
 }
 
@@ -172,7 +172,7 @@ function legacyPersonalTasks(){
   return [...erp,...trello].sort((a,b)=>String(a.due||'9999').localeCompare(String(b.due||'9999')));
 }
 function personalTasksMode(){ return state.personalTasks && state.personalTasks.mode || null; }
-function personalTaskCaption(){ return personalTasksMode()==='rules' ? '관리자 지정 규칙 기준 미처리 업무' : '명시적으로 배정된 미처리 업무'; }
+function personalTaskCaption(){ return personalTasksMode()==='rules' ? '관리자 지정 규칙 기준 업무 (Slack·Trello 활동, 본인이 제출한 미승인 결재·지출 문서 포함)' : '명시적으로 배정된 미처리 업무'; }
 function personalTasks(){
   const pt = state.personalTasks;
   if(!state.user) return [];
@@ -454,11 +454,10 @@ function buildRuleInput(rule){
   const kind=rule.kind||'manual';
   const needsSource = kind==='slack_activity'||kind==='trello_new_card';
   const out={ assigneeUid:rule.assigneeUid||'', title:(rule.title||'').trim(), kind, sourceIds:needsSource?(Array.isArray(rule.sourceIds)?rule.sourceIds.filter(Boolean):[]):[], enabled:rule.enabled!==false, expireAfterDue:!!rule.expireAfterDue, due:rule.due||null };
+  if(Array.isArray(rule.recordIds)) out.recordIds=rule.recordIds.slice();
   if(rule.id){ out.id=rule.id; if(rule.version!=null) out.version=rule.version; }
   return out;
 }
-
-function blankRule(){ return {id:null,version:null,assigneeUid:'',title:'',kind:'manual',sourceIds:[],enabled:true,expireAfterDue:false,due:null}; }
 
 async function loadAdminConfig(){
   if(!(state.status && state.status.identity && state.status.identity.isAdmin)) return;
@@ -468,9 +467,8 @@ async function loadAdminConfig(){
     const data=await api('/admin/task-config');
     if(!adminContextValid(epoch,uid)) return;
     state.admin.config=data;
-    state.admin.rules=(Array.isArray(data.rules)?data.rules:[]).map(r=>({...r}));
+    state.admin.allRules=(Array.isArray(data.rules)?data.rules:[]).map(r=>({...r}));
     state.admin.error='';
-    state.admin.dirty=false;
   }catch(error){
     if(epoch!==state.adminSeq || !state.user || state.user.uid!==uid) return;
     state.admin.error=error.message||'관리자 설정을 불러오지 못했습니다.';
@@ -478,10 +476,20 @@ async function loadAdminConfig(){
   if(epoch===state.adminSeq && state.user && state.user.uid===uid){ state.admin.loading=false; renderAdminDialog(); }
 }
 
+function showAdminList(){
+  state.admin.view='list'; state.admin.selectedUid=null; state.admin.focusToken++; state.admin.employeeSeq++;
+  state.admin.employee={uid:null,data:null,loading:false,error:''};
+  state.admin.gen={loading:false,error:'',summary:'',questions:[],requestId:null,lastUid:null,lastText:''};
+  const listEl=$('admin-view-list'), empEl=$('admin-view-employee');
+  if(listEl) listEl.hidden=false; if(empEl) empEl.hidden=true;
+  renderAdminDialog();
+}
+
 function openAdminDialog(){
   const dlg=$('admin-tasks-dialog'); if(!dlg) return;
   if(!(state.status && state.status.identity && state.status.identity.isAdmin)) return;
   if(!dlg.open) dlg.showModal();
+  showAdminList();
   if(!state.admin.config && !state.admin.loading) loadAdminConfig(); else renderAdminDialog();
 }
 
@@ -489,49 +497,26 @@ function employeeRow(emp){
   const uidSafe=escapeHtml(emp.uid||'');
   const nameSafe=escapeHtml(emp.name||'이름 없음');
   const metaSafe=escapeHtml([emp.email,emp.role].filter(Boolean).join(' · '));
-  const control = emp.nexusEnabled ? '<span class="emp-status35 on">접속 허용됨</span>' : `<button type="button" class="admin-access-btn" data-uid="${uidSafe}">NEXUS 접속 허용</button>`;
+  const statusBadge = emp.nexusEnabled ? '<span class="emp-status35 on">접속 허용됨</span>' : '<span class="emp-status35 off">접속 대기</span>';
   const labels={slack_activity:'Slack',trello_new_card:'Trello',erp_approval:'결재',erp_expense:'지출',manual:'수동'};
   const breakdown=Object.entries(emp.taskCounts||{}).filter(([,n])=>Number(n)>0).map(([k,n])=>`${labels[k]||k} ${Number(n)}`).join(' · ');
   const counts=emp.countUnavailable!==true&&typeof emp.taskCount==='number'?`처리할 업무 ${emp.taskCount}건${breakdown?' · '+breakdown:''}`:(emp.nexusEnabled?'업무 수 확인 대기':'접속 허용 대기');
-  return `<div class="admin-emp-row"><div><strong>${nameSafe}</strong><small>${metaSafe}</small><small>${escapeHtml(counts)}</small></div>${control}</div>`;
+  return `<button type="button" class="admin-emp-card" data-uid="${uidSafe}"><div class="admin-emp-card-main"><strong>${nameSafe}</strong><small>${metaSafe}</small><small>${escapeHtml(counts)}</small></div>${statusBadge}</button>`;
 }
 
-const RULE_KIND_LABELS=[['manual','수동 지정'],['slack_activity','Slack 활동'],['trello_new_card','Trello 새 카드'],['erp_approval','ERP 결재'],['erp_expense','ERP 지출']];
+const RULE_KIND_LABELS_MAP={manual:'수동 지정',slack_activity:'Slack 활동',trello_new_card:'Trello 새 카드',erp_approval:'ERP 결재',erp_expense:'ERP 지출'};
 
-function sourceCheckboxList(rule){
-  const kind=rule.kind;
-  if(kind!=='slack_activity' && kind!=='trello_new_card') return '';
-  const catalog = kind==='slack_activity' ? ((state.admin.config&&state.admin.config.catalog&&state.admin.config.catalog.slackChannels)||[]) : ((state.admin.config&&state.admin.config.catalog&&state.admin.config.catalog.trelloBoards)||[]);
-  const selected = new Set((rule.sourceIds||[]).map(String));
-  const known = new Set(catalog.map(c=>String(c.id)));
-  const items = catalog.map(c=>{
-    const idStr=String(c.id); const idSafe=escapeHtml(idStr); const nameSafe=escapeHtml(c.name||idStr);
-    const checked = selected.has(idStr) ? 'checked' : '';
-    return `<label class="r-source-opt"><input type="checkbox" class="r-source-check" value="${idSafe}" ${checked}>${kind==='slack_activity'?'#':''}${nameSafe}</label>`;
-  });
-  const unknown = [...selected].filter(id=>!known.has(id));
-  unknown.forEach(id=>{
-    const idSafe=escapeHtml(id);
-    items.push(`<label class="r-source-opt unknown"><input type="checkbox" class="r-source-check" value="${idSafe}" checked>${idSafe} (목록에 없음 · 선택 해제 시 제거)</label>`);
-  });
-  return `<fieldset class="r-sources-group"><legend>소스 선택</legend>${items.join('')||'<small class="admin-hint">등록된 채널/보드가 없습니다.</small>'}</fieldset>`;
-}
-
-function ruleRow(rule,index,prefix){
-  const employees=(state.admin.config&&state.admin.config.employees)||[];
-  const assigneeOptions=('<option value="">담당자 선택</option>')+employees.map(e=>`<option value="${escapeHtml(e.uid)}" ${rule.assigneeUid===e.uid?'selected':''}>${escapeHtml(e.name||e.uid)}</option>`).join('');
-  const kindSel=RULE_KIND_LABELS.map(([v,l])=>`<option value="${v}" ${rule.kind===v?'selected':''}>${escapeHtml(l)}</option>`).join('');
-  const needsSource = rule.kind==='slack_activity'||rule.kind==='trello_new_card';
-  return `<div class="admin-rule-row" data-prefix="${prefix}" data-index="${index}">
-    <label>제목<input type="text" class="r-title" maxlength="80" value="${escapeHtml(rule.title||'')}"></label>
-    <label>담당자<select class="r-assignee">${assigneeOptions}</select></label>
-    <label>종류<select class="r-kind">${kindSel}</select></label>
-    ${needsSource?sourceCheckboxList(rule):''}
-    <label>마감일<input type="date" class="r-due" value="${escapeHtml(rule.due?String(rule.due).slice(0,10):'')}"></label>
-    <label class="r-inline"><input type="checkbox" class="r-enabled" ${rule.enabled!==false?'checked':''}>사용</label>
-    <label class="r-inline"><input type="checkbox" class="r-expire" ${rule.expireAfterDue?'checked':''}>마감 지나면 자동 종료</label>
-    <div class="admin-rule-actions">${prefix==='rule'?`<button type="button" class="r-save">저장</button>`:''}${rule.id?`<button type="button" class="r-delete">삭제</button>`:(prefix==='rule'?`<button type="button" class="r-delete">제거</button>`:'')}</div>
-  </div>`;
+function ruleConditionCard(rule){
+  const kindLabel = RULE_KIND_LABELS_MAP[rule.kind]||rule.kind||'조건';
+  const catalog = rule.kind==='slack_activity' ? ((state.admin.config&&state.admin.config.catalog&&state.admin.config.catalog.slackChannels)||[]) : (rule.kind==='trello_new_card' ? ((state.admin.config&&state.admin.config.catalog&&state.admin.config.catalog.trelloBoards)||[]) : []);
+  const sourceNames = (rule.sourceIds||[]).map(id=>{ const found=catalog.find(c=>String(c.id)===String(id)); return found?found.name:id; });
+  const dueTxt = rule.due?`마감 ${String(rule.due).slice(0,10)}`:'';
+  const expireTxt = rule.expireAfterDue?'마감 후 자동 종료':'';
+  const recordTxt = Array.isArray(rule.recordIds) && rule.recordIds.length ? `연결 문서 ${rule.recordIds.length}건` : '';
+  const metaParts=[kindLabel, sourceNames.length?`#${sourceNames.join(', #')}`:'', recordTxt, dueTxt, expireTxt].filter(Boolean).map(escapeHtml);
+  const stateCls = rule.enabled!==false?'on':'off';
+  const idSafe=escapeHtml(rule.id||'');
+  return `<article class="rule-cond-card ${stateCls}" data-rule-id="${idSafe}"><div class="rule-cond-main"><strong>${escapeHtml(rule.title||'(제목 없음)')}</strong><small>${metaParts.join(' · ')}</small></div><div class="rule-cond-actions"><label class="r-inline"><input type="checkbox" class="rc-enabled" ${rule.enabled!==false?'checked':''}>사용</label><button type="button" class="rc-delete">삭제</button></div></article>`;
 }
 
 function renderAdminDialog(){
@@ -548,136 +533,181 @@ function renderAdminDialog(){
   const scan=(cfg&&cfg.scan)||{};
   const scanInfo=$('admin-scan-info'); if(scanInfo) scanInfo.textContent = scan.lastScanAt?`최근 스캔 ${formatDateTime(scan.lastScanAt)}`:'스캔 기록 없음';
   const scanWarn=$('admin-scan-warnings'); if(scanWarn) scanWarn.innerHTML=(scan.warnings||[]).map(w=>`<li>${escapeHtml(typeof w==='string'?w:JSON.stringify(w))}</li>`).join('');
+  if(state.admin.view==='employee'){ renderEmployeeFocus(); return; }
   const empEl=$('admin-employees'); if(empEl) empEl.innerHTML=((cfg&&cfg.employees)||[]).map(employeeRow).join('')||'<p>직원 정보를 불러오지 못했습니다.</p>';
-  const rulesEl=$('admin-rules'); if(rulesEl) rulesEl.innerHTML=state.admin.rules.map((r,i)=>ruleRow(r,i,'rule')).join('')||'<p>등록된 규칙이 없습니다. 새 규칙을 추가해 주세요.</p>';
-  renderPlanDraft();
 }
 
-function renderPlanDraft(){
-  const plan=state.admin.plan;
-  const qEl=$('admin-plan-questions'); if(qEl) qEl.innerHTML=(plan.questions||[]).map(q=>`<li>${escapeHtml(typeof q==='string'?q:JSON.stringify(q))}</li>`).join('');
-  const draftEl=$('admin-plan-draft'); if(draftEl) draftEl.innerHTML=(plan.draft||[]).map((r,i)=>ruleRow(r,i,'plan')).join('')||'<p>Claude 분석 결과가 아직 없습니다.</p>';
-  const applyBtn=$('admin-plan-apply'); if(applyBtn) applyBtn.disabled = !(plan.draft && plan.draft.length && (!plan.questions || plan.questions.length===0));
-}
+function renderEmployeeFocus(){
+  const uid=state.admin.selectedUid;
+  const cfg=state.admin.config;
+  const emp=((cfg&&cfg.employees)||[]).find(e=>String(e.uid)===String(uid));
+  const nameEl=$('admin-emp-name'); if(nameEl) nameEl.textContent = emp?emp.name||'(이름 없음)':'(직원을 찾을 수 없습니다)';
+  const metaEl=$('admin-emp-meta'); if(metaEl) metaEl.textContent = emp?[emp.email,emp.role].filter(Boolean).join(' · '):'';
+  const uidEl=$('admin-emp-uid-lock'); if(uidEl){ uidEl.dataset.uid=uid||''; uidEl.textContent = uid?'선택한 직원에게만 배정':''; }
+  const enabled = !!(emp && emp.nexusEnabled);
+  const disabledNote=$('admin-emp-disabled-note'); if(disabledNote) disabledNote.hidden=enabled;
+  const grantBtn=$('admin-emp-grant-btn'); if(grantBtn){ grantBtn.dataset.uid=uid||''; grantBtn.disabled=false; }
+  const genBtn=$('admin-gen-btn'); if(genBtn) genBtn.disabled = !enabled || state.admin.gen.loading;
+  const genText=$('admin-gen-text'); if(genText) genText.disabled = !enabled || state.admin.gen.loading;
 
-function ruleFieldTarget(prefix){ return prefix==='plan' ? state.admin.plan.draft : state.admin.rules; }
+  const rules = (state.admin.allRules||[]).filter(r=>String(r.assigneeUid)===String(uid));
+  const rulesEl=$('admin-emp-rules'); if(rulesEl) rulesEl.innerHTML = rules.length ? rules.map(ruleConditionCard).join('') : '<p class="admin-hint">등록된 업무 규칙이 없습니다.</p>';
 
-async function onEmployeeClick(e){
-  const btn=e.target.closest('.admin-access-btn'); if(!btn || btn.disabled) return;
-  const targetUid=btn.dataset.uid; if(!targetUid) return;
-  if(!confirm('선택한 직원의 NEXUS 접속을 허용할까요? 역할은 변경되지 않습니다.')) return;
-  btn.disabled=true;
-  const epoch=state.adminSeq, uid=state.user&&state.user.uid;
-  try{
-    await api('/admin/task-access',{method:'POST',body:JSON.stringify({uid:targetUid,enabled:true})});
-    if(!adminContextValid(epoch,uid)) return;
-    toast('NEXUS 접속을 허용했습니다.'); await loadAdminConfig();
-  }catch(error){
-    if(epoch!==state.adminSeq || !state.user || state.user.uid!==uid) return;
-    toast(error.message,true); btn.disabled=false;
+  const ed=state.admin.employee;
+  const taskCountEl=$('admin-emp-task-count');
+  const tasksEl=$('admin-emp-tasks');
+  const warnEl=$('admin-emp-warnings');
+  if(ed.uid!==uid){
+    if(taskCountEl) taskCountEl.textContent='';
+    if(tasksEl) tasksEl.innerHTML='';
+    if(warnEl) warnEl.innerHTML='';
+  } else if(ed.loading){
+    if(taskCountEl) taskCountEl.textContent='불러오는 중…';
+    if(tasksEl) tasksEl.innerHTML='<div class="personal-empty35 loading-live"><strong>불러오는 중</strong></div>';
+    if(warnEl) warnEl.innerHTML='';
+  } else if(ed.error){
+    if(taskCountEl) taskCountEl.textContent='—';
+    if(tasksEl) tasksEl.innerHTML=`<div class="personal-empty35 error-live"><strong>불러오기 실패</strong><p>${escapeHtml(ed.error)}</p></div>`;
+    if(warnEl) warnEl.innerHTML='';
+  } else if(ed.data){
+    const items=Array.isArray(ed.data.items)?ed.data.items:[];
+    const count=typeof ed.data.count==='number'?ed.data.count:items.length;
+    if(taskCountEl) taskCountEl.textContent=`${count}건`;
+    if(tasksEl) tasksEl.innerHTML = items.length ? items.map(t=>`<article class="task-row"><a href="${escapeHtml(safeUrl(t.url)||ERP_URL)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t.title||'제목 없음')}</a><div class="task-meta"><span class="task-source">${escapeHtml(t.source||'')}</span><span>${escapeHtml(t.due?formatDateTime(t.due):'일정 없음')}</span></div></article>`).join('') : '<div class="personal-empty35"><strong>업무 없음</strong><p>현재 이 직원에게 배정된 미처리 업무가 없습니다.</p></div>';
+    if(warnEl) warnEl.innerHTML=(ed.data.warnings||[]).map(w=>`<li>${escapeHtml(typeof w==='string'?w:JSON.stringify(w))}</li>`).join('');
+  } else {
+    if(taskCountEl) taskCountEl.textContent='—';
+    if(tasksEl) tasksEl.innerHTML='';
+    if(warnEl) warnEl.innerHTML='';
   }
+
+  const genStatus=$('admin-gen-status');
+  if(genStatus){
+    if(state.admin.gen.loading){ genStatus.textContent='AI 생성 중...'; genStatus.classList.remove('gen-status-error'); }
+    else if(state.admin.gen.error){ genStatus.textContent=state.admin.gen.error; genStatus.classList.add('gen-status-error'); }
+    else { genStatus.textContent=''; genStatus.classList.remove('gen-status-error'); }
+  }
+  const genSummary=$('admin-gen-summary'); if(genSummary) genSummary.textContent = state.admin.gen.summary||'';
+  const genQ=$('admin-gen-questions'); if(genQ) genQ.innerHTML=(state.admin.gen.questions||[]).map(q=>`<li>${escapeHtml(typeof q==='string'?q:JSON.stringify(q))}</li>`).join('');
 }
 
 function adminContextValid(epoch,uid){ return epoch===state.adminSeq && state.user && state.user.uid===uid && state.status && state.status.identity && state.status.identity.isAdmin; }
+function genContextValid(epoch,uid,selUid,token){ return adminContextValid(epoch,uid) && state.admin.selectedUid===selUid && (token===undefined || state.admin.focusToken===token); }
 
-function bindRuleFieldEvents(container){
-  if(!container || container.__ruleBound) return; container.__ruleBound=true;
-  container.addEventListener('input',(e)=>{
-    const row=e.target.closest('.admin-rule-row'); if(!row) return;
-    const idx=Number(row.dataset.index); const arr=ruleFieldTarget(row.dataset.prefix); const rule=arr && arr[idx]; if(!rule) return;
-    if(e.target.classList.contains('r-title')) rule.title=e.target.value;
-    else if(e.target.classList.contains('r-due')) rule.due=e.target.value||null;
-    if(row.dataset.prefix==='rule') state.admin.dirty=true;
-  });
-  container.addEventListener('change',(e)=>{
-    const row=e.target.closest('.admin-rule-row'); if(!row) return;
-    const idx=Number(row.dataset.index); const arr=ruleFieldTarget(row.dataset.prefix); const rule=arr && arr[idx]; if(!rule) return;
-    if(e.target.classList.contains('r-assignee')) rule.assigneeUid=e.target.value;
-    else if(e.target.classList.contains('r-kind')){ rule.kind=e.target.value; if(rule.kind!=='slack_activity'&&rule.kind!=='trello_new_card') rule.sourceIds=[]; renderAdminDialog(); }
-    else if(e.target.classList.contains('r-enabled')) rule.enabled=e.target.checked;
-    else if(e.target.classList.contains('r-expire')) rule.expireAfterDue=e.target.checked;
-    else if(e.target.classList.contains('r-source-check')){
-      const val=e.target.value; const set=new Set((rule.sourceIds||[]).map(String));
-      if(e.target.checked) set.add(val); else set.delete(val);
-      rule.sourceIds=[...set];
-    }
-    if(row.dataset.prefix==='rule') state.admin.dirty=true;
-  });
-  container.addEventListener('click',async(e)=>{
-    const row=e.target.closest('.admin-rule-row'); if(!row) return;
-    const idx=Number(row.dataset.index); const arr=ruleFieldTarget(row.dataset.prefix); const rule=arr && arr[idx]; if(!rule) return;
-    if(e.target.classList.contains('r-save')){
-      if(e.target.disabled) return; e.target.disabled=true;
-      const epoch=state.adminSeq, uid=state.user&&state.user.uid;
-      try{
-        const res=await api('/admin/task-rules',{method:'POST',body:JSON.stringify({rules:[buildRuleInput(rule)]})});
-        if(!adminContextValid(epoch,uid)) return;
-        if(res && Array.isArray(res.rules) && res.rules[0]) Object.assign(rule,res.rules[0]);
-        state.admin.dirty=false; toast('규칙을 저장했습니다.'); renderAdminDialog();
-        await loadPersonalTasks();
-      }catch(error){
-        if(epoch!==state.adminSeq || !state.user || state.user.uid!==uid) return;
-        if(error.status===409){ toast('다른 곳에서 먼저 저장되어 최신 내용을 다시 불러옵니다.',true); await loadAdminConfig(); }
-        else { toast(error.message,true); e.target.disabled=false; }
-      }
-    } else if(e.target.classList.contains('r-delete')){
-      if(e.target.disabled) return;
-      if(!rule.id){ arr.splice(idx,1); renderAdminDialog(); return; }
-      if(!confirm('이 규칙을 삭제할까요? 관련 개인 업무도 더 이상 표시되지 않습니다.')) return;
-      e.target.disabled=true;
-      const epoch=state.adminSeq, uid=state.user&&state.user.uid;
-      try{
-        await api('/admin/task-rules/delete',{method:'POST',body:JSON.stringify({id:rule.id,version:rule.version})});
-        if(!adminContextValid(epoch,uid)) return;
-        arr.splice(idx,1); toast('규칙을 삭제했습니다.'); renderAdminDialog();
-        await loadPersonalTasks();
-      }catch(error){
-        if(epoch!==state.adminSeq || !state.user || state.user.uid!==uid) return;
-        toast(error.message,true); e.target.disabled=false;
-      }
-    }
-  });
+function openEmployeeFocus(uid){
+  if(!uid) return;
+  state.admin.view='employee';
+  state.admin.selectedUid=uid;
+  state.admin.focusToken++;
+  state.admin.gen={loading:false,error:'',summary:'',questions:[],requestId:null,lastUid:null,lastText:''};
+  const listEl=$('admin-view-list'), empEl=$('admin-view-employee');
+  if(listEl) listEl.hidden=true; if(empEl) empEl.hidden=false;
+  const genText=$('admin-gen-text'); if(genText){ genText.value=''; genText.disabled=false; }
+  renderAdminDialog();
+  loadEmployeeTasks(uid);
 }
 
-async function saveAllRules(){
-  if(state.admin.saving) return;
-  const issues=[];
-  state.admin.rules.forEach((r,i)=>{
-    if(!r.assigneeUid) issues.push(`규칙 ${i+1}: 담당자를 선택해 주세요.`);
-    if(!r.title || !r.title.trim()) issues.push(`규칙 ${i+1}: 제목을 입력해 주세요.`);
-    if((r.kind==='slack_activity'||r.kind==='trello_new_card') && (!r.sourceIds || !r.sourceIds.length)) issues.push(`규칙 ${i+1}: 소스 ID를 입력해 주세요.`);
-  });
-  const errEl=$('admin-tasks-error');
-  if(issues.length){ if(errEl) errEl.textContent=issues.join(' '); return; }
-  state.admin.saving=true;
-  const saveBtn=$('admin-rules-save'); if(saveBtn) saveBtn.disabled=true;
-  const epoch=state.adminSeq, uid=state.user&&state.user.uid;
+async function loadEmployeeTasks(uid){
+  const epoch=state.adminSeq, authUid=state.user&&state.user.uid, token=state.admin.focusToken, seq=++state.admin.employeeSeq;
+  state.admin.employee={uid,data:null,loading:true,error:''};
+  renderAdminDialog();
   try{
-    const res=await api('/admin/task-rules',{method:'POST',body:JSON.stringify({rules:state.admin.rules.map(buildRuleInput)})});
+    const data=await api(`/admin/task-employee?uid=${encodeURIComponent(uid)}`);
+    if(seq!==state.admin.employeeSeq || !genContextValid(epoch,authUid,uid,token)) return;
+    state.admin.employee={uid,data,loading:false,error:''};
+  }catch(error){
+    if(seq!==state.admin.employeeSeq || !genContextValid(epoch,authUid,uid,token)) return;
+    state.admin.employee={uid,data:null,loading:false,error:error.message||'업무 목록을 불러오지 못했습니다.'};
+  }
+  renderAdminDialog();
+}
+
+async function onEmployeeCardClick(e){
+  const card=e.target.closest('.admin-emp-card'); if(!card) return;
+  const uid=card.dataset.uid; if(!uid) return;
+  openEmployeeFocus(uid);
+}
+
+async function onGrantAccess(e){
+  const btn=e.currentTarget||e.target; if(!btn || btn.disabled) return;
+  const targetUid=btn.dataset.uid||state.admin.selectedUid; if(!targetUid) return;
+  if(!confirm('선택한 직원의 NEXUS 접속을 허용할까요? 역할은 변경되지 않습니다.')) return;
+  btn.disabled=true;
+  const epoch=state.adminSeq, uid=state.user&&state.user.uid, token=state.admin.focusToken;
+  try{
+    await api('/admin/task-access',{method:'POST',body:JSON.stringify({uid:targetUid,enabled:true})});
     if(!adminContextValid(epoch,uid)) return;
-    if(res && Array.isArray(res.rules)) state.admin.rules=res.rules.map(r=>({...r}));
-    state.admin.dirty=false; if(errEl) errEl.textContent=''; toast('규칙을 저장했습니다.'); renderAdminDialog();
-    await loadPersonalTasks();
+    toast('NEXUS 접속을 허용했습니다.');
+    await loadAdminConfig();
+    if(genContextValid(epoch,uid,targetUid,token)) loadEmployeeTasks(targetUid);
   }catch(error){
     if(epoch!==state.adminSeq || !state.user || state.user.uid!==uid) return;
-    if(error.status===409){ toast('다른 곳에서 먼저 저장되어 최신 내용을 다시 불러옵니다.',true); await loadAdminConfig(); }
-    else if(errEl) errEl.textContent=error.message; else toast(error.message,true);
+    toast(error.message,true);
   } finally {
-    state.admin.saving=false; if(saveBtn) saveBtn.disabled=false;
+    if(genContextValid(epoch,uid,targetUid,token)) btn.disabled=false;
   }
+}
+
+function bindEmployeeRuleEvents(container){
+  if(!container || container.__ruleBound) return; container.__ruleBound=true;
+  container.addEventListener('change', async(e)=>{
+    if(!e.target.classList.contains('rc-enabled')) return;
+    const card=e.target.closest('.rule-cond-card'); if(!card) return;
+    const ruleId=card.dataset.ruleId; if(!ruleId) return;
+    const rule=(state.admin.allRules||[]).find(r=>String(r.id)===String(ruleId)); if(!rule) return;
+    const checkbox=e.target; if(checkbox.disabled) return; checkbox.disabled=true;
+    const nextEnabled=checkbox.checked;
+    const epoch=state.adminSeq, uid=state.user&&state.user.uid, token=state.admin.focusToken, selUid=state.admin.selectedUid;
+    try{
+      const res=await api('/admin/task-rules',{method:'POST',body:JSON.stringify({rules:[buildRuleInput({...rule,enabled:nextEnabled})]})});
+      if(!adminContextValid(epoch,uid)) return;
+      if(res && Array.isArray(res.rules) && res.rules[0]) Object.assign(rule,res.rules[0]); else rule.enabled=nextEnabled;
+      toast(nextEnabled?'규칙을 사용으로 설정했습니다.':'규칙을 사용 안 함으로 설정했습니다.');
+      if(genContextValid(epoch,uid,selUid,token)) renderAdminDialog();
+      await loadPersonalTasks();
+      if(genContextValid(epoch,uid,selUid,token)) loadEmployeeTasks(selUid);
+    }catch(error){
+      if(epoch!==state.adminSeq || !state.user || state.user.uid!==uid) return;
+      if(error.status===409){ toast('다른 곳에서 먼저 변경되어 최신 내용을 다시 불러옵니다.',true); await loadAdminConfig(); }
+      else { toast(error.message,true); checkbox.checked=!nextEnabled; }
+    } finally { checkbox.disabled=false; }
+  });
+  container.addEventListener('click', async(e)=>{
+    if(!e.target.classList.contains('rc-delete')) return;
+    if(e.target.disabled) return;
+    const card=e.target.closest('.rule-cond-card'); if(!card) return;
+    const ruleId=card.dataset.ruleId; if(!ruleId) return;
+    const rule=(state.admin.allRules||[]).find(r=>String(r.id)===String(ruleId)); if(!rule) return;
+    if(!confirm('이 규칙을 삭제할까요? 관련 개인 업무도 더 이상 표시되지 않습니다.')) return;
+    const btn=e.target; btn.disabled=true;
+    const epoch=state.adminSeq, uid=state.user&&state.user.uid, token=state.admin.focusToken, selUid=state.admin.selectedUid;
+    try{
+      await api('/admin/task-rules/delete',{method:'POST',body:JSON.stringify({id:rule.id,version:rule.version})});
+      if(!adminContextValid(epoch,uid)) return;
+      state.admin.allRules=(state.admin.allRules||[]).filter(r=>String(r.id)!==String(ruleId));
+      toast('규칙을 삭제했습니다.');
+      if(genContextValid(epoch,uid,selUid,token)) renderAdminDialog();
+      await loadPersonalTasks();
+      if(genContextValid(epoch,uid,selUid,token)) loadEmployeeTasks(selUid);
+    }catch(error){
+      if(epoch!==state.adminSeq || !state.user || state.user.uid!==uid) return;
+      toast(error.message,true); btn.disabled=false;
+    }
+  });
 }
 
 async function runAdminScan(){
   if(state.admin.scanning) return;
   state.admin.scanning=true;
   const btn=$('admin-scan-btn'); if(btn) btn.disabled=true;
-  const epoch=state.adminSeq, uid=state.user&&state.user.uid;
+  const epoch=state.adminSeq, uid=state.user&&state.user.uid, token=state.admin.focusToken, selUid=state.admin.selectedUid;
   try{
     const res=await api('/admin/task-scan',{method:'POST'});
     if(!adminContextValid(epoch,uid)) return;
     if(state.admin.config) state.admin.config.scan={...(state.admin.config.scan||{}),lastScanAt:res.lastScanAt,warnings:res.warnings||[]};
     toast('스캔을 실행했습니다.'); renderAdminDialog();
     await loadPersonalTasks();
+    if(state.admin.view==='employee' && selUid && genContextValid(epoch,uid,selUid,token)) loadEmployeeTasks(selUid);
   }catch(error){
     if(epoch!==state.adminSeq || !state.user || state.user.uid!==uid) return;
     toast(error.message,true);
@@ -685,73 +715,60 @@ async function runAdminScan(){
   finally{ state.admin.scanning=false; if(btn) btn.disabled=false; }
 }
 
-async function runAdminPlan(){
-  if(state.admin.plan.loading) return;
-  const textEl=$('admin-plan-text'); const text=(textEl?textEl.value:'').trim();
-  const statusEl=$('admin-plan-status'); const summaryEl=$('admin-plan-summary'); const runBtn=$('admin-plan-run');
-  if(!text){ toast('업무 지시 내용을 입력해 주세요.',true); return; }
-  const seq=++state.admin.plan.planSeq;
-  state.admin.plan.loading=true;
-  state.admin.plan.result=null; state.admin.plan.draft=[]; state.admin.plan.questions=[];
-  if(summaryEl) summaryEl.textContent='';
-  if(statusEl) statusEl.textContent='Claude 분석 중...';
-  if(runBtn) runBtn.disabled=true;
-  renderPlanDraft();
-  const epoch=state.adminSeq, uid=state.user&&state.user.uid;
+async function runTaskGenerate(){
+  if(state.admin.gen.loading) return;
+  const selUid=state.admin.selectedUid; if(!selUid) return;
+  const cfg=state.admin.config;
+  const emp=((cfg&&cfg.employees)||[]).find(e=>String(e.uid)===String(selUid));
+  if(!emp || !emp.nexusEnabled){ toast('먼저 NEXUS 접속을 허용해 주세요.',true); return; }
+  const textEl=$('admin-gen-text'); const text=(textEl?textEl.value:'').trim();
+  if(!text){ toast('업무 내용을 입력해 주세요.',true); return; }
+  const token=state.admin.focusToken;
+  const prevGen=state.admin.gen;
+  const canReuseId = prevGen.requestId && prevGen.lastUid===selUid && prevGen.lastText===text;
+  const requestId = canReuseId ? prevGen.requestId : newRequestId();
+  state.admin.gen={loading:true,error:'',summary:'',questions:[],requestId,lastUid:selUid,lastText:text};
+  const genBtn=$('admin-gen-btn'); if(genBtn) genBtn.disabled=true;
+  if(textEl) textEl.disabled=true;
+  renderAdminDialog();
+  const epoch=state.adminSeq, authUid=state.user&&state.user.uid;
   try{
-    const data=await api('/admin/task-plan',{method:'POST',body:JSON.stringify({text})});
-    if(seq!==state.admin.plan.planSeq || !adminContextValid(epoch,uid)) return;
-    state.admin.plan.result=data;
-    state.admin.plan.draft=(Array.isArray(data.rules)?data.rules:[]).map(r=>({...r}));
-    state.admin.plan.questions=Array.isArray(data.questions)?data.questions:[];
-    if(summaryEl) summaryEl.textContent=data.summary||'';
+    const res=await api('/admin/task-generate',{method:'POST',body:JSON.stringify({assigneeUid:selUid,text,requestId})});
+    if(!genContextValid(epoch,authUid,selUid,token)) return;
+    if(res && res.ok===false && res.needsClarification){
+      state.admin.gen={loading:false,error:'',summary:res.summary||'',questions:Array.isArray(res.questions)?res.questions:[],requestId:null,lastUid:null,lastText:''};
+      toast('추가 확인이 필요합니다.',true);
+    } else {
+      const created=Number(res&&res.createdCount)||0, reused=Number(res&&res.reusedCount)||0;
+      if(genContextValid(epoch,authUid,selUid,token)){
+        state.admin.gen={loading:false,error:'',summary:(res&&res.summary)||'',questions:[],requestId:null,lastUid:null,lastText:''};
+        if(textEl) textEl.value='';
+        renderAdminDialog();
+      }
+      toast(`업무 생성 완료 (신규 ${created}건 · 재사용 ${reused}건)`);
+      await loadAdminConfig();
+      if(genContextValid(epoch,authUid,selUid,token)) await loadEmployeeTasks(selUid);
+      await loadPersonalTasks();
+      renderAll();
+      return;
+    }
   }catch(error){
-    if(seq!==state.admin.plan.planSeq || epoch!==state.adminSeq || !state.user || state.user.uid!==uid) return;
-    state.admin.plan.result=null; state.admin.plan.draft=[]; state.admin.plan.questions=[];
-    if(summaryEl) summaryEl.textContent=''; toast(error.message,true);
+    if(!genContextValid(epoch,authUid,selUid,token)) return;
+    state.admin.gen={loading:false,error:error.message||'업무 생성에 실패했습니다.',summary:'',questions:[],requestId,lastUid:selUid,lastText:text};
+    toast(error.message,true);
   }
-  if(seq===state.admin.plan.planSeq){
-    state.admin.plan.loading=false; if(statusEl) statusEl.textContent=''; if(runBtn) runBtn.disabled=false;
-    renderPlanDraft();
-  }
-}
-
-async function applyAdminPlan(){
-  if(state.admin.applying) return;
-  const draft=state.admin.plan.draft||[];
-  if(!draft.length || (state.admin.plan.questions||[]).length){ toast('확인이 필요한 항목이 남아 있어 적용할 수 없습니다.',true); return; }
-  state.admin.applying=true;
-  const applyBtn=$('admin-plan-apply'); if(applyBtn) applyBtn.disabled=true;
-  const epoch=state.adminSeq, uid=state.user&&state.user.uid;
-  try{
-    const res=await api('/admin/task-rules',{method:'POST',body:JSON.stringify({rules:draft.map(buildRuleInput)})});
-    if(!adminContextValid(epoch,uid)) return;
-    if(res && Array.isArray(res.rules)) state.admin.rules=[...state.admin.rules,...res.rules.map(r=>({...r}))];
-    state.admin.plan={text:'',loading:false,result:null,draft:[],questions:[],planSeq:state.admin.plan.planSeq};
-    const textEl=$('admin-plan-text'); if(textEl) textEl.value='';
-    const summaryEl=$('admin-plan-summary'); if(summaryEl) summaryEl.textContent='';
-    toast('검토한 규칙을 적용했습니다.'); renderAdminDialog();
-    await loadPersonalTasks();
-  }catch(error){
-    if(epoch!==state.adminSeq || !state.user || state.user.uid!==uid) return;
-    if(error.status===409){ toast('다른 곳에서 먼저 저장되어 최신 내용을 다시 불러옵니다.',true); await loadAdminConfig(); }
-    else toast(error.message,true);
-  } finally {
-    state.admin.applying=false; renderPlanDraft();
-  }
+  if(genContextValid(epoch,authUid,selUid,token)){ if(textEl) textEl.disabled=false; const btn2=$('admin-gen-btn'); if(btn2) btn2.disabled=!emp.nexusEnabled; renderAdminDialog(); }
 }
 
 function wireAdminTaskUI(){
   const gearBtn=$('admin-tasks-btn'); if(gearBtn) gearBtn.onclick=openAdminDialog;
   const closeBtn=$('admin-tasks-close'); if(closeBtn) closeBtn.onclick=()=>{ const d=$('admin-tasks-dialog'); if(d&&d.open) d.close(); };
-  const addBtn=$('admin-rule-add'); if(addBtn) addBtn.onclick=()=>{ state.admin.rules.push(blankRule()); state.admin.dirty=true; renderAdminDialog(); };
-  const saveBtn=$('admin-rules-save'); if(saveBtn) saveBtn.onclick=saveAllRules;
   const scanBtn=$('admin-scan-btn'); if(scanBtn) scanBtn.onclick=runAdminScan;
-  const planRunBtn=$('admin-plan-run'); if(planRunBtn) planRunBtn.onclick=runAdminPlan;
-  const planApplyBtn=$('admin-plan-apply'); if(planApplyBtn) planApplyBtn.onclick=applyAdminPlan;
-  const empEl=$('admin-employees'); if(empEl) empEl.addEventListener('click',onEmployeeClick);
-  bindRuleFieldEvents($('admin-rules'));
-  bindRuleFieldEvents($('admin-plan-draft'));
+  const empEl=$('admin-employees'); if(empEl) empEl.addEventListener('click',onEmployeeCardClick);
+  const backBtn=$('admin-emp-back'); if(backBtn) backBtn.onclick=showAdminList;
+  const grantBtn=$('admin-emp-grant-btn'); if(grantBtn) grantBtn.onclick=onGrantAccess;
+  const genBtn=$('admin-gen-btn'); if(genBtn) genBtn.onclick=runTaskGenerate;
+  bindEmployeeRuleEvents($('admin-emp-rules'));
   const tasksEl=$('personal-tasks');
   if(tasksEl && !tasksEl.__ackBound){
     tasksEl.__ackBound=true;
