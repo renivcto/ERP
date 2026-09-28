@@ -866,7 +866,7 @@ async function deleteMeeting(){ const id=$('meeting-id').value; if(!id)return; $
 const PEOPLE=STAFF.map(p=>({...p,type:p.kind,team:p.role.split(' ')[0]||'',tasks:[],messages:[],thread:'',color:p.color}));
 function syncScenePeople(counts){for(const p of PEOPLE){const n=counts[p.id]||0;p.tasks=Array.from({length:n},(_,i)=>({id:`live-${p.id}-${i}`,title:'명시 배정 업무',status:'진행 중',kind:'task',done:false,erp:true,url:ERP_URL}))}window.NEXUS?.refreshDeskDialog?.()}
 function selectV45Person(id){state.selectedPerson=id;document.querySelectorAll('[data-person]').forEach(el=>el.classList.toggle('selected',el.dataset.person===id));window.onPersonSelect?.(id)}
-window.NEXUS={PEOPLE,WAREHOUSES:[],workMode:'offline',workConnection:'unconnected',personalMode35:true,selectPerson:selectV45Person,renderTasks:()=>{},toast,openDeskWork:id=>showSubpage('tasks',id),openERPTask:t=>window.open(safeUrl(t?.url)||ERP_URL,'_blank','noopener'),openShare:()=>openFeedDrawer(null),openWarehouse:()=>{},refreshCalendar32:renderCalendar,showLiveErpTip:()=>{},showLiveBoardTip:showFeedBoardTip};
+window.NEXUS={PEOPLE,WAREHOUSES:[],workMode:'offline',workConnection:'unconnected',personalMode35:true,selectPerson:selectV45Person,renderTasks:()=>{},toast,openDeskWork:id=>showSubpage('tasks',id),openERPTask:t=>window.open(safeUrl(t?.url)||ERP_URL,'_blank','noopener'),openShare:()=>openFeedErp(),openWarehouse:()=>{},refreshCalendar32:renderCalendar,showLiveErpTip:()=>{},showLiveBoardTip:showFeedBoardTip};
 window.__resolveNexusBridge?.();
 function bindOriginalScene(){setTimeout(renderViewerFace,900);state.scene={setView:v=>window.NEXUS.setView?.(v),callMeeting:(title,ids)=>window.NEXUS.callMeeting?.(title,ids),returnSeats:()=>window.NEXUS.endMeeting?.(),updateWork:syncScenePeople};syncScenePeople(personWorkCounts())}
 window.addEventListener('nexus-scene-ready',bindOriginalScene,{once:true});if(window.NEXUS.sceneReady)bindOriginalScene();
@@ -956,15 +956,25 @@ function subscribeFeed(){
   state.firestoreUnsubs.push(unsub);
 }
 function renderFeedBoard(){
-  const body=$('feed-board-body40'), meta=$('feed-board-meta40'); if(!body||!meta) return; const f=state.feed||{};
-  if(f.error){ meta.textContent='읽기 오류'; body.innerHTML='<p class="fb-empty40">'+escapeHtml(f.error)+'</p>'; return; }
-  if(!f.loaded){ meta.textContent='연결 대기'; body.innerHTML='<p class="fb-empty40">운영 업무 공유 게시판을 불러오는 중입니다.</p>'; return; }
-  const posts=feedAllPosts(), fresh=posts.filter(feedIsNew).length;
-  meta.textContent='ERP 실시간 · '+posts.length+'건'+(fresh?' · 새 글 '+fresh:'');
-  if(!posts.length){ body.innerHTML='<p class="fb-empty40">아직 공유된 글이 없습니다.</p>'; return; }
-  const top=posts[0], rest=posts.slice(1); const excerpt=feedText(top.content).replace(/\s+/g,' ').slice(0,160);
-  body.innerHTML='<button type="button" class="fb-feature40" data-feed-id="'+escapeHtml(top.id)+'"><span class="fb-tags40">'+feedChip(top)+(top.pinned?'<span class="fb-pin40">고정</span>':'')+(feedIsNew(top)?'<span class="fb-new40">NEW</span>':'')+'<em>'+escapeHtml(top.authorName||'작성자 미상')+' · '+escapeHtml(feedWhen(top.createdAt))+'</em></span><strong>'+escapeHtml(top.title||'제목 없음')+'</strong>'+(excerpt?'<span class="fb-excerpt40">'+escapeHtml(excerpt)+'</span>':'')+'</button>'
-    +'<ul class="fb-list40">'+rest.slice(0,2).map(p=>'<li><button type="button" data-feed-id="'+escapeHtml(p.id)+'">'+feedChip(p)+'<b>'+escapeHtml(p.title||'제목 없음')+'</b><small>'+escapeHtml(p.authorName||'')+' · '+escapeHtml(feedWhen(p.createdAt,true))+'</small></button></li>').join('')+'</ul>';
+  const body=$('feed-board-body40'), pop=$('feed-board-pop40'); if(!body||!pop) return; const f=state.feed||{};
+  const setPop=html=>{ pop.innerHTML=html; };
+  if(f.error){ body.innerHTML='<p class="fb-empty40">'+escapeHtml(f.error)+'</p>'; setPop('<p class="fb-pop-foot40">'+escapeHtml(f.error)+'</p>'); return; }
+  if(!f.loaded){ body.innerHTML='<p class="fb-empty40">운영 업무 공유 불러오는 중</p>'; setPop(''); return; }
+  const posts=feedAllPosts();
+  if(!posts.length){ body.innerHTML='<p class="fb-empty40">운영 업무 공유 · 아직 글이 없습니다</p>'; setPop(''); return; }
+  const top=posts[0], text=feedText(top.content), excerpt=text.replace(/\s+/g,' ').slice(0,180);
+  body.innerHTML='<strong class="fb-t40">'+escapeHtml(top.title||'제목 없음')+'</strong>'+(excerpt?'<span class="fb-x40">'+escapeHtml(excerpt)+'</span>':'');
+  const c=feedCat(top.category);
+  setPop('<div class="fb-pop-meta40"><span>운영 업무 공유</span><span>'+escapeHtml(c.label)+'</span><span>'+escapeHtml(top.authorName||'작성자 미상')+'</span><span>'+escapeHtml(feedWhen(top.createdAt))+'</span></div><strong class="fb-pop-t40">'+escapeHtml(top.title||'제목 없음')+'</strong><div class="fb-pop-body40">'+(escapeHtml(text)||'본문 없음')+'</div><p class="fb-pop-foot40">클릭하면 ERP 운영 업무 공유에서 전체를 볼 수 있습니다.</p>');
+}
+function openFeedErp(){
+  const frame=$('erp-frame37'); if(!frame) return; $('erp-shell37').hidden=false;
+  const seq=(openFeedErp.seq=(openFeedErp.seq||0)+1);
+  if(!frame.getAttribute('src')) frame.src=ERP_URL;
+  const tryGo=n=>{ if(seq!==openFeedErp.seq||$('erp-shell37').hidden) return; let done=false;
+    try{ const w=frame.contentWindow, d=w&&w.document; if(d&&d.readyState==='complete'&&typeof w.go==='function'&&d.getElementById('page-feedshare')){ w.go('feedshare'); done=true; setTimeout(()=>{ try{ if(seq===openFeedErp.seq&&!d.getElementById('page-feedshare')?.classList.contains('active')) w.go('feedshare'); }catch{} },1500); } }catch{}
+    if(!done&&n<80) setTimeout(()=>tryGo(n+1),250); };
+  tryGo(0);
 }
 function openFeedDrawer(id){
   const posts=feedAllPosts(); const p=id!=null?posts.find(x=>String(x.id)===String(id)):null;
@@ -979,11 +989,10 @@ function openFeedDrawer(id){
 }
 function showFeedBoardTip(e,tip,host){
   if(!tip||!host) return; const p=feedAllPosts()[0]; const r=host.getBoundingClientRect();
-  tip.textContent=p?('운영 업무 공유 · '+(p.title||'제목 없음')+' (클릭하면 게시판 열기)'):'운영 업무 공유 게시판';
+  tip.textContent=p?('운영 업무 공유 · '+(p.title||'제목 없음')+' (클릭하면 ERP로 이동)'):'운영 업무 공유';
   tip.style.left=(e.clientX-r.left+14)+'px'; tip.style.top=(e.clientY-r.top+14)+'px'; tip.style.display='block';
 }
 function bindFeedBoard(){
-  const body=$('feed-board-body40'); if(body) body.addEventListener('click',e=>{ const b=e.target.closest('[data-feed-id]'); if(b) openFeedDrawer(b.dataset.feedId); });
-  const all=$('feed-board-all40'); if(all) all.onclick=()=>openFeedDrawer(null);
-  $('subpage-content').addEventListener('click',e=>{ const b=e.target.closest('[data-feed-id]'); if(b&&b.closest('.fb-drawer-list40')){ openFeedDrawer(b.dataset.feedId); return; } if(e.target.closest('#feed-open-erp40')){ $('erp-frame37').src=ERP_URL; $('erp-shell37').hidden=false; } });
+  const board=$('feed-board40'); if(board){ board.addEventListener('click',()=>openFeedErp()); board.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); openFeedErp(); } }); }
 }
+
