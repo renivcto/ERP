@@ -417,7 +417,9 @@ function personWorkCounts(){
     const members=Array.isArray(card.members)?card.members:[];
     for(const member of members){ const label=String(member.fullName||member.name||member.username||'').trim().toLowerCase(); const p=STAFF.find(s=>s.name.toLowerCase()===label); if(p) counts[p.id]++; }
   }
-  if(state.profile?.name){ const p=STAFF.find(s=>s.name===state.profile.name); if(p) counts[p.id]=personalTasks().length; }
+  const staffForName=name=>STAFF.find(s=>s.name===name||(name==='JUYEON LEE'&&s.id==='juyeon'));
+  for(const emp of state.admin?.config?.employees||[]){ const p=staffForName(emp.name); if(p&&emp.countUnavailable!==true&&typeof emp.taskCount==='number') counts[p.id]=emp.taskCount; }
+  if(state.profile?.name){ const p=staffForName(state.profile.name); if(p) counts[p.id]=personalTasks().length; }
   return counts;
 }
 
@@ -488,7 +490,10 @@ function employeeRow(emp){
   const nameSafe=escapeHtml(emp.name||'이름 없음');
   const metaSafe=escapeHtml([emp.email,emp.role].filter(Boolean).join(' · '));
   const control = emp.nexusEnabled ? '<span class="emp-status35 on">접속 허용됨</span>' : `<button type="button" class="admin-access-btn" data-uid="${uidSafe}">NEXUS 접속 허용</button>`;
-  return `<div class="admin-emp-row"><div><strong>${nameSafe}</strong><small>${metaSafe}</small></div>${control}</div>`;
+  const labels={slack_activity:'Slack',trello_new_card:'Trello',erp_approval:'결재',erp_expense:'지출',manual:'수동'};
+  const breakdown=Object.entries(emp.taskCounts||{}).filter(([,n])=>Number(n)>0).map(([k,n])=>`${labels[k]||k} ${Number(n)}`).join(' · ');
+  const counts=emp.countUnavailable!==true&&typeof emp.taskCount==='number'?`처리할 업무 ${emp.taskCount}건${breakdown?' · '+breakdown:''}`:(emp.nexusEnabled?'업무 수 확인 대기':'접속 허용 대기');
+  return `<div class="admin-emp-row"><div><strong>${nameSafe}</strong><small>${metaSafe}</small><small>${escapeHtml(counts)}</small></div>${control}</div>`;
 }
 
 const RULE_KIND_LABELS=[['manual','수동 지정'],['slack_activity','Slack 활동'],['trello_new_card','Trello 새 카드'],['erp_approval','ERP 결재'],['erp_expense','ERP 지출']];
