@@ -8267,7 +8267,7 @@ async function _doSaveDataInner() {
   // v1.9.755: approvals 본문 / 메모 / content 등 큰 string 필드 IDB 오프로드
   //   원인: 첨부 외에도 본문에 base64 image 가 inline 으로 들어있으면 doc 1MB 초과
   //   → SYNC RECOVERY 가 매 새로고침마다 트리거되는 무한 루프 발생
-  const APPROVAL_SMALL_KEYS = new Set(['id','status','category','title','date','requester','approver','phase','department','priority','amount','vendor','itemName','attachments','phaseHistory','updatedAt','createdAt','signedAt','submittedAt','rejectedAt','phaseChangedAt','number','requestType','approvalNumber','currency','paid','paidAt','paymentMethod','paymentMemo','dueDate','requestedAt','company','vendorId','expenseId','recipientName','recipientPhone','recipientAddress','documentType','approverPhase']);
+  const APPROVAL_SMALL_KEYS = new Set(['authorUid','authorEmail','authorName','id','status','category','title','date','requester','approver','phase','department','priority','amount','vendor','itemName','attachments','phaseHistory','updatedAt','createdAt','signedAt','submittedAt','rejectedAt','phaseChangedAt','number','requestType','approvalNumber','currency','paid','paidAt','paymentMethod','paymentMemo','dueDate','requestedAt','company','vendorId','expenseId','recipientName','recipientPhone','recipientAddress','documentType','approverPhase']);
   let _apnFieldOffload = 0;
   (dbToSave.approvals||[]).forEach((ap, pi) => {
     if (!ap || ap.id == null) return;
@@ -33395,7 +33395,7 @@ function savePo() {
     }
   } else {
     const newId = (typeof nextId === 'function') ? nextId('order') : (Date.now());
-    DB.orders.push({ id: newId, createdAt: Date.now(), ...data });
+    DB.orders.push({ id: newId, createdAt: Date.now(), ...data, ..._nexusSubmittedAuthor16() });
     _savedOrderId = newId;
     showNotif('✅ 해외 PO 저장 완료', 'success');
   }
@@ -36164,7 +36164,7 @@ function saveOrder() {
   } else {
     const _newOrderId = nextId('order');
     // v2.3.471: createdAt 부여 — 없으면 EDIT RECOVERY 의 v2.3.419 동일성 가드('' === '')가 orders 에서 무력
-    DB.orders.push({id:_newOrderId, createdAt: Date.now(), ...data});
+    DB.orders.push({id:_newOrderId, createdAt: Date.now(), ...data, ..._nexusSubmittedAuthor16()});
     _savedOrderId = _newOrderId;
   }
   // v1.9.226 — 사용자가 같은 서명의 발주서를 새로 작성했다면 tombstone 에서 제거(재활성)
@@ -43020,6 +43020,7 @@ async function saveNonPoApproval() {
     note: $('apn-note').value || '',
     attachments: Array.isArray(_apnAttachments) ? _apnAttachments.slice() : [],
     // v1.9.288: 기안자 (로그인 사용자 자동 저장)
+    ..._nexusSubmittedAuthor16(),
     authorName: _myName,
     authorEmail: _myEmail,
     createdAt: _now,
@@ -43966,6 +43967,13 @@ function _freshExpenseId() {
   return id;
 }
 
+/* NEXUS live16: persist authenticated submitter only on document CREATE. */
+function _nexusSubmittedAuthor16() {
+  const authUser = window._firebaseAuth && window._firebaseAuth.currentUser;
+  if (!authUser || !authUser.uid) return {};
+  const me = window._currentUser || {};
+  return {authorUid: String(authUser.uid), authorEmail: String(authUser.email || me.email || '').trim().toLowerCase(), authorName: me.displayName || me.name || authUser.displayName || authUser.email || ''};
+}
 function saveExpense() {
   const title = $('ape-title').value.trim();
   if (!title) { showNotif('제목을 입력하세요', 'warning'); return; }
@@ -44097,6 +44105,7 @@ function saveExpense() {
   const _newPm = ($('ape-paymethod') && $('ape-paymethod').value) || '계좌이체';
   const e = {
     id: _freshExpenseId(),
+    ..._nexusSubmittedAuthor16(),
     approvalId: null,
     orderId: null,
     category: _category,
