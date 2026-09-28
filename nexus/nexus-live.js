@@ -74,7 +74,7 @@ async function api(path,options={}){
   if(options.body && !headers['Content-Type']) headers['Content-Type']='application/json';
   const response=await fetch(`${API_BASE}${path}`,{...options,headers,cache:'no-store'});
   let data=null; try{ data=await response.json(); }catch{ data={}; }
-  if(!response.ok){ const err=new Error(apiErrorMessage(data,response.status)); err.code=data?.error?.code || `http-${response.status}`; err.status=response.status; if((response.status===401||response.status===403)&&state.authorized) lockApi(err.message); throw err; }
+  if(!response.ok){ const err=new Error(apiErrorMessage(data,response.status)); err.code=data?.error?.code || `http-${response.status}`; err.status=response.status; if((response.status===401||(response.status===403&&!path.startsWith('/admin/task-')))&&state.authorized) lockApi(err.message); throw err; }
   return data;
 }
 
@@ -608,6 +608,8 @@ function openEmployeeFocus(uid){
 }
 
 async function loadEmployeeTasks(uid){
+  const employee=((state.admin.config&&state.admin.config.employees)||[]).find(e=>String(e.uid)===String(uid));
+  if(employee && !employee.nexusEnabled){ state.admin.employeeSeq++; state.admin.employee={uid,data:null,loading:false,error:''}; renderAdminDialog(); return; }
   const epoch=state.adminSeq, authUid=state.user&&state.user.uid, token=state.admin.focusToken, seq=++state.admin.employeeSeq;
   state.admin.employee={uid,data:null,loading:true,error:''};
   renderAdminDialog();
