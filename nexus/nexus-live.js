@@ -1026,6 +1026,6 @@ function renderSalesKpi(){
 function pinFinance42(){
   const el=$('finance-pin42'); if(!el||el.dataset.pinned) return;
   if(typeof window.NEXUS?.pinToWorld!=='function') return;
-  window.NEXUS.pinToWorld(el,6.55,1.05,3.35); el.dataset.pinned='1';
+  window.NEXUS.pinToWorld(el,7.15,0.55,3.75); el.dataset.pinned='1';
   el.onclick=()=>showSubpage('overview'); el.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); showSubpage('overview'); } };
 }
