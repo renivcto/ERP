@@ -870,7 +870,7 @@ function syncScenePeople(counts){for(const p of PEOPLE){const n=counts[p.id]||0;
 function selectV45Person(id){state.selectedPerson=id;document.querySelectorAll('[data-person]').forEach(el=>el.classList.toggle('selected',el.dataset.person===id));window.onPersonSelect?.(id)}
 window.NEXUS={PEOPLE,WAREHOUSES:[],workMode:'offline',workConnection:'unconnected',personalMode35:true,selectPerson:selectV45Person,renderTasks:()=>{},toast,openDeskWork:id=>showSubpage('tasks',id),openERPTask:t=>window.open(safeUrl(t?.url)||ERP_URL,'_blank','noopener'),openShare:()=>openFeedErp(),openWarehouse:()=>{},refreshCalendar32:renderCalendar,showLiveErpTip:()=>{},showLiveBoardTip:showFeedBoardTip};
 window.__resolveNexusBridge?.();
-function bindOriginalScene(){setTimeout(renderViewerFace,900);pinFinance42();state.scene={setView:v=>window.NEXUS.setView?.(v),callMeeting:(title,ids)=>window.NEXUS.callMeeting?.(title,ids),returnSeats:()=>window.NEXUS.endMeeting?.(),updateWork:syncScenePeople};syncScenePeople(personWorkCounts())}
+function bindOriginalScene(){setTimeout(renderViewerFace,900);state.scene={setView:v=>window.NEXUS.setView?.(v),callMeeting:(title,ids)=>window.NEXUS.callMeeting?.(title,ids),returnSeats:()=>window.NEXUS.endMeeting?.(),updateWork:syncScenePeople};syncScenePeople(personWorkCounts())}
 window.addEventListener('nexus-scene-ready',bindOriginalScene,{once:true});if(window.NEXUS.sceneReady)bindOriginalScene();
 
 function lockApi(message){clearAll();setAuthOverlay('NEXUS 접근 차단',message||'NEXUS 서버 권한을 확인할 수 없습니다.',{logout:true})}
@@ -901,7 +901,7 @@ document.querySelectorAll('[data-view]').forEach(button=>button.onclick=()=>{con
 document.querySelectorAll('.navicon[data-panel]').forEach(button=>button.onclick=()=>showSubpage(button.dataset.panel));
 $('subpage-content').onclick=e=>{const member=e.target.closest('[data-person]');if(member)selectV45Person(member.dataset.person);};
 $('home-button').onclick=()=>{closeSubpage();$('erp-shell37').hidden=true;$('erp-frame37').removeAttribute('src');state.scene?.returnSeats();}; $('subpage-close').onclick=closeSubpage;
-$('nav-erp37').onclick=()=>{$('erp-frame37').src=ERP_URL;$('erp-shell37').hidden=false;}; bindFeedBoard(); $('erp-home37').onclick=()=>{$('erp-shell37').hidden=true;$('erp-frame37').removeAttribute('src');};
+$('nav-erp37').onclick=()=>{$('erp-frame37').src=ERP_URL;$('erp-shell37').hidden=false;}; bindFeedBoard(); pinFinance42(); $('erp-home37').onclick=()=>{$('erp-shell37').hidden=true;$('erp-frame37').removeAttribute('src');};
 $('office-view-button').onclick=()=>state.scene?.setView('office'); $('meeting-view-button').onclick=()=>state.scene?.setView('meeting'); $('return-seats-button').onclick=()=>state.scene?.returnSeats();
 $('meeting-new-button').onclick=()=>openMeetingDialog(); $('meeting-close-button').onclick=()=>{$('meeting-dialog').close();state.meetingRequestId=null;state.meetingPayloadKey=null;}; $('meeting-cancel-button').onclick=()=>{state.meetingRequestId=null;state.meetingPayloadKey=null;$('meeting-dialog').close();}; $('meeting-form').onsubmit=e=>{e.preventDefault();saveMeeting();}; $('meeting-delete-button').onclick=deleteMeeting;
 $('meeting-list').onclick=e=>{
@@ -1025,8 +1025,7 @@ function renderSalesKpi(){
 }
 function pinFinance42(){
   const el=$('fin-sign43'); if(!el||el.dataset.pinned) return;
-  if(typeof window.NEXUS?.pinToWorld!=='function') return;
-  window.NEXUS.pinToWorld(el,8.4,0,3.2); el.dataset.pinned='1';
+  el.dataset.pinned='1';
   el.onclick=()=>showSubpage('overview'); el.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); showSubpage('overview'); } };
 }
 
