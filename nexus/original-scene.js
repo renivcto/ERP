@@ -340,7 +340,7 @@ function animateAvatars(t,dt,paused){
 }
 window.NEXUS.activityOf=id=>avatars.find(a=>a.id===id)?.activity||null;
 
-const zonelabels=[label('MEETING ROOM',RX+4,.06,4.2,'zone-label room-label')]
+const zonelabels=[label('MEETING ROOM',RX+4,.06,4.2,'zone-label room-label')];window.NEXUS.pinToWorld=(el,x,y,z)=>{labels.append(el);const o={el,pos:new THREE.Vector3(x,y,z)};zonelabels.push(o);return o};window.dispatchEvent(new CustomEvent('nexus-pin-ready'));
 // Ambient particles stay inside the collaboration hub.
 
 let width=1,height=1,theta=0,phi=.58,radius=23.8,drag=false,moved=0,startX=0,startY=0,paused=matchMedia('(prefers-reduced-motion: reduce)').matches;let last=0;const target=new THREE.Vector3(0,.7,-.4);function resize(){width=host.clientWidth;height=host.clientHeight;renderer.setSize(width,height,false);camera.aspect=width/height;camera.updateProjectionMatrix()}new ResizeObserver(resize).observe(host);resize();function cam(){if(viewLerp){const V=VIEWS[view];if(view==='office')V.target.x=camera.aspect>=1.5?.85:-.05;target.lerp(V.target,.14);radius+=(V.radius-radius)*.14;phi+=(V.phi-phi)*.14;theta+=(0-theta)*.14}const fit=Math.max(1,1.45/camera.aspect);const r=radius*fit;camera.position.set(target.x+Math.sin(theta)*Math.cos(phi)*r,target.y+Math.sin(phi)*r,target.z+Math.cos(theta)*Math.cos(phi)*r);camera.lookAt(target)}cam();

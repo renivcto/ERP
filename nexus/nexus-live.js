@@ -44,6 +44,7 @@ const state = {
   user:null, profile:null, authorized:false, firestoreUnsubs:[], pollTimer:null, polling:false,
   erp:{approvals:[],expenses:[],orders:[],tasks:[],productions:[],items:[],poOverrides:{},expenseOverrides:{},sources:{},error:''},
   feed:{posts:[],archPosts:{},loaded:false,error:''},
+  sales:{docs:{},loaded:false,error:''},
   status:null, trello:{items:[],boards:[],me:null,fetchedAt:null,error:''},
   slack:{channels:[],messages:[],channel:'',replies:new Map(),replyTarget:null,error:'',loading:false,partial:false,failedChannelCount:0,truncated:false,fetchedAt:null,canPost:false,canReply:false,requestSeq:0,history:{channelId:'',messages:[],nextCursor:null,hasMore:false,loadingMore:false,error:''}},
   meetings:[], meetingError:'', meetingRequestId:null, meetingPayloadKey:null, scene:null, selectedPerson:'jaeho', selectedDate:ymdKst(), weekOffset:0, lastPollAt:null,
@@ -85,7 +86,7 @@ function clearExternal(){ state.status=null; state.trello={items:[],boards:[],me
 function clearERP(error=''){ state.erp={approvals:[],expenses:[],orders:[],tasks:[],productions:[],items:[],poOverrides:{},expenseOverrides:{},sources:{},error}; if(window.NEXUS)window.NEXUS.workMode='offline'; renderAll(); }
 function clearAll(){ stopFirestore(); stopPolling(); clearExternal(); state.authorized=false; state.user=null; state.profile=null; state.meetingRequestId=null; state.meetingPayloadKey=null; if($('meeting-dialog').open)$('meeting-dialog').close(); $('slack-text').value=''; $('erp-shell37').hidden=true; $('erp-frame37').removeAttribute('src'); closeSubpage(); clearERP(''); $('viewer-name').textContent='사용자 확인 중'; $('viewer-role').textContent='읽기 전용'; $('logout-button').textContent='나'; if(state.scene) state.scene.returnSeats();
   state.personalTasksSeq++; state.personalTasks={mode:null,items:[],count:0,warnings:[],error:'',fetchedAt:null,lastScanAt:null};
-  state.feed={posts:[],archPosts:{},loaded:false,error:''}; renderViewerFace.tries=0; for(const k of Object.keys(FACE_CACHE)) delete FACE_CACHE[k]; if($('viewer-avatar')){ $('viewer-avatar').textContent=''; $('viewer-avatar').classList.remove('has-face40'); }
+  state.feed={posts:[],archPosts:{},loaded:false,error:''}; state.sales={docs:{},loaded:false,error:''}; renderSalesKpi(); renderViewerFace.tries=0; for(const k of Object.keys(FACE_CACHE)) delete FACE_CACHE[k]; if($('viewer-avatar')){ $('viewer-avatar').textContent=''; $('viewer-avatar').classList.remove('has-face40'); }
   state.adminSeq++;
   state.admin={loading:false,scanning:false,error:'',config:null,allRules:[],view:'list',selectedUid:null,focusToken:0,employeeSeq:0,employee:{uid:null,data:null,loading:false,error:''},gen:{loading:false,error:'',summary:'',questions:[],requestId:null,lastUid:null,lastText:''}};
   if($('admin-tasks-dialog') && $('admin-tasks-dialog').open) $('admin-tasks-dialog').close();
@@ -119,6 +120,7 @@ function subscribeERP(){
     state.firestoreUnsubs.push(unsub);
   }
   subscribeFeed();
+  subscribeSales();
 }
 
 function orderTotal(o){
@@ -409,7 +411,7 @@ function renderAll(){ renderMetrics(); renderPersonal(); renderCalendar(); rende
 function renderV45Status(){
   const mine=personalTasks(),sources=Object.keys(state.erp.sources).length,slackOn=flag(state.status,['flags.slackConnected','integrations.slack.connected']),trelloOn=flag(state.status,['flags.trelloConnected','integrations.trello.available']);
   $('led-tasks-live').textContent=mine.length+'건';$('erp-led-source').textContent=state.erp.error?'읽기 오류':sources?'실시간':'연결 대기';$('erp-work-state').textContent=state.erp.error|| (sources?'ERP 읽기 전용 연결':'실시간 연결 대기');
-  renderFeedBoard();
+  renderFeedBoard(); renderSalesKpi();
   $('calendar-source32').textContent=trelloOn?'Trello + ERP':'ERP';$('company-source37').textContent=state.lastPollAt?'라이브 연결':'연결 대기';$('slack-scope35').textContent=slackOn?'내 참여 채널 · 최신 대화순':'OAuth 연결 필요';
   $('slack-result35').textContent=state.slack.loading?'불러오는 중':state.slack.error||(!state.slack.channel?(()=>{const total=state.slack.channels.length,filtered=filteredOverviewChannels().length;return overviewSearchQuery()?`${filtered}개 채널 (전체 ${total}개)`:`${total}개 채널`;})():(state.slack.partial?`일부 ${state.slack.messages.length}건`:state.slack.messages.length+'건'));
   const next=state.meetings.filter(m=>m?.status!=='canceled'&&new Date(m.endAt)>new Date()).sort((a,b)=>String(a.startAt).localeCompare(String(b.startAt)))[0];$('meeting-next').textContent=next?'예정 · '+formatDateTime(next.startAt,next.timezone||'Asia/Seoul')+' · '+(next.title||'회의'):'예정된 회의 없음';const candidate=safeUrl(next?.huddleUrl||next?.huddleURL);const h=next?(candidate===HUDDLE_URL?candidate:HUDDLE_URL):'';$('meeting-huddle34').hidden=!h;if(h){$('meeting-huddle34').href=h;$('meeting-huddle34').dataset.meetingId=next.id}else{$('meeting-huddle34').removeAttribute('href');delete $('meeting-huddle34').dataset.meetingId}
@@ -868,7 +870,7 @@ function syncScenePeople(counts){for(const p of PEOPLE){const n=counts[p.id]||0;
 function selectV45Person(id){state.selectedPerson=id;document.querySelectorAll('[data-person]').forEach(el=>el.classList.toggle('selected',el.dataset.person===id));window.onPersonSelect?.(id)}
 window.NEXUS={PEOPLE,WAREHOUSES:[],workMode:'offline',workConnection:'unconnected',personalMode35:true,selectPerson:selectV45Person,renderTasks:()=>{},toast,openDeskWork:id=>showSubpage('tasks',id),openERPTask:t=>window.open(safeUrl(t?.url)||ERP_URL,'_blank','noopener'),openShare:()=>openFeedErp(),openWarehouse:()=>{},refreshCalendar32:renderCalendar,showLiveErpTip:()=>{},showLiveBoardTip:showFeedBoardTip};
 window.__resolveNexusBridge?.();
-function bindOriginalScene(){setTimeout(renderViewerFace,900);state.scene={setView:v=>window.NEXUS.setView?.(v),callMeeting:(title,ids)=>window.NEXUS.callMeeting?.(title,ids),returnSeats:()=>window.NEXUS.endMeeting?.(),updateWork:syncScenePeople};syncScenePeople(personWorkCounts())}
+function bindOriginalScene(){setTimeout(renderViewerFace,900);pinFinance42();state.scene={setView:v=>window.NEXUS.setView?.(v),callMeeting:(title,ids)=>window.NEXUS.callMeeting?.(title,ids),returnSeats:()=>window.NEXUS.endMeeting?.(),updateWork:syncScenePeople};syncScenePeople(personWorkCounts())}
 window.addEventListener('nexus-scene-ready',bindOriginalScene,{once:true});if(window.NEXUS.sceneReady)bindOriginalScene();
 
 function lockApi(message){clearAll();setAuthOverlay('NEXUS 접근 차단',message||'NEXUS 서버 권한을 확인할 수 없습니다.',{logout:true})}
@@ -996,3 +998,34 @@ function bindFeedBoard(){
   const board=$('feed-board40'); if(board){ board.addEventListener('click',()=>openFeedErp()); board.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); openFeedErp(); } }); }
 }
 
+
+
+/* live25: ERP board = 이번 달 지급 예정 / 전날 매출 / 이번 달 매출; 결재·지출 대기 pinned to 재무팀 in 3D */
+function salesDigest(arr){ const byDay={}; (Array.isArray(arr)?arr:[]).forEach(o=>{ const day=String(o?.orderDate||'').slice(0,10); if(!/^\d{4}-\d{2}-\d{2}$/.test(day)) return; const v=parseFloat(o.paymentAmount||o.totalPrice||0)||0; const b=byDay[day]||(byDay[day]={sum:0,n:0}); b.sum+=v; b.n++; }); return byDay; }
+function subscribeSales(){
+  state.sales={docs:{},loaded:false,error:''}; const arch={};
+  const unsub=onSnapshot(doc(db,'erp_data','shopOrders'),snap=>{
+    const data=snap.exists()?(snap.data()||{}):{}; state.sales.docs.live=salesDigest(parseErpDoc(snap,[])); state.sales.loaded=true; state.sales.error='';
+    const n=Math.min(10,Math.max(0,Number(data.arch)||0));
+    for(const k of Object.keys(arch)) if(Number(k)>n){ arch[k](); delete arch[k]; delete state.sales.docs['a'+k]; }
+    for(let i=1;i<=n;i++){ if(arch[i]) continue; const u=onSnapshot(doc(db,'erp_data','shopOrders_arch'+i),s=>{ state.sales.docs['a'+i]=salesDigest(parseErpDoc(s,[])); renderSalesKpi(); },()=>{}); arch[i]=u; state.firestoreUnsubs.push(u); }
+    renderSalesKpi();
+  },error=>{ state.sales.loaded=true; state.sales.error=error?.code==='permission-denied'?'권한 없음':'읽기 오류'; renderSalesKpi(); });
+  state.firestoreUnsubs.push(unsub);
+}
+function salesTotal(pred){ let sum=0,n=0; Object.values(state.sales?.docs||{}).forEach(d=>Object.entries(d||{}).forEach(([day,b])=>{ if(pred(day)){ sum+=b.sum; n+=b.n; } })); return {sum,n}; }
+function renderSalesKpi(){
+  const y=$('sales-yday42'), m=$('sales-month42'); if(!y||!m) return; const s=state.sales||{};
+  const yn=$('sales-yday-n42'), mn=$('sales-month-n42');
+  if(!s.loaded||s.error){ const t=s.error||'-'; y.textContent=t; m.textContent=t; if(yn) yn.textContent=''; if(mn) mn.textContent=''; return; }
+  const today=ymdKst(), yday=new Date(Date.parse(today+'T00:00:00Z')-86400000).toISOString().slice(0,10), month=today.slice(0,7);
+  const a=salesTotal(d=>d===yday), b=salesTotal(d=>d.startsWith(month));
+  y.textContent=formatKrw(a.sum); m.textContent=formatKrw(b.sum);
+  if(yn) yn.textContent=yday.slice(5).replace('-','/')+' · '+a.n+'건'; if(mn) mn.textContent=Number(month.slice(5))+'월 · '+b.n+'건';
+}
+function pinFinance42(){
+  const el=$('finance-pin42'); if(!el||el.dataset.pinned) return;
+  if(typeof window.NEXUS?.pinToWorld!=='function') return;
+  window.NEXUS.pinToWorld(el,6.55,1.05,3.35); el.dataset.pinned='1';
+  el.onclick=()=>showSubpage('overview'); el.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); showSubpage('overview'); } };
+}
