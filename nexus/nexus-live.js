@@ -401,6 +401,12 @@ function normalizeMeetings(data){ state.meetings=Array.isArray(data?.items)?data
 const HUDDLE_RE=/^https:\/\/app\.slack\.com\/huddle\/T0AU32P7W0Y\/[CDG][A-Z0-9]{8,}$/;
 function validHuddle(u){ const c=safeUrl(u); return HUDDLE_RE.test(c.replace(/\/$/,''))?c.replace(/\/$/,''):''; }
 function meetingHuddle(m){ return validHuddle(m?.huddleUrl||m?.huddleURL)||HUDDLE_URL; }
+// live56: Slack only supports huddle links for channels; DM / group-DM huddles open the conversation instead.
+function huddleChannelOf(url){ const m=String(url||'').match(/\/([CDG][A-Z0-9]{8,})$/); return m?m[1]:''; }
+function meetingStartUrl(m){ const url=meetingHuddle(m); const id=huddleChannelOf(url); return (!id||url===HUDDLE_URL)?url:'https://reniv.slack.com/archives/'+id; }
+function meetingInProgress(m){ const now=Date.now(); return !!m&&m.status!=='canceled'&&Date.parse(m.startAt)<=now&&now<Date.parse(m.endAt); }
+function startHint(m){ return meetingStartUrl(m)===meetingHuddle(m)?'':'Slack 대화창이 열리면 오른쪽 위 헤드폰(허들) 버튼을 눌러 시작해 주세요.'; }
+async function endMeetingNow(id){ const m=state.meetings.find(x=>String(x.id)===String(id)); if(!m) return; if(!confirm('미팅을 종료할까요? 참석자가 자리로 돌아갑니다.\nSlack 허들은 Slack에서 \'나가기\'를 눌러 종료해 주세요.')) return; try{ await api(`/meetings/${encodeURIComponent(id)}/end`,{method:'POST',body:'{}'}); await loadMeetings(); renderV45Status(); syncMeetingScene(); toast('미팅을 종료했습니다. Slack 허들은 Slack에서 나가기를 눌러 주세요.'); }catch(error){ toast('미팅 종료 실패: '+error.message,true); } }
 const HUDDLE_REASON={slack_scope_upgrade:'참석자 전용 허들을 만들려면 Slack을 한 번 다시 연결해 주세요.',slack_not_connected:'Slack 연결이 필요합니다.',solo:'참석자가 본인뿐이라 #slack-전체 허들을 사용합니다.',attendees_unresolved:'참석자의 Slack 계정을 찾지 못해 #slack-전체 허들을 사용합니다.',open_failed:'Slack 그룹 대화를 열지 못해 #slack-전체 허들을 사용합니다.',directory_failed:'Slack 사용자 목록을 읽지 못해 #slack-전체 허들을 사용합니다.',too_many:'참석자가 많아 #slack-전체 허들을 사용합니다.'};
 function huddleNote(h){ if(!h) return ''; const parts=[]; if(h.reason&&HUDDLE_REASON[h.reason]) parts.push(HUDDLE_REASON[h.reason]); if(Array.isArray(h.unresolved)&&h.unresolved.length&&h.reason!=='attendees_unresolved') parts.push('Slack 계정 미확인: '+h.unresolved.join(', ')); return parts.join(' '); }
 function meetingLabel(m){ const t=String(m?.title||'').trim(); return t&&t!=='회의'?t:'미팅'; }
@@ -408,7 +414,7 @@ function renderMeetings(){
   const me=String(state.user?.uid||'');
   const nowMs=Date.now(); const list=state.meetings.filter(m=>m?.status!=='canceled'&&!(Date.parse(m?.endAt)<nowMs)).sort((a,b)=>String(a.startAt||'').localeCompare(String(b.startAt||''))); $('meeting-list').innerHTML=state.meetingError?`<div class="empty">${escapeHtml(state.meetingError)}</div>`:list.length?list.map(m=>{
     const attendeeIds=Array.isArray(m.attendeeIds)?m.attendeeIds:[]; const mine=!m.ownerUid||String(m.ownerUid)===me; const notes=String(m.notes||'').trim();
-    return `<article class="meeting-row"><div><strong>${escapeHtml(meetingLabel(m))}</strong><small>${escapeHtml(formatDateTime(m.startAt,m.timezone||'Asia/Seoul'))}</small><span class="meeting-att45">${attendeeIds.map(id=>STAFF.find(p=>p.id===id)?.name).filter(Boolean).map(n=>`<i>${escapeHtml(n)}</i>`).join('')||'<i>참석자 없음</i>'}</span>${notes?`<p class="meeting-notes-view44">${escapeHtml(notes)}</p>`:''}</div><div class="meeting-actions"><a class="meeting-start44" href="${escapeHtml(meetingHuddle(m))}" target="_blank" rel="noopener" data-start-meeting="${escapeHtml(m.id)}">미팅 시작</a>${mine?`<button type="button" data-edit-meeting="${escapeHtml(m.id)}">수정</button><button type="button" class="meeting-del44" data-delete-meeting="${escapeHtml(m.id)}">삭제</button>`:''}</div></article>`;
+    return `<article class="meeting-row"><div><strong>${escapeHtml(meetingLabel(m))}</strong><small>${escapeHtml(formatDateTime(m.startAt,m.timezone||'Asia/Seoul'))}</small><span class="meeting-att45">${attendeeIds.map(id=>STAFF.find(p=>p.id===id)?.name).filter(Boolean).map(n=>`<i>${escapeHtml(n)}</i>`).join('')||'<i>참석자 없음</i>'}</span>${notes?`<p class="meeting-notes-view44">${escapeHtml(notes)}</p>`:''}</div><div class="meeting-actions">${meetingInProgress(m)?`<button type="button" class="meeting-end56" data-end-meeting="${escapeHtml(m.id)}">미팅 종료</button>`:`<a class="meeting-start44" href="${escapeHtml(meetingStartUrl(m))}" target="_blank" rel="noopener" data-start-meeting="${escapeHtml(m.id)}">미팅 시작</a>`}${mine?`<button type="button" data-edit-meeting="${escapeHtml(m.id)}">수정</button><button type="button" class="meeting-del44" data-delete-meeting="${escapeHtml(m.id)}">삭제</button>`:''}</div></article>`;
   }).join(''):'<div class="empty">예약된 미팅이 없습니다.</div>';
 }
 function renderConnectionState(){
@@ -422,7 +428,7 @@ function renderV45Status(){
   renderFeedBoard(); renderSalesKpi();
   $('calendar-source32').textContent=trelloOn?'Trello + ERP':'ERP';$('company-source37').textContent=state.lastPollAt?'라이브 연결':'연결 대기';$('slack-scope35').textContent=slackOn?'내 참여 채널 · 최신 대화순':'OAuth 연결 필요';
   $('slack-result35').textContent=state.slack.loading?'불러오는 중':state.slack.error||(!state.slack.channel?(()=>{const total=state.slack.channels.length,filtered=filteredOverviewChannels().length;return overviewSearchQuery()?`${filtered}개 채널 (전체 ${total}개)`:`${total}개 채널`;})():(state.slack.partial?`일부 ${state.slack.messages.length}건`:state.slack.messages.length+'건'));
-  const next=state.meetings.filter(m=>m?.status!=='canceled'&&new Date(m.endAt)>new Date()).sort((a,b)=>String(a.startAt).localeCompare(String(b.startAt)))[0];$('meeting-next').textContent=next?((new Date(next.startAt)<=new Date()?'미팅 중 · ':'')+formatDateTime(next.startAt,next.timezone||'Asia/Seoul')):'예정된 미팅 없음';const h=next?meetingHuddle(next):'';$('meeting-huddle34').hidden=!h;if(h){$('meeting-huddle34').href=h;$('meeting-huddle34').dataset.meetingId=next.id}else{$('meeting-huddle34').removeAttribute('href');delete $('meeting-huddle34').dataset.meetingId}
+  const next=state.meetings.filter(m=>m?.status!=='canceled'&&new Date(m.endAt)>new Date()).sort((a,b)=>String(a.startAt).localeCompare(String(b.startAt)))[0];$('meeting-next').textContent=next?((new Date(next.startAt)<=new Date()?'미팅 중 · ':'')+formatDateTime(next.startAt,next.timezone||'Asia/Seoul')):'예정된 미팅 없음';const hb=$('meeting-huddle34');const live=meetingInProgress(next);hb.hidden=!next;if(next){hb.dataset.meetingId=next.id;hb.dataset.mode=live?'end':'start';hb.textContent=live?'미팅 종료':'미팅 시작';hb.classList.toggle('end56',live);if(live)hb.removeAttribute('href');else hb.href=meetingStartUrl(next);}else{hb.removeAttribute('href');delete hb.dataset.meetingId;delete hb.dataset.mode;hb.classList.remove('end56')}
 }
 function personWorkCounts(){
   const counts=Object.fromEntries(STAFF.map(p=>[p.id,0]));
@@ -876,8 +882,8 @@ async function checkSlackHuddleScope(){
 }
 function renderMeetingLink(){
   const out=$('meeting-link-out44'), btn=$('meeting-link-btn44'); if(!out||!btn) return; const url=state.meetingLink, info=state.meetingLinkInfo||null;
-  if(url){ const scope=info?.scope||(url===HUDDLE_URL?'channel':'group'); const label=scope==='channel'?'Slack 허들 · #slack-전체':'Slack 허들 · 참석자 전용'; const note=huddleNote(info);
-    out.innerHTML='<a href="'+escapeHtml(url)+'" target="_blank" rel="noopener">'+escapeHtml(label)+'</a>'+(note?' <small class="huddle-note45">'+escapeHtml(note)+'</small>':' <small>저장하면 이 미팅에 함께 저장됩니다</small>')+(info?.reason==='slack_scope_upgrade'?' <button type="button" class="slack-reconnect45" data-slack-reconnect>Slack 다시 연결</button>':'');
+  if(url){ const scope=info?.scope||(url===HUDDLE_URL?'channel':'group'); const label=scope==='channel'?'Slack 허들 · #slack-전체':'Slack 참석자 전용 대화 · 허들'; const note=huddleNote(info);
+    out.innerHTML='<a href="'+escapeHtml(url===HUDDLE_URL?url:('https://reniv.slack.com/archives/'+huddleChannelOf(url)))+'" target="_blank" rel="noopener">'+escapeHtml(label)+'</a>'+(note?' <small class="huddle-note45">'+escapeHtml(note)+'</small>':' <small>저장하면 이 미팅에 함께 저장됩니다</small>')+(info?.reason==='slack_scope_upgrade'?' <button type="button" class="slack-reconnect45" data-slack-reconnect>Slack 다시 연결</button>':'');
     btn.textContent='링크 생성됨'; btn.classList.add('done44'); }
   else { out.textContent='참석자만 들어오는 Slack 허들 링크를 만듭니다.'; btn.textContent='미팅 링크 생성'; btn.classList.remove('done44'); }
 }
@@ -900,7 +906,7 @@ async function startInstantMeeting(ev){
   if(!attendeeIds.length){ go(HUDDLE_URL); return; }
   const now=new Date(), startAt=now.toISOString(), endAt=new Date(now.getTime()+30*60000).toISOString();
   const body={requestId:newRequestId(),title:'바로 미팅',notes:$('meeting-notes44')?.value.trim()||'',startAt,endAt,timezone:'Asia/Seoul',attendeeIds};
-  try{ const data=await api('/meetings',{method:'POST',body:JSON.stringify(body)}); const saved=data.meeting||data.item||data; go(meetingHuddle(saved)); await loadMeetings(); const note=huddleNote(data.huddle); toast(saved?.huddleScope&&saved.huddleScope!=='channel'?'참석자 전용 Slack 허들을 열었습니다.':('Slack 허들을 열었습니다.'+(note?' '+note:''))); }
+  try{ const data=await api('/meetings',{method:'POST',body:JSON.stringify(body)}); const saved=data.meeting||data.item||data; go(meetingStartUrl(saved)); await loadMeetings(); const note=huddleNote(data.huddle); toast(saved?.huddleScope&&saved.huddleScope!=='channel'?'참석자 전용 Slack 대화창을 열었습니다. 헤드폰(허들) 버튼을 눌러 시작해 주세요.':('Slack 허들을 열었습니다.'+(note?' '+note:''))); }
   catch(error){
     if(error.code==='meeting_overlap'){ try{ const l=await api('/meetings/link',{method:'POST',body:JSON.stringify({attendeeIds})}); go(validHuddle(l?.huddleUrl)||HUDDLE_URL); }catch{ go(HUDDLE_URL); } toast('같은 시간에 예약된 미팅이 있어 기록은 추가하지 않고 허들만 열었습니다.'); }
     else { go(HUDDLE_URL); toast('미팅 기록 저장 실패: '+error.message+' (#slack-전체 허들을 열었습니다)',true); }
@@ -944,7 +950,7 @@ $('auth-logout-button').onclick=async()=>{clearAll();await signOut(auth);}; $('l
 function clearSlackThreadState({invalidate=false}={}){state.slack.replies.clear();state.slack.replyTarget=null;if(invalidate)state.slack.requestSeq++;renderReplyTarget();}
 async function selectSlackChannel(channelId){const channel=String(channelId||'');state.slack.channel=channel;$('slack-search35').value='';state.slack.messages=[];state.slack.error='';state.slack.loading=false;resetSlackHistory(channel);clearSlackThreadState({invalidate:true});renderSlack();$('slack-feed').scrollTop=0;if(state.slack.channel)await loadSlackMessages();else await loadSlackFeed();}
 $('refresh-button').onclick=()=>pollAll({manual:true}); $('slack-reload-button').onclick=()=>state.slack.channel?loadSlackMessages({resetHistory:true}):loadSlackFeed();
-$('calendar-source-filter').onchange=renderCalendar; $('calendar-title-filter').oninput=renderCalendar; $('week-prev32').onclick=()=>{state.weekOffset--;renderCalendar()}; $('week-next32').onclick=()=>{state.weekOffset++;renderCalendar()}; $('week-today32').onclick=()=>{state.weekOffset=0;state.selectedDate=ymdKst();renderCalendar()}; $('week-days32').onclick=e=>{const b=e.target.closest('[data-live-date]');if(b){state.selectedDate=b.dataset.liveDate;state.weekOffset=0;renderCalendar()}}; $('slack-search35').oninput=()=>{clearSlackThreadState();renderSlack();}; $('meeting-huddle34').onclick=()=>{};
+$('calendar-source-filter').onchange=renderCalendar; $('calendar-title-filter').oninput=renderCalendar; $('week-prev32').onclick=()=>{state.weekOffset--;renderCalendar()}; $('week-next32').onclick=()=>{state.weekOffset++;renderCalendar()}; $('week-today32').onclick=()=>{state.weekOffset=0;state.selectedDate=ymdKst();renderCalendar()}; $('week-days32').onclick=e=>{const b=e.target.closest('[data-live-date]');if(b){state.selectedDate=b.dataset.liveDate;state.weekOffset=0;renderCalendar()}}; $('slack-search35').oninput=()=>{clearSlackThreadState();renderSlack();}; $('meeting-huddle34').onclick=e=>{const b=e.currentTarget;const m=state.meetings.find(x=>String(x.id)===String(b.dataset.meetingId));if(b.dataset.mode==='end'){e.preventDefault();endMeetingNow(b.dataset.meetingId);return;}const hint=startHint(m);if(hint)toast(hint);};
 $('slack-channel-select').onchange=async e=>{await selectSlackChannel(e.target.value);};
 $('slack-connect-button').onclick=async()=>{ $('slack-connect-button').disabled=true; try{const data=await api('/slack/connect',{method:'POST',body:'{}'}),url=safeUrl(data?.url);if(!url||!/(^|\.)slack\.com$/.test(new URL(url).hostname))throw new Error('유효한 Slack OAuth 주소를 받지 못했습니다.');window.location.assign(url);}catch(error){toast(error.message,true);}finally{$('slack-connect-button').disabled=false;}};
 $('slack-feed').onclick=async e=>{
@@ -966,7 +972,9 @@ $('office-view-button').onclick=()=>state.scene?.setView('office'); $('meeting-v
 $('meeting-new-button').onclick=()=>openMeetingDialog(); $('meeting-close-button').onclick=()=>{$('meeting-dialog').close();state.meetingRequestId=null;state.meetingPayloadKey=null;}; $('meeting-cancel-button').onclick=()=>{state.meetingRequestId=null;state.meetingPayloadKey=null;$('meeting-dialog').close();}; $('meeting-form').onsubmit=e=>{e.preventDefault();saveMeeting();}; $('meeting-delete-button').onclick=()=>deleteMeeting(); $('meeting-link-btn44').onclick=createMeetingLink; $('meeting-link-out44').addEventListener('click',e=>{ if(e.target.closest('[data-slack-reconnect]')) reconnectSlack(); }); $('meeting-reconnect45').addEventListener('click',e=>{ if(e.target.closest('[data-slack-reconnect]')) reconnectSlack(); }); $('meeting-attendees').addEventListener('change',()=>{ if(state.meetingLink){ state.meetingLink=''; state.meetingLinkInfo=null; renderMeetingLink(); } }); $('meeting-now44').onclick=startInstantMeeting; $('meeting-next').onclick=()=>{ if(!$('meeting-dialog').open) openMeetingDialog(); };
 $('meeting-list').onclick=e=>{
   const edit=e.target.closest('[data-edit-meeting]'); if(edit){const m=state.meetings.find(x=>String(x.id)===String(edit.dataset.editMeeting));if(m)openMeetingDialog(m);return;}
+  const endb=e.target.closest('[data-end-meeting]'); if(endb){endMeetingNow(endb.dataset.endMeeting);return;}
   const del=e.target.closest('[data-delete-meeting]'); if(del){deleteMeeting(del.dataset.deleteMeeting);return;}
+  const st=e.target.closest('[data-start-meeting]'); if(st){const hint=startHint(state.meetings.find(x=>String(x.id)===String(st.dataset.startMeeting))); if(hint) toast(hint);}
   
 };
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('subpage').hidden)closeSubpage();});
@@ -1105,7 +1113,7 @@ function syncMeetingScene(){
   if(prev) state.scene.returnSeats();
   if(m){ const go=()=>{ if(state.sceneMeetingKey===key) state.scene.callMeeting(meetingLabel(m),m.attendeeIds||[]); }; if(prev) setTimeout(go,6000); else go(); }
 }
-setInterval(syncMeetingScene,15000);
+setInterval(()=>{ syncMeetingScene(); try{ renderV45Status(); renderMeetings(); }catch{} },15000);
 
 function shortWhen43(v){ const t=Date.parse(v); if(!t) return ''; return new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(t)); }
 
