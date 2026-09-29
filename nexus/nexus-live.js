@@ -182,7 +182,7 @@ function personalTaskCaption(){ return personalTasksMode()==='rules' ? '관리�
 function personalTasks(){
   const pt = state.personalTasks;
   if(!state.user) return [];
-  if(pt && pt.mode==='rules') return (pt.items||[]).map(t=>({ id:String(t.id), ruleId:t.ruleId, title:t.title||'제목 없음', due:t.due||'', status:t.canComplete?'진행 중':'원본에서 처리', source:t.source||'', kind:String(t.kind||''), url:safeUrl(t.url)||ERP_URL, canComplete:!!t.canComplete, version:t.version, activityAt:t.activityAt||'' }));
+  if(pt && pt.mode==='rules') return (pt.items||[]).map(t=>({ id:String(t.id), ruleId:t.ruleId, title:t.title||'제목 없음', summary:String(t.summary||''), postedAt:t.postedAt||'', due:t.due||'', status:t.canComplete?'진행 중':'원본에서 처리', source:t.source||'', kind:String(t.kind||''), url:safeUrl(t.url)||ERP_URL, canComplete:!!t.canComplete, version:t.version, activityAt:t.activityAt||'' }));
   if(pt && pt.mode==='legacy') return legacyPersonalTasks();
   return [];
 }
@@ -209,7 +209,7 @@ function renderPersonal(){
     const tasks=personalTasks();
     const count = pt.mode==='rules' ? (typeof pt.count==='number'?pt.count:tasks.length) : tasks.length;
     $('personal-task-count').textContent=String(count);
-    const rows=tasks.map(t=>`<article class="task-row${t.kind==='slack_activity'?' task-slack41':''}">${t.kind==='slack_activity'?'<span class="task-slack-mark41" aria-label="Slack">#</span>':''}<a href="${escapeHtml(t.url||ERP_URL)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t.title)}</a><div class="task-meta"><span class="task-source">${escapeHtml(t.source)}</span><span>${escapeHtml(t.status)}</span><span>${escapeHtml(t.due?formatDateTime(t.due):'일정 없음')}</span>${t.canComplete?`<button type="button" class="task-ack35" data-id="${escapeHtml(t.id)}" data-version="${escapeHtml(JSON.stringify(t.version===undefined?null:t.version))}">완료 처리</button>`:''}</div></article>`).join('');
+    const rows=tasks.map(t=>{ const slack=t.kind==='slack_activity'; const main=slack&&t.summary?t.summary:t.title; const posted=slack&&t.postedAt?shortWhen43(t.postedAt):''; const replied=slack&&t.activityAt&&t.postedAt&&(Date.parse(t.activityAt)-Date.parse(t.postedAt)>60000)?shortWhen43(t.activityAt):''; const timeMeta=slack?(posted?`<span class="task-time43">${escapeHtml(posted)} 등록</span>`:'')+(replied?`<span class="task-time43">답글 ${escapeHtml(replied)}</span>`:'')+(t.due?`<span>${escapeHtml(formatDateTime(t.due))}</span>`:''):`<span>${escapeHtml(t.status)}</span><span>${escapeHtml(t.due?formatDateTime(t.due):'일정 없음')}</span>`; return `<article class="task-row${slack?' task-slack41':''}">${slack?'<span class="task-slack-mark41" aria-label="Slack">#</span>':''}<a href="${escapeHtml(t.url||ERP_URL)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(t.title)}">${escapeHtml(main)}</a><div class="task-meta"><span class="task-source">${escapeHtml(t.source)}</span>${timeMeta}${t.canComplete?`<button type="button" class="task-ack35" data-id="${escapeHtml(t.id)}" data-version="${escapeHtml(JSON.stringify(t.version===undefined?null:t.version))}">완료 처리</button>`:''}</div></article>`; }).join('');
     const emptyMsg = pt.mode==='rules' ? '현재 적용된 관리자 규칙에서 배정된 미처리 업무가 없습니다.' : '현재 로그인 사용자에게 명시적으로 배정된 미처리 업무가 없습니다.';
     const warn = Array.isArray(pt.warnings)&&pt.warnings.length ? `<ul class="admin-warn-list">${pt.warnings.map(w=>`<li>${escapeHtml(typeof w==='string'?w:JSON.stringify(w))}</li>`).join('')}</ul>` : '';
     $('personal-tasks').innerHTML = (tasks.length?rows:`<div class="personal-empty35"><strong>업무 없음</strong><p>${emptyMsg}</p></div>`) + warn;
@@ -1103,3 +1103,5 @@ function syncMeetingScene(){
   if(m){ const go=()=>{ if(state.sceneMeetingKey===key) state.scene.callMeeting(meetingLabel(m),m.attendeeIds||[]); }; if(prev) setTimeout(go,6000); else go(); }
 }
 setInterval(syncMeetingScene,15000);
+
+function shortWhen43(v){ const t=Date.parse(v); if(!t) return ''; return new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(t)); }
