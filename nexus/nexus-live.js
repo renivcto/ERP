@@ -401,7 +401,7 @@ function meetingHuddle(m){ const c=safeUrl(m?.huddleUrl||m?.huddleURL); return c
 function meetingLabel(m){ const t=String(m?.title||'').trim(); return t&&t!=='회의'?t:'미팅'; }
 function renderMeetings(){
   const me=String(state.user?.uid||'');
-  const list=state.meetings.filter(m=>m?.status!=='canceled').sort((a,b)=>String(a.startAt||'').localeCompare(String(b.startAt||''))); $('meeting-list').innerHTML=state.meetingError?`<div class="empty">${escapeHtml(state.meetingError)}</div>`:list.length?list.map(m=>{
+  const nowMs=Date.now(); const list=state.meetings.filter(m=>m?.status!=='canceled'&&!(Date.parse(m?.endAt)<nowMs)).sort((a,b)=>String(a.startAt||'').localeCompare(String(b.startAt||''))); $('meeting-list').innerHTML=state.meetingError?`<div class="empty">${escapeHtml(state.meetingError)}</div>`:list.length?list.map(m=>{
     const attendeeIds=Array.isArray(m.attendeeIds)?m.attendeeIds:[]; const mine=!m.ownerUid||String(m.ownerUid)===me; const notes=String(m.notes||'').trim();
     return `<article class="meeting-row"><div><strong>${escapeHtml(meetingLabel(m))}</strong><small>${escapeHtml(formatDateTime(m.startAt,m.timezone||'Asia/Seoul'))} · ${attendeeIds.length}명</small>${notes?`<p class="meeting-notes-view44">${escapeHtml(notes)}</p>`:''}</div><div class="meeting-actions"><a class="meeting-start44" href="${escapeHtml(meetingHuddle(m))}" target="_blank" rel="noopener" data-start-meeting="${escapeHtml(m.id)}">미팅 시작</a>${mine?`<button type="button" data-edit-meeting="${escapeHtml(m.id)}">수정</button><button type="button" class="meeting-del44" data-delete-meeting="${escapeHtml(m.id)}">삭제</button>`:''}</div></article>`;
   }).join(''):'<div class="empty">예약된 미팅이 없습니다.</div>';
