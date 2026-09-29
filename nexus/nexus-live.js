@@ -788,7 +788,9 @@ function wireAdminTaskUI(){
   if(tasksEl && !tasksEl.__ackBound){
     tasksEl.__ackBound=true;
     tasksEl.addEventListener('click',async(e)=>{
-      const btn=e.target.closest('.task-ack35'); if(!btn || btn.disabled) return;
+      const btn=e.target.closest('.task-ack35');
+      if(!btn){ const row=e.target.closest('.task-row'); const a=row&&row.querySelector('a[href]'); if(a&&!e.target.closest('a')){ window.open(a.href,'_blank','noopener'); } return; }
+      if(btn.disabled) return;
       const id=btn.dataset.id; let version=null;
       try{ version=JSON.parse(btn.dataset.version); }catch{ version=btn.dataset.version; }
       btn.disabled=true;
