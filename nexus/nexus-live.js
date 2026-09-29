@@ -1137,7 +1137,7 @@ window.NEXUS.openPersonSlack=openPersonSlack;
 state.deskWork={people:{},loaded:false,error:''};
 async function loadDeskWork(){
   if(!state.authorized||!state.status?.identity?.isAdmin){ state.deskWork={people:{},loaded:false,error:''}; return; }
-  try{ const d=await api('/admin/desk-work'); state.deskWork={people:d?.people||{},loaded:true,error:''}; }
+  try{ const d=await api('/admin/task-desk'); state.deskWork={people:d?.people||{},loaded:true,error:''}; }
   catch(error){ state.deskWork={people:state.deskWork?.people||{},loaded:!!state.deskWork?.loaded,error:error.message||'오류'}; }
   if(state.scene) state.scene.updateWork(personWorkCounts());
 }
