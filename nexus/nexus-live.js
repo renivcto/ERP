@@ -91,7 +91,7 @@ function clearAll(){ stopFirestore(); stopPolling(); clearExternal(); state.auth
   state.admin={loading:false,scanning:false,error:'',config:null,allRules:[],view:'list',selectedUid:null,focusToken:0,employeeSeq:0,employee:{uid:null,data:null,loading:false,error:''},gen:{loading:false,error:'',summary:'',questions:[],requestId:null,lastUid:null,lastText:''}};
   if($('admin-tasks-dialog') && $('admin-tasks-dialog').open) $('admin-tasks-dialog').close();
   if($('admin-tasks-btn')) $('admin-tasks-btn').hidden=true;
-  state.sceneMeetingKey=''; for(const k of Object.keys(window.__nexusSlackDm||{})) delete window.__nexusSlackDm[k];
+  state.sceneMeetingKey=''; state.deskWork={people:{},loaded:false,error:''}; try{hideDeskTip48(true);}catch{} for(const k of Object.keys(window.__nexusSlackDm||{})) delete window.__nexusSlackDm[k];
   if($('admin-gen-text')) $('admin-gen-text').value='';
   renderPersonal();
 }
@@ -432,6 +432,7 @@ function personWorkCounts(){
   }
   const staffForName=name=>STAFF.find(s=>s.name===name||(name==='JUYEON LEE'&&s.id==='juyeon'));
   for(const emp of state.admin?.config?.employees||[]){ const p=staffForName(emp.name); if(p&&emp.countUnavailable!==true&&typeof emp.taskCount==='number') counts[p.id]=emp.taskCount; }
+  for(const [id,info] of Object.entries(state.deskWork?.people||{})){ if(id in counts&&typeof info?.count==='number') counts[id]=info.count; }
   if(state.profile?.name){ const p=staffForName(state.profile.name); if(p) counts[p.id]=personalTasks().length; }
   return counts;
 }
@@ -824,7 +825,7 @@ async function loadSlackMessages({resetHistory=false}={}){
 }
 async function pollAll({manual=false}={}){
   if(!state.user||document.hidden||state.polling)return; state.polling=true; if(manual) $('refresh-button').disabled=true;
-  try{ await loadStatus(); await Promise.all([loadTrello(),loadMeetings(),loadSlackChannels({manual}),loadPersonalTasks()]); state.lastPollAt=Date.now(); if(manual) toast('최신 서버 상태를 확인했습니다.'); }
+  try{ await loadStatus(); await Promise.all([loadTrello(),loadMeetings(),loadSlackChannels({manual}),loadPersonalTasks(),loadDeskWork()]); state.lastPollAt=Date.now(); if(manual) toast('최신 서버 상태를 확인했습니다.'); }
   catch(error){ if(manual) toast(error.message,true); }
   finally{ state.polling=false; $('refresh-button').disabled=false; }
 }
@@ -935,7 +936,7 @@ window.addEventListener('nexus-scene-ready',bindOriginalScene,{once:true});if(wi
 function lockApi(message){clearAll();setAuthOverlay('NEXUS 접근 차단',message||'NEXUS 서버 권한을 확인할 수 없습니다.',{logout:true})}
 async function handleActiveUser(user){
   clearExternal();stopFirestore();stopPolling();state.user=user;setAuthOverlay('NEXUS 권한 확인 중','서버의 nexus_access 권한과 활성 임원 계정을 확인하고 있습니다.');
-  try{const status=await api('/status');if(String(status?.identity?.uid||'')!==String(user.uid))throw Object.assign(new Error('서버 사용자와 현재 로그인 계정이 일치하지 않습니다.'),{status:403});state.status=status;state.profile={uid:user.uid,name:status.identity.displayName||user.displayName||'',email:status.identity.email||user.email||'',role:status.identity.isAdmin?'관리자':(status.identity.permission==='read'?'조회 권한':'임원')};state.authorized=true;$('viewer-name').textContent=`(${state.profile.name||state.profile.email})`;$('viewer-role').textContent=state.profile.role;renderViewerFace();$('logout-button').textContent=(state.profile.name||'나').slice(0,1);showApp();subscribeERP();if($('admin-tasks-btn'))$('admin-tasks-btn').hidden=!status.identity.isAdmin;await Promise.all([loadTrello(),loadMeetings(),loadSlackChannels(),loadPersonalTasks()]);state.lastPollAt=Date.now();renderAll();startPolling()}catch(error){clearAll();setAuthOverlay('접근할 수 없습니다',error.message,{logout:true})}
+  try{const status=await api('/status');if(String(status?.identity?.uid||'')!==String(user.uid))throw Object.assign(new Error('서버 사용자와 현재 로그인 계정이 일치하지 않습니다.'),{status:403});state.status=status;state.profile={uid:user.uid,name:status.identity.displayName||user.displayName||'',email:status.identity.email||user.email||'',role:status.identity.isAdmin?'관리자':(status.identity.permission==='read'?'조회 권한':'임원')};state.authorized=true;$('viewer-name').textContent=`(${state.profile.name||state.profile.email})`;$('viewer-role').textContent=state.profile.role;renderViewerFace();$('logout-button').textContent=(state.profile.name||'나').slice(0,1);showApp();subscribeERP();if($('admin-tasks-btn'))$('admin-tasks-btn').hidden=!status.identity.isAdmin;await Promise.all([loadTrello(),loadMeetings(),loadSlackChannels(),loadPersonalTasks(),loadDeskWork()]);state.lastPollAt=Date.now();renderAll();startPolling()}catch(error){clearAll();setAuthOverlay('접근할 수 없습니다',error.message,{logout:true})}
 }
 
 $('login-button').onclick=async()=>{ $('login-button').disabled=true; try{await signInWithPopup(auth,provider);}catch(error){if(error.code!=='auth/popup-closed-by-user')setAuthOverlay('로그인 오류',error.message,{login:true});}finally{$('login-button').disabled=false;}};
@@ -1131,3 +1132,63 @@ async function openPersonSlack(id){
   }
 }
 window.NEXUS.openPersonSlack=openPersonSlack;
+
+/* live48: desk paper stacks follow each person's task count; hover shows the list, click opens it in the drawer */
+state.deskWork={people:{},loaded:false,error:''};
+async function loadDeskWork(){
+  if(!state.authorized||!state.status?.identity?.isAdmin){ state.deskWork={people:{},loaded:false,error:''}; return; }
+  try{ const d=await api('/admin/desk-work'); state.deskWork={people:d?.people||{},loaded:true,error:''}; }
+  catch(error){ state.deskWork={people:state.deskWork?.people||{},loaded:!!state.deskWork?.loaded,error:error.message||'오류'}; }
+  if(state.scene) state.scene.updateWork(personWorkCounts());
+}
+function viewerStaffId(){ return typeof viewerPersonId==='function'?viewerPersonId():null; }
+function deskItemsFor(id){
+  if(id&&id===viewerStaffId()) return personalTasks().map(t=>({kind:t.kind,title:t.title,summary:t.summary,source:t.source,url:t.url,due:t.due,postedAt:t.postedAt}));
+  const p=state.deskWork?.people?.[id]; return Array.isArray(p?.items)?p.items:[];
+}
+function deskCountFor(id){
+  if(id&&id===viewerStaffId()) return personalTasks().length;
+  const p=state.deskWork?.people?.[id]; return typeof p?.count==='number'?p.count:null;
+}
+function deskKind48(k){ return k==='slack_activity'?{cls:'slack',label:'Slack'}:k==='trello_new_card'?{cls:'trello',label:'Trello'}:k==='erp_approval'?{cls:'erp',label:'결재'}:k==='erp_expense'?{cls:'erp',label:'지출'}:{cls:'erp',label:'업무'}; }
+function deskRow48(t){
+  const k=deskKind48(t.kind); const main=(t.kind==='slack_activity'&&t.summary)?t.summary:t.title;
+  const sub=[t.source, t.kind==='trello_new_card'?t.summary:'', t.postedAt?shortWhen43(t.postedAt)+' 등록':'', t.due?shortWhen43(t.due).replace(/ \d{2}:\d{2}$/,'')+' 마감':''].filter(Boolean).join(' · ');
+  return '<li class="desk-row48 '+k.cls+'"><a href="'+escapeHtml(t.url||ERP_URL)+'" target="_blank" rel="noopener noreferrer"><b>'+escapeHtml(k.label)+'</b><span>'+escapeHtml(main||'제목 없음')+'</span><small>'+escapeHtml(sub)+'</small></a></li>';
+}
+function deskGroups48(items){
+  const order=[['erp_approval','미결재'],['erp_expense','지출 결의'],['slack_activity','Slack'],['trello_new_card','Trello'],['manual','업무']];
+  return order.map(([k,label])=>{ const list=items.filter(t=>(t.kind||'manual')===k||(k==='manual'&&!['erp_approval','erp_expense','slack_activity','trello_new_card'].includes(t.kind))); return list.length?'<h5>'+escapeHtml(label)+' <em>'+list.length+'</em></h5><ul>'+list.map(deskRow48).join('')+'</ul>':''; }).join('');
+}
+let deskTipHideTimer=null;
+function deskTipEl(){
+  let el=document.getElementById('desk-tip48');
+  if(!el){ el=document.createElement('div'); el.id='desk-tip48'; el.className='desk-tip48'; el.setAttribute('role','tooltip'); document.body.appendChild(el);
+    el.addEventListener('mouseenter',()=>{ clearTimeout(deskTipHideTimer); });
+    el.addEventListener('mouseleave',()=>hideDeskTip48()); }
+  return el;
+}
+function showDeskTip48(kind,anchor,id){
+  if(kind!=='work'||!anchor) return; clearTimeout(deskTipHideTimer);
+  const person=STAFF.find(p=>p.id===id); if(!person) return;
+  const items=deskItemsFor(id); const count=deskCountFor(id);
+  const el=deskTipEl();
+  const note=!items.length?(state.status?.identity?.isAdmin?'표시할 업무가 없습니다.':'관리자만 다른 사람의 업무를 볼 수 있습니다.'):'';
+  el.innerHTML='<header><strong>'+escapeHtml(person.name)+'</strong><span>업무 '+(count??items.length)+'건</span></header>'+(note?'<p class="desk-empty48">'+escapeHtml(note)+'</p>':'<div class="desk-body48">'+deskGroups48(items)+'</div>');
+  el.style.display='block';
+  const r=anchor.getBoundingClientRect(), w=el.offsetWidth, h=el.offsetHeight;
+  let x=r.left+r.width/2-w/2, y=r.top-h-10; if(y<8) y=r.bottom+10;
+  x=Math.max(8,Math.min(window.innerWidth-w-8,x)); y=Math.max(8,Math.min(window.innerHeight-h-8,y));
+  el.style.left=x+'px'; el.style.top=y+'px';
+}
+function hideDeskTip48(immediate){ clearTimeout(deskTipHideTimer); const go=()=>{ const el=document.getElementById('desk-tip48'); if(el) el.style.display='none'; }; if(immediate===true) go(); else deskTipHideTimer=setTimeout(go,220); }
+function openDeskDrawer48(id){
+  const person=STAFF.find(p=>p.id===id); if(!person) return; const items=deskItemsFor(id);
+  hideDeskTip48(true);
+  $('subpage-title').textContent=person.name+' 업무'; $('drawer-path-live').textContent='WORKSPACE / 업무';
+  $('subpage-content').innerHTML='<div class="desk-drawer48">'+(items.length?deskGroups48(items):'<p class="desk-empty48">표시할 업무가 없습니다.</p>')+'</div>';
+  $('subpage').hidden=false; $('subpage').classList.add('open'); $('app').classList.add('subpage-open'); $('subpage').focus();
+}
+window.NEXUS.showHover31=showDeskTip48;
+window.NEXUS.hideHover31=hideDeskTip48;
+window.NEXUS.openDeskWork=openDeskDrawer48;
