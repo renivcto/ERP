@@ -863,6 +863,12 @@ function openMeetingDialog(meeting=null){
   $('meeting-attendees').innerHTML=people.map(p=>`<label class="att-chip45"><input type="checkbox" value="${escapeHtml(p.id)}" ${selected.has(p.id)?'checked':''}><span>${escapeHtml(p.name)}</span></label>`).join('');
   state.meetingLink=meeting?meetingHuddle(meeting):''; state.meetingLinkInfo=meeting?{scope:meeting.huddleScope||(state.meetingLink===HUDDLE_URL?'channel':'group'),unresolved:[],reason:''}:null; renderMeetingLink();
   $('meeting-delete-button').hidden=!meeting; $('meeting-error').textContent=''; state.meetingRequestId=newRequestId(); state.meetingPayloadKey=null; if(!$('meeting-dialog').open) $('meeting-dialog').showModal();
+  checkSlackHuddleScope();
+}
+async function checkSlackHuddleScope(){
+  const bar=$('meeting-reconnect45'); if(!bar) return; if(state.slackScopeOk){ bar.hidden=true; return; }
+  const me=viewerPersonId(); if(!me) return;
+  try{ const d=await api('/meetings/link',{method:'POST',body:JSON.stringify({attendeeIds:[me]})}); const need=d?.reason==='slack_scope_upgrade'||d?.reason==='slack_not_connected'; bar.hidden=!need; if(!need) state.slackScopeOk=true; }catch{ bar.hidden=true; }
 }
 function renderMeetingLink(){
   const out=$('meeting-link-out44'), btn=$('meeting-link-btn44'); if(!out||!btn) return; const url=state.meetingLink, info=state.meetingLinkInfo||null;
@@ -953,7 +959,7 @@ $('subpage-content').onclick=e=>{const member=e.target.closest('[data-person]');
 $('home-button').onclick=()=>{closeSubpage();$('erp-shell37').hidden=true;$('erp-frame37').removeAttribute('src');state.scene?.returnSeats();}; $('subpage-close').onclick=closeSubpage;
 $('nav-erp37').onclick=()=>{$('erp-frame37').src=ERP_URL;$('erp-shell37').hidden=false;}; bindFeedBoard(); pinFinance42(); $('erp-home37').onclick=()=>{$('erp-shell37').hidden=true;$('erp-frame37').removeAttribute('src');};
 $('office-view-button').onclick=()=>state.scene?.setView('office'); $('meeting-view-button').onclick=()=>state.scene?.setView('meeting'); $('return-seats-button').onclick=()=>state.scene?.returnSeats();
-$('meeting-new-button').onclick=()=>openMeetingDialog(); $('meeting-close-button').onclick=()=>{$('meeting-dialog').close();state.meetingRequestId=null;state.meetingPayloadKey=null;}; $('meeting-cancel-button').onclick=()=>{state.meetingRequestId=null;state.meetingPayloadKey=null;$('meeting-dialog').close();}; $('meeting-form').onsubmit=e=>{e.preventDefault();saveMeeting();}; $('meeting-delete-button').onclick=()=>deleteMeeting(); $('meeting-link-btn44').onclick=createMeetingLink; $('meeting-link-out44').addEventListener('click',e=>{ if(e.target.closest('[data-slack-reconnect]')) reconnectSlack(); }); $('meeting-attendees').addEventListener('change',()=>{ if(state.meetingLink){ state.meetingLink=''; state.meetingLinkInfo=null; renderMeetingLink(); } }); $('meeting-now44').onclick=startInstantMeeting; $('meeting-next').onclick=()=>{ if(!$('meeting-dialog').open) openMeetingDialog(); };
+$('meeting-new-button').onclick=()=>openMeetingDialog(); $('meeting-close-button').onclick=()=>{$('meeting-dialog').close();state.meetingRequestId=null;state.meetingPayloadKey=null;}; $('meeting-cancel-button').onclick=()=>{state.meetingRequestId=null;state.meetingPayloadKey=null;$('meeting-dialog').close();}; $('meeting-form').onsubmit=e=>{e.preventDefault();saveMeeting();}; $('meeting-delete-button').onclick=()=>deleteMeeting(); $('meeting-link-btn44').onclick=createMeetingLink; $('meeting-link-out44').addEventListener('click',e=>{ if(e.target.closest('[data-slack-reconnect]')) reconnectSlack(); }); $('meeting-reconnect45').addEventListener('click',e=>{ if(e.target.closest('[data-slack-reconnect]')) reconnectSlack(); }); $('meeting-attendees').addEventListener('change',()=>{ if(state.meetingLink){ state.meetingLink=''; state.meetingLinkInfo=null; renderMeetingLink(); } }); $('meeting-now44').onclick=startInstantMeeting; $('meeting-next').onclick=()=>{ if(!$('meeting-dialog').open) openMeetingDialog(); };
 $('meeting-list').onclick=e=>{
   const edit=e.target.closest('[data-edit-meeting]'); if(edit){const m=state.meetings.find(x=>String(x.id)===String(edit.dataset.editMeeting));if(m)openMeetingDialog(m);return;}
   const del=e.target.closest('[data-delete-meeting]'); if(del){deleteMeeting(del.dataset.deleteMeeting);return;}
