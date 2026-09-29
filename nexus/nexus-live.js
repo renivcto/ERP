@@ -91,7 +91,7 @@ function clearAll(){ stopFirestore(); stopPolling(); clearExternal(); state.auth
   state.admin={loading:false,scanning:false,error:'',config:null,allRules:[],view:'list',selectedUid:null,focusToken:0,employeeSeq:0,employee:{uid:null,data:null,loading:false,error:''},gen:{loading:false,error:'',summary:'',questions:[],requestId:null,lastUid:null,lastText:''}};
   if($('admin-tasks-dialog') && $('admin-tasks-dialog').open) $('admin-tasks-dialog').close();
   if($('admin-tasks-btn')) $('admin-tasks-btn').hidden=true;
-  state.sceneMeetingKey='';
+  state.sceneMeetingKey=''; for(const k of Object.keys(window.__nexusSlackDm||{})) delete window.__nexusSlackDm[k];
   if($('admin-gen-text')) $('admin-gen-text').value='';
   renderPersonal();
 }
@@ -1112,3 +1112,22 @@ function trelloRow44(t){
   const card=String(t.summary||'').trim(); const due=t.due?shortWhen43(t.due).replace(/ \d{2}:\d{2}$/,''):'';
   return '<article class="task-row task-trello44"><span class="task-trello-mark44" aria-label="Trello"><i></i><i></i></span><a href="'+escapeHtml(t.url||'https://trello.com/')+'" target="_blank" rel="noopener noreferrer" title="'+escapeHtml(card?card+' · '+t.title:t.title)+'">'+escapeHtml(t.title)+'</a><div class="task-meta"><span class="task-source">'+escapeHtml(t.source||'Trello')+'</span>'+(card?'<span class="task-card44">'+escapeHtml(card)+'</span>':'')+(due?'<span class="task-due44">'+escapeHtml(due)+' 마감</span>':'')+(t.canComplete?'<button type="button" class="task-ack35" data-id="'+escapeHtml(t.id)+'" data-version="'+escapeHtml(JSON.stringify(t.version===undefined?null:t.version))+'">완료 처리</button>':'')+'</div></article>';
 }
+
+/* live46: clicking an office avatar opens that person's Slack DM (AI staff: their Slack app DM) */
+var SLACK_DM_CACHE=window.__nexusSlackDm||(window.__nexusSlackDm={});
+async function openPersonSlack(id){
+  const person=STAFF.find(p=>p.id===id); if(!person||!state.authorized) return;
+  const cached=SLACK_DM_CACHE[id]; if(cached){ window.open(cached,'_blank','noopener'); return; }
+  const win=window.open('about:blank','_blank');
+  if(win){ try{ win.document.title='Slack 대화 여는 중'; win.document.body.innerHTML='<p style="font:16px sans-serif;padding:24px">'+escapeHtml(person.name)+' Slack 대화창을 여는 중입니다…</p>'; }catch{} }
+  try{
+    const d=await api('/slack/dm',{method:'POST',body:JSON.stringify({personId:id})});
+    const url=safeUrl(d?.url); if(!/^https:\/\/reniv\.slack\.com\/archives\/[CDG][A-Z0-9]{8,}$/.test(url)) throw new Error('Slack 대화 주소를 확인하지 못했습니다.');
+    SLACK_DM_CACHE[id]=url; if(win&&!win.closed) win.location.href=url; else window.open(url,'_blank','noopener');
+    toast(person.name+(d.self?' (나에게 보내는 메모)':'')+' Slack 대화창을 열었습니다.');
+  }catch(error){
+    if(win&&!win.closed) win.close();
+    toast(error.code==='slack_scope_upgrade'?'Slack을 한 번 다시 연결해 주세요. (미팅 예약 창의 Slack 다시 연결)':error.message,true);
+  }
+}
+window.NEXUS.openPersonSlack=openPersonSlack;
