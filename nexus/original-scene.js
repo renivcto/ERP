@@ -156,7 +156,7 @@ let viewLerp=true;const VIEW_THETA={office:0,ceo:0,room:0};
 function setView(v){if(!VIEWS[v])return;view=v;window.NEXUS.hideHover31?.(true);document.querySelectorAll('.erp-led30,.share-display30').forEach(el=>el.hidden=v!=='office');viewLerp=true;document.querySelectorAll('[data-view]').forEach(b=>{b.classList.toggle('on',b.dataset.view===v);b.setAttribute('aria-pressed',String(b.dataset.view===v))});updateInsetLabel()}
 window.NEXUS.setView=setView;window.NEXUS.currentView=()=>view;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>setView(b.dataset.view));
 const insetEl=document.getElementById('cam-inset'),insetTag=document.getElementById('cam-tag');const insetEl2=document.getElementById('cam-inset2'),insetTag2=document.getElementById('cam-tag2');
-function updateInsetLabel(){if(!insetTag)return;const a=view==='ceo',b=view==='room';insetTag.textContent=a?'● CAM · 오피스':'● CAM · 대표이사실';insetEl.setAttribute('aria-label',a?'오피스 카메라. 클릭하면 오피스 보기':'대표이사실 카메라. 클릭하면 대표이사실 보기');if(insetTag2){insetTag2.textContent=b?'● CAM · 오피스':'● CAM · 회의실';insetEl2.setAttribute('aria-label',b?'오피스 카메라. 클릭하면 오피스 보기':'회의실 카메라. 클릭하면 회의실 보기')}}
+function updateInsetLabel(){if(!insetTag)return;const a=view==='ceo',b=view==='room';insetTag.textContent=a?'● CAM · 오피스':'● CAM · 대표이사실';insetEl.setAttribute('aria-label',a?'오피스 카메라. 클릭하면 오피스 보기':'대표이사실 카메라. 클릭하면 대표이사실 보기');if(insetTag2){insetTag2.textContent=b?'● CAM · 오피스':'● CAM · 미팅룸';insetEl2.setAttribute('aria-label',b?'오피스 카메라. 클릭하면 오피스 보기':'미팅룸 카메라. 클릭하면 미팅룸 보기')}}
 if(insetEl){insetEl.onclick=()=>setView(view==='ceo'?'office':'ceo');if(insetEl2)insetEl2.onclick=()=>setView(view==='room'?'office':'room');updateInsetLabel()}
 const roomCam=new THREE.PerspectiveCamera(44,1.6,.1,120);roomCam.position.set(RX+4,6.6,8.4);roomCam.lookAt(RX+4,.9,-.5);
 const officeCam=new THREE.PerspectiveCamera(44,1.6,.1,120);officeCam.position.set(0,11,13);officeCam.lookAt(0,.8,-.6);const ceoCam=new THREE.PerspectiveCamera(44,1.6,.1,120);ceoCam.position.set(CX+5.5,4.6,6.4);ceoCam.lookAt(CX+.3,1.2,-1.2);
@@ -257,7 +257,7 @@ let meetingTitle=null;
 function setActivity(a,text){a.activity=text;window.NEXUS.renderTasks?.()}
 function turnTo(g,target,dt){let diff=target-g.rotation.y;diff=((diff+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;g.rotation.y+=diff*Math.min(1,dt*9)}
 const toVec=p=>{const v=new THREE.Vector3(p[0],.2,p[1]);v.jump=p[2]==='J';return v};
-window.NEXUS.callMeeting=(title='회의',participantIds=null)=>{const selected=new Set(participantIds??avatars.map(a=>a.id));if(!selected.size)return;meetingTitle=title;avatars.forEach(a=>{if(!selected.has(a.id))return;const seat=ROOM_SEATS[a.id];a.route=[...(a.suite?[[a.home.x,4.3],[CX+7.5,4.3,'J']]:[[a.home.x,6.6],[19,6.6,'J']]),[RX-2.5,5.5],...INNER[a.id],[seat[0],seat[1]]].map(toVec);a.routeIndex=0;a.state='go';a.seatRot=seat[2];setActivity(a,title+' 참석 이동 중')})};
+window.NEXUS.callMeeting=(title='미팅',participantIds=null)=>{const selected=new Set(participantIds??avatars.map(a=>a.id));if(!selected.size)return;meetingTitle=title;avatars.forEach(a=>{if(!selected.has(a.id))return;const seat=ROOM_SEATS[a.id];a.route=[...(a.suite?[[a.home.x,4.3],[CX+7.5,4.3,'J']]:[[a.home.x,6.6],[19,6.6,'J']]),[RX-2.5,5.5],...INNER[a.id],[seat[0],seat[1]]].map(toVec);a.routeIndex=0;a.state='go';a.seatRot=seat[2];setActivity(a,title+' 참석 이동 중')})};
 window.NEXUS.endMeeting=()=>{meetingTitle=null;avatars.forEach(a=>{if(a.state==='desk')return;a.route=[...INNER[a.id].slice().reverse(),[RX-2.5,5.5,'J'],...(a.suite?[[CX+7.5,4.3],[a.home.x,4.3]]:[[19,6.6],[a.home.x,6.6]])].map(toVec).concat([a.home.clone()]);a.routeIndex=0;a.state='return';setActivity(a,'자리로 복귀 중')})};
 window.NEXUS.meetingActive=()=>meetingTitle;
 function pose(a,seated,walkPhase){const hip=seated?-1.45:0,knee=seated?1.45:0;a.legs.forEach((l,i)=>{l.rotation.x=seated?hip:(walkPhase==null?0:(i?-1:1)*Math.sin(walkPhase)*.6)});a.knees.forEach((k,i)=>{k.rotation.x=seated?knee:(walkPhase==null?0:Math.max(0,(i?-1:1)*Math.sin(walkPhase-1.2))*.9)})}
@@ -281,7 +281,7 @@ function animateAvatars(t,dt,paused){
    if(!paused){
     if(dist>1e-3){const step=Math.min(dist,4.8*dt),k=step/dist;g.position.x+=dx*k;g.position.z+=dz*k;turnTo(g,Math.atan2(dx,dz),dt*1.6)}
     if(dist<=.06){const cur=a.route[a.routeIndex];a.routeIndex++;if(cur.jump&&a.route[a.routeIndex]){g.position.x=a.route[a.routeIndex].x;g.position.z=a.route[a.routeIndex].z;a.routeIndex++}
-     if(a.routeIndex>=a.route.length){if(a.state==='go'){a.state='meeting';setActivity(a,(meetingTitle||'회의')+' 참석 중');a.faceTarget=a.seatRot}else{a.state='desk';g.position.copy(a.home);setActivity(a,null)}}}
+     if(a.routeIndex>=a.route.length){if(a.state==='go'){a.state='meeting';setActivity(a,(meetingTitle||'미팅')+' 참석 중');a.faceTarget=a.seatRot}else{a.state='desk';g.position.copy(a.home);setActivity(a,null)}}}
     a.walk=(a.walk||0)+dt*17;
    }
    const w=a.walk||0;pose(a,false,w);const s=Math.sin(w);setArm(a,0,-s*.45,-.04,-.3);setArm(a,1,s*.45,.04,-.3);

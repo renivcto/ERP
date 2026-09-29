@@ -397,11 +397,14 @@ function renderSlack(){
 function renderReplyTarget(){ const target=state.slack.replyTarget,el=$('reply-target'); el.hidden=!target; if(target) el.innerHTML=`<span>#${escapeHtml(target.channelName||target.channelId)} · ${escapeHtml(target.name)} 메시지에 답글</span><button type="button" data-clear-reply aria-label="답글 취소">×</button>`; }
 
 function normalizeMeetings(data){ state.meetings=Array.isArray(data?.items)?data.items:(Array.isArray(data?.meetings)?data.meetings:[]); state.meetingError=''; renderMeetings(); renderV45Status(); }
+function meetingHuddle(m){ const c=safeUrl(m?.huddleUrl||m?.huddleURL); return c===HUDDLE_URL?c:HUDDLE_URL; }
+function meetingLabel(m){ const t=String(m?.title||'').trim(); return t&&t!=='회의'?t:'미팅'; }
 function renderMeetings(){
+  const me=String(state.user?.uid||'');
   const list=state.meetings.filter(m=>m?.status!=='canceled').sort((a,b)=>String(a.startAt||'').localeCompare(String(b.startAt||''))); $('meeting-list').innerHTML=state.meetingError?`<div class="empty">${escapeHtml(state.meetingError)}</div>`:list.length?list.map(m=>{
-    const candidate=safeUrl(m.huddleUrl||m.huddleURL); const huddle=candidate===HUDDLE_URL?candidate:HUDDLE_URL; const attendeeIds=Array.isArray(m.attendeeIds)?m.attendeeIds:[];
-    return `<article class="meeting-row"><div><strong>${escapeHtml(m.title||'회의')}</strong><small>${escapeHtml(formatDateTime(m.startAt,m.timezone||'Asia/Seoul'))} · ${attendeeIds.length}명 · ${escapeHtml(m.timezone||'Asia/Seoul')}</small></div><div class="meeting-actions">${huddle?`<a href="${escapeHtml(huddle)}" target="_blank" rel="noopener" data-start-meeting="${escapeHtml(m.id)}">회의 시작</a>`:'<span class="muted">허들 준비 중</span>'}<button type="button" data-edit-meeting="${escapeHtml(m.id)}">수정</button></div></article>`;
-  }).join(''):'<div class="empty">예약된 회의가 없습니다.</div>';
+    const attendeeIds=Array.isArray(m.attendeeIds)?m.attendeeIds:[]; const mine=!m.ownerUid||String(m.ownerUid)===me; const notes=String(m.notes||'').trim();
+    return `<article class="meeting-row"><div><strong>${escapeHtml(meetingLabel(m))}</strong><small>${escapeHtml(formatDateTime(m.startAt,m.timezone||'Asia/Seoul'))} · ${attendeeIds.length}명</small>${notes?`<p class="meeting-notes-view44">${escapeHtml(notes)}</p>`:''}</div><div class="meeting-actions"><a class="meeting-start44" href="${escapeHtml(meetingHuddle(m))}" target="_blank" rel="noopener" data-start-meeting="${escapeHtml(m.id)}">미팅 시작</a>${mine?`<button type="button" data-edit-meeting="${escapeHtml(m.id)}">수정</button><button type="button" class="meeting-del44" data-delete-meeting="${escapeHtml(m.id)}">삭제</button>`:''}</div></article>`;
+  }).join(''):'<div class="empty">예약된 미팅이 없습니다.</div>';
 }
 function renderConnectionState(){
   const status=state.status||{}; const connected={erp:!state.erp.error,trello:flag(status,['trelloConnected','trello.connected','flags.trelloConnected','connections.trello.connected','integrations.trello.available'],!!state.trello.fetchedAt),slack:flag(status,['slackConnected','slack.connected','flags.slackConnected','connections.slack.connected','integrations.slack.connected']),meetings:flag(status,['meetingsReady','meetings.ready','flags.meetingsReady'],true)};
@@ -414,7 +417,7 @@ function renderV45Status(){
   renderFeedBoard(); renderSalesKpi();
   $('calendar-source32').textContent=trelloOn?'Trello + ERP':'ERP';$('company-source37').textContent=state.lastPollAt?'라이브 연결':'연결 대기';$('slack-scope35').textContent=slackOn?'내 참여 채널 · 최신 대화순':'OAuth 연결 필요';
   $('slack-result35').textContent=state.slack.loading?'불러오는 중':state.slack.error||(!state.slack.channel?(()=>{const total=state.slack.channels.length,filtered=filteredOverviewChannels().length;return overviewSearchQuery()?`${filtered}개 채널 (전체 ${total}개)`:`${total}개 채널`;})():(state.slack.partial?`일부 ${state.slack.messages.length}건`:state.slack.messages.length+'건'));
-  const next=state.meetings.filter(m=>m?.status!=='canceled'&&new Date(m.endAt)>new Date()).sort((a,b)=>String(a.startAt).localeCompare(String(b.startAt)))[0];$('meeting-next').textContent=next?'예정 · '+formatDateTime(next.startAt,next.timezone||'Asia/Seoul')+' · '+(next.title||'회의'):'예정된 회의 없음';const candidate=safeUrl(next?.huddleUrl||next?.huddleURL);const h=next?(candidate===HUDDLE_URL?candidate:HUDDLE_URL):'';$('meeting-huddle34').hidden=!h;if(h){$('meeting-huddle34').href=h;$('meeting-huddle34').dataset.meetingId=next.id}else{$('meeting-huddle34').removeAttribute('href');delete $('meeting-huddle34').dataset.meetingId}
+  const next=state.meetings.filter(m=>m?.status!=='canceled'&&new Date(m.endAt)>new Date()).sort((a,b)=>String(a.startAt).localeCompare(String(b.startAt)))[0];$('meeting-next').textContent=next?((new Date(next.startAt)<=new Date()?'미팅 중 · ':'')+formatDateTime(next.startAt,next.timezone||'Asia/Seoul')):'예정된 미팅 없음';const candidate=safeUrl(next?.huddleUrl||next?.huddleURL);const h=next?(candidate===HUDDLE_URL?candidate:HUDDLE_URL):'';$('meeting-huddle34').hidden=!h;if(h){$('meeting-huddle34').href=h;$('meeting-huddle34').dataset.meetingId=next.id}else{$('meeting-huddle34').removeAttribute('href');delete $('meeting-huddle34').dataset.meetingId}
 }
 function personWorkCounts(){
   const counts=Object.fromEntries(STAFF.map(p=>[p.id,0]));
@@ -830,7 +833,7 @@ function showSubpage(kind){
   }
   if(kind==='team') html=`<span class="demo">확인된 조직 구성 · 실제 접속 상태 아님</span><div class="team-pairs44"><div class="team-columns44"><h3>사람</h3><h3>AI</h3></div>${STAFF_PAIRS.map(([human,ai])=>`<div class="team-pair44">${teamCard(human)}${ai?teamCard(ai):'<div class="team-empty44" aria-label="AI 미배치"></div>'}</div>`).join('')}</div><p>현재 접속 상태나 업무 배정은 실제 데이터가 있을 때만 별도로 표시합니다.</p>`;
   if(kind==='connections'){
-    const c=renderConnectionState(); html=`<div class="notice-box">ERP·Trello는 읽기 전용입니다. 회의는 서버에 저장되며, Slack 메시지는 사용자가 전송 버튼을 누른 경우에만 보냅니다. Firebase ID 토큰은 메모리에서 Authorization 헤더에만 사용하며 저장하거나 로그로 남기지 않습니다.</div><div class="connection-list">${connectionCard('ERP 실시간',c.erp,state.erp.error||'활성 계정의 Firestore 읽기 권한 사용')}${connectionCard('Trello',c.trello,state.trello.error||`${state.trello.items.length}개 카드 수신`)}${connectionCard('Slack',c.slack,state.slack.error||`${state.slack.channels.length}개 참여 채널`)}${connectionCard('회의 저장',c.meetings,state.meetingError||`${state.meetings.filter(meeting=>meeting.status!=='canceled').length}개 예약`)}</div>`;
+    const c=renderConnectionState(); html=`<div class="notice-box">ERP·Trello는 읽기 전용입니다. 미팅은 서버에 저장되며, Slack 메시지는 사용자가 전송 버튼을 누른 경우에만 보냅니다. Firebase ID 토큰은 메모리에서 Authorization 헤더에만 사용하며 저장하거나 로그로 남기지 않습니다.</div><div class="connection-list">${connectionCard('ERP 실시간',c.erp,state.erp.error||'활성 계정의 Firestore 읽기 권한 사용')}${connectionCard('Trello',c.trello,state.trello.error||`${state.trello.items.length}개 카드 수신`)}${connectionCard('Slack',c.slack,state.slack.error||`${state.slack.channels.length}개 참여 채널`)}${connectionCard('미팅 저장',c.meetings,state.meetingError||`${state.meetings.filter(meeting=>meeting.status!=='canceled').length}개 예약`)}</div>`;
   }
   $('subpage-content').innerHTML=html; $('subpage').hidden=false; $('subpage').classList.add('open'); $('app').classList.add('subpage-open'); document.querySelectorAll('.navicon').forEach(b=>b.classList.toggle('active',b.dataset.panel===kind)); $('subpage').focus();
 }
@@ -847,23 +850,56 @@ function zonedIso(date,time,timezone){
 function defaultMeetingDate(){ const d=new Date(Date.now()+15*60000); d.setMinutes(Math.ceil(d.getMinutes()/15)*15,0,0); return d; }
 function openMeetingDialog(meeting=null){
   const d=meeting?new Date(meeting.startAt):defaultMeetingDate(),tz=meeting?.timezone||'Asia/Seoul';
-  $('meeting-dialog-title').textContent=meeting?'회의 수정':'회의 예약'; $('meeting-id').value=meeting?.id||''; $('meeting-revision').value=meeting?.revision??''; $('meeting-title').value=meeting?.title||'';
+  $('meeting-dialog-title').textContent=meeting?'미팅 수정':'미팅 예약'; $('meeting-id').value=meeting?.id||''; $('meeting-revision').value=meeting?.revision??''; $('meeting-title').value=meeting?.title||'';
+  $('meeting-notes44').value=meeting?.notes||'';
   $('meeting-date').value=toYmd(d,tz); $('meeting-time').value=new Intl.DateTimeFormat('en-GB',{timeZone:tz,hour:'2-digit',minute:'2-digit',hour12:false}).format(d); $('meeting-timezone').value=tz;
   const duration=meeting?.startAt&&meeting?.endAt?Math.max(15,Math.round((new Date(meeting.endAt)-new Date(meeting.startAt))/60000)):30; $('meeting-duration').value=String([15,30,60,90].includes(duration)?duration:30);
-  const selected=new Set(meeting?.attendeeIds||STAFF.map(p=>p.id)); $('meeting-attendees').innerHTML=STAFF.map(p=>`<label><input type="checkbox" value="${escapeHtml(p.id)}" ${selected.has(p.id)?'checked':''}><span>${escapeHtml(p.name)}</span></label>`).join('');
-  $('meeting-delete-button').hidden=!meeting; $('meeting-error').textContent=''; state.meetingRequestId=newRequestId(); state.meetingPayloadKey=null; $('meeting-dialog').showModal();
+  const people=STAFF.filter(p=>p.kind==='사람'); const me=viewerPersonId();
+  const selected=new Set(meeting?(meeting.attendeeIds||[]):(me?[me]:[]));
+  $('meeting-attendees').innerHTML=people.map(p=>`<label><input type="checkbox" value="${escapeHtml(p.id)}" ${selected.has(p.id)?'checked':''}><span>${escapeHtml(p.name)}</span></label>`).join('');
+  state.meetingLink=meeting?meetingHuddle(meeting):''; renderMeetingLink();
+  $('meeting-delete-button').hidden=!meeting; $('meeting-error').textContent=''; state.meetingRequestId=newRequestId(); state.meetingPayloadKey=null; if(!$('meeting-dialog').open) $('meeting-dialog').showModal();
+}
+function renderMeetingLink(){
+  const out=$('meeting-link-out44'), btn=$('meeting-link-btn44'); if(!out||!btn) return; const url=state.meetingLink;
+  if(url){ out.innerHTML='<a href="'+escapeHtml(url)+'" target="_blank" rel="noopener">Slack 허들 · #slack-전체</a> <small>저장하면 이 미팅에 함께 저장됩니다</small>'; btn.textContent='링크 생성됨'; btn.classList.add('done44'); }
+  else { out.textContent='링크를 만들면 이 미팅에 Slack 허들 링크가 저장됩니다.'; btn.textContent='미팅 링크 생성'; btn.classList.remove('done44'); }
+}
+async function createMeetingLink(){
+  const btn=$('meeting-link-btn44'); btn.disabled=true; $('meeting-link-out44').textContent='Slack 권한을 확인하고 있습니다.';
+  try{ const data=await api('/meetings/link',{method:'POST',body:'{}'}); const url=safeUrl(data?.huddleUrl); if(url!==HUDDLE_URL) throw new Error('허들 링크를 확인하지 못했습니다.'); state.meetingLink=url; renderMeetingLink(); }
+  catch(error){ state.meetingLink=''; renderMeetingLink(); $('meeting-link-out44').textContent='링크 생성 실패: '+error.message; }
+  finally{ btn.disabled=false; }
+}
+function meetingTitleFromNotes(notes){ const line=String(notes||'').split('\n').map(s=>s.trim()).find(Boolean)||''; return line?(line.length>40?line.slice(0,40)+'…':line):'미팅'; }
+async function startInstantMeeting(){
+  // The anchor opens the Slack huddle itself (user click). Record a 30-minute meeting starting now in the background.
+  const people=STAFF.filter(p=>p.kind==='사람').map(p=>p.id); const me=viewerPersonId();
+  const checked=$('meeting-attendees')?[...$('meeting-attendees').querySelectorAll('input:checked')].map(el=>el.value).filter(id=>people.includes(id)):[];
+  const attendeeIds=checked.length?checked:(me?[me]:[]); if(!attendeeIds.length){ toast('Slack 허들을 열었습니다.'); return; }
+  const now=new Date(), startAt=now.toISOString(), endAt=new Date(now.getTime()+30*60000).toISOString();
+  const body={requestId:newRequestId(),title:'바로 미팅',notes:$('meeting-notes44')?.value.trim()||'',startAt,endAt,timezone:'Asia/Seoul',attendeeIds};
+  try{ await api('/meetings',{method:'POST',body:JSON.stringify(body)}); await loadMeetings(); state.scene?.callMeeting('바로 미팅',attendeeIds); toast('바로 미팅을 시작했습니다. Slack 허들 창을 확인해 주세요.'); }
+  catch(error){ toast(error.code==='meeting_overlap'?'Slack 허들을 열었습니다. 같은 시간에 예약된 미팅이 있어 기록은 추가하지 않았습니다.':'Slack 허들을 열었습니다. 미팅 기록 저장 실패: '+error.message, error.code!=='meeting_overlap'); }
 }
 async function saveMeeting(){
-  const id=$('meeting-id').value||undefined,revisionRaw=$('meeting-revision').value,revision=revisionRaw===''?undefined:Number(revisionRaw),title=$('meeting-title').value.trim(),timezone=$('meeting-timezone').value,date=$('meeting-date').value,time=$('meeting-time').value;
-  const attendeeIds=[...$('meeting-attendees').querySelectorAll('input:checked')].map(el=>el.value); if(!title||!date||!time||!attendeeIds.length){ $('meeting-error').textContent='회의 제목, 시간, 3D 이동 참석자를 확인해 주세요.'; return; }
-  let startAt; try{startAt=zonedIso(date,time,timezone);}catch{ $('meeting-error').textContent='회의 시간을 변환할 수 없습니다.'; return; } const endAt=new Date(new Date(startAt).getTime()+Number($('meeting-duration').value)*60000).toISOString();
-  const payloadKey=JSON.stringify({id:id||'',revision:revision??null,title,startAt,endAt,timezone,attendeeIds}); if(state.meetingPayloadKey!==payloadKey){state.meetingRequestId=newRequestId();state.meetingPayloadKey=payloadKey;} const requestId=state.meetingRequestId; const body={requestId,title,startAt,endAt,timezone,attendeeIds}; if(id) body.id=id; if(revision!==undefined) body.revision=revision;
-  $('meeting-save-button').disabled=true; $('meeting-error').textContent=navigator.onLine?'서버에 저장 중입니다.':'오프라인입니다. 연결 후 같은 요청으로 다시 시도할 수 있습니다.';
-  try{ const data=await api('/meetings',{method:'POST',body:JSON.stringify(body)}); const saved=data.meeting||data.item||data; if(!saved?.id) throw new Error('서버가 저장된 회의를 반환하지 않았습니다.'); $('meeting-error').textContent=''; $('meeting-dialog').close(); state.meetingRequestId=null; state.meetingPayloadKey=null; await loadMeetings(); toast('회의가 서버에 저장되었습니다.'); }
+  const id=$('meeting-id').value||undefined,revisionRaw=$('meeting-revision').value,revision=revisionRaw===''?undefined:Number(revisionRaw),notes=$('meeting-notes44').value.trim(),title=meetingTitleFromNotes(notes),timezone=$('meeting-timezone').value,date=$('meeting-date').value,time=$('meeting-time').value;
+  const attendeeIds=[...$('meeting-attendees').querySelectorAll('input:checked')].map(el=>el.value); if(!date||!time||!attendeeIds.length){ $('meeting-error').textContent='날짜, 시간, 참석자를 확인해 주세요.'; return; }
+  let startAt; try{startAt=zonedIso(date,time,timezone);}catch{ $('meeting-error').textContent='미팅 시간을 변환할 수 없습니다.'; return; } const endAt=new Date(new Date(startAt).getTime()+Number($('meeting-duration').value)*60000).toISOString();
+  const payloadKey=JSON.stringify({id:id||'',revision:revision??null,title,notes,startAt,endAt,timezone,attendeeIds}); if(state.meetingPayloadKey!==payloadKey){state.meetingRequestId=newRequestId();state.meetingPayloadKey=payloadKey;} const requestId=state.meetingRequestId; const body={requestId,title,notes,startAt,endAt,timezone,attendeeIds}; if(id) body.id=id; if(revision!==undefined) body.revision=revision;
+  $('meeting-save-button').disabled=true; $('meeting-error').textContent=navigator.onLine?'저장 중입니다.':'오프라인입니다. 연결 후 다시 시도해 주세요.';
+  try{ const data=await api('/meetings',{method:'POST',body:JSON.stringify(body)}); const saved=data.meeting||data.item||data; if(!saved?.id) throw new Error('서버가 저장된 미팅을 반환하지 않았습니다.'); $('meeting-error').textContent=''; state.meetingRequestId=null; state.meetingPayloadKey=null; await loadMeetings(); openMeetingDialog(); toast('미팅이 저장되었습니다.'); }
   catch(error){ $('meeting-error').textContent=`저장 실패: ${error.message}`; }
   finally{ $('meeting-save-button').disabled=false; }
 }
-async function deleteMeeting(){ const id=$('meeting-id').value; if(!id)return; $('meeting-delete-button').disabled=true; try{ await api(`/meetings/${encodeURIComponent(id)}`,{method:'DELETE'}); $('meeting-dialog').close(); state.meetingRequestId=null; state.meetingPayloadKey=null; await loadMeetings(); toast('회의를 삭제했습니다.'); }catch(error){ $('meeting-error').textContent=`삭제 실패: ${error.message}`; }finally{$('meeting-delete-button').disabled=false;} }
+async function deleteMeeting(targetId){
+  const id=typeof targetId==='string'?targetId:$('meeting-id').value; if(!id)return; const m=state.meetings.find(x=>String(x.id)===String(id));
+  if(!confirm((m?formatDateTime(m.startAt,m.timezone||'Asia/Seoul')+' ':'')+'미팅을 삭제할까요?')) return;
+  $('meeting-delete-button').disabled=true;
+  try{ await api(`/meetings/${encodeURIComponent(id)}`,{method:'DELETE'}); state.meetingRequestId=null; state.meetingPayloadKey=null; await loadMeetings(); if(String($('meeting-id').value)===String(id)) openMeetingDialog(); toast('미팅을 삭제했습니다.'); }
+  catch(error){ $('meeting-error').textContent=`삭제 실패: ${error.message}`; }
+  finally{ $('meeting-delete-button').disabled=false; }
+}
 
 const PEOPLE=STAFF.map(p=>({...p,type:p.kind,team:p.role.split(' ')[0]||'',tasks:[],messages:[],thread:'',color:p.color}));
 function syncScenePeople(counts){for(const p of PEOPLE){const n=counts[p.id]||0;p.tasks=Array.from({length:n},(_,i)=>({id:`live-${p.id}-${i}`,title:'명시 배정 업무',status:'진행 중',kind:'task',done:false,erp:true,url:ERP_URL}))}window.NEXUS?.refreshDeskDialog?.()}
@@ -884,7 +920,7 @@ $('auth-logout-button').onclick=async()=>{clearAll();await signOut(auth);}; $('l
 function clearSlackThreadState({invalidate=false}={}){state.slack.replies.clear();state.slack.replyTarget=null;if(invalidate)state.slack.requestSeq++;renderReplyTarget();}
 async function selectSlackChannel(channelId){const channel=String(channelId||'');state.slack.channel=channel;$('slack-search35').value='';state.slack.messages=[];state.slack.error='';state.slack.loading=false;resetSlackHistory(channel);clearSlackThreadState({invalidate:true});renderSlack();$('slack-feed').scrollTop=0;if(state.slack.channel)await loadSlackMessages();else await loadSlackFeed();}
 $('refresh-button').onclick=()=>pollAll({manual:true}); $('slack-reload-button').onclick=()=>state.slack.channel?loadSlackMessages({resetHistory:true}):loadSlackFeed();
-$('calendar-source-filter').onchange=renderCalendar; $('calendar-title-filter').oninput=renderCalendar; $('week-prev32').onclick=()=>{state.weekOffset--;renderCalendar()}; $('week-next32').onclick=()=>{state.weekOffset++;renderCalendar()}; $('week-today32').onclick=()=>{state.weekOffset=0;state.selectedDate=ymdKst();renderCalendar()}; $('week-days32').onclick=e=>{const b=e.target.closest('[data-live-date]');if(b){state.selectedDate=b.dataset.liveDate;state.weekOffset=0;renderCalendar()}}; $('slack-search35').oninput=()=>{clearSlackThreadState();renderSlack();}; $('meeting-call').onclick=()=>{if(!$('meeting-dialog').open)openMeetingDialog();}; $('meeting-huddle34').onclick=()=>{const m=state.meetings.find(x=>String(x.id)===String($('meeting-huddle34').dataset.meetingId));if(m)state.scene?.callMeeting(m.title,m.attendeeIds||[]);};
+$('calendar-source-filter').onchange=renderCalendar; $('calendar-title-filter').oninput=renderCalendar; $('week-prev32').onclick=()=>{state.weekOffset--;renderCalendar()}; $('week-next32').onclick=()=>{state.weekOffset++;renderCalendar()}; $('week-today32').onclick=()=>{state.weekOffset=0;state.selectedDate=ymdKst();renderCalendar()}; $('week-days32').onclick=e=>{const b=e.target.closest('[data-live-date]');if(b){state.selectedDate=b.dataset.liveDate;state.weekOffset=0;renderCalendar()}}; $('slack-search35').oninput=()=>{clearSlackThreadState();renderSlack();}; $('meeting-huddle34').onclick=()=>{const m=state.meetings.find(x=>String(x.id)===String($('meeting-huddle34').dataset.meetingId));if(m)state.scene?.callMeeting(meetingLabel(m),m.attendeeIds||[]);};
 $('slack-channel-select').onchange=async e=>{await selectSlackChannel(e.target.value);};
 $('slack-connect-button').onclick=async()=>{ $('slack-connect-button').disabled=true; try{const data=await api('/slack/connect',{method:'POST',body:'{}'}),url=safeUrl(data?.url);if(!url||!/(^|\.)slack\.com$/.test(new URL(url).hostname))throw new Error('유효한 Slack OAuth 주소를 받지 못했습니다.');window.location.assign(url);}catch(error){toast(error.message,true);}finally{$('slack-connect-button').disabled=false;}};
 $('slack-feed').onclick=async e=>{
@@ -903,10 +939,11 @@ $('subpage-content').onclick=e=>{const member=e.target.closest('[data-person]');
 $('home-button').onclick=()=>{closeSubpage();$('erp-shell37').hidden=true;$('erp-frame37').removeAttribute('src');state.scene?.returnSeats();}; $('subpage-close').onclick=closeSubpage;
 $('nav-erp37').onclick=()=>{$('erp-frame37').src=ERP_URL;$('erp-shell37').hidden=false;}; bindFeedBoard(); pinFinance42(); $('erp-home37').onclick=()=>{$('erp-shell37').hidden=true;$('erp-frame37').removeAttribute('src');};
 $('office-view-button').onclick=()=>state.scene?.setView('office'); $('meeting-view-button').onclick=()=>state.scene?.setView('meeting'); $('return-seats-button').onclick=()=>state.scene?.returnSeats();
-$('meeting-new-button').onclick=()=>openMeetingDialog(); $('meeting-close-button').onclick=()=>{$('meeting-dialog').close();state.meetingRequestId=null;state.meetingPayloadKey=null;}; $('meeting-cancel-button').onclick=()=>{state.meetingRequestId=null;state.meetingPayloadKey=null;$('meeting-dialog').close();}; $('meeting-form').onsubmit=e=>{e.preventDefault();saveMeeting();}; $('meeting-delete-button').onclick=deleteMeeting;
+$('meeting-new-button').onclick=()=>openMeetingDialog(); $('meeting-close-button').onclick=()=>{$('meeting-dialog').close();state.meetingRequestId=null;state.meetingPayloadKey=null;}; $('meeting-cancel-button').onclick=()=>{state.meetingRequestId=null;state.meetingPayloadKey=null;$('meeting-dialog').close();}; $('meeting-form').onsubmit=e=>{e.preventDefault();saveMeeting();}; $('meeting-delete-button').onclick=()=>deleteMeeting(); $('meeting-link-btn44').onclick=createMeetingLink; $('meeting-now44').onclick=startInstantMeeting; $('meeting-next').onclick=()=>{ if(!$('meeting-dialog').open) openMeetingDialog(); };
 $('meeting-list').onclick=e=>{
   const edit=e.target.closest('[data-edit-meeting]'); if(edit){const m=state.meetings.find(x=>String(x.id)===String(edit.dataset.editMeeting));if(m)openMeetingDialog(m);return;}
-  const start=e.target.closest('[data-start-meeting]'); if(start){const m=state.meetings.find(x=>String(x.id)===String(start.dataset.startMeeting));if(m)state.scene?.callMeeting(m.title,m.attendeeIds||[]);}
+  const del=e.target.closest('[data-delete-meeting]'); if(del){deleteMeeting(del.dataset.deleteMeeting);return;}
+  const start=e.target.closest('[data-start-meeting]'); if(start){const m=state.meetings.find(x=>String(x.id)===String(start.dataset.startMeeting));if(m)state.scene?.callMeeting(meetingLabel(m),m.attendeeIds||[]);}
 };
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('subpage').hidden)closeSubpage();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stopPolling();else if(state.user){pollAll();startPolling();}});
