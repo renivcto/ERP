@@ -403,7 +403,7 @@ function renderMeetings(){
   const me=String(state.user?.uid||'');
   const nowMs=Date.now(); const list=state.meetings.filter(m=>m?.status!=='canceled'&&!(Date.parse(m?.endAt)<nowMs)).sort((a,b)=>String(a.startAt||'').localeCompare(String(b.startAt||''))); $('meeting-list').innerHTML=state.meetingError?`<div class="empty">${escapeHtml(state.meetingError)}</div>`:list.length?list.map(m=>{
     const attendeeIds=Array.isArray(m.attendeeIds)?m.attendeeIds:[]; const mine=!m.ownerUid||String(m.ownerUid)===me; const notes=String(m.notes||'').trim();
-    return `<article class="meeting-row"><div><strong>${escapeHtml(meetingLabel(m))}</strong><small>${escapeHtml(formatDateTime(m.startAt,m.timezone||'Asia/Seoul'))} · ${attendeeIds.length}명</small>${notes?`<p class="meeting-notes-view44">${escapeHtml(notes)}</p>`:''}</div><div class="meeting-actions"><a class="meeting-start44" href="${escapeHtml(meetingHuddle(m))}" target="_blank" rel="noopener" data-start-meeting="${escapeHtml(m.id)}">미팅 시작</a>${mine?`<button type="button" data-edit-meeting="${escapeHtml(m.id)}">수정</button><button type="button" class="meeting-del44" data-delete-meeting="${escapeHtml(m.id)}">삭제</button>`:''}</div></article>`;
+    return `<article class="meeting-row"><div><strong>${escapeHtml(meetingLabel(m))}</strong><small>${escapeHtml(formatDateTime(m.startAt,m.timezone||'Asia/Seoul'))}</small><span class="meeting-att45">${attendeeIds.map(id=>STAFF.find(p=>p.id===id)?.name).filter(Boolean).map(n=>`<i>${escapeHtml(n)}</i>`).join('')||'<i>참석자 없음</i>'}</span>${notes?`<p class="meeting-notes-view44">${escapeHtml(notes)}</p>`:''}</div><div class="meeting-actions"><a class="meeting-start44" href="${escapeHtml(meetingHuddle(m))}" target="_blank" rel="noopener" data-start-meeting="${escapeHtml(m.id)}">미팅 시작</a>${mine?`<button type="button" data-edit-meeting="${escapeHtml(m.id)}">수정</button><button type="button" class="meeting-del44" data-delete-meeting="${escapeHtml(m.id)}">삭제</button>`:''}</div></article>`;
   }).join(''):'<div class="empty">예약된 미팅이 없습니다.</div>';
 }
 function renderConnectionState(){
@@ -856,7 +856,7 @@ function openMeetingDialog(meeting=null){
   const duration=meeting?.startAt&&meeting?.endAt?Math.max(15,Math.round((new Date(meeting.endAt)-new Date(meeting.startAt))/60000)):30; $('meeting-duration').value=String([15,30,60,90].includes(duration)?duration:30);
   const people=STAFF.filter(p=>p.kind==='사람'); const me=viewerPersonId();
   const selected=new Set(meeting?(meeting.attendeeIds||[]):(me?[me]:[]));
-  $('meeting-attendees').innerHTML=people.map(p=>`<label><input type="checkbox" value="${escapeHtml(p.id)}" ${selected.has(p.id)?'checked':''}><span>${escapeHtml(p.name)}</span></label>`).join('');
+  $('meeting-attendees').innerHTML=people.map(p=>`<label class="att-chip45"><input type="checkbox" value="${escapeHtml(p.id)}" ${selected.has(p.id)?'checked':''}><span>${escapeHtml(p.name)}</span></label>`).join('');
   state.meetingLink=meeting?meetingHuddle(meeting):''; renderMeetingLink();
   $('meeting-delete-button').hidden=!meeting; $('meeting-error').textContent=''; state.meetingRequestId=newRequestId(); state.meetingPayloadKey=null; if(!$('meeting-dialog').open) $('meeting-dialog').showModal();
 }
