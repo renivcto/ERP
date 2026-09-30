@@ -439,8 +439,8 @@ function personWorkCounts(){
   }
   const staffForName=name=>STAFF.find(s=>s.name===name||(name==='JUYEON LEE'&&s.id==='juyeon'));
   for(const emp of state.admin?.config?.employees||[]){ const p=staffForName(emp.name); if(p&&emp.countUnavailable!==true&&typeof emp.taskCount==='number') counts[p.id]=emp.taskCount; }
-  for(const [id,info] of Object.entries(state.deskWork?.people||{})){ if(id in counts&&typeof info?.count==='number') counts[id]=info.count; }
-  if(state.profile?.name){ const p=staffForName(state.profile.name); if(p) counts[p.id]=personalTasks().length; }
+  for(const [id,info] of Object.entries(state.deskWork?.people||{})){ if(id in counts&&Array.isArray(info?.items)) counts[id]=deskItemsFor(id).length; }
+  if(state.profile?.name){ const p=staffForName(state.profile.name); if(p) counts[p.id]=deskItemsFor(p.id).length; }
   return counts;
 }
 
@@ -1151,13 +1151,17 @@ async function loadDeskWork(){
   if(state.scene) state.scene.updateWork(personWorkCounts());
 }
 function viewerStaffId(){ return typeof viewerPersonId==='function'?viewerPersonId():null; }
+// live61: desk lists hide anything whose latest date (posted/activity/due) is more than 30 days ago
+function deskRecent61(t){ const cut=Date.now()-30*86400000; const ts=[t.postedAt,t.activityAt,t.due].map(v=>Date.parse(v)||0); const latest=Math.max(...ts); return !latest||latest>=cut; }
 function deskItemsFor(id){
-  if(id&&id===viewerStaffId()) return personalTasks().map(t=>({kind:t.kind,title:t.title,summary:t.summary,source:t.source,url:t.url,due:t.due,postedAt:t.postedAt}));
-  const p=state.deskWork?.people?.[id]; return Array.isArray(p?.items)?p.items:[];
+  let items;
+  if(id&&id===viewerStaffId()) items=personalTasks().map(t=>({kind:t.kind,title:t.title,summary:t.summary,source:t.source,url:t.url,due:t.due,postedAt:t.postedAt,activityAt:t.activityAt}));
+  else { const p=state.deskWork?.people?.[id]; items=Array.isArray(p?.items)?p.items:[]; }
+  return items.filter(deskRecent61);
 }
 function deskCountFor(id){
-  if(id&&id===viewerStaffId()) return personalTasks().length;
-  const p=state.deskWork?.people?.[id]; return typeof p?.count==='number'?p.count:null;
+  if(id&&id===viewerStaffId()) return deskItemsFor(id).length;
+  const p=state.deskWork?.people?.[id]; return Array.isArray(p?.items)?deskItemsFor(id).length:null;
 }
 function deskKind48(k){ return k==='slack_activity'?{cls:'slack',label:'Slack'}:k==='trello_new_card'?{cls:'trello',label:'Trello'}:k==='erp_approval'?{cls:'erp',label:'결재'}:k==='erp_expense'?{cls:'erp',label:'지출'}:{cls:'erp',label:'업무'}; }
 function deskRow48(t){
