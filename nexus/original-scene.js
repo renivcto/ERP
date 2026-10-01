@@ -103,7 +103,7 @@ TEAM_ZONES.forEach(t=>{
 {const lab=new THREE.Group();lab.position.set(-4.0,0,2.75);scene.add(lab);window.__labBench=lab;
  // live68: open 3-tier display shelf (same .9 height), front open toward the office camera
  {const sm=new THREE.MeshStandardMaterial({color:0xf4f2ec,roughness:.5}),bm=new THREE.MeshStandardMaterial({color:0xe6e1d6,roughness:.6});
-  for(const y of [.03,.33,.63,.88])box(1.3,.04,.6,sm,0,y,0,lab);
+  for(const y of [.03,.3,.58,.88])box(1.3,.04,.6,sm,0,y,0,lab);
   for(const dx of [-.63,.63])box(.04,.9,.6,sm,dx,.45,0,lab);
   box(1.3,.9,.03,bm,0,.45,-.285,lab);}
  const glassM=new THREE.MeshPhysicalMaterial({color:0xcfe9e4,roughness:.1,transparent:true,opacity:.7});
@@ -182,9 +182,9 @@ const avatars=[],clickTargets=[];
  window.NEXUS.setLabProducts=(list)=>{const lab=window.__labBench;if(!lab)return;
   if(labItems){for(const o of labItems.children)o.traverse(m=>{const i=clickTargets.indexOf(m);if(i>=0)clickTargets.splice(i,1);if(m.material){if(m.material.map)m.material.map.dispose();m.material.dispose()}if(m.geometry&&m.geometry.type==='PlaneGeometry')m.geometry.dispose()});lab.remove(labItems);labItems=null}
   const items=(Array.isArray(list)?list:[]).slice(0,9);if(window.__labDefault)window.__labDefault.visible=!items.length;if(!items.length)return;
-  labItems=new THREE.Group();lab.add(labItems);const TIERS=[.9,.65,.35],per=Math.ceil(items.length/3);
-  items.forEach((p,i)=>{const tier=Math.min(2,Math.floor(i/per)),row=items.slice(tier*per,tier*per+per),k=i-tier*per,step=row.length>1?Math.min(.38,1.1/(row.length-1)):0,x=-step*(row.length-1)/2+k*step;const g=new THREE.Group();g.position.set(x,TIERS[tier],.06);labItems.add(g);g.userData.isPhoto=true;const col=new THREE.Color(p.color||'#7c5fc4');
-   const H=tier===0?.26:.18,W=H*.78;const targets=[];
+  labItems=new THREE.Group();lab.add(labItems);const TIERS=[.9,.6,.32],per=Math.ceil(items.length/3);
+  items.forEach((p,i)=>{const tier=Math.min(2,Math.floor(i/per)),row=items.slice(tier*per,tier*per+per),k=i-tier*per,step=row.length>1?Math.min(.5,1.0/(row.length-1)):0,x=-step*(row.length-1)/2+k*step;const g=new THREE.Group();g.position.set(x,TIERS[tier],.13);labItems.add(g);g.userData.isPhoto=true;const col=new THREE.Color(p.color||'#7c5fc4');
+   const H=tier===0?.34:.24,W=H*.82;const targets=[];
    const frame=new THREE.Mesh(new THREE.PlaneGeometry(W+.02,H+.02),new THREE.MeshBasicMaterial({color:col,toneMapped:false}));frame.position.set(0,H/2+.012,0);frame.rotation.x=-.08;g.add(frame);targets.push(frame);
    const photoMat=new THREE.MeshBasicMaterial({color:0xffffff,toneMapped:false});const photo=new THREE.Mesh(new THREE.PlaneGeometry(W,H),photoMat);photo.position.set(0,H/2+.012,.002);photo.rotation.x=-.08;g.add(photo);targets.push(photo);
    box(W*.7,.012,.06,new THREE.MeshStandardMaterial({color:0x9aa5a0,roughness:.4,metalness:.3}),0,.006,-.01,g);
