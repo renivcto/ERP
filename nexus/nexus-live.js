@@ -1353,3 +1353,6 @@ document.addEventListener('click',e=>{
   e.preventDefault(); e.stopPropagation();
   openSlackPopup77('https://reniv.slack.com/archives/'+ch+'/p'+ts.replace('.',''));
 },true);
+
+/* live83: spin the refresh icon briefly on click */
+document.addEventListener('click',e=>{ const b=e.target.closest('#slack-refresh-live'); if(!b) return; b.classList.add('spin83'); setTimeout(()=>b.classList.remove('spin83'),1200); },true);
