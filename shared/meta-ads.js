@@ -127,7 +127,9 @@ function _mReportHtml(rep) {
     (rep.analysis ? '<div style="font-size:12.5px;line-height:1.65;color:#1e293b">' + _mMd(rep.analysis) + '</div>' : '<div style="font-size:12px;color:#94a3b8">분석 대기 중입니다. 06:05 에 Greg 에이전트가 작성하고 06:20 에 반영됩니다.</div>') + '</div>';
   h += '<div style="background:#f8fafc;border-radius:12px;padding:14px 16px"><div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:8px">📌 자동 권고 (규칙 기반)</div>' +
     ((rep.recs && rep.recs.length) ? rep.recs.map(r => '<div style="font-size:12.5px;line-height:1.55;color:#1e293b;padding-left:12px;text-indent:-10px;margin-bottom:5px">• ' + _mEsc(r.text) + '</div>').join('') : '<div style="font-size:12px;color:#94a3b8">권고 없음</div>') + '</div></div>';
-  h += '<div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:6px">🎬 광고별 퍼널 진단</div>' + _mAdsTable(rep.ads);
+  // v2.3.873: 제목 오른쪽에 '다른 회사 광고 분석' 바로가기
+  h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><span style="font-size:13px;font-weight:800;color:#0f172a">🎬 광고별 퍼널 진단</span>' +
+    '<button class="btn btn-sm" onclick="go(\'compads\')" title="경쟁 화장품 브랜드의 효율 높은 소재와 글로우샷 비교" style="height:26px;padding:3px 12px;font-size:12px;font-weight:700;background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;border-radius:8px">🔍 다른 회사 광고 분석</button></div>' + _mAdsTable(rep.ads);
   return h + '</div>';
 }
 
