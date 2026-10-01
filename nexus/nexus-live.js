@@ -1309,3 +1309,37 @@ document.addEventListener('click',e=>{
   if(!row) return; const a=row.querySelector('a[href]'); const href=a?a.href:''; if(!slackRef77(href)) return;
   e.preventDefault(); e.stopPropagation(); hideDeskTip48?.(true); openSlackPopup77(href);
 },true);
+
+/* live80: Trello cards open an in-NEXUS popup (card detail, checklists, comments, attachments) */
+function trelloRef80(url){ const m=String(url||'').match(/trello\.com\/c\/([A-Za-z0-9]{8,24})/); return m?{id:m[1],url}:null; }
+const TRELLO_LABEL80={green:'#61bd4f',yellow:'#f2d600',orange:'#ff9f1a',red:'#eb5a46',purple:'#c377e0',blue:'#0079bf',sky:'#00c2e0',lime:'#51e898',pink:'#ff78cb',black:'#344563'};
+function trelloDay80(v){ const t=Date.parse(v); if(!t) return ''; return new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(t)); }
+async function openTrelloPopup80(url,focusText){
+  const ref=trelloRef80(url); if(!ref){ window.open(url,'_blank','noopener'); return; }
+  let ov=document.getElementById('trello-pop80');
+  if(!ov){ ov=document.createElement('div'); ov.id='trello-pop80'; ov.className='slack-pop77 trello-pop80'; ov.innerHTML='<div class="sp-box77" role="dialog" aria-modal="true"><header><span class="sp-ch77"></span><a class="sp-open77" target="_blank" rel="noopener">Trello에서 열기</a><button type="button" class="sp-x77" aria-label="닫기">×</button></header><div class="sp-body77"></div></div>'; document.body.appendChild(ov);
+    ov.addEventListener('click',e=>{ if(e.target===ov||e.target.closest('.sp-x77')) ov.hidden=true; });
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!ov.hidden) ov.hidden=true; }); }
+  ov.querySelector('.sp-open77').href=ref.url; ov.querySelector('.sp-ch77').textContent='Trello'; const body=ov.querySelector('.sp-body77'); body.innerHTML='<p class="sp-loading77">카드를 불러오는 중…</p>'; ov.hidden=false;
+  try{
+    const c=await api('/trello/card?id='+encodeURIComponent(ref.id));
+    ov.querySelector('.sp-ch77').textContent=[c.board,c.list].filter(Boolean).join(' › ')||'Trello';
+    if(c.url) ov.querySelector('.sp-open77').href=c.url;
+    const focus=String(focusText||'').trim();
+    const labels=(c.labels||[]).filter(l=>l.name||l.color).map(l=>'<span class="tp-label80" style="background:'+escapeHtml(TRELLO_LABEL80[String(l.color).replace(/_.*/,'')]||'#8590a2')+'">'+escapeHtml(l.name||'')+'</span>').join('');
+    const meta=[c.due?'<span class="tp-due80'+(c.dueComplete?' done':'')+'">마감 '+escapeHtml(trelloDay80(c.due))+(c.dueComplete?' · 완료':'')+'</span>':'',c.members?.length?'<span>담당 '+escapeHtml(c.members.join(', '))+'</span>':''].filter(Boolean).join('');
+    const checklists=(c.checklists||[]).map(cl=>{ const done=cl.items.filter(i=>i.done).length; return '<section class="tp-cl80"><h5>'+escapeHtml(cl.name||'체크리스트')+' <em>'+done+'/'+cl.items.length+'</em></h5><ul>'+cl.items.map(i=>'<li class="'+(i.done?'done':'')+(focus&&i.name.trim()===focus?' focus80':'')+'"><i>'+(i.done?'✔':'')+'</i><span>'+escapeHtml(i.name)+'</span>'+(i.due?'<small>'+escapeHtml(trelloDay80(i.due))+'</small>':'')+'</li>').join('')+'</ul></section>'; }).join('');
+    const atts=(c.attachments||[]).length?'<section class="tp-sec80"><h5>첨부</h5><div class="slack-files73">'+c.attachments.map(a=>'<a href="'+escapeHtml(a.url)+'" target="_blank" rel="noopener"><i>'+(/^image\//.test(a.mimeType||'')?'🖼':'📎')+'</i>'+escapeHtml(a.name||'첨부')+'</a>').join('')+'</div></section>':'';
+    const comments=(c.comments||[]).length?'<section class="tp-sec80"><h5>댓글 '+c.comments.length+'개</h5>'+c.comments.map(m=>'<article class="sp-reply77"><header><b>'+escapeHtml(m.author)+'</b><time>'+escapeHtml(trelloDay80(m.date))+'</time></header><div class="sp-text77">'+escapeHtml(m.text)+'</div></article>').join('')+'</section>':'';
+    body.innerHTML='<h3 class="tp-title80">'+escapeHtml(c.name||'제목 없음')+'</h3>'+(labels?'<div class="tp-labels80">'+labels+'</div>':'')+(meta?'<div class="tp-meta80">'+meta+'</div>':'')+(c.desc?'<section class="tp-sec80"><h5>설명</h5><div class="sp-text77">'+escapeHtml(c.desc)+'</div></section>':'')+checklists+atts+comments+(!c.desc&&!checklists&&!atts&&!comments?'<p class="sp-loading77">설명, 체크리스트, 댓글이 없는 카드입니다.</p>':'');
+    const f=body.querySelector('.focus80'); if(f) f.scrollIntoView({block:'center'});
+  }catch(error){ body.innerHTML='<p class="sp-loading77">불러오지 못했습니다: '+escapeHtml(error.message)+'</p>'; }
+}
+document.addEventListener('click',e=>{
+  if(e.target.closest('.task-ack35')) return;
+  const row=e.target.closest('#my-tasks35 .task-trello44, .desk-row48.trello, #company-list37 .ev-trello54, #agenda-content32 .company-day37');
+  if(!row) return; const a=row.matches('a[href]')?row:row.querySelector('a[href]'); const href=a?a.href:''; if(!trelloRef80(href)) return;
+  e.preventDefault(); e.stopPropagation(); try{hideDeskTip48(true);}catch{}
+  const isChecklist=row.classList.contains('task-trello44')&&/체크/.test(row.querySelector('.task-card44')?.textContent||'')||row.classList.contains('task-trello44')&&row.querySelector('.task-card44');
+  openTrelloPopup80(href,row.classList.contains('task-trello44')?(row.querySelector('a')?.textContent||''):'');
+},true);
