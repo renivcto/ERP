@@ -45806,6 +45806,19 @@ function openPoApprovalByOrderId(id) {
   setTimeout(() => { try { go('approval'); switchApprovalTab('po'); } catch(_){} if (ap) { try { openApprovalDetail(ap.id); } catch (err) { console.warn('openPoApprovalByOrderId 실패:', err); } } }, 400);
 }
 window.openPoApprovalByOrderId = openPoApprovalByOrderId;
+// NEXUS 딥링크(?newproduct=<id>) — 인사이트 > 신제품 개발 보드에서 해당 카드를 연다.
+function openNewProductById(id) {
+  if (id == null || id === '') return;
+  try { go('insight'); setInsightTopTab('newprod'); } catch(_){}
+  const tryOpen = (n) => {
+    const it = (DB.newProducts || []).find(x => x && String(x.id) === String(id));
+    if (it) { try { openNewProductModal(it.id); } catch (err) { console.warn('openNewProductById 실패:', err); } return; }
+    if (n < 10) setTimeout(() => tryOpen(n + 1), 400);
+    else { try { showNotif('해당 신제품 카드를 찾을 수 없습니다.', 'warning'); } catch(_){} }
+  };
+  setTimeout(() => tryOpen(0), 400);
+}
+window.openNewProductById = openNewProductById;
 
 // 로드 완료 + 로그인 후, URL 의 ?approval=<id> (또는 #approval=) 이 있으면 1회 자동 오픈.
 function _handleApprovalDeepLink() {
@@ -45814,14 +45827,15 @@ function _handleApprovalDeepLink() {
     if (!window._currentUser) return;            // 로그인 후 재시도
     if (!Array.isArray(DB.approvals)) return;
     let id = null, kind = 'approval';
-    try { const q = new URLSearchParams(location.search); for (const k of ['approval', 'expense', 'order']) { const v = q.get(k); if (v) { id = v; kind = k; break; } } } catch(_){}
-    if (!id) { const h = (location.hash || '').match(/(approval|expense|order)=([^&]+)/); if (h) { kind = h[1]; try { id = decodeURIComponent(h[2]); } catch(_) { id = h[2]; } } }
+    try { const q = new URLSearchParams(location.search); for (const k of ['approval', 'expense', 'order', 'newproduct']) { const v = q.get(k); if (v) { id = v; kind = k; break; } } } catch(_){}
+    if (!id) { const h = (location.hash || '').match(/(approval|expense|order|newproduct)=([^&]+)/); if (h) { kind = h[1]; try { id = decodeURIComponent(h[2]); } catch(_) { id = h[2]; } } }
     if (!id) return;
     if (kind === 'expense' && !Array.isArray(DB.expenses)) return;
     window._approvalDeepLinkDone = true;
     try { history.replaceState(null, '', location.pathname); } catch(_){}  // 새로고침 시 재오픈 방지
     console.log('🔗 [v2.3.199] 결재 딥링크 진입 — ' + kind + '=' + id);
-    if (kind === 'expense') openExpenseById(id);
+    if (kind === 'newproduct') openNewProductById(id);
+    else if (kind === 'expense') openExpenseById(id);
     else if (kind === 'order') openPoApprovalByOrderId(id);
     else openApprovalById(id);
   } catch (e) { console.warn('[v2.3.199] 결재 딥링크 처리 실패:', e); }
