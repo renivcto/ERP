@@ -357,7 +357,8 @@ function renderSlackOverviewCards(list){
     if(unavailable) body='<p class="slack-overview-empty">대화 기록을 불러올 수 없습니다.</p>';
     else if(!hasMsg) body='<p class="slack-overview-empty">아직 표시할 대화가 없습니다.</p>';
     else body=`<p class="slack-overview-preview">${escapeHtml(text||'(내용 없음)')}</p>`;
-    return `<button type="button" class="slack-overview-card" data-open-channel="${escapeHtml(id)}"><div class="slack-overview-top"><span class="slack-overview-name">#${escapeHtml(name)}</span>${time?`<time>${escapeHtml(time)}</time>`:''}</div>${hasMsg?`<div class="slack-overview-meta">${escapeHtml(author)}</div>`:''}${body}<div class="slack-overview-foot">${replyCount>0?`<span class="slack-overview-replies">답글 ${replyCount}</span>`:'<span></span>'}<span class="slack-overview-open">채널 대화 보기 ›</span></div></button>`;
+    const lm=c?.latestMessage||null,rootTs=String(lm?.threadTs||lm?.thread_ts||lm?.ts||''),popTs=/^\d+\.\d+$/.test(rootTs)?rootTs:'';
+    return `<button type="button" class="slack-overview-card" data-open-channel="${escapeHtml(id)}"${popTs?` data-pop-ts="${escapeHtml(popTs)}"`:''}><div class="slack-overview-top"><span class="slack-overview-name">#${escapeHtml(name)}</span>${time?`<time>${escapeHtml(time)}</time>`:''}</div>${hasMsg?`<div class="slack-overview-meta">${escapeHtml(author)}</div>`:''}${body}<div class="slack-overview-foot">${replyCount>0?`<span class="slack-overview-replies">답글 ${replyCount}</span>`:'<span></span>'}<span class="slack-overview-open">채널 대화 보기 ›</span></div></button>`;
   }).join('');
 }
 function renderSlackOverviewFeed(feed){
@@ -1342,4 +1343,13 @@ document.addEventListener('click',e=>{
   e.preventDefault(); e.stopPropagation(); try{hideDeskTip48(true);}catch{}
   const isChecklist=row.classList.contains('task-trello44')&&/체크/.test(row.querySelector('.task-card44')?.textContent||'')||row.classList.contains('task-trello44')&&row.querySelector('.task-card44');
   openTrelloPopup80(href,row.classList.contains('task-trello44')?(row.querySelector('a')?.textContent||''):'');
+},true);
+
+/* live81: overview channel cards open the latest message in the Slack popup; '채널 대화 보기' still opens the channel */
+document.addEventListener('click',e=>{
+  const card=e.target.closest('#slack-feed35 .slack-overview-card[data-pop-ts]'); if(!card) return;
+  if(e.target.closest('.slack-overview-open')) return;
+  const ch=card.dataset.openChannel, ts=card.dataset.popTs; if(!/^[CDG][A-Z0-9]{8,}$/.test(ch||'')) return;
+  e.preventDefault(); e.stopPropagation();
+  openSlackPopup77('https://reniv.slack.com/archives/'+ch+'/p'+ts.replace('.',''));
 },true);
