@@ -122,6 +122,7 @@ function subscribeERP(){
   }
   subscribeFeed();
   subscribeSales();
+  subscribeLab67();
 }
 
 function orderTotal(o){
@@ -1061,7 +1062,7 @@ function openFeedDrawer(id){
 }
 function showFeedBoardTip(e,tip,host){
   if(!tip||!host) return; const p=feedAllPosts()[0]; const r=host.getBoundingClientRect();
-  tip.textContent=p?('운영 업무 공유 · '+(p.title||'제목 없음')+' (클릭하면 ERP로 이동)'):'운영 업무 공유';
+  tip.classList.remove('lab-tip67');tip.textContent=p?('운영 업무 공유 · '+(p.title||'제목 없음')+' (클릭하면 ERP로 이동)'):'운영 업무 공유';
   tip.style.left=(e.clientX-r.left+14)+'px'; tip.style.top=(e.clientY-r.top+14)+'px'; tip.style.display='block';
 }
 function bindFeedBoard(){
@@ -1205,3 +1206,41 @@ function openDeskDrawer48(id){
 window.NEXUS.showHover31=showDeskTip48;
 window.NEXUS.hideHover31=hideDeskTip48;
 window.NEXUS.openDeskWork=openDeskDrawer48;
+
+/* live67: ERP 신제품 개발 (아이디어 발전시키기 + 제품개발 중) on the R&D bench */
+const LAB_STAGE67={developing:{label:'제품개발 중',color:'#7c3aed'},develop:{label:'아이디어 발전시키기',color:'#2f6fd0'}};
+var LAB67=window.__lab67||(window.__lab67={products:[],imgs:{},unsubs:{},timer:null});
+function subscribeLab67(){
+  for(const u of Object.values(LAB67.unsubs)) try{u()}catch{}; LAB67.unsubs={}; LAB67.imgs={}; LAB67.products=[];
+  const unsub=onSnapshot(doc(db,'erp_data','newProducts'),snap=>{
+    const all=parseErpDoc(snap,[]);
+    LAB67.products=all.filter(p=>p&&LAB_STAGE67[p.stage]&&String(p.status||'').toUpperCase()!=='DROP')
+      .sort((a,b)=>(a.stage==='developing'?0:1)-(b.stage==='developing'?0:1)||(Number(b.updatedAt)||0)-(Number(a.updatedAt)||0)).slice(0,6);
+    for(const p of LAB67.products){
+      const direct=[...(Array.isArray(p.productImgs)?p.productImgs:[]),p.productImg].find(v=>typeof v==='string'&&/^https:\/\//.test(v));
+      if(direct){ LAB67.imgs[p.id]=direct; continue; }
+      const has=[...(Array.isArray(p.productImgs)?p.productImgs:[]),p.productImg].some(v=>v==='__idb__'||v==='__stored__');
+      if(!has||LAB67.unsubs['img:'+p.id]) continue;
+      const key=Array.isArray(p.productImgs)&&p.productImgs.length?'newProduct_'+p.id+'_productImgs_0':'newProduct_'+p.id+'_productImg';
+      LAB67.unsubs['img:'+p.id]=onSnapshot(doc(db,'newProductImages',key),s=>{ const v=s.exists()?String(s.data()?.data||''):''; if(/^https:\/\//.test(v)||/^data:image\//.test(v)){ LAB67.imgs[p.id]=v; pushLab67(); } },()=>{});
+      state.firestoreUnsubs.push(LAB67.unsubs['img:'+p.id]);
+    }
+    pushLab67();
+  },()=>{});
+  state.firestoreUnsubs.push(unsub);
+}
+function pushLab67(){
+  clearTimeout(LAB67.timer);
+  LAB67.timer=setTimeout(()=>{ if(typeof window.NEXUS?.setLabProducts!=='function') { LAB67.timer=setTimeout(pushLab67,800); return; }
+    window.NEXUS.setLabProducts(LAB67.products.map(p=>({id:String(p.id),name:p.name||'신제품',stage:p.stage,color:LAB_STAGE67[p.stage].color,img:LAB67.imgs[p.id]||''}))); },250);
+}
+function showLabTip67(e,tip,host,id){
+  const p=LAB67.products.find(x=>String(x.id)===String(id)); if(!p||!tip||!host) return; const st=LAB_STAGE67[p.stage]||{}; const img=LAB67.imgs[p.id];
+  tip.classList.add('lab-tip67');
+  tip.innerHTML=(img?'<img src="'+escapeHtml(img)+'" alt="">':'')+'<div><strong>'+escapeHtml(p.name||'신제품')+'</strong><span style="color:'+escapeHtml(st.color||'#555')+'">'+escapeHtml(st.label||'')+'</span><small>클릭하면 ERP 신제품 개발 카드 열기</small></div>';
+  const r=host.getBoundingClientRect(); tip.style.left=(e.clientX-r.left+14)+'px'; tip.style.top=(e.clientY-r.top+14)+'px'; tip.style.display='flex';
+}
+function openLabProduct67(id){ window.open(ERP_URL+'?newproduct='+encodeURIComponent(id),'_blank','noopener'); }
+window.NEXUS.showLabTip=showLabTip67;
+window.NEXUS.openLabProduct=openLabProduct67;
+window.addEventListener('nexus-scene-ready',()=>pushLab67());
