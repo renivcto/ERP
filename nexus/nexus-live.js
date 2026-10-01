@@ -1215,7 +1215,7 @@ function subscribeLab67(){
   const unsub=onSnapshot(doc(db,'erp_data','newProducts'),snap=>{
     const all=parseErpDoc(snap,[]);
     LAB67.products=all.filter(p=>p&&LAB_STAGE67[p.stage]&&String(p.status||'').toUpperCase()!=='DROP')
-      .sort((a,b)=>(a.stage==='developing'?0:1)-(b.stage==='developing'?0:1)||(Number(b.updatedAt)||0)-(Number(a.updatedAt)||0)).slice(0,6);
+      .sort((a,b)=>(a.stage==='developing'?0:1)-(b.stage==='developing'?0:1)||(Number(b.updatedAt)||0)-(Number(a.updatedAt)||0)).slice(0,9);
     for(const p of LAB67.products){
       const direct=[...(Array.isArray(p.productImgs)?p.productImgs:[]),p.productImg].find(v=>typeof v==='string'&&/^https:\/\//.test(v));
       if(direct){ LAB67.imgs[p.id]=direct; continue; }
