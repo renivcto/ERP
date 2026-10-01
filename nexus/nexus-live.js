@@ -1258,7 +1258,7 @@ async function slackImageUrl76(id,size){
   IMG76.pending.set(key,p); try{ return await p; } finally{ IMG76.pending.delete(key); }
 }
 function hydrateSlackImages76(){
-  document.querySelectorAll('#slack-feed35 figure[data-img76]:not([data-done76])').forEach(fig=>{
+  document.querySelectorAll('#slack-feed35 figure[data-img76]:not([data-done76]), #slack-pop77 figure[data-img76]:not([data-done76])').forEach(fig=>{
     fig.dataset.done76='1'; const id=fig.dataset.img76;
     slackImageUrl76(id,'thumb').then(url=>{ const ph=fig.querySelector('.slack-img-ph76'); const img=new Image(); img.src=url; img.alt=fig.dataset.title76||''; img.loading='lazy'; if(ph) ph.replaceWith(img); else fig.prepend(img); })
       .catch(err=>{ const ph=fig.querySelector('.slack-img-ph76'); if(!ph) return; if(err.code==='slack_scope_upgrade'){ ph.innerHTML='이미지를 보려면 <button type="button" class="text-button" data-slack-reconnect76>Slack 다시 연결</button>'; } else ph.textContent=err.message; });
@@ -1274,6 +1274,38 @@ function openImageViewer76(id,title){
 }
 new MutationObserver(()=>hydrateSlackImages76()).observe(document.getElementById('slack-feed35')||document.body,{childList:true,subtree:true});
 document.addEventListener('click',e=>{
-  const fig=e.target.closest('#slack-feed35 figure[data-img76]'); if(fig&&fig.querySelector('img')){ e.stopPropagation(); e.preventDefault(); openImageViewer76(fig.dataset.img76,fig.dataset.title76); return; }
+  const fig=e.target.closest('#slack-feed35 figure[data-img76], #slack-pop77 figure[data-img76]'); if(fig&&fig.querySelector('img')){ e.stopPropagation(); e.preventDefault(); openImageViewer76(fig.dataset.img76,fig.dataset.title76); return; }
   if(e.target.closest('[data-slack-reconnect76]')){ e.stopPropagation(); e.preventDefault(); reconnectSlack(); }
+},true);
+
+/* live77: Slack tasks open an in-NEXUS popup (message, images, thread) instead of jumping to Slack */
+function slackRef77(url){ const m=String(url||'').match(/slack\.com\/archives\/([CDG][A-Z0-9]{8,})\/p(\d{10})(\d{6})/); return m?{channel:m[1],ts:m[2]+'.'+m[3],url}:null; }
+function dedupeParas77(s){ const seen=new Set(); return String(s||'').split(/\n{2,}/).filter(p=>{const k=p.replace(/\s+/g,''); if(!k||seen.has(k)) return false; seen.add(k); return true;}).join('\n\n'); }
+function slackFilesHtml77(m){
+  const files=(Array.isArray(m.files)?m.files:[]); const imgs=files.filter(f=>/^image\/(png|jpe?g|gif|webp)$/i.test(f.mimetype||'')&&/^F[A-Z0-9]{8,}$/.test(f.id||'')); const others=files.filter(f=>!imgs.includes(f)&&/^https:\/\/[a-z0-9-]+\.slack\.com\//.test(String(f.permalink||'')));
+  return (imgs.length?'<div class="slack-imgs76">'+imgs.map(f=>'<figure data-img76="'+escapeHtml(f.id)+'" data-title76="'+escapeHtml(f.title||f.name||'')+'"><span class="slack-img-ph76">이미지 불러오는 중…</span><figcaption>'+escapeHtml(f.title||f.name||'')+'</figcaption></figure>').join('')+'</div>':'')
+   +(others.length?'<div class="slack-files73">'+others.map(f=>'<a href="'+escapeHtml(f.permalink)+'" target="_blank" rel="noopener"><i>📄</i>'+escapeHtml(f.title||f.name||'첨부 파일')+'</a>').join('')+'</div>':'');
+}
+async function openSlackPopup77(url){
+  const ref=slackRef77(url); if(!ref){ window.open(url,'_blank','noopener'); return; }
+  let ov=document.getElementById('slack-pop77');
+  if(!ov){ ov=document.createElement('div'); ov.id='slack-pop77'; ov.className='slack-pop77'; ov.innerHTML='<div class="sp-box77" role="dialog" aria-modal="true"><header><span class="sp-ch77"></span><a class="sp-open77" target="_blank" rel="noopener">Slack에서 열기</a><button type="button" class="sp-x77" aria-label="닫기">×</button></header><div class="sp-body77"></div></div>'; document.body.appendChild(ov);
+    ov.addEventListener('click',e=>{ if(e.target===ov||e.target.closest('.sp-x77')) ov.hidden=true; });
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!ov.hidden&&document.getElementById('img-viewer76')?.hidden!==false) ov.hidden=true; }); }
+  ov.querySelector('.sp-open77').href=ref.url; ov.querySelector('.sp-ch77').textContent='Slack'; const body=ov.querySelector('.sp-body77'); body.innerHTML='<p class="sp-loading77">메시지를 불러오는 중…</p>'; ov.hidden=false;
+  try{
+    const d=await api('/slack/replies?channel='+encodeURIComponent(ref.channel)+'&ts='+encodeURIComponent(ref.ts));
+    const msgs=Array.isArray(d.messages)?d.messages:[]; const root=msgs.find(x=>String(x.ts)===ref.ts)||msgs[0]; const replies=msgs.filter(x=>x!==root);
+    ov.querySelector('.sp-ch77').textContent='#'+(d.channelName||'');
+    if(!root){ body.innerHTML='<p class="sp-loading77">메시지를 찾지 못했습니다.</p>'; return; }
+    const msgHtml=(m,cls)=>'<article class="'+cls+'"><header><b>'+escapeHtml(slackAuthor(m))+'</b><time>'+escapeHtml(slackTime(m))+'</time></header><div class="sp-text77">'+escapeHtml(dedupeParas77(m.detail||slackText(m)))+'</div>'+slackFilesHtml77(m)+'</article>';
+    body.innerHTML=msgHtml(root,'sp-root77')+(replies.length?'<h4 class="sp-h77">답글 '+replies.length+'개</h4>'+replies.map(r=>msgHtml(r,'sp-reply77')).join(''):'');
+    hydrateSlackImages76();
+  }catch(error){ body.innerHTML='<p class="sp-loading77">불러오지 못했습니다: '+escapeHtml(error.message)+'</p>'; }
+}
+document.addEventListener('click',e=>{
+  if(e.target.closest('.task-ack35')) return;
+  const row=e.target.closest('#my-tasks35 .task-slack41, .desk-row48.slack');
+  if(!row) return; const a=row.querySelector('a[href]'); const href=a?a.href:''; if(!slackRef77(href)) return;
+  e.preventDefault(); e.stopPropagation(); hideDeskTip48?.(true); openSlackPopup77(href);
 },true);
