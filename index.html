@@ -45819,6 +45819,43 @@ function openNewProductById(id) {
   setTimeout(() => tryOpen(0), 400);
 }
 window.openNewProductById = openNewProductById;
+// NEXUS 딥링크 빠른 열기 — 전체 동기화를 기다리지 않고, 로그인과 신제품 데이터가 준비되는 즉시 카드를 연다.
+(function _fastNewProductDeepLink(){
+  let id = null;
+  try { id = new URLSearchParams(location.search).get('newproduct'); } catch(_){}
+  if (!id) return;
+  let cover = null;
+  try {
+    cover = document.createElement('div');
+    cover.id = 'np-deeplink-cover';
+    cover.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#f8fafc;display:flex;align-items:center;justify-content:center;font:600 15px Pretendard,system-ui,sans-serif;color:#475569';
+    cover.textContent = '신제품 카드를 여는 중…';
+    (document.body || document.documentElement).appendChild(cover);
+  } catch(_){}
+  const done = () => { try { cover && cover.remove(); } catch(_){} };
+  const started = Date.now();
+  const tick = () => {
+    try {
+      const ready = window._currentUser && typeof DB !== 'undefined' && Array.isArray(DB.newProducts)
+        && typeof openNewProductModal === 'function' && document.getElementById('np-kanban');
+      const it = ready ? DB.newProducts.find(x => x && String(x.id) === String(id)) : null;
+      if (it) {
+        window._approvalDeepLinkDone = true;
+        try { history.replaceState(null, '', location.pathname); } catch(_){}
+        try { go('insight'); setInsightTopTab('newprod'); } catch(_){}
+        openNewProductModal(it.id);
+        setTimeout(done, 150);
+        // 늦게 도착한 초기 화면 전환이 카드를 덮지 않도록 몇 차례 확인
+        [800, 2000, 4000, 6500].forEach(ms => setTimeout(() => {
+          try { const n = document.getElementById('np-name'); if (!(n && n.offsetParent !== null)) { go('insight'); setInsightTopTab('newprod'); openNewProductModal(it.id); } } catch(_){}
+        }, ms));
+        return;
+      }
+    } catch(_){}
+    if (Date.now() - started < 15000) setTimeout(tick, 120); else done();
+  };
+  tick();
+})();
 
 // 로드 완료 + 로그인 후, URL 의 ?approval=<id> (또는 #approval=) 이 있으면 1회 자동 오픈.
 function _handleApprovalDeepLink() {
