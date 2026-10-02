@@ -65,7 +65,15 @@
       && typeof window._periodOnChange === 'function' && (typeof _firestoreDataLoaded === 'undefined' || _firestoreDataLoaded === true);
     if (ready) {
       try { history.replaceState(null, '', location.pathname); } catch (_) {}
-      setTimeout(function () { try { run(); } catch (e) { console.warn('[nexus-theme] view link failed', e); } }, 300);
+      // ERP may switch back to 업무 현황 after its own startup; keep the requested screen for ~12s
+      var want = view === 'pay' ? 'page-approval' : 'page-sales', tries = 0;
+      var shown = function () { var p = document.getElementById(want); return p && p.offsetParent !== null && (view !== 'pay' || window._apCurrentTab === undefined || window._apCurrentTab === 'expense'); };
+      var guard = function () {
+        if (!shown()) { try { run(); } catch (e) { console.warn('[nexus-theme] view link failed', e); } }
+        if (++tries < 24) setTimeout(guard, 500);
+      };
+      setTimeout(function () { try { run(); } catch (e) {} setTimeout(guard, 500); }, 300);
+      document.addEventListener('click', function stop(ev) { if (ev.isTrusted) { tries = 99; document.removeEventListener('click', stop, true); } }, true);
       return;
     }
     if (Date.now() - started < 30000) setTimeout(tick, 200);
