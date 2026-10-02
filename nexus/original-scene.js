@@ -179,18 +179,70 @@ const propSteel=new THREE.MeshStandardMaterial({color:0x8e9a9b,roughness:.32,met
 const avatars=[],clickTargets=[];
 // live67: R&D bench shows ERP new products in development (image label per product); hover = tooltip, click = ERP card.
 {let labItems=null;const texLoader=new THREE.TextureLoader();texLoader.setCrossOrigin('anonymous');
- window.NEXUS.setLabProducts=(list)=>{const lab=window.__labBench;if(!lab)return;
-  if(labItems){for(const o of labItems.children)o.traverse(m=>{const i=clickTargets.indexOf(m);if(i>=0)clickTargets.splice(i,1);if(m.material){if(m.material.map)m.material.map.dispose();m.material.dispose()}if(m.geometry&&m.geometry.type==='PlaneGeometry')m.geometry.dispose()});lab.remove(labItems);labItems=null}
+ 
+// live92: 3D R&D shelf products ------------------------------------------------
+const LAB92=window.__lab92||(window.__lab92=new Map());
+function labProfile92(url){
+  if(LAB92.has(url))return LAB92.get(url);
+  const pr=new Promise(res=>{const im=new Image();im.crossOrigin='anonymous';im.onerror=()=>res(null);im.onload=()=>{try{
+    const sc=Math.min(1,512/Math.max(im.width,im.height)),W=Math.max(8,Math.round(im.width*sc)),H=Math.max(8,Math.round(im.height*sc));
+    const cv=document.createElement('canvas');cv.width=W;cv.height=H;const cx=cv.getContext('2d',{willReadFrequently:true});cx.drawImage(im,0,0,W,H);const d=cx.getImageData(0,0,W,H).data;
+    const px=(x,y)=>{const i=(y*W+x)*4;return[d[i],d[i+1],d[i+2]]};
+    const L=[],R=[];
+    for(let y=0;y<H;y++){ // background colour of this row = its two outer edges
+      const a=px(1,y),b=px(W-2,y);const diff=(c,bg)=>Math.abs(c[0]-bg[0])+Math.abs(c[1]-bg[1])+Math.abs(c[2]-bg[2]);
+      let l=-1,r=-1;for(let x=2;x<W-2;x++){if(diff(px(x,y),a)>30&&diff(px(x+1,y),a)>30){l=x;break}}
+      for(let x=W-3;x>1;x--){if(diff(px(x,y),b)>30&&diff(px(x-1,y),b)>30){r=x;break}}
+      L.push(l);R.push(l>=0&&r>l?r:-1);}
+    const widths=L.map((l,y)=>R[y]>l?R[y]-l:0),maxW=Math.max(...widths);if(maxW<W*.08)return res(null);
+    const rows=widths.map((w,y)=>w>maxW*.18?y:-1).filter(y=>y>=0);let top=rows[0],bot=rows[rows.length-1];
+    const centers=rows.map(y=>(L[y]+R[y])/2).sort((p,q)=>p-q),c=centers[Math.floor(centers.length/2)];
+    let rad=[];for(let y=0;y<H;y++)rad.push(y<top||y>bot||widths[y]<=0?0:Math.max(0,Math.min(c-L[y],R[y]-c)));
+    const med=rad.map((_,y)=>{const w=[];for(let k=-3;k<=3;k++){const v=rad[y+k];if(v!==undefined)w.push(v)}w.sort((p,q)=>p-q);return w[w.length>>1]});
+    // drop thin soft-shadow rows at the very bottom
+    {let bs=-1,bl=0,cs=-1;for(let y=0;y<=H;y++){const on=y<H&&med[y]>maxW*.05;if(on&&cs<0)cs=y;if(!on&&cs>=0){if(y-cs>bl){bl=y-cs;bs=cs}cs=-1}}if(bl>4){top=bs;bot=bs+bl-1}}
+    while(bot>top&&med[bot]<maxW*.12)bot--;while(top<bot&&med[top]<maxW*.06)top++;
+    // cap colour = middle of the top few rows
+    let cr=0,cg=0,cb=0,n=0;for(let y=top+2;y<Math.min(bot,top+8);y++){const q=px(Math.round(c),y);cr+=q[0];cg+=q[1];cb+=q[2];n++}
+    res({canvas:cv,W,H,c,top,bot,rad:med,cap:n?[cr/n/255,cg/n/255,cb/n/255]:[1,1,1]});
+  }catch(_){res(null)}};im.src=url});
+  LAB92.set(url,pr);return pr;
+}
+function labPhotoBottle92(pr,maxH,maxD){
+  const {W,H,c,top,bot,rad}=pr;const ph=bot-top+1,rmax=Math.max(...rad.slice(top,bot+1));const s=Math.min(maxH/ph,maxD/(2*rmax||1));
+  const SEG=40,RINGS=Math.min(80,ph),pos=[],uv=[],idx=[];
+  for(let i=0;i<=RINGS;i++){const row=top+(bot-top)*(1-i/RINGS);const ri=rad[Math.round(row)]*.96;const yw=(bot-row)*s;
+    for(let j=0;j<=SEG;j++){const th=-Math.PI+2*Math.PI*j/SEG,sx=Math.sin(th),cz=Math.cos(th);pos.push(ri*s*sx,yw,ri*s*cz);uv.push((c+ri*sx)/W,1-row/H)}}
+  for(let i=0;i<RINGS;i++)for(let j=0;j<SEG;j++){const a=i*(SEG+1)+j,b=a+SEG+1;idx.push(a,a+1,b,b,a+1,b+1)}
+  // top cap
+  const topR=rad[top+1]*.96*s,yTop=(bot-top)*s,ci=pos.length/3;pos.push(0,yTop,0);uv.push(c/W,1-(top+3)/H);
+  for(let j=0;j<=SEG;j++){const th=-Math.PI+2*Math.PI*j/SEG;pos.push(topR*Math.sin(th),yTop,topR*Math.cos(th));uv.push(c/W,1-(top+3)/H)}
+  for(let j=0;j<SEG;j++)idx.push(ci,ci+1+j+1,ci+1+j);
+  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));geo.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));geo.setIndex(idx);geo.computeVertexNormals();
+  const tex=new THREE.CanvasTexture(pr.canvas);tex.colorSpace=THREE.SRGBColorSpace;tex.anisotropy=8;
+  const mat=new THREE.MeshStandardMaterial({map:tex,roughness:.32,metalness:0,emissive:0xffffff,emissiveMap:tex,emissiveIntensity:.42});
+  const m=new THREE.Mesh(geo,mat);m.userData.ownGeo92=true;m.castShadow=true;m.position.set(0,.012,0);m.rotation.x=-.04;return m;
+}
+function labGenericBottle92(col){
+  const grp=new THREE.Group();const pts=[[0,0],[.07,0],[.075,.01],[.075,.2],[.068,.235],[.04,.26],[.03,.27],[.03,.29]].map(([x,y])=>new THREE.Vector2(x,y));
+  const glass=new THREE.MeshPhysicalMaterial({color:col.clone().lerp(new THREE.Color(0xffffff),.35),roughness:.12,transmission:.2,transparent:true,opacity:.92});
+  const body=new THREE.Mesh(new THREE.LatheGeometry(pts,40),glass);body.userData.ownGeo92=true;body.castShadow=true;body.position.y=.012;grp.add(body);
+  const label=new THREE.Mesh(new THREE.CylinderGeometry(.0765,.0765,.09,40,1,true),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.6}));label.userData.ownGeo92=true;label.position.y=.012+.1;grp.add(label);
+  const cap=new THREE.Mesh(new THREE.CylinderGeometry(.034,.036,.09,32),new THREE.MeshStandardMaterial({color:col.clone().multiplyScalar(.75),roughness:.35}));cap.userData.ownGeo92=true;cap.position.y=.012+.335;grp.add(cap);
+  return grp;
+}
+window.NEXUS.setLabProducts=(list)=>{const lab=window.__labBench;if(!lab)return;
+  if(labItems){for(const o of labItems.children)o.traverse(m=>{const i=clickTargets.indexOf(m);if(i>=0)clickTargets.splice(i,1);if(m.material){if(m.material.map)m.material.map.dispose();m.material.dispose()}if(m.geometry&&(m.geometry.type==='PlaneGeometry'||m.userData.ownGeo92))m.geometry.dispose()});lab.remove(labItems);labItems=null}
   const items=(Array.isArray(list)?list:[]).slice(0,9);if(window.__labDefault)window.__labDefault.visible=!items.length;if(!items.length)return;
   labItems=new THREE.Group();lab.add(labItems);const TIERS=[.93,.49,.05],per=Math.ceil(items.length/3);
   items.forEach((p,i)=>{const tier=Math.min(2,Math.floor(i/per)),row=items.slice(tier*per,tier*per+per),k=i-tier*per,step=row.length>1?Math.min(.58,1.16/(row.length-1)):0,x=-step*(row.length-1)/2+k*step;const g=new THREE.Group();g.position.set(x,TIERS[tier],.1);labItems.add(g);g.userData.isPhoto=true;const col=new THREE.Color(p.color||'#7c5fc4');
    const H=.4,W=.36;const targets=[];
-      const photoMat=new THREE.MeshBasicMaterial({color:0xffffff,toneMapped:false});const photo=new THREE.Mesh(new THREE.PlaneGeometry(W,H),photoMat);photo.position.set(0,H/2+.012,.002);photo.rotation.x=-.1;g.add(photo);
    box(W*.7,.012,.06,new THREE.MeshStandardMaterial({color:0x9aa5a0,roughness:.4,metalness:.3}),0,.006,-.01,g);
    // live89: one flat hit rectangle per product on the shelf's front plane — cells never overlap, so hover matches what you see
    const cellW=row.length>1?Math.min(.58,1.2/row.length):.6,cellH=.42;const hit=new THREE.Mesh(new THREE.PlaneGeometry(cellW,cellH),new THREE.MeshBasicMaterial({visible:false}));hit.position.set(0,cellH/2,.22);g.add(hit);targets.push(hit);
-   const fallback=()=>{photoMat.color.copy(col.clone().lerp(new THREE.Color(0xffffff),.6));const glass=new THREE.MeshPhysicalMaterial({color:col.clone().lerp(new THREE.Color(0xffffff),.45),roughness:.15,transparent:true,opacity:.9});cylinder(.06,.066,.18,glass,0,.1,.04,g);cylinder(.042,.042,.06,new THREE.MeshStandardMaterial({color:col,roughness:.4}),0,.22,.04,g)};
-   if(p.img){texLoader.load(p.img,t=>{t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=8;const ia=(t.image&&t.image.width&&t.image.height)?t.image.width/t.image.height:1,pa=W/H;if(ia>pa){t.repeat.set(pa/ia,1);t.offset.set((1-pa/ia)/2,0)}else{t.repeat.set(1,ia/pa);t.offset.set(0,(1-ia/pa)/2)}photoMat.map=t;photoMat.needsUpdate=true},undefined,fallback)}else fallback();
+   // live92: background removed (누끼) + real 3D body: the photo's silhouette is turned into a round (lathe) bottle and the photo is wrapped on its front
+   const fallback=()=>{if(g.parent)g.add(labGenericBottle92(col))};
+   if(p.img){labProfile92(p.img).then(pr=>{if(!g.parent)return;if(!pr){fallback();return}g.add(labPhotoBottle92(pr,.38,.34))}).catch(fallback)}else fallback();
    for(const m of targets){m.userData.labProduct=p.id;clickTargets.push(m)}});
  };}
 
