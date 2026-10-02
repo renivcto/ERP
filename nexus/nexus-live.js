@@ -1291,22 +1291,53 @@ function slackFilesHtml77(m){
   return (imgs.length?'<div class="slack-imgs76">'+imgs.map(f=>'<figure data-img76="'+escapeHtml(f.id)+'" data-title76="'+escapeHtml(f.title||f.name||'')+'"><span class="slack-img-ph76">이미지 불러오는 중…</span><figcaption>'+escapeHtml(f.title||f.name||'')+'</figcaption></figure>').join('')+'</div>':'')
    +(others.length?'<div class="slack-files73">'+others.map(f=>'<a href="'+escapeHtml(f.permalink)+'" target="_blank" rel="noopener"><i>📄</i>'+escapeHtml(f.title||f.name||'첨부 파일')+'</a>').join('')+'</div>':'');
 }
-async function openSlackPopup77(url){
+async function openSlackPopup77(url,opts){
   const ref=slackRef77(url); if(!ref){ window.open(url,'_blank','noopener'); return; }
   let ov=document.getElementById('slack-pop77');
-  if(!ov){ ov=document.createElement('div'); ov.id='slack-pop77'; ov.className='slack-pop77'; ov.innerHTML='<div class="sp-box77" role="dialog" aria-modal="true"><header><span class="sp-ch77"></span><a class="sp-open77" target="_blank" rel="noopener">Slack에서 열기</a><button type="button" class="sp-x77" aria-label="닫기">×</button></header><div class="sp-body77"></div></div>'; document.body.appendChild(ov);
+  if(!ov){ ov=document.createElement('div'); ov.id='slack-pop77'; ov.className='slack-pop77'; ov.innerHTML='<div class="sp-box77" role="dialog" aria-modal="true"><header><span class="sp-ch77"></span><a class="sp-open77" target="_blank" rel="noopener">Slack에서 열기</a><button type="button" class="sp-x77" aria-label="닫기">×</button></header><div class="sp-body77"></div><form class="sp-compose87" hidden><textarea rows="2" maxlength="4000" placeholder="답글을 입력하세요 (Ctrl+Enter로 보내기)"></textarea><button type="submit">답글 보내기</button></form></div>'; document.body.appendChild(ov);
     ov.addEventListener('click',e=>{ if(e.target===ov||e.target.closest('.sp-x77')) ov.hidden=true; });
-    document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!ov.hidden&&document.getElementById('img-viewer76')?.hidden!==false) ov.hidden=true; }); }
-  ov.querySelector('.sp-open77').href=ref.url; ov.querySelector('.sp-ch77').textContent='Slack'; const body=ov.querySelector('.sp-body77'); body.innerHTML='<p class="sp-loading77">메시지를 불러오는 중…</p>'; ov.hidden=false;
+    ov.addEventListener('click',slackPopupAction87);
+    const form=ov.querySelector('.sp-compose87'), ta=form.querySelector('textarea');
+    form.addEventListener('submit',e=>{ e.preventDefault(); sendSlackReply87(); });
+    ta.addEventListener('keydown',e=>{ if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); sendSlackReply87(); } });
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!ov.hidden&&document.getElementById('img-viewer76')?.hidden!==false&&!ov.querySelector('.sp-edit87')) ov.hidden=true; }); }
+  ov._ref87=ref;
+  ov.querySelector('.sp-open77').href=ref.url; const body=ov.querySelector('.sp-body77'); const form=ov.querySelector('.sp-compose87');
+  if(!opts?.keep){ ov.querySelector('.sp-ch77').textContent='Slack'; body.innerHTML='<p class="sp-loading77">메시지를 불러오는 중…</p>'; form.hidden=true; form.querySelector('textarea').value=''; }
+  ov.hidden=false;
   try{
     const d=await api('/slack/replies?channel='+encodeURIComponent(ref.channel)+'&ts='+encodeURIComponent(ref.ts));
     const msgs=Array.isArray(d.messages)?d.messages:[]; const root=msgs.find(x=>String(x.ts)===ref.ts)||msgs[0]; const replies=msgs.filter(x=>x!==root);
     ov.querySelector('.sp-ch77').textContent='#'+(d.channelName||'');
     if(!root){ body.innerHTML='<p class="sp-loading77">메시지를 찾지 못했습니다.</p>'; return; }
-    const msgHtml=(m,cls)=>'<article class="'+cls+'"><header><b>'+escapeHtml(slackAuthor(m))+'</b><time>'+escapeHtml(slackTime(m))+'</time></header><div class="sp-text77">'+escapeHtml(dedupeParas77(m.detail||slackText(m)))+'</div>'+slackFilesHtml77(m)+'</article>';
+    ov._msgs87=msgs; ov._thread87=String(root.threadTs||root.thread_ts||root.ts);
+    const acts=m=>m.mine?'<span class="sp-acts87"><button type="button" data-edit87="'+escapeHtml(m.ts)+'">수정</button><button type="button" data-del87="'+escapeHtml(m.ts)+'">삭제</button></span>':'';
+    const msgHtml=(m,cls)=>'<article class="'+cls+'" data-ts87="'+escapeHtml(m.ts)+'"><header><b>'+escapeHtml(slackAuthor(m))+'</b><time>'+escapeHtml(slackTime(m))+(m.edited?' · 수정됨':'')+'</time>'+acts(m)+'</header><div class="sp-text77">'+escapeHtml(dedupeParas77(m.detail||slackText(m)))+'</div>'+slackFilesHtml77(m)+'</article>';
     body.innerHTML=msgHtml(root,'sp-root77')+(replies.length?'<h4 class="sp-h77">답글 '+replies.length+'개</h4>'+replies.map(r=>msgHtml(r,'sp-reply77')).join(''):'');
+    form.hidden=false;
     hydrateSlackImages76();
+    if(opts?.scrollEnd) body.scrollTop=body.scrollHeight;
   }catch(error){ body.innerHTML='<p class="sp-loading77">불러오지 못했습니다: '+escapeHtml(error.message)+'</p>'; }
+}
+function slackEditableText87(raw){ return String(raw||'').replace(/<(https?:[^>|]+)\|[^>]*>/g,'$1').replace(/<(https?:[^>]+)>/g,'$1').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&'); }
+async function sendSlackReply87(){
+  const ov=document.getElementById('slack-pop77'); const ref=ov?._ref87; if(!ref) return; const form=ov.querySelector('.sp-compose87'), ta=form.querySelector('textarea'), btn=form.querySelector('button');
+  const text=ta.value.trim(); if(!text||btn.disabled) return; btn.disabled=true; btn.textContent='보내는 중…';
+  try{ await api('/slack/post',{method:'POST',body:JSON.stringify({channel:ref.channel,text,threadTs:ov._thread87||ref.ts})}); ta.value=''; toast('답글을 보냈습니다.'); await openSlackPopup77(ref.url,{keep:true,scrollEnd:true}); }
+  catch(error){ toast('답글 전송 실패: '+error.message,true); }
+  finally{ btn.disabled=false; btn.textContent='답글 보내기'; }
+}
+async function slackPopupAction87(e){
+  const ov=document.getElementById('slack-pop77'); const ref=ov?._ref87; if(!ref) return;
+  const ed=e.target.closest('[data-edit87]'), del=e.target.closest('[data-del87]'), save=e.target.closest('[data-save87]'), cancel=e.target.closest('[data-cancel87]');
+  if(ed){ const ts=ed.dataset.edit87; const m=(ov._msgs87||[]).find(x=>String(x.ts)===ts); const art=ov.querySelector('[data-ts87="'+CSS.escape(ts)+'"]'); if(!m||!art) return; const txt=art.querySelector('.sp-text77'); txt.innerHTML='<div class="sp-edit87"><textarea rows="5" maxlength="4000"></textarea><div><button type="button" data-cancel87>취소</button><button type="button" class="primary" data-save87="'+escapeHtml(ts)+'">저장</button></div></div>'; const t=txt.querySelector('textarea'); t.value=slackEditableText87(m.raw||m.text||''); t.focus(); return; }
+  if(cancel){ await openSlackPopup77(ref.url,{keep:true}); return; }
+  if(save){ const ts=save.dataset.save87; const t=save.closest('.sp-edit87').querySelector('textarea'); const text=t.value.trim(); if(!text) return; save.disabled=true; save.textContent='저장 중…';
+    try{ await api('/slack/update',{method:'POST',body:JSON.stringify({channel:ref.channel,ts,text})}); toast('메시지를 수정했습니다.'); await openSlackPopup77(ref.url,{keep:true}); }
+    catch(error){ toast('수정 실패: '+error.message,true); save.disabled=false; save.textContent='저장'; } return; }
+  if(del){ const ts=del.dataset.del87; if(!confirm('이 메시지를 Slack에서 삭제할까요? 되돌릴 수 없습니다.')) return;
+    try{ await api('/slack/delete',{method:'POST',body:JSON.stringify({channel:ref.channel,ts})}); toast('메시지를 삭제했습니다.'); if(ts===ref.ts){ ov.hidden=true; } else await openSlackPopup77(ref.url,{keep:true}); }
+    catch(error){ toast('삭제 실패: '+error.message,true); } }
 }
 document.addEventListener('click',e=>{
   if(e.target.closest('.task-ack35')) return;
