@@ -11,6 +11,14 @@
    ============================================================================= */
 
 window._CA = window._CA || { index: [], reps: {}, imgs: {}, sel: null, ts: 0, loading: false };
+// v2.3.875: 같은 화면을 구글(_GCA · gcompAds*)에도 쓴다. 렌더 시점의 종류(_CAK)에 따라 문서 이름·버튼이 바뀐다.
+window._GCA = window._GCA || { index: [], reps: {}, imgs: {}, sel: null, ts: 0, loading: false };
+window._CA_CFG = {
+  meta: { st: '_CA', pre: 'compAds', root: 'compads-root', back: 'metaads', backLabel: '← 메타 광고', render: 'renderCompAdsPage', src: '메타 광고 라이브러리 + 우리 메타 광고 실적' },
+  google: { st: '_GCA', pre: 'gcompAds', root: 'gcompads-root', back: 'googleads', backLabel: '← 구글 광고', render: 'renderGCompAdsPage', src: '구글 광고 투명성 센터 + 유튜브 공개 조회수 + 우리 구글 광고 실적' } };
+window._CAK = window._CAK || 'meta';
+const _caC = () => window._CA_CFG[window._CAK] || window._CA_CFG.meta;
+const _caS = () => window[_caC().st];
 
 function _caGet(id) {
   const db = window._firebaseDb, docF = window._firestoreDoc;
@@ -19,12 +27,12 @@ function _caGet(id) {
   return getFn(docF(db, 'erp_data', id)).then(s => (s && s.exists && s.exists()) ? s.data() : null);
 }
 async function _caLoadIndex(force) {
-  const C = window._CA;
+  const C = _caS();
   if (C.loading) return;
   if (!force && C.ts && (Date.now() - C.loadedAt) < 5 * 60 * 1000) return;
   C.loading = true;
   try {
-    const d = await _caGet('compAdsIndex');
+    const d = await _caGet(_caC().pre + 'Index');
     let arr = []; try { arr = d ? (typeof d.data === 'string' ? JSON.parse(d.data) : d.data) : []; } catch (_) {}
     C.index = (Array.isArray(arr) ? arr : []).slice().sort((a, b) => (a.date < b.date ? 1 : -1));
     C.ts = (d && d.ts) || Date.now(); C.loadedAt = Date.now();
@@ -33,20 +41,20 @@ async function _caLoadIndex(force) {
   } finally { C.loading = false; }
 }
 async function _caLoadReport(date) {
-  const C = window._CA;
+  const C = _caS();
   if (C.reps[date]) return C.reps[date];
-  const d = await _caGet('compAds_' + date);
+  const d = await _caGet(_caC().pre + '_' + date);
   let rep = null; try { rep = d ? (typeof d.data === 'string' ? JSON.parse(d.data) : d.data) : null; } catch (_) {}
   C.reps[date] = rep; return rep;
 }
 // 이미지는 화면에 그린 뒤 하나씩 받아 채운다 (문서 1MB 제한 때문에 이미지마다 별도 문서)
 function _caFillImages(date) {
-  const C = window._CA;
-  document.querySelectorAll('#compads-root img[data-ca-img]').forEach(el => {
+  const C = _caS();
+  document.querySelectorAll('#' + _caC().root + ' img[data-ca-img]').forEach(el => {
     const key = el.getAttribute('data-ca-img'); const id = date + '_' + key;
-    const put = (src) => { if (src) { el.src = src; el.style.opacity = 1; el.parentElement && el.parentElement.querySelector('.ca-img-wait') && (el.parentElement.querySelector('.ca-img-wait').style.display = 'none'); } };
+    const put = (src) => { if (src) { el.src = src; el.style.opacity = 1; if (el.parentElement) el.parentElement.style.minHeight = '0'; el.parentElement && el.parentElement.querySelector('.ca-img-wait') && (el.parentElement.querySelector('.ca-img-wait').style.display = 'none'); } };
     if (C.imgs[id]) { put(C.imgs[id]); return; }
-    _caGet('compAdsImg_' + id).then(d => { if (d && d.data) { C.imgs[id] = d.data; put(d.data); } }).catch(() => {});
+    _caGet(_caC().pre + 'Img_' + id).then(d => { if (d && d.data) { C.imgs[id] = d.data; put(d.data); } }).catch(() => {});
   });
 }
 function _caOpenImg(el) {
@@ -70,12 +78,13 @@ const _caImg = (key, h) => '<div style="position:relative;background:#0f172a;bor
 
 function _caIndexTable(index, sel) {
   if (!index.length) return '<div style="color:#94a3b8;font-size:12.5px">아직 분석 기록이 없습니다.</div>';
+  if (window._CAK === 'google') return _caIndexTableG(index, sel);
   let h = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">' +
     _caTh('날짜', 'left') + _caTh('수집 광고') + _caTh('크리에이터 비중') + _caTh('영상 길이 중앙값') + _caTh('장기 생존 1위 소재', 'left') + _caTh('새로 뜨는 소재', 'left') +
     _caTh('우리 기준일') + _caTh('우리 CPM') + _caTh('우리 링크 CTR') + _caTh('훅률 / 유지율') + _caTh('랜딩 → 장바구니 → 구매') + _caTh('한 줄 결론', 'left') + '</tr></thead><tbody>';
   index.forEach(r => {
     const on = r.date === sel;
-    h += '<tr onclick="window._CA.sel=\'' + r.date + '\';renderCompAdsPage()" style="cursor:pointer;border-bottom:1px solid #f1f5f9;background:' + (on ? '#eff6ff' : 'transparent') + '">' +
+    h += '<tr onclick="window.' + _caC().st + '.sel=\'' + r.date + '\';' + _caC().render + '()" style="cursor:pointer;border-bottom:1px solid #f1f5f9;background:' + (on ? '#eff6ff' : 'transparent') + '">' +
       _caTd('<b>' + _caDateK(r.date) + '</b>', 'left', ';white-space:nowrap') + _caTd(_caNum(r.unique) + '개') + _caTd((r.creatorShare || 0) + '%') + _caTd((r.medianLen || 0) + '초') +
       _caTd(_caEsc(r.topBrand) + ' · ' + _caEsc(r.topTitle) + (r.topLink ? ' ' + _caLink(r.topLink, '') : ''), 'left') + _caTd(_caEsc(r.newTop || '-'), 'left') +
       _caTd(_caEsc(r.ourAsOf || '-'), 'center', ';white-space:nowrap') + _caTd(_caWon(r.ourCpm)) + _caTd((r.ourCtr || 0) + '%') + _caTd((r.ourHook || 0) + '% / ' + (r.ourHold || 0) + '%') +
@@ -84,17 +93,31 @@ function _caIndexTable(index, sel) {
   return h + '</tbody></table></div><div style="font-size:11px;color:#94a3b8;margin-top:6px">행을 누르면 그날 분석이 아래에 열립니다. 우리 수치는 기준일까지의 최신 구매 캠페인(소재 1~3) 기준이고, 랜딩·장바구니·구매는 누적입니다.</div>';
 }
 
-function _caTopCards(top) {
+function _caIndexTableG(index, sel) {
+  let h = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">' +
+    _caTh('날짜', 'left') + _caTh('수집 소재') + _caTh('유튜브 조회수 1위 소재', 'left') + _caTh('새로 뜨는 소재', 'left') + _caTh('우리 기준일') + _caTh('우리 지출(누적)') + _caTh('우리 CTR') + _caTh('우리 조회율') + _caTh('클릭 → 장바구니 → 구매') + _caTh('한 줄 결론', 'left') + '</tr></thead><tbody>';
+  index.forEach(r => {
+    const on = r.date === sel;
+    h += '<tr onclick="window._GCA.sel=\'' + r.date + '\';renderGCompAdsPage()" style="cursor:pointer;border-bottom:1px solid #f1f5f9;background:' + (on ? '#eff6ff' : 'transparent') + '">' +
+      _caTd('<b>' + _caDateK(r.date) + '</b>', 'left', ';white-space:nowrap') + _caTd(_caNum(r.unique) + '개') +
+      _caTd(_caEsc(r.topBrand) + ' · ' + _caEsc(r.topTitle) + (r.topLink ? ' ' + _caLink(r.topLink, '') : ''), 'left') + _caTd(_caEsc(r.newTop || '-'), 'left') +
+      _caTd(_caEsc(r.ourAsOf || '-'), 'center', ';white-space:nowrap') + _caTd(_caWon(r.ourSpend)) + _caTd((r.ourCtr || 0) + '%') + _caTd((r.ourViewRate || 0) + '%') +
+      _caTd(_caNum(r.ourClicks) + ' → ' + _caNum(r.ourAtc) + ' → ' + _caNum(r.ourBuy)) + _caTd(_caEsc(r.headline || ''), 'left', ';min-width:260px') + '</tr>';
+  });
+  return h + '</tbody></table></div><div style="font-size:11px;color:#94a3b8;margin-top:6px">행을 누르면 그날 분석이 아래에 열립니다. 우리 수치는 구글 광고 계정 누적(최근 90일) 기준입니다.</div>';
+}
+
+function _caTopCards(top, rep) {
   return top.map((a, i) => {
     const flow = (a.flow || []).map(f => '<tr><td style="padding:4px 8px 4px 0;font-size:11.5px;color:#64748b;white-space:nowrap;vertical-align:top;font-weight:700">' + _caEsc(f[0]) + '</td><td style="padding:4px 0;font-size:12px;color:#1e293b;line-height:1.5">' + _caEsc(f[1]) + '</td></tr>').join('');
     const why = (a.why || []).map(w => '<div style="font-size:12px;line-height:1.55;color:#1e293b;padding-left:12px;text-indent:-10px;margin-bottom:3px">• ' + _caEsc(w) + '</div>').join('');
     return '<div style="border:1px solid #e2e8f0;border-radius:14px;padding:14px;margin-bottom:12px;background:#fff">' +
       '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px"><span style="background:#0f172a;color:#fff;border-radius:8px;padding:2px 9px;font-size:12px;font-weight:800">#' + (i + 1) + '</span>' +
       '<span style="font-size:14px;font-weight:800;color:#0f172a">' + _caEsc(a.brand) + ' · ' + _caEsc(a.title) + '</span>' + _caChip(_caEsc(a.verdict), '#ecfdf5', '#047857') +
-      '<span style="margin-left:auto">' + _caLink(a.link, '광고 라이브러리에서 보기') + '</span></div>' +
+      '<span style="margin-left:auto">' + _caLink(a.link, a.linkLabel || '광고 라이브러리에서 보기') + (a.link2 ? ' &nbsp;' + _caLink(a.link2, a.link2Label || '영상') : '') + '</span></div>' +
       '<div style="margin-bottom:8px">' + _caChip('제품: ' + _caEsc(a.product)) + _caChip('화자: ' + _caEsc(a.who)) + _caChip('형식: ' + _caEsc(a.format) + (a.lenS ? ' · ' + a.lenS + '초' : '')) +
-      _caChip('게재 시작 ' + _caEsc(a.start) + ' · ' + a.days + '일째', '#eff6ff', '#1d4ed8') + _caChip('복제: ' + _caEsc(a.copies), '#fef3c7', '#92400e') + _caChip('랜딩: ' + _caEsc(a.landing)) + '</div>' +
-      '<div style="font-size:11.5px;color:#475569;margin-bottom:10px"><b>노출 지표(조회수 대체)</b> · ' + _caEsc(a.kw) + ' <span style="color:#94a3b8">(광고 라이브러리 \'높은 노출순\' 순위, 조회수는 메타 비공개)</span></div>' +
+      _caChip('게재 시작 ' + _caEsc(a.start) + ' · ' + a.days + '일째', '#eff6ff', '#1d4ed8') + (a.views != null ? _caChip('유튜브 조회수 ' + _caNum(a.views) + '회', '#fee2e2', '#b91c1c') : '') + (a.copies ? _caChip((rep && rep.copiesLabel || '복제') + ': ' + _caEsc(a.copies), '#fef3c7', '#92400e') : '') + _caChip('랜딩: ' + _caEsc(a.landing)) + '</div>' +
+      '<div style="font-size:11.5px;color:#475569;margin-bottom:10px"><b>' + _caEsc(rep && rep.kwLabel || '노출 지표(조회수 대체)') + '</b> · ' + _caEsc(a.kw) + ' <span style="color:#94a3b8">' + _caEsc(rep && rep.kwNote || '(광고 라이브러리 \'높은 노출순\' 순위, 조회수는 메타 비공개)') + '</span></div>' +
       '<div style="display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:14px">' + _caImg(a.img, 200) +
       '<div><div style="font-size:12.5px;font-weight:800;color:#0f172a;margin-bottom:4px">🎬 장면 흐름</div><table style="border-collapse:collapse;margin-bottom:8px">' + flow + '</table>' +
       '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin:6px 0 4px">💡 효율이 높은 이유</div>' + why +
@@ -104,13 +127,14 @@ function _caTopCards(top) {
   }).join('');
 }
 
-function _caListTable(rows) {
+function _caListTable(rows, rep) {
+  const hasV = rows.some(r => r.views != null); const hasC = !(rep && rep.noCopies);
   let h = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">' +
-    _caTh('#') + _caTh('브랜드 / 게재 페이지', 'left') + _caTh('형식') + _caTh('길이') + _caTh('게재 시작일') + _caTh('게재 일수') + _caTh('복제') + _caTh('노출 순위 (조회수 대체)', 'left') + _caTh('첫 문구', 'left') + _caTh('링크') + '</tr></thead><tbody>';
+    _caTh('#') + _caTh('브랜드 / 게재 페이지', 'left') + _caTh('형식') + _caTh('길이') + _caTh('게재 시작일') + _caTh('게재 일수') + (hasC ? _caTh(rep && rep.copiesLabel || '복제') : '') + (hasV ? _caTh('유튜브 조회수') : '') + _caTh(rep && rep.tableKwLabel || '노출 순위 (조회수 대체)', 'left') + _caTh('첫 문구', 'left') + _caTh('링크') + '</tr></thead><tbody>';
   rows.forEach((r, i) => {
     const pg = r.creator ? _caEsc(r.brand) + '<div style="font-size:10.5px;color:#94a3b8">크리에이터 ' + _caEsc(r.creator) + '</div>' : _caEsc(r.page) + (r.landing ? '<div style="font-size:10.5px;color:#94a3b8">' + _caEsc(r.landing) + '</div>' : '');
     h += '<tr style="border-bottom:1px solid #f1f5f9">' + _caTd(i + 1) + _caTd(pg, 'left') + _caTd(_caEsc(r.format)) + _caTd(r.lenS ? r.lenS + '초' : '-') + _caTd(_caEsc(r.start), 'center', ';white-space:nowrap') +
-      _caTd('<b style="color:' + (r.days >= 90 ? '#16a34a' : (r.days >= 30 ? '#0f172a' : '#94a3b8')) + '">' + r.days + '일</b>') + _caTd(r.copies > 1 ? '<b style="color:#b45309">' + r.copies + '개</b>' : '1') +
+      _caTd('<b style="color:' + (r.days >= 90 ? '#16a34a' : (r.days >= 30 ? '#0f172a' : '#94a3b8')) + '">' + r.days + '일</b>') + (hasC ? _caTd(r.copies > 1 ? '<b style="color:#b45309">' + r.copies + '개</b>' : '1') : '') + (hasV ? _caTd(r.views != null ? '<b style="color:#b91c1c">' + _caNum(r.views) + '</b>' : '-') : '') +
       _caTd(_caEsc(r.kw), 'left', ';font-size:11.5px;min-width:180px') + _caTd(_caEsc(r.hook), 'left', ';font-size:11.5px;color:#475569;min-width:220px') + _caTd(_caLink(r.link, '열기'), 'center', ';white-space:nowrap') + '</tr>';
   });
   return h + '</tbody></table></div><div style="font-size:11px;color:#94a3b8;margin-top:6px">순서 = 노출 순위·여러 키워드 동시 상위·게재 일수·복제 수를 합친 추정 점수. 초록 = 90일 이상 장기 게재.</div>';
@@ -118,6 +142,7 @@ function _caListTable(rows) {
 
 function _caOurs(o) {
   if (!o) return '';
+  if (o.kpis) return _caOursG(o);
   const k = (l, v, sub, bg, c) => '<div style="background:' + bg + ';border-radius:12px;padding:12px;text-align:center"><div style="font-size:11px;color:' + c + ';font-weight:700;margin-bottom:4px">' + l + '</div><div style="font-size:18px;font-weight:800;color:' + c + '">' + v + '</div>' + (sub ? '<div style="font-size:10.5px;color:#64748b;margin-top:2px">' + sub + '</div>' : '') + '</div>';
   const c = o.c0928 || {}, t = o.totals || {};
   let h = '<div style="font-size:11.5px;color:#64748b;margin-bottom:10px">' + _caEsc(o.note) + '</div>';
@@ -144,6 +169,27 @@ function _caOurs(o) {
   return h;
 }
 
+function _caOursG(o) {
+  let h = '<div style="font-size:11.5px;color:#64748b;margin-bottom:10px">' + _caEsc(o.note) + '</div>';
+  if (o.kpiTitle) h += '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin-bottom:6px">' + _caEsc(o.kpiTitle) + '</div>';
+  const tone = { bad: ['#fef2f2', '#b91c1c'], good: ['#ecfdf5', '#047857'], info: ['#eff6ff', '#1d4ed8'], warn: ['#fefce8', '#a16207'], spend: ['#fdf2f8', '#9d174d'] };
+  h += '<div style="display:grid;grid-template-columns:repeat(' + Math.min(6, o.kpis.length) + ',minmax(0,1fr));gap:8px;margin-bottom:12px">' + o.kpis.map(k => { const t = tone[k.tone] || tone.info; return '<div style="background:' + t[0] + ';border-radius:12px;padding:12px;text-align:center"><div style="font-size:11px;color:' + t[1] + ';font-weight:700;margin-bottom:4px">' + _caEsc(k.l) + '</div><div style="font-size:18px;font-weight:800;color:' + t[1] + '">' + _caEsc(k.v) + '</div>' + (k.sub ? '<div style="font-size:10.5px;color:#64748b;margin-top:2px">' + _caEsc(k.sub) + '</div>' : '') + '</div>'; }).join('') + '</div>';
+  if (o.adCols && o.adRows) {
+    h += '<details style="margin-bottom:12px"><summary style="cursor:pointer;font-size:12.5px;font-weight:700;color:#475569">' + _caEsc(o.adTitle || '광고별 실적') + '</summary><div style="overflow-x:auto;margin-top:8px"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">' +
+      o.adCols.map((c, i) => _caTh(_caEsc(c), i === 0 ? 'left' : 'center')).join('') + '</tr></thead><tbody>' +
+      o.adRows.map(r => '<tr style="border-bottom:1px solid #f1f5f9">' + r.map((c, i) => _caTd(i === 0 ? '<b>' + _caEsc(c) + '</b>' : (/^https?:/.test(String(c)) ? _caLink(c, '보기') : _caEsc(c)), i === 0 ? 'left' : 'center')).join('') + '</tr>').join('') + '</tbody></table></div>' +
+      (o.adNote ? '<div style="font-size:11px;color:#94a3b8;margin-top:4px">' + _caEsc(o.adNote) + '</div>' : '') + '</details>';
+  }
+  h += '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin-bottom:6px">' + _caEsc(o.creativeTitle || '우리 소재 장면') + '</div>';
+  h += (o.creatives || []).map(cv => '<div style="border:1px solid #fee2e2;border-radius:14px;padding:12px;margin-bottom:10px;background:#fffafa">' +
+    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px"><span style="font-size:13.5px;font-weight:800;color:#0f172a">' + _caEsc(cv.name) + '</span>' +
+    (cv.chips || []).map(c => _caChip(_caEsc(c))).join('') + (cv.productAt ? _caChip('제품 첫 등장 ' + _caEsc(cv.productAt), /^0/.test(cv.productAt) ? '#ecfdf5' : '#fef2f2', /^0/.test(cv.productAt) ? '#047857' : '#b91c1c') : '') +
+    '<span style="margin-left:auto">' + _caLink(cv.link, cv.linkLabel || '영상') + '</span></div>' +
+    '<div style="display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:14px">' + _caImg(cv.key, 200) +
+    '<div>' + (cv.notes || []).map(n => '<div style="font-size:12px;line-height:1.55;color:#1e293b;padding-left:12px;text-indent:-10px;margin-bottom:4px">• ' + _caEsc(n) + '</div>').join('') + '</div></div></div>').join('');
+  return h;
+}
+
 function _caCompare(rows) {
   let h = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">' +
     _caTh('항목', 'left') + _caTh('경쟁 상위 소재', 'left') + _caTh('글로우샷 (현재)', 'left') + _caTh('차이의 영향') + '</tr></thead><tbody>';
@@ -154,38 +200,41 @@ function _caCompare(rows) {
   return h + '</tbody></table></div>';
 }
 
-function renderCompAdsPage() {
-  const host = document.getElementById('compads-root'); if (!host) return;
-  const C = window._CA;
+function renderCompAdsPage() { _caRender('meta'); }
+function renderGCompAdsPage() { _caRender('google'); }   // v2.3.875: 구글 · 다른 회사 광고 분석
+function _caRender(kind) {
+  window._CAK = kind; const K = _caC();
+  const host = document.getElementById(K.root); if (!host) return;
+  const C = _caS();
   if (!C.ts && !C.loading) {
     host.innerHTML = '<div style="padding:30px;color:#94a3b8;font-size:13px">다른 회사 광고 분석을 불러오는 중…</div>';
-    _caLoadIndex(false).then(() => renderCompAdsPage()).catch(e => { host.innerHTML = '<div style="padding:30px;color:#dc2626;font-size:13px">불러오기 실패: ' + _caEsc(e && e.message) + '</div>'; });
+    _caLoadIndex(false).then(() => _caRender(kind)).catch(e => { host.innerHTML = '<div style="padding:30px;color:#dc2626;font-size:13px">불러오기 실패: ' + _caEsc(e && e.message) + '</div>'; });
     return;
   }
   const date = C.sel;
   const rep = date ? C.reps[date] : null;
   if (date && rep === undefined) {
     host.innerHTML = '<div style="padding:30px;color:#94a3b8;font-size:13px">' + _caDateK(date) + ' 분석을 불러오는 중…</div>';
-    _caLoadReport(date).then(() => renderCompAdsPage()).catch(e => { host.innerHTML = '<div style="padding:30px;color:#dc2626;font-size:13px">불러오기 실패: ' + _caEsc(e && e.message) + '</div>'; });
+    _caLoadReport(date).then(() => _caRender(kind)).catch(e => { host.innerHTML = '<div style="padding:30px;color:#dc2626;font-size:13px">불러오기 실패: ' + _caEsc(e && e.message) + '</div>'; });
     return;
   }
   let h = '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">' +
-    '<button class="btn btn-sm" onclick="go(\'metaads\')" style="height:28px;font-size:12px">← 메타 광고</button>' +
-    '<span style="font-size:12px;color:#64748b">갱신 ' + (C.ts ? new Date(C.ts).toLocaleString('ko-KR', { hour12: false }) : '-') + ' · 매일 아침 자동 분석 (메타 광고 라이브러리 + 우리 메타 광고 실적)</span>' +
-    '<button class="btn btn-sm" onclick="window._CA.ts=0;renderCompAdsPage()" style="height:28px;font-size:12px">🔄 새로고침</button>' +
-    '<span style="margin-left:auto;font-size:12px;color:#475569;font-weight:700">분석 날짜</span><select class="fs" onchange="window._CA.sel=this.value;renderCompAdsPage()" style="width:150px;font-size:12px;height:30px">' +
+    '<button class="btn btn-sm" onclick="go(\'' + K.back + '\')" style="height:28px;font-size:12px">' + K.backLabel + '</button>' +
+    '<span style="font-size:12px;color:#64748b">갱신 ' + (C.ts ? new Date(C.ts).toLocaleString('ko-KR', { hour12: false }) : '-') + ' · 매일 아침 자동 분석 (' + K.src + ')</span>' +
+    '<button class="btn btn-sm" onclick="window.' + K.st + '.ts=0;' + K.render + '()" style="height:28px;font-size:12px">🔄 새로고침</button>' +
+    '<span style="margin-left:auto;font-size:12px;color:#475569;font-weight:700">분석 날짜</span><select class="fs" onchange="window.' + K.st + '.sel=this.value;' + K.render + '()" style="width:150px;font-size:12px;height:30px">' +
     C.index.map(r => '<option value="' + r.date + '"' + (r.date === date ? ' selected' : '') + '>' + r.date + '</option>').join('') + '</select></div>';
   h += _caCard('📅 날짜별 요약', _caIndexTable(C.index, date));
   if (!rep) { host.innerHTML = h + '<div class="card" style="padding:24px;color:#94a3b8;font-size:13px">선택한 날짜의 분석이 없습니다.</div>'; return; }
   const m = rep.method || {}, s = rep.stats || {};
   h += '<div class="card" style="padding:16px 18px;margin-bottom:14px;background:linear-gradient(135deg,#eff6ff,#f0fdf4)">' +
     '<div style="font-size:15px;font-weight:800;color:#0f172a;margin-bottom:6px">🔍 ' + _caDateK(rep.date) + ' 한 줄 결론</div><div style="font-size:13.5px;color:#1e293b;line-height:1.6;margin-bottom:10px">' + _caEsc(rep.headline) + '</div>' +
-    '<div>' + _caChip('수집 광고 ' + _caNum(s.unique) + '개') + _caChip('영상 ' + _caNum(s.video) + ' · 이미지 ' + _caNum(s.image)) + _caChip('크리에이터 파트너십 ' + (s.creatorShare || 0) + '%', '#ecfdf5', '#047857') +
-    _caChip('영상 길이 중앙값 ' + (s.medianLen || 0) + '초') + _caChip('60일 이상 게재 ' + _caNum(s.long60) + '개', '#eff6ff', '#1d4ed8') + '</div>' +
+    '<div>' + (rep.statsChips ? rep.statsChips.map(c => _caChip(_caEsc(c))).join('') : _caChip('수집 광고 ' + _caNum(s.unique) + '개') + _caChip('영상 ' + _caNum(s.video) + ' · 이미지 ' + _caNum(s.image)) + _caChip('크리에이터 파트너십 ' + (s.creatorShare || 0) + '%', '#ecfdf5', '#047857') +
+    _caChip('영상 길이 중앙값 ' + (s.medianLen || 0) + '초') + _caChip('60일 이상 게재 ' + _caNum(s.long60) + '개', '#eff6ff', '#1d4ed8')) + '</div>' +
     '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;font-weight:700;color:#475569">조사 방법 · 조회수 안내</summary><div style="font-size:12px;color:#334155;line-height:1.6;margin-top:6px">' + _caEsc(m.text) +
-    '<br><b>키워드</b>: ' + _caEsc((m.keywords || []).join(', ')) + ' · <b>브랜드</b>: ' + _caEsc((m.brands || []).join(', ')) + '<br>' + _caEsc(m.viewsNote) + '</div></details></div>';
-  h += _caCard('🏆 효율이 높은 소재 TOP ' + (rep.top || []).length + ' — 장면 분석', _caTopCards(rep.top || []));
-  h += _caCard('📋 노출 상위 소재 전체 표 (게재 시작일·게재 일수순 비교)', _caListTable(rep.table || []));
+    '<br><b>키워드</b>: ' + _caEsc((m.keywords || []).join(', ') || '-') + ' · <b>브랜드</b>: ' + _caEsc((m.brands || []).join(', ')) + '<br>' + _caEsc(m.viewsNote) + '</div></details></div>';
+  h += _caCard('🏆 효율이 높은 소재 TOP ' + (rep.top || []).length + ' — 장면 분석', _caTopCards(rep.top || [], rep));
+  h += _caCard(rep.tableTitle || '📋 노출 상위 소재 전체 표 (게재 시작일·게재 일수순 비교)', _caListTable(rep.table || [], rep));
   h += _caCard('🧩 공통 성공 패턴', '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">' + (rep.patterns || []).map((p, i) =>
     '<div style="background:#f8fafc;border-radius:12px;padding:12px 14px"><div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:4px">' + (i + 1) + '. ' + _caEsc(p.t) + '</div><div style="font-size:12px;color:#334155;line-height:1.55">' + _caEsc(p.d) + '</div><div style="font-size:11.5px;color:#64748b;margin-top:4px">예) ' + _caEsc(p.ex) + '</div></div>').join('') + '</div>');
   h += _caCard('🧴 우리 글로우샷 광고 현황', _caOurs(rep.ours), ';border:1px solid #fecaca');
