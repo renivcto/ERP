@@ -19,7 +19,7 @@ window._CA_CFG = {
   meta: { st: '_CA', pre: 'compAds', root: 'compads-root', back: 'metaads', backLabel: '← 메타 광고', render: 'renderCompAdsPage', src: '메타 광고 라이브러리 + 우리 메타 광고 실적' },
   google: { st: '_GCA', pre: 'gcompAds', root: 'gcompads-root', back: 'googleads', backLabel: '← 구글 광고', render: 'renderGCompAdsPage', src: '구글 광고 투명성 센터 + 유튜브 공개 조회수 + 우리 구글 광고 실적' },
   ref: { st: '_RCA', pre: 'refAds', root: 'refads-root', back: 'googleads', backLabel: '← 구글 광고', render: 'renderRefAdsPage', src: '부스터스 · 뉴셀렉트 · 아이리스브라이트 — 구글 광고 투명성 센터 + 유튜브 조회수', col: '게재 중 영상 · 구글 광고', colNote: '게재 중 영상 = 구글 영상 광고 중 어제까지 게재된 고유 유튜브 영상 수, 구글 광고 = 투명성 센터의 대한민국 노출 광고 수(공식몰 도메인 기준, 근사치).' },
-  mref: { st: '_MRCA', pre: 'mrefAds', root: 'mrefads-root', back: 'metaads', backLabel: '← 메타 광고', render: 'renderMRefAdsPage', src: '부스터스 · 뉴셀렉트 · 아이리스브라이트 — 메타 광고 라이브러리', col: '메타 광고 · 60일+', colNote: '메타 광고 = 광고 라이브러리에서 게재 중으로 확인된 광고 수(브랜드 검색 상위 기준), 60일+ = 그중 60일 이상 게재 중인 광고 수.' } };
+  mref: { st: '_MRCA', pre: 'mrefAds', root: 'mrefads-root', back: 'metaads', backLabel: '← 메타 광고', render: 'renderMRefAdsPage', src: '부스터스 · 뉴셀렉트 · 아이리스브라이트 — 메타 광고 라이브러리', col: '메타 광고 · 60일+', topCol: '가장 오래 게재된 소재', colNote: '메타 광고 = 광고 라이브러리에서 게재 중으로 확인된 광고 수(브랜드 검색 상위 기준), 60일+ = 그중 60일 이상 게재 중인 광고 수.' } };
 window._CAK = window._CAK || 'meta';
 const _caC = () => window._CA_CFG[window._CAK] || window._CA_CFG.meta;
 const _caS = () => window[_caC().st];
@@ -136,7 +136,7 @@ function _caIndexTableG(index, sel) {
 function _caIndexTableR(index, sel) {
   const cos = (index[0] && index[0].cos) || [];
   let h = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">' +
-    _caTh('날짜', 'left') + cos.map(c => _caTh(_caEsc(c.n) + '<div style="font-weight:500;color:#94a3b8">' + (_caC().col || '메타 · 구글') + '</div>')).join('') + _caTh('유튜브 조회수 1위', 'left') + _caTh('새로 뜬 소재', 'left') + _caTh('한 줄 결론', 'left') + '</tr></thead><tbody>';
+    _caTh('날짜', 'left') + cos.map(c => _caTh(_caEsc(c.n) + '<div style="font-weight:500;color:#94a3b8">' + (_caC().col || '메타 · 구글') + '</div>')).join('') + _caTh(_caC().topCol || '유튜브 조회수 1위', 'left') + _caTh('새로 뜬 소재', 'left') + _caTh('한 줄 결론', 'left') + '</tr></thead><tbody>';
   index.forEach(r => {
     const on = r.date === sel;
     h += '<tr onclick="window.' + _caC().st + '.sel=\'' + r.date + '\';' + _caC().render + '()" style="cursor:pointer;border-bottom:1px solid #f1f5f9;background:' + (on ? '#eff6ff' : 'transparent') + '">' +
