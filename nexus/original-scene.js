@@ -217,7 +217,7 @@ function labPhotoBottle92(pr,maxH,maxD){
   // top cap
   const topR=rad[top+1]*.96*s,yTop=(bot-top)*s,ci=pos.length/3;pos.push(0,yTop,0);uv.push(c/W,1-(top+Math.max(3,(bot-top)*.05))/H);
   for(let j=0;j<=SEG;j++){const th=-Math.PI+2*Math.PI*j/SEG;pos.push(topR*Math.sin(th),yTop,topR*Math.cos(th));uv.push(c/W,1-(top+Math.max(3,(bot-top)*.05))/H)}
-  for(let j=0;j<SEG;j++)idx.push(ci,ci+1+j+1,ci+1+j);
+  for(let j=0;j<SEG;j++)idx.push(ci,ci+1+j,ci+1+j+1);
   const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));geo.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));geo.setIndex(idx);geo.computeVertexNormals();
   const tex=new THREE.CanvasTexture(pr.canvas);tex.colorSpace=THREE.SRGBColorSpace;tex.anisotropy=8;
   const mat=new THREE.MeshStandardMaterial({map:tex,roughness:.32,metalness:0,emissive:0xffffff,emissiveMap:tex,emissiveIntensity:.34});
