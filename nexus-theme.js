@@ -39,44 +39,60 @@
 /* NEXUS deep links (navigation only, no data writes):
    ?view=pay          -> 결재 관리 · 지출 결의서 (이번 달 지급 예정)
    ?view=sales-yday   -> 판매 관리 · 매출 분석, 일별 = 어제(KST)
-   ?view=sales-month  -> 판매 관리 · 매출 분석, 월별 = 이번 달(KST) */
+   ?view=sales-month  -> 판매 관리 · 매출 분석, 월별 = 이번 달(KST)
+   ERP's own startup (doRender) calls go('dashboard') when the data loader finishes, which can be
+   long after this script runs. So we (1) redirect that startup go('dashboard') to the target page,
+   (2) re-apply the target until the loader is gone and the screen is stable, (3) stop as soon as
+   the user clicks anything. */
 (function () {
   var view = null;
   try { view = new URLSearchParams(location.search).get('view'); } catch (_) {}
   if (!/^(pay|sales-yday|sales-month)$/.test(view || '')) return;
-  var started = Date.now();
-  function kst(offsetDays) { return new Date(Date.now() + 9 * 3600e3 + (offsetDays || 0) * 86400e3).toISOString().slice(0, 10); }
+  try { history.replaceState(null, '', location.pathname); } catch (_) {}
+  var page = view === 'pay' ? 'approval' : 'sales', want = 'page-' + page;
+  var active = true, started = Date.now(), stableSince = 0;
+  function kst(d) { return new Date(Date.now() + 9 * 3600e3 + (d || 0) * 86400e3).toISOString().slice(0, 10); }
+  function stop() { active = false; }
+  document.addEventListener('pointerdown', function (ev) { if (ev.isTrusted) stop(); }, true);
+  document.addEventListener('keydown', function (ev) { if (ev.isTrusted) stop(); }, true);
+  // (1) intercept the startup jump to 업무 현황
+  var wrapped = false;
+  function wrapGo() {
+    if (wrapped || typeof window.go !== 'function') return;
+    var orig = window.go; wrapped = true;
+    window.go = function (p) {
+      if (active && p === 'dashboard') { var r = orig.call(this, page); setTimeout(applyDetail, 60); return r; }
+      return orig.apply(this, arguments);
+    };
+  }
   function setPeriod(mode, value) {
-    var blk = document.querySelector('.period-filter[data-prefix="sd"]'); if (!blk) return false;
-    var sel = blk.querySelector('.period-mode'); sel.value = mode; window._periodOnChange('sd');
-    var inp = blk.querySelector(mode === 'day' ? '.period-day' : '.period-month'); if (inp) { inp.value = value; window._periodOnChange('sd'); }
-    return true;
+    var blk = document.querySelector('.period-filter[data-prefix="sd"]'); if (!blk || typeof window._periodOnChange !== 'function') return;
+    var sel = blk.querySelector('.period-mode'); var inp = blk.querySelector(mode === 'day' ? '.period-day' : '.period-month');
+    if (sel.value === mode && inp && inp.value === value) return;
+    sel.value = mode; window._periodOnChange('sd'); if (inp) { inp.value = value; window._periodOnChange('sd'); }
   }
-  function run() {
-    if (view === 'pay') { window.go('approval'); window.switchApprovalTab('expense'); return; }
-    window.go('sales');
-    setTimeout(function () {
-      window.switchSalesTab('dashboard');
-      setTimeout(function () { if (view === 'sales-yday') setPeriod('day', kst(-1)); else setPeriod('month', kst(0).slice(0, 7)); }, 150);
-    }, 30);
+  function applyDetail() {
+    try {
+      if (view === 'pay') { if (window._apCurrentTab !== 'expense' && typeof window.switchApprovalTab === 'function') window.switchApprovalTab('expense'); return; }
+      var dash = document.getElementById('sales-panel-dashboard');
+      if ((!dash || dash.style.display === 'none') && typeof window.switchSalesTab === 'function') window.switchSalesTab('dashboard');
+      setTimeout(function () { if (view === 'sales-yday') setPeriod('day', kst(-1)); else setPeriod('month', kst(0).slice(0, 7)); }, 120);
+    } catch (e) { console.warn('[nexus-theme] view detail failed', e); }
   }
+  function shown() { var p = document.getElementById(want); return !!(p && p.offsetParent !== null); }
+  // (2) keep the target until the ERP finished loading and stayed put for 4s (max 3 min)
   function tick() {
-    var ready = window._currentUser && typeof window.go === 'function' && typeof window.switchSalesTab === 'function'
-      && typeof window._periodOnChange === 'function' && (typeof _firestoreDataLoaded === 'undefined' || _firestoreDataLoaded === true);
+    if (!active) return;
+    wrapGo();
+    var ready = window._currentUser && typeof window.go === 'function';
+    var loading = !!document.getElementById('erp-loader');
     if (ready) {
-      try { history.replaceState(null, '', location.pathname); } catch (_) {}
-      // ERP may switch back to 업무 현황 after its own startup; keep the requested screen for ~12s
-      var want = view === 'pay' ? 'page-approval' : 'page-sales', tries = 0;
-      var shown = function () { var p = document.getElementById(want); return p && p.offsetParent !== null && (view !== 'pay' || window._apCurrentTab === undefined || window._apCurrentTab === 'expense'); };
-      var guard = function () {
-        if (!shown()) { try { run(); } catch (e) { console.warn('[nexus-theme] view link failed', e); } }
-        if (++tries < 24) setTimeout(guard, 500);
-      };
-      setTimeout(function () { try { run(); } catch (e) {} setTimeout(guard, 500); }, 300);
-      document.addEventListener('click', function stop(ev) { if (ev.isTrusted) { tries = 99; document.removeEventListener('click', stop, true); } }, true);
-      return;
+      if (!shown()) { try { window.go(page); } catch (_) {} setTimeout(applyDetail, 60); stableSince = 0; }
+      else if (!stableSince) { applyDetail(); stableSince = Date.now(); }
+      if (!loading && stableSince && Date.now() - stableSince > 4000) { applyDetail(); stop(); return; }
     }
-    if (Date.now() - started < 30000) setTimeout(tick, 200);
+    if (Date.now() - started > 180000) { stop(); return; }
+    setTimeout(tick, 250);
   }
   tick();
 })();
