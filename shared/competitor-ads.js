@@ -72,7 +72,7 @@ const _caTh = (t, al) => '<th style="padding:8px 6px;font-size:11px;color:#47556
 const _caTd = (t, al, ex) => '<td style="padding:7px 6px;font-size:12px;text-align:' + (al || 'center') + ';vertical-align:top' + (ex || '') + '">' + t + '</td>';
 const _caChip = (t, bg, c) => '<span style="display:inline-block;background:' + (bg || '#f1f5f9') + ';color:' + (c || '#334155') + ';border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;margin:0 4px 4px 0">' + t + '</span>';
 const _caLink = (href, t) => href ? '<a href="' + _caEsc(href) + '" target="_blank" rel="noopener" style="color:#2563eb;font-weight:700;text-decoration:none">' + (t || '보기') + ' ↗</a>' : '-';
-const _caImg = (key, h) => '<div style="position:relative;background:#0f172a;border-radius:10px;overflow:hidden;min-height:' + (h || 160) + 'px">' +
+const _caImg = (key, h) => '<div style="align-self:start;position:relative;background:#0f172a;border-radius:10px;overflow:hidden;min-height:' + (h || 160) + 'px">' +
   '<div class="ca-img-wait" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#64748b;font-size:12px">장면 이미지 불러오는 중…</div>' +
   '<img data-ca-img="' + _caEsc(key) + '" onclick="_caOpenImg(this)" title="클릭하면 크게 봅니다" style="display:block;width:100%;height:auto;opacity:0;transition:opacity .2s;cursor:zoom-in;position:relative"></div>';
 
