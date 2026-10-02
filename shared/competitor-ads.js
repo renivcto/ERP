@@ -13,9 +13,11 @@
 window._CA = window._CA || { index: [], reps: {}, imgs: {}, sel: null, ts: 0, loading: false };
 // v2.3.875: 같은 화면을 구글(_GCA · gcompAds*)에도 쓴다. 렌더 시점의 종류(_CAK)에 따라 문서 이름·버튼이 바뀐다.
 window._GCA = window._GCA || { index: [], reps: {}, imgs: {}, sel: null, ts: 0, loading: false };
+window._RCA = window._RCA || { index: [], reps: {}, imgs: {}, sel: null, ts: 0, loading: false };   // v2.3.879: 특정 레퍼런스 분석
 window._CA_CFG = {
   meta: { st: '_CA', pre: 'compAds', root: 'compads-root', back: 'metaads', backLabel: '← 메타 광고', render: 'renderCompAdsPage', src: '메타 광고 라이브러리 + 우리 메타 광고 실적' },
-  google: { st: '_GCA', pre: 'gcompAds', root: 'gcompads-root', back: 'googleads', backLabel: '← 구글 광고', render: 'renderGCompAdsPage', src: '구글 광고 투명성 센터 + 유튜브 공개 조회수 + 우리 구글 광고 실적' } };
+  google: { st: '_GCA', pre: 'gcompAds', root: 'gcompads-root', back: 'googleads', backLabel: '← 구글 광고', render: 'renderGCompAdsPage', src: '구글 광고 투명성 센터 + 유튜브 공개 조회수 + 우리 구글 광고 실적' },
+  ref: { st: '_RCA', pre: 'refAds', root: 'refads-root', back: 'googleads', backLabel: '← 구글 광고', render: 'renderRefAdsPage', src: '부스터스 · 뉴셀렉트 · 아이리스브라이트 — 메타 광고 라이브러리 + 구글 광고 투명성 센터 + 유튜브 조회수' } };
 window._CAK = window._CAK || 'meta';
 const _caC = () => window._CA_CFG[window._CAK] || window._CA_CFG.meta;
 const _caS = () => window[_caC().st];
@@ -100,6 +102,7 @@ const _caImg = (key, h) => '<div style="align-self:start;position:relative;backg
 function _caIndexTable(index, sel) {
   if (!index.length) return '<div style="color:#94a3b8;font-size:12.5px">아직 분석 기록이 없습니다.</div>';
   if (window._CAK === 'google') return _caIndexTableG(index, sel);
+  if (window._CAK === 'ref') return _caIndexTableR(index, sel);
   let h = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">' +
     _caTh('날짜', 'left') + _caTh('수집 광고') + _caTh('크리에이터 비중') + _caTh('영상 길이 중앙값') + _caTh('장기 생존 1위 소재', 'left') + _caTh('새로 뜨는 소재', 'left') +
     _caTh('우리 기준일') + _caTh('우리 CPM') + _caTh('우리 링크 CTR') + _caTh('훅률 / 유지율') + _caTh('랜딩 → 장바구니 → 구매') + _caTh('한 줄 결론', 'left') + '</tr></thead><tbody>';
@@ -128,6 +131,33 @@ function _caIndexTableG(index, sel) {
   return h + '</tbody></table></div><div style="font-size:11px;color:#94a3b8;margin-top:6px">행을 누르면 그날 분석이 아래에 열립니다. 우리 수치는 구글 광고 계정 누적(최근 90일) 기준입니다.</div>';
 }
 
+function _caIndexTableR(index, sel) {
+  const cos = (index[0] && index[0].cos) || [];
+  let h = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">' +
+    _caTh('날짜', 'left') + cos.map(c => _caTh(_caEsc(c.n) + '<div style="font-weight:500;color:#94a3b8">메타 · 구글</div>')).join('') + _caTh('유튜브 조회수 1위', 'left') + _caTh('새로 뜬 소재', 'left') + _caTh('한 줄 결론', 'left') + '</tr></thead><tbody>';
+  index.forEach(r => {
+    const on = r.date === sel;
+    h += '<tr onclick="window._RCA.sel=\'' + r.date + '\';renderRefAdsPage()" style="cursor:pointer;border-bottom:1px solid #f1f5f9;background:' + (on ? '#eff6ff' : 'transparent') + '">' +
+      _caTd('<b>' + _caDateK(r.date) + '</b>', 'left', ';white-space:nowrap') + (r.cos || []).map(c => _caTd(_caNum(c.meta) + ' · ' + _caNum(c.google), 'center', ';white-space:nowrap')).join('') +
+      _caTd(_caEsc(r.topTitle || '') + (r.topLink ? ' ' + _caLink(r.topLink, '') : ''), 'left', ';min-width:200px') + _caTd(_caEsc(r.newTop || '-'), 'left', ';min-width:260px') + _caTd(_caEsc(r.headline || ''), 'left', ';min-width:280px') + '</tr>';
+  });
+  return h + '</tbody></table></div><div style="font-size:11px;color:#94a3b8;margin-top:6px">메타 = 광고 라이브러리에서 게재 중으로 확인된 광고 수(브랜드 검색 상위 기준), 구글 = 투명성 센터의 대한민국 노출 광고 수(공식몰 도메인 기준, 근사치).</div>';
+}
+
+function _caCompanies(cos) {
+  return '<div style="display:grid;grid-template-columns:repeat(' + Math.min(3, cos.length) + ',minmax(0,1fr));gap:12px">' + cos.map(c =>
+    '<div style="border:1px solid #e2e8f0;border-radius:14px;padding:14px;background:#fff">' +
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:15px;font-weight:800;color:#0f172a">' + _caEsc(c.name) + '</span><span style="margin-left:auto">' + _caLink(c.site, '사이트') + '</span></div>' +
+    '<div style="font-size:11.5px;color:#64748b;margin-bottom:8px">' + _caEsc(c.note) + '</div>' +
+    '<div style="margin-bottom:8px">' + (c.kpis || []).map(k => _caChip(_caEsc(k), '#eff6ff', '#1d4ed8')).join('') + '</div>' +
+    '<table style="width:100%;border-collapse:collapse;margin-bottom:8px"><thead><tr style="background:#f8fafc">' + _caTh('브랜드', 'left') + _caTh('분야', 'left') + _caTh('메타') + _caTh('구글') + '</tr></thead><tbody>' +
+    (c.brands || []).map(b => '<tr style="border-bottom:1px solid #f1f5f9">' + _caTd('<b>' + _caEsc(b.n) + '</b>', 'left') + _caTd(_caEsc(b.cat), 'left', ';font-size:11px;color:#64748b') + _caTd(_caEsc(b.meta)) + _caTd(_caEsc(b.google)) + '</tr>').join('') + '</tbody></table>' +
+    '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin:6px 0 4px">광고 운영 방식</div>' +
+    (c.strategy || []).map(s => '<div style="font-size:12px;line-height:1.55;color:#1e293b;padding-left:12px;text-indent:-10px;margin-bottom:3px">• ' + _caEsc(s) + '</div>').join('') +
+    (c.apply ? '<div style="background:#f0fdf4;border-radius:10px;padding:8px 10px;margin-top:8px;font-size:12px;color:#166534;line-height:1.55"><b>르니브 적용</b> · ' + _caEsc(c.apply) + '</div>' : '') +
+    '</div>').join('') + '</div>';
+}
+
 function _caTopCards(top, rep) {
   return top.map((a, i) => {
     const flow = (a.flow || []).map(f => '<tr><td style="padding:4px 8px 4px 0;font-size:11.5px;color:#64748b;white-space:nowrap;vertical-align:top;font-weight:700">' + _caEsc(f[0]) + '</td><td style="padding:4px 0;font-size:12px;color:#1e293b;line-height:1.5">' + _caEsc(f[1]) + '</td></tr>').join('');
@@ -138,7 +168,7 @@ function _caTopCards(top, rep) {
       '<span style="margin-left:auto">' + _caLink(a.link, a.linkLabel || '광고 라이브러리에서 보기') + (a.link2 ? ' &nbsp;' + _caLink(a.link2, a.link2Label || '영상') : '') + '</span></div>' +
       '<div style="margin-bottom:8px">' + _caChip('제품: ' + _caEsc(a.product)) + _caChip('화자: ' + _caEsc(a.who)) + _caChip('형식: ' + _caEsc(a.format) + (a.lenS ? ' · ' + a.lenS + '초' : '')) +
       _caChip('게재 시작 ' + _caEsc(a.start) + ' · ' + a.days + '일째', '#eff6ff', '#1d4ed8') + (a.views != null ? _caChip('유튜브 조회수 ' + _caNum(a.views) + '회', '#fee2e2', '#b91c1c') : '') + (a.copies ? _caChip((rep && rep.copiesLabel || '복제') + ': ' + _caEsc(a.copies), '#fef3c7', '#92400e') : '') + _caChip('랜딩: ' + _caEsc(a.landing)) + '</div>' +
-      '<div style="font-size:11.5px;color:#475569;margin-bottom:10px"><b>' + _caEsc(rep && rep.kwLabel || '노출 지표(조회수 대체)') + '</b> · ' + _caEsc(a.kw) + ' <span style="color:#94a3b8">' + _caEsc(rep && rep.kwNote || '(광고 라이브러리 \'높은 노출순\' 순위, 조회수는 메타 비공개)') + '</span></div>' +
+      '<div style="font-size:11.5px;color:#475569;margin-bottom:10px"><b>' + _caEsc(rep && rep.kwLabel || '노출 지표(조회수 대체)') + '</b> · ' + _caEsc(a.kw) + ' <span style="color:#94a3b8">' + _caEsc(rep && rep.kwNote != null ? rep.kwNote : '(광고 라이브러리 \'높은 노출순\' 순위, 조회수는 메타 비공개)') + '</span></div>' +
       '<div style="display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:14px">' + _caImg(a.img, 200) +
       '<div><div style="font-size:12.5px;font-weight:800;color:#0f172a;margin-bottom:4px">🎬 장면 흐름</div><table style="border-collapse:collapse;margin-bottom:8px">' + flow + '</table>' +
       '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin:6px 0 4px">💡 효율이 높은 이유</div>' + why +
@@ -211,9 +241,10 @@ function _caOursG(o) {
   return h;
 }
 
-function _caCompare(rows) {
+function _caCompare(rows, rep) {
+  const hd = (rep && rep.compareHead) || ['항목', '경쟁 상위 소재', '글로우샷 (현재)', '차이의 영향'];
   let h = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">' +
-    _caTh('항목', 'left') + _caTh('경쟁 상위 소재', 'left') + _caTh('글로우샷 (현재)', 'left') + _caTh('차이의 영향') + '</tr></thead><tbody>';
+    _caTh(hd[0], 'left') + _caTh(hd[1], 'left') + _caTh(hd[2], 'left') + _caTh(hd[3]) + '</tr></thead><tbody>';
   rows.forEach(r => {
     const imp = r[3] || ''; const col = /^높음/.test(imp) ? '#dc2626' : (/^중간/.test(imp) ? '#d97706' : '#64748b');
     h += '<tr style="border-bottom:1px solid #f1f5f9">' + _caTd('<b>' + _caEsc(r[0]) + '</b>', 'left', ';white-space:nowrap') + _caTd(_caEsc(r[1]), 'left', ';color:#166534') + _caTd(_caEsc(r[2]), 'left', ';color:#991b1b') + _caTd('<b style="color:' + col + '">' + _caEsc(imp) + '</b>', 'center', ';white-space:nowrap') + '</tr>';
@@ -222,7 +253,8 @@ function _caCompare(rows) {
 }
 
 function renderCompAdsPage() { _caRender('meta'); }
-function renderGCompAdsPage() { _caRender('google'); }   // v2.3.875: 구글 · 다른 회사 광고 분석
+function renderGCompAdsPage() { _caRender('google'); }
+function renderRefAdsPage() { _caRender('ref'); }   // v2.3.879: 특정 레퍼런스 분석   // v2.3.875: 구글 · 다른 회사 광고 분석
 function _caRender(kind) {
   window._CAK = kind; const K = _caC();
   const host = document.getElementById(K.root); if (!host) return;
@@ -254,16 +286,17 @@ function _caRender(kind) {
     _caChip('영상 길이 중앙값 ' + (s.medianLen || 0) + '초') + _caChip('60일 이상 게재 ' + _caNum(s.long60) + '개', '#eff6ff', '#1d4ed8')) + '</div>' +
     '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;font-weight:700;color:#475569">조사 방법 · 조회수 안내</summary><div style="font-size:12px;color:#334155;line-height:1.6;margin-top:6px">' + _caEsc(m.text) +
     '<br><b>키워드</b>: ' + _caEsc((m.keywords || []).join(', ') || '-') + ' · <b>브랜드</b>: ' + _caEsc((m.brands || []).join(', ')) + '<br>' + _caEsc(m.viewsNote) + '</div></details></div>';
-  h += _caCard('🏆 효율이 높은 소재 TOP ' + (rep.top || []).length + ' — 장면 분석', _caTopCards(rep.top || [], rep));
+  if (rep.companies) h += _caCard('🏢 회사별 광고 운영 현황', _caCompanies(rep.companies));
+  h += _caCard(rep.topTitle || ('🏆 효율이 높은 소재 TOP ' + (rep.top || []).length + ' — 장면 분석'), _caTopCards(rep.top || [], rep));
   h += _caCard(rep.tableTitle || '📋 노출 상위 소재 전체 표 (게재 시작일·게재 일수순 비교)', _caListTable(rep.table || [], rep));
-  h += _caCard('🧩 공통 성공 패턴', '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">' + (rep.patterns || []).map((p, i) =>
+  h += _caCard((rep.titles && rep.titles.patterns) || '🧩 공통 성공 패턴', '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">' + (rep.patterns || []).map((p, i) =>
     '<div style="background:#f8fafc;border-radius:12px;padding:12px 14px"><div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:4px">' + (i + 1) + '. ' + _caEsc(p.t) + '</div><div style="font-size:12px;color:#334155;line-height:1.55">' + _caEsc(p.d) + '</div><div style="font-size:11.5px;color:#64748b;margin-top:4px">예) ' + _caEsc(p.ex) + '</div></div>').join('') + '</div>');
-  h += _caCard('🧴 우리 글로우샷 광고 현황', _caOurs(rep.ours), ';border:1px solid #fecaca');
-  h += _caCard('⚖️ 글로우샷 vs 경쟁 상위 소재 비교', _caCompare(rep.compare || []));
-  h += _caCard('🩺 우리 광고 효율이 떨어지는 이유', (rep.diagnosis || []).map((d, i) =>
+  if (rep.ours) h += _caCard((rep.titles && rep.titles.ours) || '🧴 우리 글로우샷 광고 현황', _caOurs(rep.ours), ';border:1px solid #fecaca');
+  h += _caCard((rep.titles && rep.titles.compare) || '⚖️ 글로우샷 vs 경쟁 상위 소재 비교', _caCompare(rep.compare || [], rep));
+  h += _caCard((rep.titles && rep.titles.diagnosis) || '🩺 우리 광고 효율이 떨어지는 이유', (rep.diagnosis || []).map((d, i) =>
     '<div style="border-left:4px solid #ef4444;background:#fff7f7;border-radius:10px;padding:10px 14px;margin-bottom:10px"><div style="font-size:13.5px;font-weight:800;color:#991b1b;margin-bottom:4px">' + (i + 1) + '. ' + _caEsc(d.title) + '</div>' +
     '<div style="font-size:12px;color:#1e293b;line-height:1.6"><b>근거</b> · ' + _caEsc(d.evidence) + '</div><div style="font-size:12px;color:#334155;line-height:1.6;margin-top:3px"><b>원인</b> · ' + _caEsc(d.cause) + '</div></div>').join(''));
-  h += _caCard('✅ 개선할 점 (우선순위)', '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">' + _caTh('우선순위') + _caTh('무엇을', 'left') + _caTh('어떻게', 'left') + _caTh('목표 지표') + '</tr></thead><tbody>' +
+  h += _caCard((rep.titles && rep.titles.actions) || '✅ 개선할 점 (우선순위)', '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">' + _caTh('우선순위') + _caTh('무엇을', 'left') + _caTh('어떻게', 'left') + _caTh('목표 지표') + '</tr></thead><tbody>' +
     (rep.actions || []).map(a => '<tr style="border-bottom:1px solid #f1f5f9">' + _caTd('<b style="color:' + (a.p === '1순위' ? '#dc2626' : (a.p === '2순위' ? '#d97706' : '#64748b')) + '">' + _caEsc(a.p) + '</b>', 'center', ';white-space:nowrap') +
       _caTd('<b>' + _caEsc(a.what) + '</b>', 'left', ';white-space:nowrap') + _caTd(_caEsc(a.how), 'left', ';line-height:1.55') + _caTd(_caEsc(a.kpi), 'center', ';white-space:nowrap;color:#1d4ed8;font-weight:700') + '</tr>').join('') + '</tbody></table></div>' +
     '<div style="font-size:11px;color:#94a3b8;margin-top:6px">경쟁사 효율은 공개 지표 기반 추정입니다. 광고 켜기/끄기·예산 변경은 이 화면에서 하지 않습니다.</div>');
