@@ -13,11 +13,13 @@
 window._CA = window._CA || { index: [], reps: {}, imgs: {}, sel: null, ts: 0, loading: false };
 // v2.3.875: 같은 화면을 구글(_GCA · gcompAds*)에도 쓴다. 렌더 시점의 종류(_CAK)에 따라 문서 이름·버튼이 바뀐다.
 window._GCA = window._GCA || { index: [], reps: {}, imgs: {}, sel: null, ts: 0, loading: false };
-window._RCA = window._RCA || { index: [], reps: {}, imgs: {}, sel: null, ts: 0, loading: false };   // v2.3.879: 특정 레퍼런스 분석
+window._RCA = window._RCA || { index: [], reps: {}, imgs: {}, sel: null, ts: 0, loading: false };   // v2.3.879: 특정 레퍼런스 분석 (구글)
+window._MRCA = window._MRCA || { index: [], reps: {}, imgs: {}, sel: null, ts: 0, loading: false };   // v2.3.880: 특정 레퍼런스 분석 (메타)
 window._CA_CFG = {
   meta: { st: '_CA', pre: 'compAds', root: 'compads-root', back: 'metaads', backLabel: '← 메타 광고', render: 'renderCompAdsPage', src: '메타 광고 라이브러리 + 우리 메타 광고 실적' },
   google: { st: '_GCA', pre: 'gcompAds', root: 'gcompads-root', back: 'googleads', backLabel: '← 구글 광고', render: 'renderGCompAdsPage', src: '구글 광고 투명성 센터 + 유튜브 공개 조회수 + 우리 구글 광고 실적' },
-  ref: { st: '_RCA', pre: 'refAds', root: 'refads-root', back: 'googleads', backLabel: '← 구글 광고', render: 'renderRefAdsPage', src: '부스터스 · 뉴셀렉트 · 아이리스브라이트 — 메타 광고 라이브러리 + 구글 광고 투명성 센터 + 유튜브 조회수' } };
+  ref: { st: '_RCA', pre: 'refAds', root: 'refads-root', back: 'googleads', backLabel: '← 구글 광고', render: 'renderRefAdsPage', src: '부스터스 · 뉴셀렉트 · 아이리스브라이트 — 구글 광고 투명성 센터 + 유튜브 조회수', col: '게재 중 영상 · 구글 광고', colNote: '게재 중 영상 = 구글 영상 광고 중 어제까지 게재된 고유 유튜브 영상 수, 구글 광고 = 투명성 센터의 대한민국 노출 광고 수(공식몰 도메인 기준, 근사치).' },
+  mref: { st: '_MRCA', pre: 'mrefAds', root: 'mrefads-root', back: 'metaads', backLabel: '← 메타 광고', render: 'renderMRefAdsPage', src: '부스터스 · 뉴셀렉트 · 아이리스브라이트 — 메타 광고 라이브러리', col: '메타 광고 · 60일+', colNote: '메타 광고 = 광고 라이브러리에서 게재 중으로 확인된 광고 수(브랜드 검색 상위 기준), 60일+ = 그중 60일 이상 게재 중인 광고 수.' } };
 window._CAK = window._CAK || 'meta';
 const _caC = () => window._CA_CFG[window._CAK] || window._CA_CFG.meta;
 const _caS = () => window[_caC().st];
@@ -102,7 +104,7 @@ const _caImg = (key, h) => '<div style="align-self:start;position:relative;backg
 function _caIndexTable(index, sel) {
   if (!index.length) return '<div style="color:#94a3b8;font-size:12.5px">아직 분석 기록이 없습니다.</div>';
   if (window._CAK === 'google') return _caIndexTableG(index, sel);
-  if (window._CAK === 'ref') return _caIndexTableR(index, sel);
+  if (window._CAK === 'ref' || window._CAK === 'mref') return _caIndexTableR(index, sel);
   let h = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">' +
     _caTh('날짜', 'left') + _caTh('수집 광고') + _caTh('크리에이터 비중') + _caTh('영상 길이 중앙값') + _caTh('장기 생존 1위 소재', 'left') + _caTh('새로 뜨는 소재', 'left') +
     _caTh('우리 기준일') + _caTh('우리 CPM') + _caTh('우리 링크 CTR') + _caTh('훅률 / 유지율') + _caTh('랜딩 → 장바구니 → 구매') + _caTh('한 줄 결론', 'left') + '</tr></thead><tbody>';
@@ -134,14 +136,14 @@ function _caIndexTableG(index, sel) {
 function _caIndexTableR(index, sel) {
   const cos = (index[0] && index[0].cos) || [];
   let h = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">' +
-    _caTh('날짜', 'left') + cos.map(c => _caTh(_caEsc(c.n) + '<div style="font-weight:500;color:#94a3b8">메타 · 구글</div>')).join('') + _caTh('유튜브 조회수 1위', 'left') + _caTh('새로 뜬 소재', 'left') + _caTh('한 줄 결론', 'left') + '</tr></thead><tbody>';
+    _caTh('날짜', 'left') + cos.map(c => _caTh(_caEsc(c.n) + '<div style="font-weight:500;color:#94a3b8">' + (_caC().col || '메타 · 구글') + '</div>')).join('') + _caTh('유튜브 조회수 1위', 'left') + _caTh('새로 뜬 소재', 'left') + _caTh('한 줄 결론', 'left') + '</tr></thead><tbody>';
   index.forEach(r => {
     const on = r.date === sel;
-    h += '<tr onclick="window._RCA.sel=\'' + r.date + '\';renderRefAdsPage()" style="cursor:pointer;border-bottom:1px solid #f1f5f9;background:' + (on ? '#eff6ff' : 'transparent') + '">' +
+    h += '<tr onclick="window.' + _caC().st + '.sel=\'' + r.date + '\';' + _caC().render + '()" style="cursor:pointer;border-bottom:1px solid #f1f5f9;background:' + (on ? '#eff6ff' : 'transparent') + '">' +
       _caTd('<b>' + _caDateK(r.date) + '</b>', 'left', ';white-space:nowrap') + (r.cos || []).map(c => _caTd(_caNum(c.meta) + ' · ' + _caNum(c.google), 'center', ';white-space:nowrap')).join('') +
       _caTd(_caEsc(r.topTitle || '') + (r.topLink ? ' ' + _caLink(r.topLink, '') : ''), 'left', ';min-width:200px') + _caTd(_caEsc(r.newTop || '-'), 'left', ';min-width:260px') + _caTd(_caEsc(r.headline || ''), 'left', ';min-width:280px') + '</tr>';
   });
-  return h + '</tbody></table></div><div style="font-size:11px;color:#94a3b8;margin-top:6px">메타 = 광고 라이브러리에서 게재 중으로 확인된 광고 수(브랜드 검색 상위 기준), 구글 = 투명성 센터의 대한민국 노출 광고 수(공식몰 도메인 기준, 근사치).</div>';
+  return h + '</tbody></table></div><div style="font-size:11px;color:#94a3b8;margin-top:6px">' + (_caC().colNote || '') + '</div>';
 }
 
 function _caCompanies(cos) {
@@ -254,7 +256,8 @@ function _caCompare(rows, rep) {
 
 function renderCompAdsPage() { _caRender('meta'); }
 function renderGCompAdsPage() { _caRender('google'); }
-function renderRefAdsPage() { _caRender('ref'); }   // v2.3.879: 특정 레퍼런스 분석   // v2.3.875: 구글 · 다른 회사 광고 분석
+function renderRefAdsPage() { _caRender('ref'); }
+function renderMRefAdsPage() { _caRender('mref'); }   // v2.3.880: 메타 · 특정 레퍼런스 분석   // v2.3.879: 특정 레퍼런스 분석   // v2.3.875: 구글 · 다른 회사 광고 분석
 function _caRender(kind) {
   window._CAK = kind; const K = _caC();
   const host = document.getElementById(K.root); if (!host) return;
