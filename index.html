@@ -6369,7 +6369,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.879';
+const ERP_VERSION = 'v2.3.880';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -30093,6 +30093,7 @@ async function taxBuildMonthly(silent){
   const rows = _taxSourceRows(ym);
   const byS = {};
   const orphan = {};                     // v2.3.869: 거래처에서 찾을 수 없는 판매처
+  const dupSingle = [];                  // v2.3.877: 이미 건별 계산서가 잡은 출고
   rows.forEach(sh => {
     // v2.3.862: 거래가 있으면 모두 발행 대상. 빼려면 발행 설정에서 발행 방식을 '발행 안 함' 으로 둔다.
     const info = _taxSellerInfo(sh.sellerId);
@@ -30100,6 +30101,9 @@ async function taxBuildMonthly(silent){
     if (!info.name) { orphan[String(sh.sellerId)] = sh.sellerName || String(sh.sellerId); return; }
     if (info.mode !== 'monthly') return;                  // 건별 발행 / 발행 안 함 업체는 제외
     if (info.source === 'statement' && !sh.stmtIssuedAt) return;         // 거래명세서 발행분만
+    // v2.3.877: 같은 출고가 건별 계산서에 이미 들어가 있으면 월 합계에서 뺀다.
+    //   (안 그러면 한 거래로 계산서가 두 장 — 이중 발행 위험)
+    if (_taxInvFor('single', sh.sellerId, '', sh.id)) { dupSingle.push(sh.date || String(sh.id)); return; }
     (byS[String(sh.sellerId)] = byS[String(sh.sellerId)] || []).push(sh);
   });
   let made = 0, updated = 0, locked = [];
@@ -30144,6 +30148,7 @@ async function taxBuildMonthly(silent){
     if (locked.length) msg.push('발행완료라 건너뜀: ' + locked.join(', '));
     const _orp = Object.values(orphan);
     if (_orp.length) msg.push('거래처에 없는 판매처 제외: ' + _orp.join(', '));
+    if (dupSingle.length) msg.push('건별 계산서가 이미 있어 제외: ' + dupSingle.join(', '));
     showNotif(msg.length ? ('🧾 ' + ym + ' 월 합계 — ' + msg.join(' · '))
       : ('해당 월(' + ym + ')에 집계할 거래가 없습니다'), msg.length ? 'success' : 'warning');
   }
@@ -30162,6 +30167,8 @@ async function taxBuildSelected(){
     if (!sh) continue;
     if (_taxTooOld(String(sh.date||'').slice(0,7))) { old++; continue; }
     if (_taxInvFor('single', sh.sellerId, '', sh.id)) { skipped++; continue; }
+    // v2.3.877: 이미 월 합계 계산서에 들어간 출고는 건별로 또 만들지 않는다
+    if ((window._tax.invoices||[]).some(v => v && v.kind === 'monthly' && (v.srcIds||[]).indexOf(sh.id) >= 0)) { skipped++; continue; }
     const info = _taxSellerInfo(sh.sellerId);
     if (info.mode === 'none') { skipped++; continue; }     // v2.3.862: 발행 안 함 업체
     const A = _consignAmounts(sh);
