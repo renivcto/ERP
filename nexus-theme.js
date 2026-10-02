@@ -35,3 +35,40 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();
+
+/* NEXUS deep links (navigation only, no data writes):
+   ?view=pay          -> 결재 관리 · 지출 결의서 (이번 달 지급 예정)
+   ?view=sales-yday   -> 판매 관리 · 매출 분석, 일별 = 어제(KST)
+   ?view=sales-month  -> 판매 관리 · 매출 분석, 월별 = 이번 달(KST) */
+(function () {
+  var view = null;
+  try { view = new URLSearchParams(location.search).get('view'); } catch (_) {}
+  if (!/^(pay|sales-yday|sales-month)$/.test(view || '')) return;
+  var started = Date.now();
+  function kst(offsetDays) { return new Date(Date.now() + 9 * 3600e3 + (offsetDays || 0) * 86400e3).toISOString().slice(0, 10); }
+  function setPeriod(mode, value) {
+    var blk = document.querySelector('.period-filter[data-prefix="sd"]'); if (!blk) return false;
+    var sel = blk.querySelector('.period-mode'); sel.value = mode; window._periodOnChange('sd');
+    var inp = blk.querySelector(mode === 'day' ? '.period-day' : '.period-month'); if (inp) { inp.value = value; window._periodOnChange('sd'); }
+    return true;
+  }
+  function run() {
+    if (view === 'pay') { window.go('approval'); window.switchApprovalTab('expense'); return; }
+    window.go('sales');
+    setTimeout(function () {
+      window.switchSalesTab('dashboard');
+      setTimeout(function () { if (view === 'sales-yday') setPeriod('day', kst(-1)); else setPeriod('month', kst(0).slice(0, 7)); }, 150);
+    }, 30);
+  }
+  function tick() {
+    var ready = window._currentUser && typeof window.go === 'function' && typeof window.switchSalesTab === 'function'
+      && typeof window._periodOnChange === 'function' && (typeof _firestoreDataLoaded === 'undefined' || _firestoreDataLoaded === true);
+    if (ready) {
+      try { history.replaceState(null, '', location.pathname); } catch (_) {}
+      setTimeout(function () { try { run(); } catch (e) { console.warn('[nexus-theme] view link failed', e); } }, 300);
+      return;
+    }
+    if (Date.now() - started < 30000) setTimeout(tick, 200);
+  }
+  tick();
+})();
