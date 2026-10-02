@@ -183,12 +183,12 @@ const avatars=[],clickTargets=[];
   if(labItems){for(const o of labItems.children)o.traverse(m=>{const i=clickTargets.indexOf(m);if(i>=0)clickTargets.splice(i,1);if(m.material){if(m.material.map)m.material.map.dispose();m.material.dispose()}if(m.geometry&&m.geometry.type==='PlaneGeometry')m.geometry.dispose()});lab.remove(labItems);labItems=null}
   const items=(Array.isArray(list)?list:[]).slice(0,9);if(window.__labDefault)window.__labDefault.visible=!items.length;if(!items.length)return;
   labItems=new THREE.Group();lab.add(labItems);const TIERS=[.93,.49,.05],per=Math.ceil(items.length/3);
-  items.forEach((p,i)=>{const tier=Math.min(2,Math.floor(i/per)),row=items.slice(tier*per,tier*per+per),k=i-tier*per,step=row.length>1?Math.min(.5,1.0/(row.length-1)):0,x=-step*(row.length-1)/2+k*step;const g=new THREE.Group();g.position.set(x,TIERS[tier],.1);labItems.add(g);g.userData.isPhoto=true;const col=new THREE.Color(p.color||'#7c5fc4');
-   const H=.34,W=H*.82;const targets=[];
+  items.forEach((p,i)=>{const tier=Math.min(2,Math.floor(i/per)),row=items.slice(tier*per,tier*per+per),k=i-tier*per,step=row.length>1?Math.min(.58,1.16/(row.length-1)):0,x=-step*(row.length-1)/2+k*step;const g=new THREE.Group();g.position.set(x,TIERS[tier],.1);labItems.add(g);g.userData.isPhoto=true;const col=new THREE.Color(p.color||'#7c5fc4');
+   const H=.4,W=.36;const targets=[];
       const photoMat=new THREE.MeshBasicMaterial({color:0xffffff,toneMapped:false});const photo=new THREE.Mesh(new THREE.PlaneGeometry(W,H),photoMat);photo.position.set(0,H/2+.012,.002);photo.rotation.x=-.1;g.add(photo);
    box(W*.7,.012,.06,new THREE.MeshStandardMaterial({color:0x9aa5a0,roughness:.4,metalness:.3}),0,.006,-.01,g);
    // live89: one flat hit rectangle per product on the shelf's front plane — cells never overlap, so hover matches what you see
-   const cellW=row.length>1?Math.min(.5,1.2/row.length):.6,cellH=.42;const hit=new THREE.Mesh(new THREE.PlaneGeometry(cellW,cellH),new THREE.MeshBasicMaterial({visible:false}));hit.position.set(0,cellH/2,.22);g.add(hit);targets.push(hit);
+   const cellW=row.length>1?Math.min(.58,1.2/row.length):.6,cellH=.42;const hit=new THREE.Mesh(new THREE.PlaneGeometry(cellW,cellH),new THREE.MeshBasicMaterial({visible:false}));hit.position.set(0,cellH/2,.22);g.add(hit);targets.push(hit);
    const fallback=()=>{photoMat.color.copy(col.clone().lerp(new THREE.Color(0xffffff),.6));const glass=new THREE.MeshPhysicalMaterial({color:col.clone().lerp(new THREE.Color(0xffffff),.45),roughness:.15,transparent:true,opacity:.9});cylinder(.06,.066,.18,glass,0,.1,.04,g);cylinder(.042,.042,.06,new THREE.MeshStandardMaterial({color:col,roughness:.4}),0,.22,.04,g)};
    if(p.img){texLoader.load(p.img,t=>{t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=8;const ia=(t.image&&t.image.width&&t.image.height)?t.image.width/t.image.height:1,pa=W/H;if(ia>pa){t.repeat.set(pa/ia,1);t.offset.set((1-pa/ia)/2,0)}else{t.repeat.set(1,ia/pa);t.offset.set(0,(1-ia/pa)/2)}photoMat.map=t;photoMat.needsUpdate=true},undefined,fallback)}else fallback();
    for(const m of targets){m.userData.labProduct=p.id;clickTargets.push(m)}});
