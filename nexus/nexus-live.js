@@ -976,7 +976,7 @@ $('slack-form').onsubmit=async e=>{e.preventDefault();const text=$('slack-text')
 document.querySelectorAll('[data-view]').forEach(button=>button.onclick=()=>{const view=button.dataset.view;if(view==='home'){closeSubpage();state.scene?.setView('office');}else showSubpage(view);});
 document.querySelectorAll('.navicon[data-panel]').forEach(button=>button.onclick=()=>showSubpage(button.dataset.panel));
 $('subpage-content').onclick=e=>{const member=e.target.closest('[data-person]');if(member)selectV45Person(member.dataset.person);};
-$('home-button').onclick=()=>{closeSubpage();$('erp-shell37').hidden=true;$('erp-frame37').removeAttribute('src');}; $('subpage-close').onclick=closeSubpage;
+$('home-button').onclick=()=>goHome86(); $('subpage-close').onclick=closeSubpage;
 $('nav-erp37').onclick=()=>{$('erp-frame37').src=ERP_URL;$('erp-shell37').hidden=false;}; bindFeedBoard(); pinFinance42(); $('erp-home37').onclick=()=>{$('erp-shell37').hidden=true;$('erp-frame37').removeAttribute('src');};
 $('office-view-button').onclick=()=>state.scene?.setView('office'); $('meeting-view-button').onclick=()=>state.scene?.setView('meeting'); $('return-seats-button').onclick=()=>state.scene?.returnSeats();
 $('meeting-new-button').onclick=()=>openMeetingDialog(); $('meeting-close-button').onclick=()=>{$('meeting-dialog').close();state.meetingRequestId=null;state.meetingPayloadKey=null;}; $('meeting-cancel-button').onclick=()=>{state.meetingRequestId=null;state.meetingPayloadKey=null;$('meeting-dialog').close();}; $('meeting-form').onsubmit=e=>{e.preventDefault();saveMeeting();}; $('meeting-delete-button').onclick=()=>deleteMeeting(); $('meeting-link-btn44').onclick=createMeetingLink; $('meeting-link-out44').addEventListener('click',e=>{ if(e.target.closest('[data-slack-reconnect]')) reconnectSlack(); }); $('meeting-reconnect45').addEventListener('click',e=>{ if(e.target.closest('[data-slack-reconnect]')) reconnectSlack(); }); $('meeting-attendees').addEventListener('change',()=>{ if(state.meetingLink){ state.meetingLink=''; state.meetingLinkInfo=null; renderMeetingLink(); } }); $('meeting-now44').onclick=startInstantMeeting; $('meeting-next').onclick=()=>{ if(!$('meeting-dialog').open) openMeetingDialog(); };
@@ -1360,3 +1360,19 @@ document.addEventListener('click',e=>{
 
 /* live83: spin the refresh icon briefly on click */
 document.addEventListener('click',e=>{ const b=e.target.closest('#slack-refresh-live'); if(!b) return; b.classList.add('spin83'); setTimeout(()=>b.classList.remove('spin83'),1200); },true);
+
+/* live86: RENIV logo always returns to the NEXUS home screen */
+function goHome86(){
+  try{ closeSubpage(); }catch{}
+  try{ $('erp-shell37').hidden=true; $('erp-frame37').removeAttribute('src'); }catch{}
+  for(const id of ['meeting-dialog','admin-tasks-dialog']){ const d=document.getElementById(id); if(d&&d.open) try{ d.close(); }catch{} }
+  for(const id of ['slack-pop77','trello-pop80','img-viewer76']){ const el=document.getElementById(id); if(el) el.hidden=true; }
+  try{ hideDeskTip48(true); }catch{}
+  const tip=document.getElementById('board-tip'); if(tip) tip.style.display='none';
+  try{ window.NEXUS?.setView?.('office'); }catch{}
+  try{ if(state.slack.channel) selectSlackChannel(''); }catch{}
+  for(const sel of ['#my-tasks35','#company-list37','#slack-feed35','#agenda-content32']){ const el=document.querySelector(sel); if(el) el.scrollTop=0; }
+  try{ state.weekOffset=0; state.selectedDate=ymdKst(); renderCalendar(); }catch{}
+  if(location.search||location.hash){ try{ history.replaceState(null,'',location.pathname); }catch{} }
+  window.scrollTo(0,0);
+}
