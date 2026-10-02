@@ -20,6 +20,27 @@ window._CAK = window._CAK || 'meta';
 const _caC = () => window._CA_CFG[window._CAK] || window._CA_CFG.meta;
 const _caS = () => window[_caC().st];
 
+// v2.3.878: 월 → 일 날짜 선택기 (메타·구글 광고 화면 공용). dates = 'YYYY-MM-DD' 배열, cb = 날짜를 받는 전역 함수 이름
+window._adsDatePicker = function (dates, sel, cb, label) {
+  const ds = (dates || []).slice().sort().reverse(); if (!ds.length) return '';
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  sel = sel && ds.indexOf(sel) >= 0 ? sel : ds[0];
+  const ym = sel.slice(0, 7); const months = {}; ds.forEach(d => { (months[d.slice(0, 7)] = months[d.slice(0, 7)] || []).push(d); });
+  const mKeys = Object.keys(months).sort().reverse();
+  const wd = (d) => '일월화수목금토'[new Date(d + 'T00:00:00').getDay()];
+  let h = '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-left:auto">' +
+    '<span style="font-size:12px;color:#475569;font-weight:700">' + esc(label || '날짜') + '</span>' +
+    '<select onchange="' + cb + '(this.value)" style="height:32px;padding:0 28px 0 10px;line-height:30px;font-size:12.5px;font-weight:700;color:#0f172a;border:1px solid #cbd5e1;border-radius:8px;background-color:#fff;cursor:pointer">' +
+    mKeys.map(m => '<option value="' + months[m][0] + '"' + (m === ym ? ' selected' : '') + '>' + m.slice(0, 4) + '년 ' + (+m.slice(5)) + '월 (' + months[m].length + '일)</option>').join('') + '</select></div>';
+  h += '<div style="display:flex;flex-wrap:wrap;gap:4px;width:100%;justify-content:flex-end;margin-top:6px">' + months[ym].slice().sort().map(d => {
+    const on = d === sel, w = wd(d), wc = w === '일' ? '#dc2626' : (w === '토' ? '#2563eb' : '#475569');
+    return '<button onclick="' + cb + '(\'' + d + '\')" title="' + d + '" style="min-width:52px;height:30px;padding:0 8px;border-radius:8px;cursor:pointer;font-size:12px;line-height:28px;border:1px solid ' + (on ? '#2563eb' : '#e2e8f0') + ';background:' + (on ? '#2563eb' : '#fff') + ';color:' + (on ? '#fff' : '#0f172a') + ';font-weight:' + (on ? 800 : 600) + '">' + (+d.slice(8)) + '일 <span style="font-size:10.5px;color:' + (on ? '#dbeafe' : wc) + '">' + w + '</span></button>';
+  }).join('') + '</div>';
+  return h;
+};
+window._caPick = function (d) { const s = _caS(); s.sel = d; window[_caC().render](); };
+
+
 function _caGet(id) {
   const db = window._firebaseDb, docF = window._firestoreDoc;
   const getFn = window._firestoreGetDocFromServer || window._firestoreGetDoc;
@@ -86,7 +107,7 @@ function _caIndexTable(index, sel) {
     const on = r.date === sel;
     h += '<tr onclick="window.' + _caC().st + '.sel=\'' + r.date + '\';' + _caC().render + '()" style="cursor:pointer;border-bottom:1px solid #f1f5f9;background:' + (on ? '#eff6ff' : 'transparent') + '">' +
       _caTd('<b>' + _caDateK(r.date) + '</b>', 'left', ';white-space:nowrap') + _caTd(_caNum(r.unique) + '개') + _caTd((r.creatorShare || 0) + '%') + _caTd((r.medianLen || 0) + '초') +
-      _caTd(_caEsc(r.topBrand) + ' · ' + _caEsc(r.topTitle) + (r.topLink ? ' ' + _caLink(r.topLink, '') : ''), 'left') + _caTd(_caEsc(r.newTop || '-'), 'left') +
+      _caTd(_caEsc(r.topBrand) + ' · ' + _caEsc(r.topTitle) + (r.topLink ? ' ' + _caLink(r.topLink, '') : ''), 'left', ';min-width:200px') + _caTd(_caEsc(r.newTop || '-'), 'left', ';min-width:300px') +
       _caTd(_caEsc(r.ourAsOf || '-'), 'center', ';white-space:nowrap') + _caTd(_caWon(r.ourCpm)) + _caTd((r.ourCtr || 0) + '%') + _caTd((r.ourHook || 0) + '% / ' + (r.ourHold || 0) + '%') +
       _caTd(_caNum(r.ourLpv) + ' → ' + _caNum(r.ourAtc) + ' → ' + _caNum(r.ourBuy)) + _caTd(_caEsc(r.headline || ''), 'left', ';min-width:260px') + '</tr>';
   });
@@ -100,7 +121,7 @@ function _caIndexTableG(index, sel) {
     const on = r.date === sel;
     h += '<tr onclick="window._GCA.sel=\'' + r.date + '\';renderGCompAdsPage()" style="cursor:pointer;border-bottom:1px solid #f1f5f9;background:' + (on ? '#eff6ff' : 'transparent') + '">' +
       _caTd('<b>' + _caDateK(r.date) + '</b>', 'left', ';white-space:nowrap') + _caTd(_caNum(r.unique) + '개') +
-      _caTd(_caEsc(r.topBrand) + ' · ' + _caEsc(r.topTitle) + (r.topLink ? ' ' + _caLink(r.topLink, '') : ''), 'left') + _caTd(_caEsc(r.newTop || '-'), 'left') +
+      _caTd(_caEsc(r.topBrand) + ' · ' + _caEsc(r.topTitle) + (r.topLink ? ' ' + _caLink(r.topLink, '') : ''), 'left', ';min-width:200px') + _caTd(_caEsc(r.newTop || '-'), 'left', ';min-width:300px') +
       _caTd(_caEsc(r.ourAsOf || '-'), 'center', ';white-space:nowrap') + _caTd(_caWon(r.ourSpend)) + _caTd((r.ourCtr || 0) + '%') + _caTd((r.ourViewRate || 0) + '%') +
       _caTd(_caNum(r.ourClicks) + ' → ' + _caNum(r.ourAtc) + ' → ' + _caNum(r.ourBuy)) + _caTd(_caEsc(r.headline || ''), 'left', ';min-width:260px') + '</tr>';
   });
@@ -222,9 +243,9 @@ function _caRender(kind) {
     '<button class="btn btn-sm" onclick="go(\'' + K.back + '\')" style="height:28px;font-size:12px">' + K.backLabel + '</button>' +
     '<span style="font-size:12px;color:#64748b">갱신 ' + (C.ts ? new Date(C.ts).toLocaleString('ko-KR', { hour12: false }) : '-') + ' · 매일 아침 자동 분석 (' + K.src + ')</span>' +
     '<button class="btn btn-sm" onclick="window.' + K.st + '.ts=0;' + K.render + '()" style="height:28px;font-size:12px">🔄 새로고침</button>' +
-    '<span style="margin-left:auto;font-size:12px;color:#475569;font-weight:700">분석 날짜</span><select class="fs" onchange="window.' + K.st + '.sel=this.value;' + K.render + '()" style="width:150px;font-size:12px;height:30px">' +
-    C.index.map(r => '<option value="' + r.date + '"' + (r.date === date ? ' selected' : '') + '>' + r.date + '</option>').join('') + '</select></div>';
-  h += _caCard('📅 날짜별 요약', _caIndexTable(C.index, date));
+    window._adsDatePicker(C.index.map(r => r.date), date, '_caPick', '분석 날짜') + '</div>';
+  const _ym = (date || '').slice(0, 7); const _mIdx = C.index.filter(r => r.date.slice(0, 7) === _ym);
+  h += _caCard('📅 날짜별 요약 · ' + _ym.slice(0, 4) + '년 ' + (+_ym.slice(5)) + '월 <span style="font-size:12px;color:#94a3b8;font-weight:500">(' + _mIdx.length + '일 · 다른 달은 위 날짜 선택에서 고르세요)</span>', _caIndexTable(_mIdx.length ? _mIdx : C.index, date));
   if (!rep) { host.innerHTML = h + '<div class="card" style="padding:24px;color:#94a3b8;font-size:13px">선택한 날짜의 분석이 없습니다.</div>'; return; }
   const m = rep.method || {}, s = rep.stats || {};
   h += '<div class="card" style="padding:16px 18px;margin-bottom:14px;background:linear-gradient(135deg,#eff6ff,#f0fdf4)">' +

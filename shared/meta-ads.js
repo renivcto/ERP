@@ -207,6 +207,7 @@ function _mHistoryHtml(reports, sel) {
   return h + '</div></div>';
 }
 
+window._mPick = function (d) { window._META.sel = d; renderMetaAdsPage(); };
 function renderMetaAdsPage() {
   const host = document.getElementById('metaads-root'); if (!host) return;
   const M = window._META;
@@ -225,9 +226,8 @@ function renderMetaAdsPage() {
   host.innerHTML = '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">' +
     '<span style="font-size:12px;color:#64748b">서버 갱신 ' + (M.ts ? new Date(M.ts).toLocaleString('ko-KR', { hour12: false }) : '-') + ' · 매일 06:00 자동 (메타 계정 시간대 기준 어제 하루)</span>' +
     '<button class="btn btn-sm" onclick="window._META.ts=0;renderMetaAdsPage()" style="height:28px;font-size:12px">🔄 새로고침</button>' +
-    '<span style="margin-left:auto;font-size:12px;color:#475569;font-weight:700">리포트 날짜</span><select class="fs" onchange="window._META.sel=this.value;renderMetaAdsPage()" style="width:150px;font-size:12px;height:30px">' +
-    M.reports.map(r => '<option value="' + r.date + '"' + (rep && r.date === rep.date ? ' selected' : '') + '>' + r.date + (r.analysis ? ' 🧠' : '') + '</option>').join('') + '</select></div>' +
-    _mReportHtml(rep) + per.html + _mHistoryHtml(M.reports, rep && rep.date);
+    (typeof window._adsDatePicker === 'function' ? window._adsDatePicker(M.reports.map(r => r.date), rep && rep.date, '_mPick', '리포트 날짜') : '') + '</div>' +   // v2.3.878: 월 → 일 선택
+    _mReportHtml(rep) + per.html + _mHistoryHtml(M.reports.filter(r => !rep || r.date.slice(0, 7) === rep.date.slice(0, 7)), rep && rep.date);
   const slot = document.getElementById('metaads-period-slot'); if (slot) { slot.appendChild(filt); if (typeof _periodInit === 'function') _periodInit('ma'); }
   try { _mCharts(per.byD); } catch (e) { console.warn('metaads chart', e); }
 }

@@ -198,6 +198,7 @@ function _gHistoryHtml(reports, sel) {
   return h + '</div></div>';
 }
 
+window._gPick = function (d) { window._GADS.sel = d; renderGoogleAdsPage(); };
 function renderGoogleAdsPage() {
   const host = document.getElementById('googleads-root'); if (!host) return;
   const G = window._GADS;
@@ -215,9 +216,8 @@ function renderGoogleAdsPage() {
   host.innerHTML = '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">' +
     '<span style="font-size:12px;color:#64748b">갱신 ' + (G.ts ? new Date(G.ts).toLocaleString('ko-KR', { hour12: false }) : '-') + ' · 매일 아침 자동 (구글 광고 계정 133-454-6711, 어제 하루)</span>' +
     '<button class="btn btn-sm" onclick="window._GADS.ts=0;renderGoogleAdsPage()" style="height:28px;font-size:12px">🔄 새로고침</button>' +
-    '<span style="margin-left:auto;font-size:12px;color:#475569;font-weight:700">리포트 날짜</span><select class="fs" onchange="window._GADS.sel=this.value;renderGoogleAdsPage()" style="width:150px;font-size:12px;height:30px">' +
-    G.reports.map(r => '<option value="' + r.date + '"' + (rep && r.date === rep.date ? ' selected' : '') + '>' + r.date + (r.analysis ? ' 🧠' : '') + '</option>').join('') + '</select></div>' +
-    _gReportHtml(rep) + per.html + _gHistoryHtml(G.reports, rep && rep.date);
+    (typeof window._adsDatePicker === 'function' ? window._adsDatePicker(G.reports.map(r => r.date), rep && rep.date, '_gPick', '리포트 날짜') : '') + '</div>' +   // v2.3.878: 월 → 일 선택
+    _gReportHtml(rep) + per.html + _gHistoryHtml(G.reports.filter(r => !rep || r.date.slice(0, 7) === rep.date.slice(0, 7)), rep && rep.date);
   const slot = document.getElementById('googleads-period-slot'); if (slot) { slot.appendChild(filt); if (typeof _periodInit === 'function') _periodInit('ga'); }
   try { _gCharts(per.byD); } catch (e) { console.warn('googleads chart', e); }
 }
