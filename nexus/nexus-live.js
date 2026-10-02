@@ -1407,3 +1407,10 @@ function goHome86(){
   if(location.search||location.hash){ try{ history.replaceState(null,'',location.pathname); }catch{} }
   window.scrollTo(0,0);
 }
+
+/* live96: KPI board rows open the matching ERP screen (navigation only) */
+(function bindKpiLinks96(){
+  const open=v=>window.open(ERP_URL+'?view='+encodeURIComponent(v),'_blank','noopener');
+  document.addEventListener('click',e=>{ const el=e.target.closest?.('[data-erp-view96]'); if(el){ e.preventDefault(); e.stopPropagation(); open(el.dataset.erpView96); } },true);
+  document.addEventListener('keydown',e=>{ const el=e.target.closest?.('[data-erp-view96]'); if(el&&(e.key==='Enter'||e.key===' ')){ e.preventDefault(); open(el.dataset.erpView96); } });
+})();
