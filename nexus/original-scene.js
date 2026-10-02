@@ -216,7 +216,7 @@ function labPhotoBottle92(pr,maxH,maxD){
   for(let i=0;i<RINGS;i++)for(let j=0;j<SEG;j++){const a=i*(SEG+1)+j,b=a+SEG+1;idx.push(a,a+1,b,b,a+1,b+1)}
   // top cap
   const topR=rad[top+1]*.96*s,yTop=(bot-top)*s,ci=pos.length/3;pos.push(0,yTop,0);uv.push(c/W,1-(top+Math.max(3,(bot-top)*.05))/H);
-  for(let j=0;j<=SEG;j++){const th=-Math.PI+2*Math.PI*j/SEG;pos.push(topR*Math.sin(th),yTop,topR*Math.cos(th));uv.push(c/W,1-(top+3)/H)}
+  for(let j=0;j<=SEG;j++){const th=-Math.PI+2*Math.PI*j/SEG;pos.push(topR*Math.sin(th),yTop,topR*Math.cos(th));uv.push(c/W,1-(top+Math.max(3,(bot-top)*.05))/H)}
   for(let j=0;j<SEG;j++)idx.push(ci,ci+1+j+1,ci+1+j);
   const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));geo.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));geo.setIndex(idx);geo.computeVertexNormals();
   const tex=new THREE.CanvasTexture(pr.canvas);tex.colorSpace=THREE.SRGBColorSpace;tex.anisotropy=8;
