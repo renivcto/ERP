@@ -50,7 +50,7 @@
   if (!/^(pay|sales-yday|sales-month)$/.test(view || '')) return;
   try { history.replaceState(null, '', location.pathname); } catch (_) {}
   var page = view === 'pay' ? 'approval' : 'sales', want = 'page-' + page;
-  var active = true, started = Date.now(), stableSince = 0;
+  var active = true, started = Date.now(), stableSince = 0, startupSeen = 0;
   function kst(d) { return new Date(Date.now() + 9 * 3600e3 + (d || 0) * 86400e3).toISOString().slice(0, 10); }
   function stop() { active = false; }
   document.addEventListener('pointerdown', function (ev) { if (ev.isTrusted) stop(); }, true);
@@ -61,9 +61,14 @@
     if (wrapped || typeof window.go !== 'function') return;
     var orig = window.go; wrapped = true;
     window.go = function (p) {
-      if (active && p === 'dashboard') { var r = orig.call(this, page); setTimeout(applyDetail, 60); return r; }
+      // while active, any programmatic page change (ERP startup restore / dashboard) is redirected to the target
+      if (active && p !== page) { var r = orig.call(this, page); setTimeout(applyDetail, 60); return r; }
       return orig.apply(this, arguments);
     };
+    if (typeof window.renderDashboard === 'function') {
+      var rd = window.renderDashboard;
+      window.renderDashboard = function () { if (active) startupSeen = Date.now(); return rd.apply(this, arguments); };
+    }
   }
   function setPeriod(mode, value) {
     var blk = document.querySelector('.period-filter[data-prefix="sd"]'); if (!blk || typeof window._periodOnChange !== 'function') return;
@@ -89,7 +94,8 @@
     if (ready) {
       if (!shown()) { try { window.go(page); } catch (_) {} setTimeout(applyDetail, 60); stableSince = 0; }
       else if (!stableSince) { applyDetail(); stableSince = Date.now(); }
-      if (!loading && stableSince && Date.now() - stableSince > 4000) { applyDetail(); stop(); return; }
+      var loaded = typeof _firestoreDataLoaded === 'undefined' || _firestoreDataLoaded === true;
+      if (!loading && loaded && startupSeen && stableSince && Date.now() - Math.max(stableSince, startupSeen) > 5000) { applyDetail(); stop(); return; }
     }
     if (Date.now() - started > 180000) { stop(); return; }
     setTimeout(tick, 250);
