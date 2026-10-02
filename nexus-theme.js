@@ -52,9 +52,11 @@
   var page = view === 'pay' ? 'approval' : 'sales', want = 'page-' + page;
   var active = true, started = Date.now(), stableSince = 0, startupSeen = 0;
   function kst(d) { return new Date(Date.now() + 9 * 3600e3 + (d || 0) * 86400e3).toISOString().slice(0, 10); }
-  function stop() { active = false; }
-  document.addEventListener('pointerdown', function (ev) { if (ev.isTrusted) stop(); }, true);
-  document.addEventListener('keydown', function (ev) { if (ev.isTrusted) stop(); }, true);
+  var dbg = window.__nxViewDbg = [];
+  function log(m) { try { dbg.push(Math.round((Date.now() - started) / 100) / 10 + 's ' + m); } catch (_) {} }
+  function stop(why) { if (active) log('stop ' + (why || '')); active = false; }
+  document.addEventListener('pointerdown', function (ev) { if (ev.isTrusted) stop('pointer'); }, true);
+  document.addEventListener('keydown', function (ev) { if (ev.isTrusted) stop('key ' + ev.key); }, true);
   // (1) intercept the startup jump to 업무 현황
   var wrapped = false;
   function wrapGo() {
@@ -62,6 +64,7 @@
     var orig = window.go; wrapped = true;
     window.go = function (p) {
       // while active, any programmatic page change (ERP startup restore / dashboard) is redirected to the target
+      log('go ' + p + (active ? ' (active)' : ''));
       if (active && p !== page) { var r = orig.call(this, page); setTimeout(applyDetail, 60); return r; }
       return orig.apply(this, arguments);
     };
@@ -95,9 +98,9 @@
       if (!shown()) { try { window.go(page); } catch (_) {} setTimeout(applyDetail, 60); stableSince = 0; }
       else if (!stableSince) { applyDetail(); stableSince = Date.now(); }
       var loaded = typeof _firestoreDataLoaded === 'undefined' || _firestoreDataLoaded === true;
-      if (!loading && loaded && startupSeen && stableSince && Date.now() - Math.max(stableSince, startupSeen) > 5000) { applyDetail(); stop(); return; }
+      if (!loading && loaded && startupSeen && stableSince && Date.now() - Math.max(stableSince, startupSeen) > 5000) { applyDetail(); stop('stable'); return; }
     }
-    if (Date.now() - started > 180000) { stop(); return; }
+    if (Date.now() - started > 180000) { stop('timeout'); return; }
     setTimeout(tick, 250);
   }
   tick();
