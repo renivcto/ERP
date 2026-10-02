@@ -98,10 +98,12 @@
       if (!shown()) { try { window.go(page); } catch (_) {} setTimeout(applyDetail, 60); stableSince = 0; }
       else if (!stableSince) { applyDetail(); stableSince = Date.now(); }
       var loaded = typeof _firestoreDataLoaded === 'undefined' || _firestoreDataLoaded === true;
-      if (!loading && loaded && startupSeen && stableSince && Date.now() - Math.max(stableSince, startupSeen) > 5000) { applyDetail(); stop('stable'); return; }
+      // ERP re-runs its startup (fast path, then after the Firestore merge) at unpredictable times,
+      // so the target is held until the user touches the page or 60s pass.
+      void loading; void loaded;
     }
-    if (Date.now() - started > 180000) { stop('timeout'); return; }
-    setTimeout(tick, 250);
+    if (Date.now() - started > 60000) { stop('timeout'); return; }
+    setTimeout(tick, 400);
   }
   tick();
 })();
