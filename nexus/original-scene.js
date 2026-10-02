@@ -103,12 +103,12 @@ TEAM_ZONES.forEach(t=>{
 {const lab=new THREE.Group();lab.position.set(-4.0,0,2.75);scene.add(lab);window.__labBench=lab;
  // live68: open 3-tier display shelf (same .9 height), front open toward the office camera
  {const sm=new THREE.MeshStandardMaterial({color:0xf4f2ec,roughness:.5}),bm=new THREE.MeshStandardMaterial({color:0xe6e1d6,roughness:.6});
-  for(const y of [.03,.47,.91,1.35])box(1.3,.04,.6,sm,0,y,0,lab);
+  for(const y of [.03,.47,.91])box(1.3,.04,.6,sm,0,y,0,lab); // live91: top cover removed
   for(const dx of [-.63,.63])box(.04,1.36,.6,sm,dx,.69,0,lab);
   box(1.3,1.36,.03,bm,0,.69,-.285,lab);}
  const glassM=new THREE.MeshPhysicalMaterial({color:0xcfe9e4,roughness:.1,transparent:true,opacity:.7});
  const labDefault=new THREE.Group();lab.add(labDefault);window.__labDefault=labDefault;
- [[-.4,0xa8823f],[-.1,0x7fc9bd],[.2,0xe0b36a],[.45,0xb9a8dc]].forEach(([dx,c],i)=>{cylinder(.07,.09,.28+(i%2)*.08,glassM,dx,1.51,0,labDefault);cylinder(.05,.05,.06,new THREE.MeshStandardMaterial({color:c}),dx,1.7+(i%2)*.04,0,labDefault)})}
+ [[-.4,0xa8823f],[-.1,0x7fc9bd],[.2,0xe0b36a],[.45,0xb9a8dc]].forEach(([dx,c],i)=>{cylinder(.07,.09,.28+(i%2)*.08,glassM,dx,1.07,0,labDefault);cylinder(.05,.05,.06,new THREE.MeshStandardMaterial({color:c}),dx,1.26+(i%2)*.04,0,labDefault)})}
 
 // Indoor biophilic details.
 function plant(x,z){
