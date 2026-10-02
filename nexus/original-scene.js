@@ -215,12 +215,12 @@ function labPhotoBottle92(pr,maxH,maxD){
     for(let j=0;j<=SEG;j++){const th=-Math.PI+2*Math.PI*j/SEG,sx=Math.sin(th),cz=Math.cos(th);pos.push(ri*s*sx,yw,ri*s*cz);uv.push((c+ri*sx)/W,1-row/H)}}
   for(let i=0;i<RINGS;i++)for(let j=0;j<SEG;j++){const a=i*(SEG+1)+j,b=a+SEG+1;idx.push(a,a+1,b,b,a+1,b+1)}
   // top cap
-  const topR=rad[top+1]*.96*s,yTop=(bot-top)*s,ci=pos.length/3;pos.push(0,yTop,0);uv.push(c/W,1-(top+3)/H);
+  const topR=rad[top+1]*.96*s,yTop=(bot-top)*s,ci=pos.length/3;pos.push(0,yTop,0);uv.push(c/W,1-(top+Math.max(3,(bot-top)*.05))/H);
   for(let j=0;j<=SEG;j++){const th=-Math.PI+2*Math.PI*j/SEG;pos.push(topR*Math.sin(th),yTop,topR*Math.cos(th));uv.push(c/W,1-(top+3)/H)}
   for(let j=0;j<SEG;j++)idx.push(ci,ci+1+j+1,ci+1+j);
   const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));geo.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));geo.setIndex(idx);geo.computeVertexNormals();
   const tex=new THREE.CanvasTexture(pr.canvas);tex.colorSpace=THREE.SRGBColorSpace;tex.anisotropy=8;
-  const mat=new THREE.MeshStandardMaterial({map:tex,roughness:.32,metalness:0,emissive:0xffffff,emissiveMap:tex,emissiveIntensity:.42});
+  const mat=new THREE.MeshStandardMaterial({map:tex,roughness:.32,metalness:0,emissive:0xffffff,emissiveMap:tex,emissiveIntensity:.34});
   const m=new THREE.Mesh(geo,mat);m.userData.ownGeo92=true;m.castShadow=true;m.position.set(0,.012,0);m.rotation.x=-.04;return m;
 }
 function labGenericBottle92(col){
