@@ -107,3 +107,19 @@
   }
   tick();
 })();
+
+/* Sidebar: when a sub-menu opens on a short screen, scroll it into view (scrollbar itself is hidden) */
+(function () {
+  document.addEventListener('click', function (e) {
+    var item = e.target && e.target.closest && e.target.closest('#sidebar .nav-group > .nav-item');
+    if (!item) return;
+    setTimeout(function () {
+      var sub = item.nextElementSibling;
+      if (sub && sub.classList.contains('nav-sub') && sub.classList.contains('open')) {
+        var sb = document.getElementById('sidebar'); if (!sb || sb.scrollHeight <= sb.clientHeight) return;
+        var r = sub.getBoundingClientRect(), s = sb.getBoundingClientRect(), bottom = r.bottom + 8;
+        if (bottom > s.bottom) sb.scrollTop += Math.min(bottom - s.bottom, item.getBoundingClientRect().top - s.top - 4);
+      }
+    }, 320);
+  });
+})();
