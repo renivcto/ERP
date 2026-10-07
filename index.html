@@ -6391,7 +6391,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.883';
+const ERP_VERSION = 'v2.3.884';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -6474,6 +6474,8 @@ function _fsUpTryUpload(key, data, doUpload) {
     window._fsUpInFlight[key] = true;
     Promise.resolve(doUpload(data)).then(ok => {
       delete window._fsUpInFlight[key];
+      // v2.3.884: 실패를 묻어두지 않는다 — 다음 접속 때 _shareAutoFix 가 메운다
+      if (ok !== true) console.warn('📎 [SHARE] 공유본 업로드 실패 — 다음 접속 시 자동 재시도:', key);
       if (ok === true) {
         const m = _fsUpMap(); m[key] = fp;   // 인메모리 갱신(항상 성공)
         try { localStorage.setItem('reniv_fs_uploaded', JSON.stringify(m)); } catch(_) {}   // 영속은 best-effort
@@ -61848,6 +61850,60 @@ function _shareTargets() {
   });
   return out;
 }
+/* ═══════ v2.3.884: 첨부 공유 누락 자동 보정 ═══════
+   업로드가 한 번 실패하면 종전엔 그 레코드를 다시 저장할 때까지 재시도되지 않아
+   '올린 사람 PC 에서만 열리는 파일' 이 생겼다. 접속할 때 하루 한 번 조용히 메운다.
+   원본은 올린 사람 기기 IDB 에 있으므로, 각자 접속만 해도 저절로 복구된다. */
+const _SHARE_AUTOFIX_KEY = 'reniv_share_autofix_day';
+async function _shareAutoFix() {
+  let stamped = false;
+  try {
+    const me = window._currentUser;
+    if (!(me && (me.isAdmin || me.permission === 'write'))) return;        // 읽기 전용 계정은 올릴 수 없다
+    if (!window._firestoreGetDoc || !window._firestoreSetDoc || !window._firebaseDb) return;
+    const today = (typeof _todayKstYmd === 'function') ? _todayKstYmd() : new Date().toISOString().slice(0, 10);
+    let last = ''; try { last = localStorage.getItem(_SHARE_AUTOFIX_KEY) || ''; } catch (_) {}
+    if (last === today) return;                                            // 오늘 이미 돌았다
+    try { localStorage.setItem(_SHARE_AUTOFIX_KEY, today); stamped = true; } catch (_) {}
+
+    const targets = (typeof _shareTargets === 'function') ? _shareTargets() : [];
+    if (!targets.length) return;
+    let up = 0, lost = 0;
+    for (const t of targets) {
+      let onServer = false;
+      try {
+        const snap = await window._firestoreGetDoc(window._firestoreDoc(window._firebaseDb, t.coll, t.docId));
+        onServer = snap.exists() && !!((snap.data() || {}).data);
+      } catch (e) {
+        // 권한·네트워크 문제면 오늘 표시를 지우고 다음 접속에 다시 시도한다
+        if (stamped) { try { localStorage.removeItem(_SHARE_AUTOFIX_KEY); } catch (_) {} }
+        console.warn('📎 [SHARE-FIX] 조회 실패로 중단 — 다음 접속에 재시도:', e && (e.code || e.message));
+        return;
+      }
+      if (onServer) continue;
+      let local = null;
+      try { if (typeof idbGet === 'function') local = await idbGet(t.idbKey); } catch (_) {}
+      if (typeof local === 'string' && local.length > 100) {
+        try {
+          await window._firestoreSetDoc(window._firestoreDoc(window._firebaseDb, t.coll, t.docId),
+            { data: local, name: '', ts: Date.now() });
+          up++;
+        } catch (e) { console.warn('📎 [SHARE-FIX] 업로드 실패:', t.docId, e && (e.code || e.message)); }
+      } else lost++;
+    }
+    if (up) {
+      console.log('📎 [SHARE-FIX] 내 PC 에만 있던 첨부 ' + up + '건을 서버에 올렸습니다 — 이제 다른 사람도 보입니다');
+      try { showNotif('📎 첨부 ' + up + '건이 서버에 올라갔습니다 — 다른 분들도 볼 수 있습니다', 'success'); } catch (_) {}
+    }
+    if (lost) console.warn('📎 [SHARE-FIX] 원본을 찾지 못한 첨부 ' + lost + '건 — 설정 > 첨부 공유 점검 에서 확인하세요');
+  } catch (e) {
+    if (stamped) { try { localStorage.removeItem(_SHARE_AUTOFIX_KEY); } catch (_) {} }
+    console.warn('📎 [SHARE-FIX] 건너뜀:', e);
+  }
+}
+// 로드 직후는 Firestore·사용자 정보가 아직 안 붙었을 수 있어 2분 뒤에 한 번만 돈다
+setTimeout(function () { try { _shareAutoFix(); } catch (_) {} }, 120 * 1000);
+
 /* v2.3.883: 설정 화면 버튼 — 콘솔 없이 점검·복구 */
 async function runShareCheck(fix) {
   const out = document.getElementById('share-check-out');
