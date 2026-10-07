@@ -4072,6 +4072,26 @@ try{
           </div>
         </div>
         <!-- v2.3.857: 슬랙 — #세금계산서 알림 -->
+        <!-- v2.3.883: 첨부 공유 점검 — 올린 사람 PC 에만 남은 파일을 찾아 서버로 올린다 -->
+        <div class="card" id="share-check-card">
+          <div class="card-hdr">
+            <span class="card-title">📎 첨부 공유 점검</span>
+            <span class="badge" id="share-check-badge" style="font-size:11px;background:#f1f5f9;color:#475569">점검 전</span>
+          </div>
+          <div class="card-body">
+            <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12.5px;color:#475569;line-height:1.65">
+              📌 발주서 PDF·마감서, 지출결의서 첨부, 결재 첨부, 거래처 견적서, 품목 이미지가
+              <strong>서버에 올라가 다른 사람에게도 보이는지</strong> 확인합니다.<br>
+              내 PC 에만 있는 파일이 발견되면 <strong>[서버에 올리기]</strong> 로 바로 복구할 수 있습니다.
+              <span style="color:#b45309">※ 각자 본인 계정으로 한 번씩 눌러 주시면 좋습니다 — 파일은 올린 사람 PC 에 남아 있기 때문입니다.</span>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-primary" id="share-check-run" onclick="runShareCheck()">🔎 점검하기</button>
+              <button class="btn" id="share-check-fix" onclick="runShareCheck(true)" style="display:none;background:#a16207;color:#fff;border:1px solid #a16207;font-weight:700">⬆️ 서버에 올리기</button>
+            </div>
+            <div id="share-check-out" style="margin-top:14px"></div>
+          </div>
+        </div>
         <div class="card" id="slack-tax-settings-card">
           <div class="card-hdr">
             <span class="card-title">🧾 슬랙 — 세금계산서 알림</span>
@@ -6371,7 +6391,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.882';
+const ERP_VERSION = 'v2.3.883';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -61827,6 +61847,48 @@ function _shareTargets() {
     if (it && (mk(it.img1) || mk(it.image))) add('item_img_' + it.id, 'itemImages', 'item_' + it.id, String(it.name || it.id).slice(0, 24) + ' / 품목 이미지');
   });
   return out;
+}
+/* v2.3.883: 설정 화면 버튼 — 콘솔 없이 점검·복구 */
+async function runShareCheck(fix) {
+  const out = document.getElementById('share-check-out');
+  const badge = document.getElementById('share-check-badge');
+  const runBtn = document.getElementById('share-check-run');
+  const fixBtn = document.getElementById('share-check-fix');
+  if (!out) return;
+  out.innerHTML = '<div style="color:var(--gray-500);font-size:12.5px">\u23f3 확인하는 중… (파일이 많으면 10초쯤 걸립니다)</div>';
+  if (runBtn) runBtn.disabled = true;
+  if (fixBtn) fixBtn.disabled = true;
+  let r = null;
+  try { r = await checkSharedFiles(fix); } catch (e) { console.warn(e); }
+  if (runBtn) runBtn.disabled = false;
+  if (fixBtn) fixBtn.disabled = false;
+  if (!r) { out.innerHTML = '<div style="color:#b91c1c;font-size:12.5px">점검에 실패했습니다. 잠시 후 다시 눌러 주세요.</div>'; return; }
+
+  const esc = x => String(x == null ? '' : x).replace(/</g, '&lt;');
+  const box = (bg, bd, fg, icon, title, list) =>
+    '<div style="background:' + bg + ';border:1px solid ' + bd + ';border-radius:8px;padding:10px 12px;margin-bottom:8px">'
+    + '<div style="font-size:12.5px;font-weight:700;color:' + fg + '">' + icon + ' ' + title + '</div>'
+    + (list && list.length
+        ? '<div style="margin-top:6px;font-size:12px;color:#475569;line-height:1.7">'
+          + list.map(t => '• ' + esc(t.label)).join('<br>') + '</div>'
+        : '') + '</div>';
+
+  let html = '';
+  html += box('#f0fdf4', '#bbf7d0', '#166534', '\u{1F7E2}', '서버에 있음 — 모두에게 보입니다: ' + r.ok.length + '건', null);
+  if (r.fixable.length) html += box('#fffbeb', '#fde68a', '#a16207', '\u{1F7E1}', '내 PC 에만 있음 — 올리면 복구됩니다: ' + r.fixable.length + '건', r.fixable);
+  if (r.lost.length) html += box('#fef2f2', '#fecaca', '#b91c1c', '\u{1F534}', '원본을 찾지 못함 — 올린 분이 다시 첨부해야 합니다: ' + r.lost.length + '건', r.lost);
+  if (!r.fixable.length && !r.lost.length) html += '<div style="font-size:12.5px;color:#166534;font-weight:700">\u2705 모든 첨부가 서버에 있습니다</div>';
+  out.innerHTML = html;
+
+  if (fixBtn) {
+    fixBtn.style.display = r.fixable.length ? '' : 'none';
+    fixBtn.textContent = '\u2b06\ufe0f 서버에 올리기 (' + r.fixable.length + '건)';
+  }
+  if (badge) {
+    if (r.fixable.length) { badge.textContent = '복구 가능 ' + r.fixable.length + '건'; badge.style.background = '#fef3c7'; badge.style.color = '#92400e'; }
+    else if (r.lost.length) { badge.textContent = '원본 없음 ' + r.lost.length + '건'; badge.style.background = '#fee2e2'; badge.style.color = '#b91c1c'; }
+    else { badge.textContent = '\u2705 이상 없음'; badge.style.background = '#dcfce7'; badge.style.color = '#166534'; }
+  }
 }
 async function checkSharedFiles(fix) {
   if (!window._firestoreGetDoc || !window._firebaseDb) { console.warn('Firestore 준비 안 됨'); return; }
