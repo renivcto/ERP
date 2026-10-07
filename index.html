@@ -6371,7 +6371,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.881';
+const ERP_VERSION = 'v2.3.882';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -61783,6 +61783,103 @@ async function _loadSharedItemImage(itemId) {
 //   '__idb__' 마커만 보여 이미지가 안 보이던 문제 해결. (item/feed/comment 이미지와 동일 패턴)
 //   doc id = IDB 키와 동일: 'newProduct_<id>_<field>' / 'newProduct_<id>_<field>_<idx>'.
 //   Firestore 1MB 문서 한계 → 900KB 미만만 저장.
+/* ═══════ v2.3.881: 공유 안 된 첨부 점검·복구 ═══════
+   ERP 는 큰 파일을 문서 본문에 두지 않고 기기 IDB 로 빼고 '__idb__' 표시만 남긴 뒤,
+   같은 내용을 공유 컬렉션(orderPdfs / vendorQuotes / approvalAttachments / itemImages)에 올린다.
+   그 공유본이 없으면 올린 사람 PC 에서만 열리고 다른 사람에게는 안 보인다.
+
+     checkSharedFiles()       진단만 (표로 출력)
+     checkSharedFiles(true)   내 PC 에 원본이 있는 건 서버에 올려 복구
+
+   ⚠️ 어디에도 원본이 없는 건(🔴)은 올린 사람이 다시 첨부하는 수밖에 없다. */
+function _shareTargets() {
+  const out = [];
+  const mk = v => v === '__idb__' || v === '__stored__';
+  const add = (idbKey, coll, docId, label) => out.push({ idbKey, coll, docId, label });
+
+  (DB.orders || []).forEach(o => {
+    if (!o) return;
+    const sn = o.serial || ('발주 ' + o.id);
+    if (mk(o.pdfData)) add('order_pdf_' + o.id, 'orderPdfs', 'order_' + o.id + '_pdf', sn + ' / 발주서 PDF');
+    if (mk(o.stampData)) add('order_stamp_' + o.id, 'orderPdfs', 'order_' + o.id + '_stamp', sn + ' / 도장본');
+    if (mk(o.approvalStampImage)) add('order_astamp_' + o.id, 'orderPdfs', 'order_' + o.id + '_astamp', sn + ' / 결재 도장');
+    (o.closingDocs || []).forEach((d, i) => { if (d && mk(d.data)) add('order_closing_' + o.id + '_' + i, 'orderPdfs', 'order_' + o.id + '_closing_' + i, sn + ' / 마감서 ' + (d.name || '')); });
+    (o.quoteDocs || []).forEach((d, i) => { if (d && mk(d.data)) add('order_qdoc_' + o.id + '_' + i, 'orderPdfs', 'order_' + o.id + '_qdoc_' + i, sn + ' / 추가 견적서 ' + (d.name || '')); });
+  });
+  (DB.expenses || []).forEach(e => {
+    if (!e) return;
+    const nm = String(e.title || e.vendor || e.id).slice(0, 24);
+    (e.attachments || []).forEach((a, i) => { if (a && mk(a.data)) add('expense_attach_' + e.id + '_' + i, 'orderPdfs', 'exp_' + e.id + '_attachments_' + i, nm + ' / 첨부 ' + (a.name || '')); });
+    (e.quotes || []).forEach((a, i) => { if (a && mk(a.data)) add('expense_quote_' + e.id + '_' + i, 'orderPdfs', 'exp_' + e.id + '_quotes_' + i, nm + ' / 견적서 ' + (a.name || '')); });
+  });
+  (DB.approvals || []).forEach(a => {
+    if (!a) return;
+    const nm = String(a.title || a.id).slice(0, 24);
+    (a.attachments || []).forEach((at, i) => { if (at && mk(at.data)) add('approval_attach_' + a.id + '_' + i, 'approvalAttachments', 'approval_' + a.id + '_attach_' + i, nm + ' / ' + (at.name || '')); });
+  });
+  ['vendors', 'cooperators', 'sellers'].forEach(src => (DB[src] || []).forEach(v => {
+    if (!v) return;
+    const nm = String(v.name || v.company || v.id).slice(0, 24);
+    (v.quotes || []).forEach((q, i) => { if (q && mk(q.data)) add('vendor_quote_' + v.id + '_' + i, 'vendorQuotes', 'vendor_' + v.id + '_quote_' + i, nm + ' / 견적서 ' + (q.name || '')); });
+    (v.attachments || []).forEach((q, i) => { if (q && mk(q.data)) add('vendor_attach_' + v.id + '_' + i, 'vendorQuotes', 'vendor_' + v.id + '_attach_' + i, nm + ' / 첨부 ' + (q.name || '')); });
+  }));
+  (DB.items || []).forEach(it => {
+    if (it && (mk(it.img1) || mk(it.image))) add('item_img_' + it.id, 'itemImages', 'item_' + it.id, String(it.name || it.id).slice(0, 24) + ' / 품목 이미지');
+  });
+  return out;
+}
+async function checkSharedFiles(fix) {
+  if (!window._firestoreGetDoc || !window._firebaseDb) { console.warn('Firestore 준비 안 됨'); return; }
+  const targets = _shareTargets();
+  console.log('%c🔎 공유 안 된 첨부 점검 — 대상 ' + targets.length + '건', 'background:#1e40af;color:#fff;padding:4px 10px;font-weight:700');
+  if (!targets.length) { console.log('✅ 기기에만 있는 첨부(__idb__)가 없습니다 — 모두 서버 파일(URL)로 전환됨'); return { ok: [], fixable: [], lost: [] }; }
+
+  const ok = [], fixable = [], lost = [];
+  for (const t of targets) {
+    let onServer = false;
+    try {
+      const snap = await window._firestoreGetDoc(window._firestoreDoc(window._firebaseDb, t.coll, t.docId));
+      onServer = snap.exists() && !!((snap.data() || {}).data);
+    } catch (e) { console.warn('조회 실패', t.docId, e && (e.code || e.message)); }
+    if (onServer) { ok.push(t); continue; }
+    let local = null;
+    try { if (typeof idbGet === 'function') local = await idbGet(t.idbKey); } catch (_) {}
+    if (typeof local === 'string' && local.length > 100) { t.data = local; fixable.push(t); }
+    else lost.push(t);
+  }
+
+  console.log('🟢 서버에 있음(모두 보임): ' + ok.length + '건');
+  if (fixable.length) {
+    console.log('%c🟡 내 PC 에만 있음 — 지금 올릴 수 있음: ' + fixable.length + '건', 'color:#a16207;font-weight:700');
+    fixable.forEach(t => console.log('   ' + t.label));
+  }
+  if (lost.length) {
+    console.log('%c🔴 어디에도 원본 없음 — 올린 사람이 다시 첨부해야 함: ' + lost.length + '건', 'color:#b91c1c;font-weight:700');
+    lost.forEach(t => console.log('   ' + t.label));
+  }
+
+  if (fix && fixable.length) {
+    if (!(window._currentUser && (window._currentUser.isAdmin || window._currentUser.permission === 'write'))) {
+      console.warn('쓰기 권한이 없어 복구할 수 없습니다');
+      return { ok, fixable, lost };
+    }
+    let up = 0;
+    for (const t of fixable) {
+      try {
+        await window._firestoreSetDoc(window._firestoreDoc(window._firebaseDb, t.coll, t.docId),
+          { data: t.data, name: '', ts: Date.now() });
+        up++;
+        console.log('   ⬆️ 올림: ' + t.label);
+      } catch (e) { console.warn('   업로드 실패: ' + t.label, e && (e.code || e.message)); }
+    }
+    console.log('%c✅ ' + up + '건 복구 — 이제 다른 사람도 보입니다', 'background:#166534;color:#fff;padding:3px 9px;font-weight:700');
+    try { showNotif('✅ 첨부 ' + up + '건을 서버에 올렸습니다 — 이제 다른 사람도 볼 수 있습니다', 'success'); } catch (_) {}
+  } else if (fixable.length) {
+    console.log('%c👉 복구하려면: checkSharedFiles(true)', 'background:#a16207;color:#fff;padding:3px 9px;font-weight:700');
+  }
+  return { ok, fixable, lost };
+}
+
 async function _saveSharedNpImage(idbKey, dataUrl) {
   if (!window._firestoreSetDoc || !window._firestoreDoc || !window._firebaseDb) return;
   if (!idbKey || !dataUrl || dataUrl === '__idb__' || typeof dataUrl !== 'string' || dataUrl.length > 900000) return;
