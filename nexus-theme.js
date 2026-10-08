@@ -47,9 +47,10 @@
 (function () {
   var view = null;
   try { view = new URLSearchParams(location.search).get('view'); } catch (_) {}
-  if (!/^(pay|sales-yday|sales-month)$/.test(view || '')) return;
+  if (!/^(pay|sales-yday|sales-month|unpaid-nonpo|unpaid-expense)$/.test(view || '')) return;
   try { history.replaceState(null, '', location.pathname); } catch (_) {}
-  var page = view === 'pay' ? 'approval' : 'sales', want = 'page-' + page;
+  var unpaid = /^unpaid-/.test(view) ? view.slice(7) : null;
+  var page = (view === 'pay' || unpaid) ? 'approval' : 'sales', want = 'page-' + page;
   var active = true, started = Date.now(), stableSince = 0, startupSeen = 0;
   function kst(d) { return new Date(Date.now() + 9 * 3600e3 + (d || 0) * 86400e3).toISOString().slice(0, 10); }
   var dbg = window.__nxViewDbg = [];
@@ -81,6 +82,14 @@
   }
   function applyDetail() {
     try {
+      if (unpaid) {
+        // 결재 관리 (일반 결재 / 지출 결의서 탭) + 미결재 모아보기 팝업, matching chip selected
+        if (window._apCurrentTab !== unpaid && typeof window.switchApprovalTab === 'function') window.switchApprovalTab(unpaid);
+        var ov = document.getElementById('unpaid-unified-overlay');
+        if (!ov && typeof window.openUnpaidUnifiedView === 'function') window.openUnpaidUnifiedView();
+        if (typeof window._setUnpaidFilter === 'function') window._setUnpaidFilter(unpaid);
+        return;
+      }
       if (view === 'pay') { if (window._apCurrentTab !== 'expense' && typeof window.switchApprovalTab === 'function') window.switchApprovalTab('expense'); return; }
       var dash = document.getElementById('sales-panel-dashboard');
       if ((!dash || dash.style.display === 'none') && typeof window.switchSalesTab === 'function') window.switchSalesTab('dashboard');
