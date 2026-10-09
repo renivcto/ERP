@@ -1535,24 +1535,14 @@ async function openVideo106(id,title){
   ov.querySelector('strong').textContent=title||'동영상'; const body=ov.querySelector('.iv-body76'); ov.hidden=false;
   const run=++VID106.run;
   const show=url=>{ const v=document.createElement('video'); v.src=url; v.controls=true; v.autoplay=true; v.playsInline=true; v.className='vid-player106'; body.replaceChildren(v); v.play?.().catch(()=>{}); };
+  // live107: stream with HTTP Range via a short-lived ticket — playback starts after the first few MB
   if(VID106.cache.has(id)){ show(VID106.cache.get(id)); return; }
-  body.innerHTML='<div class="vid-load106"><b>동영상 불러오는 중…</b><div class="nx-bar106"><i style="width:0%"></i></div><small>0%</small></div>';
-  const bar=body.querySelector('.nx-bar106 i'), pct=body.querySelector('small');
+  body.innerHTML='<div class="vid-load106"><b>동영상 준비 중…</b><div class="nx-bar106 indet106"><i></i></div></div>';
   try{
-    const parts=[]; let start=0, total=0, type='video/mp4';
-    for(let guard=0;guard<80;guard++){
-      if(run!==VID106.run||ov.hidden) return;
-      const token=await auth.currentUser.getIdToken();
-      const r=await fetch(API_BASE+'/slack/file?id='+encodeURIComponent(id)+'&part=1&start='+start,{headers:{Authorization:'Bearer '+token},cache:'no-store'});
-      if(!r.ok){ let msg='동영상을 불러오지 못했습니다.'; try{ msg=(await r.json())?.error?.message||msg; }catch{} throw new Error(msg); }
-      total=Number(r.headers.get('X-Video-Total'))||total; type=r.headers.get('X-Video-Type')||type;
-      const buf=await r.arrayBuffer(); if(!buf.byteLength) break; parts.push(buf); start+=buf.byteLength;
-      const p=total?Math.min(100,Math.round(start/total*100)):0; bar.style.width=p+'%'; pct.textContent=p+'% ('+(start/1048576).toFixed(1)+' / '+(total/1048576).toFixed(1)+' MB)';
-      if(total&&start>=total) break;
-      if(buf.byteLength<6*1024*1024-1) break;
-    }
-    if(run!==VID106.run) return;
-    const url=URL.createObjectURL(new Blob(parts,{type:/quicktime/i.test(type)?'video/mp4':type})); VID106.cache.set(id,url); show(url);
+    const d=await api('/slack/video-ticket',{method:'POST',body:JSON.stringify({id})});
+    if(run!==VID106.run||ov.hidden) return;
+    const url=API_BASE+'/slack/video/'+encodeURIComponent(d.ticket); VID106.cache.set(id,url); show(url);
+    const v=body.querySelector('video'); if(v) v.addEventListener('error',()=>{ VID106.cache.delete(id); body.innerHTML='<p class="vid-load106">동영상을 재생하지 못했습니다. 다시 시도하거나 Slack에서 열어 주세요.</p>'; },{once:true});
   }catch(error){ if(run===VID106.run) body.innerHTML='<p class="vid-load106">'+escapeHtml(error.message)+'</p>'; }
 }
 document.addEventListener('click',e=>{ const ov=document.getElementById('img-viewer76'); if(ov&&(e.target===ov||e.target.closest('#img-viewer76 header button'))){ VID106.run++; ov.querySelectorAll('video').forEach(v=>{ try{ v.pause(); }catch{} }); } },true);
