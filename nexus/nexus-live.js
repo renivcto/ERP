@@ -59,8 +59,19 @@ const state = {
 
 let toastTimer;
 function toast(message, isError=false){ const el=$('toast'); el.textContent=message; el.style.borderColor=isError?'#e2bcbc':''; el.style.color=isError?'#9d4545':''; el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'),3500); }
-function setAuthOverlay(title,message,{login=false,logout=false}={}){ $('auth-title').textContent=title; $('auth-message').textContent=message; $('login-button').hidden=!login; $('auth-logout-button').hidden=!logout; $('auth-overlay').hidden=false; $('app').hidden=true; }
-function showApp(){ $('auth-overlay').hidden=true; $('app').hidden=false; document.body.classList.remove('auth-pending'); }
+/* live99: friendly "Virtual RENIV Office" loading screen with an animated AI greeter */
+const LOAD99={shownAt:Date.now(),timer:null};
+function setAuthOverlay(title,message,{login=false,logout=false}={}){ const ov=$('auth-overlay'); clearTimeout(LOAD99.timer); ov.classList.remove('leaving99'); $('auth-title').textContent=title; $('auth-message').textContent=message; $('login-button').hidden=!login; $('auth-logout-button').hidden=!logout;
+  const loading=!login&&!logout&&/확인 중/.test(title); if(loading&&!ov.classList.contains('loading99')) LOAD99.shownAt=Date.now(); ov.classList.toggle('loading99',loading); ov.dataset.step99=/권한/.test(title)?'2':'1';
+  ov.hidden=false; $('app').hidden=true; }
+function greet99(user){ const el=document.getElementById('greet99'); const n=String(user?.displayName||'').trim(); if(el) el.textContent=n?n+'님, 안녕하세요!':'안녕하세요!'; }
+function showApp(){ const ov=$('auth-overlay'); $('app').hidden=false; document.body.classList.remove('auth-pending');
+  if(!ov.classList.contains('loading99')||ov.hidden){ ov.hidden=true; return; }
+  ov.dataset.step99='3'; clearTimeout(LOAD99.timer);
+  const started=Date.now(); const finish=()=>{ ov.classList.add('leaving99'); LOAD99.timer=setTimeout(()=>{ ov.hidden=true; ov.classList.remove('leaving99'); },520); };
+  const tick=()=>{ const ready=!!window.NEXUS?.sceneReady, minOk=Date.now()-LOAD99.shownAt>2200, waited=Date.now()-started;
+    if((ready&&minOk&&waited>400)||waited>7000) finish(); else LOAD99.timer=setTimeout(tick,150); };
+  tick(); }
 function setBadge(id,text,mode=''){ const el=$(id); el.textContent=text; el.className='status-badge'+(mode?' '+mode:''); }
 function newRequestId(){ return (globalThis.crypto?.randomUUID?.() || `req-${Date.now()}-${Math.random().toString(36).slice(2)}`); }
 function formatKrw(value){ const n=Number(value)||0; return `₩${Math.round(n).toLocaleString('ko-KR')}`; }
@@ -949,7 +960,7 @@ window.addEventListener('nexus-scene-ready',bindOriginalScene,{once:true});if(wi
 
 function lockApi(message){clearAll();setAuthOverlay('NEXUS 접근 차단',message||'NEXUS 서버 권한을 확인할 수 없습니다.',{logout:true})}
 async function handleActiveUser(user){
-  clearExternal();stopFirestore();stopPolling();state.user=user;setAuthOverlay('NEXUS 권한 확인 중','서버의 nexus_access 권한과 활성 임원 계정을 확인하고 있습니다.');
+  clearExternal();stopFirestore();stopPolling();state.user=user;greet99(user);setAuthOverlay('NEXUS 권한 확인 중','서버의 nexus_access 권한과 활성 임원 계정을 확인하고 있습니다.');
   try{const status=await api('/status');if(String(status?.identity?.uid||'')!==String(user.uid))throw Object.assign(new Error('서버 사용자와 현재 로그인 계정이 일치하지 않습니다.'),{status:403});state.status=status;state.profile={uid:user.uid,name:status.identity.displayName||user.displayName||'',email:status.identity.email||user.email||'',role:status.identity.isAdmin?'관리자':(status.identity.permission==='read'?'조회 권한':'임원')};state.authorized=true;$('viewer-name').textContent=`(${state.profile.name||state.profile.email})`;$('viewer-role').textContent=state.profile.role;renderViewerFace();$('logout-button').textContent=(state.profile.name||'나').slice(0,1);showApp();subscribeERP();if($('admin-tasks-btn'))$('admin-tasks-btn').hidden=!status.identity.isAdmin;await Promise.all([loadTrello(),loadMeetings(),loadSlackChannels(),loadPersonalTasks(),loadDeskWork()]);state.lastPollAt=Date.now();renderAll();startPolling()}catch(error){clearAll();setAuthOverlay('접근할 수 없습니다',error.message,{logout:true})}
 }
 
