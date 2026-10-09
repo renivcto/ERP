@@ -1547,3 +1547,8 @@ async function openVideo106(id,title){
 }
 document.addEventListener('click',e=>{ const ov=document.getElementById('img-viewer76'); if(ov&&(e.target===ov||e.target.closest('#img-viewer76 header button'))){ VID106.run++; ov.querySelectorAll('video').forEach(v=>{ try{ v.pause(); }catch{} }); } },true);
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const ov=document.getElementById('img-viewer76'); if(ov){ VID106.run++; ov.querySelectorAll('video').forEach(v=>{ try{ v.pause(); }catch{} }); } } },true);
+
+/* live109: 3D team signs -> that team's Slack channel in the internal chat window */
+const TEAM_CHANNELS109={'재무팀':{id:'C0C3VTT6RNF',name:'재무팀'},'디자인팀':{id:'C0BP6CCGCG3',name:'디자인팀'},'국내영업팀':{id:'C0BNTRA5A73',name:'국내영업팀'},'마케팅팀':{id:'C0BPL2G41BJ',name:'마케팅팀'}};
+window.NEXUS.teamChannelLabel=team=>TEAM_CHANNELS109[team]?'#'+TEAM_CHANNELS109[team].name+' 채널 대화 열기':'';
+window.NEXUS.openTeamChannel=team=>{ const c=TEAM_CHANNELS109[team]; if(!c||!state.authorized) return false; openSlackChat103(c.id,{title:c.name}); return true; };
