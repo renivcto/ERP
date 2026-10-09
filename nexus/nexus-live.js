@@ -1279,7 +1279,7 @@ function hydrateSlackImages76(){
   document.querySelectorAll('#slack-feed35 figure[data-img76]:not([data-done76]), #slack-pop77 figure[data-img76]:not([data-done76]), #slack-chat103 figure[data-img76]:not([data-done76])').forEach(fig=>{
     fig.dataset.done76='1'; const id=fig.dataset.img76;
     slackImageUrl76(id,'thumb').then(url=>{ const ph=fig.querySelector('.slack-img-ph76'); const img=new Image(); img.src=url; img.alt=fig.dataset.title76||''; img.loading='lazy'; if(ph) ph.replaceWith(img); else fig.prepend(img); })
-      .catch(err=>{ const ph=fig.querySelector('.slack-img-ph76'); if(!ph) return; if(err.code==='slack_scope_upgrade'){ ph.innerHTML='이미지를 보려면 <button type="button" class="text-button" data-slack-reconnect76>Slack 다시 연결</button>'; } else ph.textContent=err.message; });
+      .catch(err=>{ const ph=fig.querySelector('.slack-img-ph76'); if(!ph) return; if(fig.dataset.vid106&&err.code!=='slack_scope_upgrade'){ ph.textContent='▶ 동영상'; return; } if(err.code==='slack_scope_upgrade'){ ph.innerHTML='이미지를 보려면 <button type="button" class="text-button" data-slack-reconnect76>Slack 다시 연결</button>'; } else ph.textContent=err.message; });
   });
 }
 function openImageViewer76(id,title){
@@ -1292,6 +1292,7 @@ function openImageViewer76(id,title){
 }
 new MutationObserver(()=>hydrateSlackImages76()).observe(document.getElementById('slack-feed35')||document.body,{childList:true,subtree:true});
 document.addEventListener('click',e=>{
+  const vfig=e.target.closest('figure[data-vid106]'); if(vfig){ e.stopPropagation(); e.preventDefault(); openVideo106(vfig.dataset.vid106,vfig.dataset.title76); return; }
   const fig=e.target.closest('#slack-feed35 figure[data-img76], #slack-pop77 figure[data-img76], #slack-chat103 figure[data-img76]'); if(fig&&fig.querySelector('img')){ e.stopPropagation(); e.preventDefault(); openImageViewer76(fig.dataset.img76,fig.dataset.title76); return; }
   if(e.target.closest('[data-slack-reconnect76]')){ e.stopPropagation(); e.preventDefault(); reconnectSlack(); }
 },true);
@@ -1300,8 +1301,9 @@ document.addEventListener('click',e=>{
 function slackRef77(url){ const m=String(url||'').match(/slack\.com\/archives\/([CDG][A-Z0-9]{8,})\/p(\d{10})(\d{6})/); return m?{channel:m[1],ts:m[2]+'.'+m[3],url}:null; }
 function dedupeParas77(s){ const seen=new Set(); return emojify85(String(s||'')).split(/\n{2,}/).filter(p=>{const k=p.replace(/\s+/g,''); if(!k||seen.has(k)) return false; seen.add(k); return true;}).join('\n\n'); }
 function slackFilesHtml77(m){
-  const files=(Array.isArray(m.files)?m.files:[]); const imgs=files.filter(f=>/^image\/(png|jpe?g|gif|webp)$/i.test(f.mimetype||'')&&/^F[A-Z0-9]{8,}$/.test(f.id||'')); const others=files.filter(f=>!imgs.includes(f)&&/^https:\/\/[a-z0-9-]+\.slack\.com\//.test(String(f.permalink||'')));
+  const files=(Array.isArray(m.files)?m.files:[]); const imgs=files.filter(f=>/^image\/(png|jpe?g|gif|webp)$/i.test(f.mimetype||'')&&/^F[A-Z0-9]{8,}$/.test(f.id||'')); const vids=files.filter(f=>/^video\//i.test(f.mimetype||'')&&/^F[A-Z0-9]{8,}$/.test(f.id||'')); const others=files.filter(f=>!imgs.includes(f)&&!vids.includes(f)&&/^https:\/\/[a-z0-9-]+\.slack\.com\//.test(String(f.permalink||'')));
   return (imgs.length?'<div class="slack-imgs76">'+imgs.map(f=>'<figure data-img76="'+escapeHtml(f.id)+'" data-title76="'+escapeHtml(f.title||f.name||'')+'"><span class="slack-img-ph76">이미지 불러오는 중…</span><figcaption>'+escapeHtml(f.title||f.name||'')+'</figcaption></figure>').join('')+'</div>':'')
+   +(vids.length?'<div class="slack-imgs76">'+vids.map(f=>'<figure class="vid106" data-vid106="'+escapeHtml(f.id)+'" data-img76="'+escapeHtml(f.id)+'" data-title76="'+escapeHtml(f.title||f.name||'')+'" title="클릭하면 재생"><span class="slack-img-ph76">동영상</span><i class="play106" aria-hidden="true"></i><figcaption>🎬 '+escapeHtml(f.title||f.name||'')+'</figcaption></figure>').join('')+'</div>':'')
    +(others.length?'<div class="slack-files73">'+others.map(f=>'<a href="'+escapeHtml(f.permalink)+'" target="_blank" rel="noopener"><i>📄</i>'+escapeHtml(f.title||f.name||'첨부 파일')+'</a>').join('')+'</div>':'');
 }
 async function openSlackPopup77(url,opts){
@@ -1522,3 +1524,36 @@ async function chatAction103(e){
     catch(error){ toast('삭제 실패: '+error.message,true); } }
 }
 window.NEXUS.openSlackChat=openSlackChat103;
+
+/* live106: Slack videos play inside NEXUS — downloaded in 6 MB parts through the API with the user's own Slack token */
+var VID106=window.__vid106||(window.__vid106={cache:new Map(),run:0});
+async function openVideo106(id,title){
+  let ov=document.getElementById('img-viewer76');
+  if(!ov){ ov=document.createElement('div'); ov.id='img-viewer76'; ov.className='img-viewer76'; ov.innerHTML='<div class="iv-box76"><header><strong></strong><button type="button" aria-label="닫기">×</button></header><div class="iv-body76"></div></div>'; document.body.appendChild(ov);
+    ov.addEventListener('click',e=>{ if(e.target===ov||e.target.closest('header button')) ov.hidden=true; });
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!ov.hidden) ov.hidden=true; }); }
+  ov.querySelector('strong').textContent=title||'동영상'; const body=ov.querySelector('.iv-body76'); ov.hidden=false;
+  const run=++VID106.run;
+  const show=url=>{ const v=document.createElement('video'); v.src=url; v.controls=true; v.autoplay=true; v.playsInline=true; v.className='vid-player106'; body.replaceChildren(v); v.play?.().catch(()=>{}); };
+  if(VID106.cache.has(id)){ show(VID106.cache.get(id)); return; }
+  body.innerHTML='<div class="vid-load106"><b>동영상 불러오는 중…</b><div class="nx-bar106"><i style="width:0%"></i></div><small>0%</small></div>';
+  const bar=body.querySelector('.nx-bar106 i'), pct=body.querySelector('small');
+  try{
+    const parts=[]; let start=0, total=0, type='video/mp4';
+    for(let guard=0;guard<80;guard++){
+      if(run!==VID106.run||ov.hidden) return;
+      const token=await auth.currentUser.getIdToken();
+      const r=await fetch(API_BASE+'/slack/file?id='+encodeURIComponent(id)+'&part=1&start='+start,{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+      if(!r.ok){ let msg='동영상을 불러오지 못했습니다.'; try{ msg=(await r.json())?.error?.message||msg; }catch{} throw new Error(msg); }
+      total=Number(r.headers.get('X-Video-Total'))||total; type=r.headers.get('X-Video-Type')||type;
+      const buf=await r.arrayBuffer(); if(!buf.byteLength) break; parts.push(buf); start+=buf.byteLength;
+      const p=total?Math.min(100,Math.round(start/total*100)):0; bar.style.width=p+'%'; pct.textContent=p+'% ('+(start/1048576).toFixed(1)+' / '+(total/1048576).toFixed(1)+' MB)';
+      if(total&&start>=total) break;
+      if(buf.byteLength<6*1024*1024-1) break;
+    }
+    if(run!==VID106.run) return;
+    const url=URL.createObjectURL(new Blob(parts,{type:/quicktime/i.test(type)?'video/mp4':type})); VID106.cache.set(id,url); show(url);
+  }catch(error){ if(run===VID106.run) body.innerHTML='<p class="vid-load106">'+escapeHtml(error.message)+'</p>'; }
+}
+document.addEventListener('click',e=>{ const ov=document.getElementById('img-viewer76'); if(ov&&(e.target===ov||e.target.closest('#img-viewer76 header button'))){ VID106.run++; ov.querySelectorAll('video').forEach(v=>{ try{ v.pause(); }catch{} }); } },true);
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const ov=document.getElementById('img-viewer76'); if(ov){ VID106.run++; ov.querySelectorAll('video').forEach(v=>{ try{ v.pause(); }catch{} }); } } },true);
