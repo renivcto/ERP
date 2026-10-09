@@ -1468,7 +1468,7 @@ function chatError103(error){
   body.innerHTML='<p class="sp-loading77">불러오지 못했습니다: '+escapeHtml(error?.message||String(error))+'</p>';
 }
 async function loadChat103(first,older){
-  const ov=document.getElementById('slack-chat103'); const ch=CHAT103.ch; if(!ov||!ch||CHAT103.busy) return; CHAT103.busy=true;
+  const ov=document.getElementById('slack-chat103'); const ch=CHAT103.ch; if(!ov||!ch) return; if(CHAT103.busy===ch&&!first&&!older) return; CHAT103.busy=ch;
   try{
     const q='/slack/messages?channel='+encodeURIComponent(ch)+(older&&CHAT103.cursor?'&cursor='+encodeURIComponent(CHAT103.cursor):'');
     const d=await api(q); if(CHAT103.ch!==ch) return;
@@ -1480,8 +1480,8 @@ async function loadChat103(first,older){
     const olderKept=CHAT103.msgs.filter(m=>list.length&&Number(m.ts)<Number(list[list.length-1].ts));
     CHAT103.msgs=list.concat(olderKept); if(first||!CHAT103.cursor){ CHAT103.cursor=d.responseMetadata?.nextCursor||''; CHAT103.hasMore=!!d.hasMore; }
     renderChat103({toBottom:first||CHAT103.atBottom});
-  }catch(error){ if(first) chatError103(error); }
-  finally{ CHAT103.busy=false; }
+  }catch(error){ if(CHAT103.ch===ch&&(first||!CHAT103.msgs.length)) chatError103(error); }
+  finally{ if(CHAT103.busy===ch) CHAT103.busy=false; }
 }
 function renderChat103({toBottom,keep}={}){
   const ov=document.getElementById('slack-chat103'); const body=ov.querySelector('.chat-body103'); const prevH=body.scrollHeight, prevTop=body.scrollTop;
