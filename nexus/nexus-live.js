@@ -1276,7 +1276,7 @@ async function slackImageUrl76(id,size){
   IMG76.pending.set(key,p); try{ return await p; } finally{ IMG76.pending.delete(key); }
 }
 function hydrateSlackImages76(){
-  document.querySelectorAll('#slack-feed35 figure[data-img76]:not([data-done76]), #slack-pop77 figure[data-img76]:not([data-done76])').forEach(fig=>{
+  document.querySelectorAll('#slack-feed35 figure[data-img76]:not([data-done76]), #slack-pop77 figure[data-img76]:not([data-done76]), #slack-chat103 figure[data-img76]:not([data-done76])').forEach(fig=>{
     fig.dataset.done76='1'; const id=fig.dataset.img76;
     slackImageUrl76(id,'thumb').then(url=>{ const ph=fig.querySelector('.slack-img-ph76'); const img=new Image(); img.src=url; img.alt=fig.dataset.title76||''; img.loading='lazy'; if(ph) ph.replaceWith(img); else fig.prepend(img); })
       .catch(err=>{ const ph=fig.querySelector('.slack-img-ph76'); if(!ph) return; if(err.code==='slack_scope_upgrade'){ ph.innerHTML='이미지를 보려면 <button type="button" class="text-button" data-slack-reconnect76>Slack 다시 연결</button>'; } else ph.textContent=err.message; });
@@ -1292,7 +1292,7 @@ function openImageViewer76(id,title){
 }
 new MutationObserver(()=>hydrateSlackImages76()).observe(document.getElementById('slack-feed35')||document.body,{childList:true,subtree:true});
 document.addEventListener('click',e=>{
-  const fig=e.target.closest('#slack-feed35 figure[data-img76], #slack-pop77 figure[data-img76]'); if(fig&&fig.querySelector('img')){ e.stopPropagation(); e.preventDefault(); openImageViewer76(fig.dataset.img76,fig.dataset.title76); return; }
+  const fig=e.target.closest('#slack-feed35 figure[data-img76], #slack-pop77 figure[data-img76], #slack-chat103 figure[data-img76]'); if(fig&&fig.querySelector('img')){ e.stopPropagation(); e.preventDefault(); openImageViewer76(fig.dataset.img76,fig.dataset.title76); return; }
   if(e.target.closest('[data-slack-reconnect76]')){ e.stopPropagation(); e.preventDefault(); reconnectSlack(); }
 },true);
 
