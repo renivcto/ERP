@@ -979,7 +979,7 @@ $('slack-connect-button').onclick=async()=>{ $('slack-connect-button').disabled=
 $('slack-feed').onclick=async e=>{
   const tg=e.target.closest('[data-toggle73]')||(!e.target.closest('button,a,input,textarea,.slack-message .slack-message')&&e.target.closest('.slack-click73'));
   if(tg){ const key=tg.dataset.toggle73||tg.dataset.msg73; const m=state.slack.messages.find(x=>String(x.channelId||state.slack.channel||'')+':'+String(x.ts||'')===key); if(tg.dataset.toggle73||(m&&((String(m.detail||'').trim()&&String(m.detail).trim().replace(/\s+/g,' ')!==slackText(m).trim().replace(/\s+/g,' '))||(Array.isArray(m.files)&&m.files.length)))){ state.slack.expanded73=state.slack.expanded73||new Set(); if(state.slack.expanded73.has(key)) state.slack.expanded73.delete(key); else state.slack.expanded73.add(key); renderSlack(); return; } }
-  const openCard=e.target.closest('[data-open-channel]'); if(openCard){await selectSlackChannel(openCard.dataset.openChannel||'');return;}
+  const openCard=e.target.closest('[data-open-channel]'); if(openCard){ const ch=openCard.dataset.openChannel||''; if(/^[CDG][A-Z0-9]{8,}$/.test(ch)){ const nm=openCard.querySelector('.slack-overview-name')?.textContent||''; openSlackChat103(ch,{title:nm}); return; } await selectSlackChannel(ch);return;}
   const back=e.target.closest('[data-back-overview]'); if(back){await selectSlackChannel('');return;}
   const loadOlder=e.target.closest('[data-load-older]'); if(loadOlder){await loadOlderSlackMessages();return;}
   const reply=e.target.closest('[data-reply-ts]'); if(reply){const channelId=String(reply.dataset.replyChannel||'');if(!channelId)return;state.slack.replyTarget={ts:String(reply.dataset.replyTs||''),channelId,channelName:reply.dataset.replyChannelName||channelId,name:reply.dataset.replyName||'사용자'};renderSlack();$('slack-text').focus();return;}
@@ -1150,19 +1150,17 @@ function trelloRow44(t){
 /* live46: clicking an office avatar opens that person's Slack DM (AI staff: their Slack app DM) */
 var SLACK_DM_CACHE=window.__nexusSlackDm||(window.__nexusSlackDm={});
 async function openPersonSlack(id){
+  // live103: open the DM inside NEXUS (internal chat window) instead of launching Slack
   const person=STAFF.find(p=>p.id===id); if(!person||!state.authorized) return;
-  const cached=SLACK_DM_CACHE[id]; if(cached){ window.open(cached,'_blank','noopener'); return; }
-  const win=window.open('about:blank','_blank');
-  if(win){ try{ win.document.title='Slack 대화 여는 중'; win.document.body.innerHTML='<p style="font:16px sans-serif;padding:24px">'+escapeHtml(person.name)+' Slack 대화창을 여는 중입니다…</p>'; }catch{} }
+  const cached=SLACK_DM_CACHE['ch:'+id];
+  if(cached){ openSlackChat103(cached,{title:person.name,person:id}); return; }
+  openSlackChat103('',{title:person.name,person:id,pending:true});
   try{
     const d=await api('/slack/dm',{method:'POST',body:JSON.stringify({personId:id})});
-    const url=safeUrl(d?.url); if(!/^https:\/\/reniv\.slack\.com\/archives\/[CDG][A-Z0-9]{8,}$/.test(url)) throw new Error('Slack 대화 주소를 확인하지 못했습니다.');
-    SLACK_DM_CACHE[id]=url; if(win&&!win.closed) win.location.href=url; else window.open(url,'_blank','noopener');
-    toast(person.name+(d.self?' (나에게 보내는 메모)':'')+' Slack 대화창을 열었습니다.');
-  }catch(error){
-    if(win&&!win.closed) win.close();
-    toast(error.code==='slack_scope_upgrade'?'Slack을 한 번 다시 연결해 주세요. (미팅 예약 창의 Slack 다시 연결)':error.message,true);
-  }
+    const ch=String(d?.channel||String(d?.url||'').split('/archives/')[1]||'');
+    if(!/^[CDG][A-Z0-9]{8,}$/.test(ch)) throw new Error('Slack 대화를 확인하지 못했습니다.');
+    SLACK_DM_CACHE['ch:'+id]=ch; openSlackChat103(ch,{title:person.name+(d.self?' (나에게 메모)':''),person:id});
+  }catch(error){ chatError103(error); }
 }
 window.NEXUS.openPersonSlack=openPersonSlack;
 
@@ -1412,7 +1410,7 @@ function goHome86(){
   try{ closeSubpage(); }catch{}
   try{ $('erp-shell37').hidden=true; $('erp-frame37').removeAttribute('src'); }catch{}
   for(const id of ['meeting-dialog','admin-tasks-dialog']){ const d=document.getElementById(id); if(d&&d.open) try{ d.close(); }catch{} }
-  for(const id of ['slack-pop77','trello-pop80','img-viewer76']){ const el=document.getElementById(id); if(el) el.hidden=true; }
+  for(const id of ['slack-pop77','trello-pop80','img-viewer76','slack-chat103']){ const el=document.getElementById(id); if(el) el.hidden=true; }
   try{ hideDeskTip48(true); }catch{}
   const tip=document.getElementById('board-tip'); if(tip) tip.style.display='none';
   try{ window.NEXUS?.setView?.('office'); }catch{}
@@ -1429,3 +1427,98 @@ function goHome86(){
   document.addEventListener('click',e=>{ const el=e.target.closest?.('[data-erp-view96]'); if(el){ e.preventDefault(); e.stopPropagation(); open(el.dataset.erpView96); } },true);
   document.addEventListener('keydown',e=>{ const el=e.target.closest?.('[data-erp-view96]'); if(el&&(e.key==='Enter'||e.key===' ')){ e.preventDefault(); open(el.dataset.erpView96); } });
 })();
+
+/* live103: internal Slack chat window (channels and DMs) — read, send, edit/delete own, threads open in the thread popup */
+var CHAT103=window.__chat103||(window.__chat103={ch:'',title:'',msgs:[],cursor:'',hasMore:false,timer:null,busy:false,sig:''});
+function chatEl103(){
+  let ov=document.getElementById('slack-chat103'); if(ov) return ov;
+  ov=document.createElement('div'); ov.id='slack-chat103'; ov.className='slack-pop77 chat103'; ov.hidden=true;
+  ov.innerHTML='<div class="sp-box77 chat-box103" role="dialog" aria-modal="true" aria-label="Slack 대화"><header><span class="chat-ic103">#</span><span class="sp-ch77 chat-title103">Slack</span><a class="sp-open77 chat-open103" target="_blank" rel="noopener">Slack에서 열기</a><button type="button" class="sp-x77" aria-label="닫기">×</button></header><div class="chat-body103"></div><form class="sp-compose87 chat-compose103"><textarea rows="2" maxlength="4000" placeholder="메시지 입력 (Enter 보내기 · Shift+Enter 줄바꿈)"></textarea><button type="submit">보내기</button></form></div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click',e=>{ if(e.target===ov||e.target.closest('.sp-x77')) closeChat103(); });
+  ov.addEventListener('click',chatAction103);
+  const form=ov.querySelector('.chat-compose103'), ta=form.querySelector('textarea');
+  form.addEventListener('submit',e=>{ e.preventDefault(); sendChat103(); });
+  ta.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){ e.preventDefault(); sendChat103(); } });
+  ov.querySelector('.chat-body103').addEventListener('scroll',e=>{ const b=e.currentTarget; CHAT103.atBottom=b.scrollHeight-b.scrollTop-b.clientHeight<40; });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!ov.hidden&&document.getElementById('slack-pop77')?.hidden!==false&&document.getElementById('img-viewer76')?.hidden!==false&&!ov.querySelector('.sp-edit87')) closeChat103(); });
+  return ov;
+}
+function closeChat103(){ const ov=document.getElementById('slack-chat103'); if(ov) ov.hidden=true; clearInterval(CHAT103.timer); CHAT103.timer=null; CHAT103.ch=''; }
+function openSlackChat103(ch,opts={}){
+  const ov=chatEl103(); const body=ov.querySelector('.chat-body103');
+  const isDm=!!opts.person||/^D/.test(ch);
+  ov.querySelector('.chat-ic103').textContent=isDm?'@':'#';
+  ov.querySelector('.chat-title103').textContent=String(opts.title||'').replace(/^#/,'')||'Slack';
+  ov.querySelector('.chat-open103').hidden=!ch; if(ch) ov.querySelector('.chat-open103').href='https://reniv.slack.com/archives/'+ch;
+  ov.querySelector('.chat-compose103').hidden=!ch;
+  ov.hidden=false;
+  if(!ch){ body.innerHTML='<p class="sp-loading77">'+(opts.pending?escapeHtml(opts.title||'')+' 님과의 대화를 여는 중…':'대화를 찾지 못했습니다.')+'</p>'; return; }
+  if(CHAT103.ch!==ch){ CHAT103.ch=ch; CHAT103.msgs=[]; CHAT103.cursor=''; CHAT103.hasMore=false; CHAT103.sig=''; CHAT103.atBottom=true; body.innerHTML='<p class="sp-loading77">대화를 불러오는 중…</p>'; ov.querySelector('.chat-compose103 textarea').value=''; }
+  loadChat103(true);
+  clearInterval(CHAT103.timer); CHAT103.timer=setInterval(()=>{ if(!document.hidden&&!ov.hidden&&!ov.querySelector('.sp-edit87')) loadChat103(false); },8000);
+  setTimeout(()=>ov.querySelector('.chat-compose103 textarea')?.focus(),60);
+}
+function chatError103(error){
+  const ov=chatEl103(); const body=ov.querySelector('.chat-body103'); ov.hidden=false;
+  if(error?.code==='slack_scope_upgrade'||error?.code==='slack_reconnect_required'||error?.code==='slack_not_connected'){
+    body.innerHTML='<div class="chat-need103"><b>Slack 권한을 한 번 더 허용해 주세요</b><p>NEXUS 안에서 1:1 대화를 읽고 보내려면 Slack 연결을 한 번 다시 해야 합니다. 버튼을 누르면 Slack 허용 화면으로 이동했다가 NEXUS로 돌아옵니다.</p><button type="button" data-reconnect103>Slack 다시 연결</button></div>';
+    ov.querySelector('.chat-compose103').hidden=true; return;
+  }
+  body.innerHTML='<p class="sp-loading77">불러오지 못했습니다: '+escapeHtml(error?.message||String(error))+'</p>';
+}
+async function loadChat103(first,older){
+  const ov=document.getElementById('slack-chat103'); const ch=CHAT103.ch; if(!ov||!ch||CHAT103.busy) return; CHAT103.busy=true;
+  try{
+    const q='/slack/messages?channel='+encodeURIComponent(ch)+(older&&CHAT103.cursor?'&cursor='+encodeURIComponent(CHAT103.cursor):'');
+    const d=await api(q); if(CHAT103.ch!==ch) return;
+    const list=(Array.isArray(d.messages)?d.messages:[]);
+    if(d.channelName&&!/^D/.test(ch)) ov.querySelector('.chat-title103').textContent=String(d.channelName);
+    if(older){ const have=new Set(CHAT103.msgs.map(m=>m.ts)); CHAT103.msgs=CHAT103.msgs.concat(list.filter(m=>!have.has(m.ts))); CHAT103.cursor=d.responseMetadata?.nextCursor||''; CHAT103.hasMore=!!d.hasMore; renderChat103({keep:true}); return; }
+    const sig=list.map(m=>m.ts+':'+(m.edited?1:0)+':'+(m.replyCount||m.reply_count||0)+':'+String(m.text||'').length).join('|');
+    if(sig===CHAT103.sig&&!first) return; CHAT103.sig=sig;
+    const olderKept=CHAT103.msgs.filter(m=>list.length&&Number(m.ts)<Number(list[list.length-1].ts));
+    CHAT103.msgs=list.concat(olderKept); if(first||!CHAT103.cursor){ CHAT103.cursor=d.responseMetadata?.nextCursor||''; CHAT103.hasMore=!!d.hasMore; }
+    renderChat103({toBottom:first||CHAT103.atBottom});
+  }catch(error){ if(first) chatError103(error); }
+  finally{ CHAT103.busy=false; }
+}
+function renderChat103({toBottom,keep}={}){
+  const ov=document.getElementById('slack-chat103'); const body=ov.querySelector('.chat-body103'); const prevH=body.scrollHeight, prevTop=body.scrollTop;
+  const msgs=CHAT103.msgs.slice().sort((a,b)=>Number(a.ts)-Number(b.ts)); let lastDay='';
+  const html=msgs.map(m=>{
+    const d=new Date(Number(m.ts)*1000), day=d.toLocaleDateString('ko-KR',{timeZone:'Asia/Seoul',month:'long',day:'numeric',weekday:'short'});
+    const sep=day!==lastDay?'<div class="chat-day103"><span>'+escapeHtml(day)+'</span></div>':''; lastDay=day;
+    const tm=d.toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'});
+    const rc=Number(m.replyCount||m.reply_count||0);
+    const acts=m.mine?'<span class="sp-acts87"><button type="button" data-cedit103="'+escapeHtml(m.ts)+'">수정</button><button type="button" data-cdel103="'+escapeHtml(m.ts)+'">삭제</button></span>':'';
+    return sep+'<article class="chat-msg103'+(m.mine?' mine103':'')+'" data-ts87="'+escapeHtml(m.ts)+'"><header><b>'+escapeHtml(slackAuthor(m))+'</b><time>'+escapeHtml(tm)+(m.edited?' · 수정됨':'')+'</time>'+acts+'</header><div class="sp-text77">'+escapeHtml(dedupeParas77(m.detail||slackText(m)))+'</div>'+slackFilesHtml77(m)+(rc?'<button type="button" class="chat-thread103" data-thread103="'+escapeHtml(m.threadTs||m.thread_ts||m.ts)+'">답글 '+rc+'개 보기 ›</button>':'')+'</article>';
+  }).join('');
+  body.innerHTML=(CHAT103.hasMore?'<button type="button" class="chat-older103" data-older103>이전 메시지 더 보기</button>':'')+(html||'<p class="sp-loading77">아직 대화가 없습니다. 첫 메시지를 보내 보세요.</p>');
+  hydrateSlackImages76();
+  if(keep) body.scrollTop=body.scrollHeight-prevH+prevTop; else if(toBottom) body.scrollTop=body.scrollHeight; else body.scrollTop=prevTop;
+}
+async function sendChat103(){
+  const ov=document.getElementById('slack-chat103'); const ch=CHAT103.ch; if(!ov||!ch) return; const form=ov.querySelector('.chat-compose103'), ta=form.querySelector('textarea'), btn=form.querySelector('button');
+  const text=ta.value.trim(); if(!text||btn.disabled) return; btn.disabled=true; btn.textContent='보내는 중…';
+  try{ await api('/slack/post',{method:'POST',body:JSON.stringify({channel:ch,text})}); ta.value=''; CHAT103.atBottom=true; CHAT103.sig=''; await loadChat103(false); const b=ov.querySelector('.chat-body103'); b.scrollTop=b.scrollHeight; }
+  catch(error){ if(error?.code==='slack_scope_upgrade') chatError103(error); else toast('보내기 실패: '+error.message,true); }
+  finally{ btn.disabled=false; btn.textContent='보내기'; ta.focus(); }
+}
+async function chatAction103(e){
+  const ov=document.getElementById('slack-chat103'); const ch=CHAT103.ch;
+  if(e.target.closest('[data-reconnect103]')){ try{ await reconnectSlack(); }catch(err){ toast(err.message,true); } return; }
+  if(!ch) return;
+  if(e.target.closest('[data-older103]')){ await loadChat103(false,true); return; }
+  const th=e.target.closest('[data-thread103]'); if(th){ openSlackPopup77('https://reniv.slack.com/archives/'+ch+'/p'+th.dataset.thread103.replace('.','')); return; }
+  const ed=e.target.closest('[data-cedit103]'), del=e.target.closest('[data-cdel103]'), save=e.target.closest('[data-save87]'), cancel=e.target.closest('[data-cancel87]');
+  if(ed){ const ts=ed.dataset.cedit103; const m=CHAT103.msgs.find(x=>String(x.ts)===ts); const art=ov.querySelector('[data-ts87="'+CSS.escape(ts)+'"]'); if(!m||!art) return; const txt=art.querySelector('.sp-text77'); txt.innerHTML='<div class="sp-edit87"><textarea rows="4" maxlength="4000"></textarea><div><button type="button" data-cancel87>취소</button><button type="button" class="primary" data-save87="'+escapeHtml(ts)+'">저장</button></div></div>'; const t=txt.querySelector('textarea'); t.value=slackEditableText87(m.raw||m.text||''); t.focus(); return; }
+  if(cancel){ renderChat103({}); return; }
+  if(save){ const ts=save.dataset.save87; const text=save.closest('.sp-edit87').querySelector('textarea').value.trim(); if(!text) return; save.disabled=true; save.textContent='저장 중…';
+    try{ await api('/slack/update',{method:'POST',body:JSON.stringify({channel:ch,ts,text})}); toast('메시지를 수정했습니다.'); CHAT103.sig=''; await loadChat103(false); }
+    catch(error){ toast('수정 실패: '+error.message,true); save.disabled=false; save.textContent='저장'; } return; }
+  if(del){ const ts=del.dataset.cdel103; if(!confirm('이 메시지를 Slack에서 삭제할까요? 되돌릴 수 없습니다.')) return;
+    try{ await api('/slack/delete',{method:'POST',body:JSON.stringify({channel:ch,ts})}); toast('메시지를 삭제했습니다.'); CHAT103.msgs=CHAT103.msgs.filter(x=>String(x.ts)!==ts); CHAT103.sig=''; await loadChat103(false); }
+    catch(error){ toast('삭제 실패: '+error.message,true); } }
+}
+window.NEXUS.openSlackChat=openSlackChat103;
