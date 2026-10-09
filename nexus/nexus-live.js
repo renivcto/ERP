@@ -1299,7 +1299,7 @@ document.addEventListener('click',e=>{
 
 /* live77: Slack tasks open an in-NEXUS popup (message, images, thread) instead of jumping to Slack */
 function slackRef77(url){ const m=String(url||'').match(/slack\.com\/archives\/([CDG][A-Z0-9]{8,})\/p(\d{10})(\d{6})/); return m?{channel:m[1],ts:m[2]+'.'+m[3],url}:null; }
-function dedupeParas77(s){ const seen=new Set(); return emojify85(String(s||'')).split(/\n{2,}/).filter(p=>{const k=p.replace(/\s+/g,''); if(!k||seen.has(k)) return false; seen.add(k); return true;}).join('\n\n'); }
+function dedupeParas77(s){ const seen=new Set(); return emojify85(String(s||'').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&')).split(/\n{2,}/).filter(p=>{const k=p.replace(/\s+/g,''); if(!k||seen.has(k)) return false; seen.add(k); return true;}).join('\n\n'); }
 function slackFilesHtml77(m){
   const files=(Array.isArray(m.files)?m.files:[]); const imgs=files.filter(f=>/^image\/(png|jpe?g|gif|webp)$/i.test(f.mimetype||'')&&/^F[A-Z0-9]{8,}$/.test(f.id||'')); const vids=files.filter(f=>/^video\//i.test(f.mimetype||'')&&/^F[A-Z0-9]{8,}$/.test(f.id||'')); const others=files.filter(f=>!imgs.includes(f)&&!vids.includes(f)&&/^https:\/\/[a-z0-9-]+\.slack\.com\//.test(String(f.permalink||'')));
   return (imgs.length?'<div class="slack-imgs76">'+imgs.map(f=>'<figure data-img76="'+escapeHtml(f.id)+'" data-title76="'+escapeHtml(f.title||f.name||'')+'"><span class="slack-img-ph76">이미지 불러오는 중…</span><figcaption>'+escapeHtml(f.title||f.name||'')+'</figcaption></figure>').join('')+'</div>':'')
