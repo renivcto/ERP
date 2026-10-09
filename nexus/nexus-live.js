@@ -64,7 +64,11 @@ const LOAD99={shownAt:Date.now(),timer:null};
 function setAuthOverlay(title,message,{login=false,logout=false}={}){ const ov=$('auth-overlay'); clearTimeout(LOAD99.timer); ov.classList.remove('leaving99'); $('auth-title').textContent=title; $('auth-message').textContent=message; $('login-button').hidden=!login; $('auth-logout-button').hidden=!logout;
   const loading=!login&&!logout&&/확인 중/.test(title); if(loading&&!ov.classList.contains('loading99')) LOAD99.shownAt=Date.now(); ov.classList.toggle('loading99',loading); ov.dataset.step99=/권한/.test(title)?'2':'1';
   ov.hidden=false; $('app').hidden=true; }
-function greet99(user){ const el=document.getElementById('greet99'); const n=String(user?.displayName||'').trim(); if(el) el.textContent=n?n+'님, 안녕하세요!':'안녕하세요!'; }
+// live102: greet with the person's ERP-registered name (users/{uid}.name via /status). Until /status answers we use the
+// name cached for this uid on this browser; the Google account name is never shown (it can be English or a nickname).
+function greet99(user,erpName){ const el=document.getElementById('greet99'); if(!el) return; const key='nexus_greet_name:'+String(user?.uid||'');
+  let n=String(erpName||'').trim(); if(n){ try{ localStorage.setItem(key,n); }catch{} } else { try{ n=localStorage.getItem(key)||''; }catch{} }
+  el.textContent=n?n+'님, 안녕하세요!':'안녕하세요!'; }
 function showApp(){ const ov=$('auth-overlay'); $('app').hidden=false; document.body.classList.remove('auth-pending');
   if(!ov.classList.contains('loading99')||ov.hidden){ ov.hidden=true; return; }
   ov.dataset.step99='3'; clearTimeout(LOAD99.timer);
@@ -961,7 +965,7 @@ window.addEventListener('nexus-scene-ready',bindOriginalScene,{once:true});if(wi
 function lockApi(message){clearAll();setAuthOverlay('NEXUS 접근 차단',message||'NEXUS 서버 권한을 확인할 수 없습니다.',{logout:true})}
 async function handleActiveUser(user){
   clearExternal();stopFirestore();stopPolling();state.user=user;greet99(user);setAuthOverlay('NEXUS 권한 확인 중','서버의 nexus_access 권한과 활성 임원 계정을 확인하고 있습니다.');
-  try{const status=await api('/status');if(String(status?.identity?.uid||'')!==String(user.uid))throw Object.assign(new Error('서버 사용자와 현재 로그인 계정이 일치하지 않습니다.'),{status:403});state.status=status;state.profile={uid:user.uid,name:status.identity.displayName||user.displayName||'',email:status.identity.email||user.email||'',role:status.identity.isAdmin?'관리자':(status.identity.permission==='read'?'조회 권한':'임원')};state.authorized=true;$('viewer-name').textContent=`(${state.profile.name||state.profile.email})`;$('viewer-role').textContent=state.profile.role;renderViewerFace();$('logout-button').textContent=(state.profile.name||'나').slice(0,1);showApp();subscribeERP();if($('admin-tasks-btn'))$('admin-tasks-btn').hidden=!status.identity.isAdmin;await Promise.all([loadTrello(),loadMeetings(),loadSlackChannels(),loadPersonalTasks(),loadDeskWork()]);state.lastPollAt=Date.now();renderAll();startPolling()}catch(error){clearAll();setAuthOverlay('접근할 수 없습니다',error.message,{logout:true})}
+  try{const status=await api('/status');if(String(status?.identity?.uid||'')!==String(user.uid))throw Object.assign(new Error('서버 사용자와 현재 로그인 계정이 일치하지 않습니다.'),{status:403});state.status=status;state.profile={uid:user.uid,name:status.identity.displayName||user.displayName||'',email:status.identity.email||user.email||'',role:status.identity.isAdmin?'관리자':(status.identity.permission==='read'?'조회 권한':'임원')};state.authorized=true;greet99(user,status.identity.displayName);$('viewer-name').textContent=`(${state.profile.name||state.profile.email})`;$('viewer-role').textContent=state.profile.role;renderViewerFace();$('logout-button').textContent=(state.profile.name||'나').slice(0,1);showApp();subscribeERP();if($('admin-tasks-btn'))$('admin-tasks-btn').hidden=!status.identity.isAdmin;await Promise.all([loadTrello(),loadMeetings(),loadSlackChannels(),loadPersonalTasks(),loadDeskWork()]);state.lastPollAt=Date.now();renderAll();startPolling()}catch(error){clearAll();setAuthOverlay('접근할 수 없습니다',error.message,{logout:true})}
 }
 
 $('login-button').onclick=async()=>{ $('login-button').disabled=true; try{await signInWithPopup(auth,provider);}catch(error){if(error.code!=='auth/popup-closed-by-user')setAuthOverlay('로그인 오류',error.message,{login:true});}finally{$('login-button').disabled=false;}};
