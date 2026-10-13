@@ -1448,7 +1448,7 @@ var CHAT103=window.__chat103||(window.__chat103={ch:'',title:'',msgs:[],cursor:'
 function chatEl103(){
   let ov=document.getElementById('slack-chat103'); if(ov) return ov;
   ov=document.createElement('div'); ov.id='slack-chat103'; ov.className='slack-pop77 chat103'; ov.hidden=true;
-  ov.innerHTML='<div class="sp-box77 chat-box103" role="dialog" aria-modal="true" aria-label="Slack 대화"><header><span class="chat-ic103">#</span><span class="sp-ch77 chat-title103">Slack</span><a class="sp-open77 chat-open103" target="_blank" rel="noopener">Slack에서 열기</a><button type="button" class="sp-x77" aria-label="닫기">×</button></header><div class="chat-body103"></div><form class="sp-compose87 chat-compose103"><textarea rows="2" maxlength="4000" placeholder="메시지 입력 (Enter 보내기 · Shift+Enter 줄바꿈)"></textarea><button type="submit">보내기</button></form></div>';
+  ov.innerHTML='<div class="sp-box77 chat-box103" role="dialog" aria-modal="true" aria-label="Slack 대화"><header><span class="chat-ic103">#</span><span class="sp-ch77 chat-title103">Slack</span><a class="sp-open77 chat-open103" target="_blank" rel="noopener">Slack에서 열기</a><button type="button" class="sp-x77" aria-label="닫기">×</button></header><div class="chat-body103"></div><div class="wf-bar115" hidden></div><form class="sp-compose87 chat-compose103"><textarea rows="2" maxlength="4000" placeholder="메시지 입력 (Enter 보내기 · Shift+Enter 줄바꿈)"></textarea><button type="submit">보내기</button></form></div>';
   document.body.appendChild(ov);
   ov.addEventListener('click',e=>{ if(e.target===ov||e.target.closest('.sp-x77')) closeChat103(); });
   ov.addEventListener('click',chatAction103);
@@ -1467,6 +1467,7 @@ function openSlackChat103(ch,opts={}){
   ov.querySelector('.chat-title103').textContent=String(opts.title||'').replace(/^#/,'')||'Slack';
   ov.querySelector('.chat-open103').hidden=!ch; if(ch) ov.querySelector('.chat-open103').href='https://reniv.slack.com/archives/'+ch;
   ov.querySelector('.chat-compose103').hidden=!ch;
+  renderWfBar115(ov,ch);
   ov.hidden=false;
   if(!ch){ body.innerHTML='<p class="sp-loading77">'+(opts.pending?escapeHtml(opts.title||'')+' 님과의 대화를 여는 중…':'대화를 찾지 못했습니다.')+'</p>'; return; }
   if(CHAT103.ch!==ch){ CHAT103.ch=ch; CHAT103.msgs=[]; CHAT103.cursor=''; CHAT103.hasMore=false; CHAT103.sig=''; CHAT103.atBottom=true; body.innerHTML='<p class="sp-loading77">대화를 불러오는 중…</p>'; ov.querySelector('.chat-compose103 textarea').value=''; }
@@ -1633,3 +1634,49 @@ function manualRow114(t){
     finally{ save.disabled=false; save.textContent='등록'; }
   });
 })();
+
+/* live115: Slack workflow request forms rebuilt inside NEXUS (same fields, same message format, same channel) */
+const WF115={
+  'C0C1Q8VKMFF':{key:'video',label:'광고 쇼츠 영상 요청',closing:':woman-raising-hand::skin-tone-3:*구매 전환율을 높이는 광고 쇼츠 영상을 제작해줘.*',
+    fields:[{k:'product',l:'광고할 제품',req:1,list:'product'},{k:'folder',l:'구글 폴더 링크',req:1,url:1,ph:'https://drive.google.com/drive/folders/...'},{k:'voice',l:'목소리톤',req:1,ph:'예: 폴더에 있는 음성파일을 사용해서 만든다.'},{k:'platform',l:'광고할 플랫폼',req:1,list:'platform'},{k:'extra',l:'추가 요청 사항',area:1,ph:'원하는 영상 내용을 적어 주세요'}]},
+  'C0C1FPRQ3F1':{key:'image',label:'광고 이미지 요청',closing:':woman-raising-hand::skin-tone-3:*광고 이미지를 제작해줘.*',
+    fields:[{k:'product',l:'광고할 제품',req:1,list:'product'},{k:'folder',l:'구글 폴더 링크',req:1,url:1,ph:'https://drive.google.com/drive/folders/...'},{k:'copy',l:'광고 카피',req:1,area:1,big:1,ph:'이미지에 들어갈 문구와 디자인 요청을 적어 주세요'},{k:'platform',l:'광고할 플랫폼',req:1,list:'platform'},{k:'extra',l:'추가 요청 사항',area:1}]}
+};
+const WF_SUGGEST115={product:['글로우 배리어 크림','글로우샷 (약국전용)','글로우샷','320 세럼','하이드란 아쿠아 탱크 세럼','하이드란 아쿠아 탱크 크림'],platform:['유튜브 쇼츠','메타·인스타 피드 (1:1 정사각)','스토리·릴스 (9:16)','메타·인스타 피드 (4:5)','틱톡']};
+function renderWfBar115(ov,ch){
+  const bar=ov.querySelector('.wf-bar115'); if(!bar) return; const wf=WF115[ch];
+  bar.hidden=!wf; if(!wf){ bar.innerHTML=''; return; }
+  bar.innerHTML='<button type="button" class="wf-btn115" data-wf115="'+escapeHtml(ch)+'">▷ '+escapeHtml(wf.label)+'</button>';
+}
+function wfSuggestions115(kind){
+  // past requests in this conversation add to the suggestion list
+  const seen=new Set(WF_SUGGEST115[kind]||[]); const label=kind==='product'?'광고할 제품':'광고할 플랫폼';
+  for(const m of (window.__chat103&&window.__chat103.msgs)||[]){ const raw=String(m.raw||''); const mm=raw.match(new RegExp('\\*'+label+'\\*\\n([^\\n*]+)')); if(mm&&mm[1].trim()) seen.add(mm[1].trim()); }
+  return [...seen];
+}
+function openWf115(ch){
+  const wf=WF115[ch]; if(!wf) return;
+  let dlg=document.getElementById('wf-dlg115');
+  if(!dlg){ dlg=document.createElement('dialog'); dlg.id='wf-dlg115'; dlg.className='add-task-dlg114 wf-dlg115'; document.body.appendChild(dlg);
+    dlg.addEventListener('click',e=>{ if(e.target===dlg||e.target.closest('.x114')) dlg.close(); });
+    dlg.addEventListener('submit',e=>{ e.preventDefault(); submitWf115(dlg); }); }
+  dlg.dataset.ch=ch;
+  dlg.innerHTML='<form><header><h3>▷ '+escapeHtml(wf.label)+'</h3><button type="button" class="x114" aria-label="닫기">×</button></header><p class="wf-sub115">#'+(ch==='C0C1Q8VKMFF'?'광고영상-제작':'광고이미지-제작')+' 채널에 Slack 워크플로와 같은 형식으로 올라갑니다.</p>'
+    +wf.fields.map(f=>'<label>'+escapeHtml(f.l)+(f.req?' <em>*</em>':'')+(f.area?'<textarea data-k="'+f.k+'" rows="'+(f.big?6:3)+'" maxlength="3000" placeholder="'+escapeHtml(f.ph||'')+'"></textarea>':'<input data-k="'+f.k+'" maxlength="300" placeholder="'+escapeHtml(f.ph||'')+'"'+(f.list?' list="wf-'+f.list+'115"':'')+(f.url?' type="url"':'')+'>')+'</label>').join('')
+    +'<datalist id="wf-product115">'+wfSuggestions115('product').map(v=>'<option value="'+escapeHtml(v)+'">').join('')+'</datalist><datalist id="wf-platform115">'+wfSuggestions115('platform').map(v=>'<option value="'+escapeHtml(v)+'">').join('')+'</datalist>'
+    +'<p class="at-err114" role="alert"></p><footer><button type="button" class="x114 ghost">취소</button><button type="submit" class="primary">요청 보내기</button></footer></form>';
+  dlg.showModal(); setTimeout(()=>dlg.querySelector('[data-k]')?.focus(),30);
+}
+async function submitWf115(dlg){
+  const ch=dlg.dataset.ch, wf=WF115[ch]; if(!wf) return; const err=dlg.querySelector('.at-err114'); const btn=dlg.querySelector('button[type=submit]');
+  const v={}; for(const f of wf.fields){ v[f.k]=String(dlg.querySelector('[data-k="'+f.k+'"]').value||'').trim(); }
+  const miss=wf.fields.filter(f=>f.req&&!v[f.k]).map(f=>f.l); if(miss.length){ err.textContent=miss.join(', ')+' 항목을 입력해 주세요.'; return; }
+  if(v.folder&&!/^https?:\/\//i.test(v.folder)){ err.textContent='구글 폴더 링크는 https:// 로 시작하는 주소여야 합니다.'; return; }
+  const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const text=wf.fields.map(f=>'*'+f.l+'*\n'+(f.k==='folder'?'<'+v.folder+'>':esc(v[f.k]))).join('\n')+'\n\n'+wf.closing;
+  btn.disabled=true; btn.textContent='보내는 중…'; err.textContent='';
+  try{ await api('/slack/post',{method:'POST',body:JSON.stringify({channel:ch,text})}); dlg.close(); toast(wf.label+'을 보냈습니다.'); if(window.__chat103&&window.__chat103.ch===ch){ window.__chat103.sig=''; window.__chat103.atBottom=true; await loadChat103(false); const b=document.querySelector('#slack-chat103 .chat-body103'); if(b) b.scrollTop=b.scrollHeight; } }
+  catch(error){ err.textContent='보내지 못했습니다: '+error.message; }
+  finally{ btn.disabled=false; btn.textContent='요청 보내기'; }
+}
+document.addEventListener('click',e=>{ const b=e.target.closest('[data-wf115]'); if(b){ e.preventDefault(); openWf115(b.dataset.wf115); } });
