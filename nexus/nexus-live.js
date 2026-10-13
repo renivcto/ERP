@@ -606,7 +606,7 @@ function renderEmployeeFocus(){
 
   renderQuickAdd112(uid, enabled);
   const backBtn=$('admin-emp-back'); if(backBtn) backBtn.hidden=isSelfMode112();
-  const rules = (state.admin.allRules||[]).filter(r=>String(r.assigneeUid)===String(uid));
+  const rules = (state.admin.allRules||[]).filter(r=>String(r.assigneeUid)===String(uid)&&!r.deleted);
   const rulesEl=$('admin-emp-rules'); if(rulesEl) rulesEl.innerHTML = rules.length ? rules.map(ruleConditionCard).join('') : '<p class="admin-hint">등록된 업무 규칙이 없습니다.</p>';
 
   const ed=state.admin.employee;
@@ -1573,7 +1573,7 @@ function renderQuickAdd112(uid, enabled){
   let box=document.getElementById('admin-quick112');
   if(!box){ const anchor=document.querySelector('#admin-view-employee .admin-gen-label'); if(!anchor) return;
     box=document.createElement('section'); box.id='admin-quick112'; box.className='admin-emp-block quick112';
-    box.innerHTML='<h4>업무 소스 바로 연결</h4><div class="q-row112"><span class="q-tag112 trello">Trello</span><select id="q-board112" aria-label="Trello 보드"></select><input id="q-list112" maxlength="40" placeholder="목록 이름 포함 (선택)"><button type="button" id="q-board-add112">보드 연결</button></div><p class="admin-hint">선택한 보드의 진행 중인 카드(기존 카드 포함)가 업무로 표시됩니다. 완료되었거나 마감이 지난 카드는 빠집니다.</p><div class="q-row112 q-auto113"><span class="q-tag112 slack">Slack</span><span>참여 중인 채널·대화는 <b>자동으로</b> 오른쪽 Slack 패널에 표시됩니다. 따로 선택할 필요가 없습니다.</span></div><h4 class="q-or112">또는 AI에게 말로 요청</h4>';
+    box.innerHTML='<h4>업무 소스 바로 연결</h4><div class="q-row112"><span class="q-tag112 trello">Trello</span><select id="q-board112" aria-label="Trello 보드"></select><input id="q-list112" maxlength="40" placeholder="목록 이름 포함 (선택)"><button type="button" id="q-board-add112">보드 연결</button></div><p class="admin-hint">선택한 보드의 진행 중인 카드(기존 카드 포함)가 업무로 표시됩니다. 완료되었거나 마감이 지난 카드는 빠집니다.</p><div class="q-slack116"><div class="q-slack-head116"><span class="q-tag112 slack">Slack</span><span>내 업무로 가져올 채널을 고르세요. 체크한 채널의 새 글·댓글이 <b>내가 처리할 업무</b>에 나옵니다.</span></div><div id="q-slack-list116" class="q-slack-list116"></div></div><h4 class="q-or112">또는 AI에게 말로 요청</h4>';
     anchor.parentNode.insertBefore(box, anchor);
     box.addEventListener('click',onQuickAdd112);
   }
@@ -1582,6 +1582,7 @@ function renderQuickAdd112(uid, enabled){
   const bv=bSel.value;
   bSel.innerHTML='<option value="">보드 선택</option>'+(cat.trelloBoards||[]).map(b=>'<option value="'+escapeHtml(b.id)+'">'+escapeHtml(b.name)+'</option>').join(''); bSel.value=bv;
   box.querySelectorAll('select,input,button').forEach(el=>el.disabled=!enabled);
+  renderSlackPick116(uid, enabled);
 }
 async function onQuickAdd112(e){
   const btn=e.target.closest('#q-board-add112,#q-ch-add112'); if(!btn||btn.disabled) return;
@@ -1695,3 +1696,38 @@ document.addEventListener('click',e=>{ const b=e.target.closest('[data-wf115]');
   };
   setInterval(place,1200);
 })();
+
+/* live116: pick joined Slack channels as task sources (checkbox list; own page only) */
+function slackRulesFor116(uid){ return (state.admin.allRules||[]).filter(r=>String(r.assigneeUid)===String(uid)&&r.kind==='slack_activity'&&!r.deleted); }
+function renderSlackPick116(uid, enabled){
+  const list=document.getElementById('q-slack-list116'); if(!list) return;
+  const own=String(uid)===String(state.user&&state.user.uid);
+  if(!own){ list.innerHTML='<p class="admin-hint">Slack 채널은 각 직원이 본인 설정 화면에서 자기 Slack 계정 기준으로 고릅니다.</p>'; return; }
+  const chans=((state.admin.config&&state.admin.config.catalog&&state.admin.config.catalog.slackChannels)||[]).slice().sort((a,b)=>String(a.name).localeCompare(String(b.name),'ko'));
+  if(!chans.length){ list.innerHTML='<p class="admin-hint">참여 중인 Slack 채널을 불러오지 못했습니다. Slack 연결을 확인해 주세요.</p>'; return; }
+  const on=new Set(); for(const r of slackRulesFor116(uid)) if(r.enabled!==false) for(const id of r.sourceIds||[]) on.add(String(id));
+  list.innerHTML=chans.map(c=>'<label class="q-ch116'+(on.has(String(c.id))?' on':'')+'"><input type="checkbox" data-ch116="'+escapeHtml(c.id)+'" data-name116="'+escapeHtml(c.name)+'"'+(on.has(String(c.id))?' checked':'')+(enabled?'':' disabled')+'>#'+escapeHtml(c.name)+'</label>').join('');
+  if(!list.__bound){ list.__bound=true; list.addEventListener('change',onSlackPick116); }
+}
+async function onSlackPick116(e){
+  const cb=e.target.closest('input[data-ch116]'); if(!cb) return; const uid=state.admin.selectedUid; const ch=cb.dataset.ch116, name=cb.dataset.name116; const want=cb.checked;
+  cb.disabled=true; cb.closest('label').classList.toggle('on',want);
+  try{
+    const rules=slackRulesFor116(uid);
+    if(want){
+      const off=rules.find(r=>r.enabled===false&&(r.sourceIds||[]).length===1&&String(r.sourceIds[0])===ch);
+      const rule=off?{...off,enabled:true}:{assigneeUid:uid,title:'#'+name+' 새 글·댓글',kind:'slack_activity',sourceIds:[ch],enabled:true,expireAfterDue:false,due:null};
+      await api('/admin/task-rules',{method:'POST',body:JSON.stringify({rules:[buildRuleInput(rule)]})});
+      toast('#'+name+' 채널을 내 업무에 추가했습니다.');
+    } else {
+      for(const r of rules.filter(r=>r.enabled!==false&&(r.sourceIds||[]).map(String).includes(ch))){
+        const rest=(r.sourceIds||[]).filter(id=>String(id)!==ch);
+        if(rest.length) await api('/admin/task-rules',{method:'POST',body:JSON.stringify({rules:[buildRuleInput({...r,sourceIds:rest})]})});
+        else await api('/admin/task-rules/delete',{method:'POST',body:JSON.stringify({id:r.id,version:r.version})});
+      }
+      toast('#'+name+' 채널을 내 업무에서 뺐습니다.');
+    }
+    await loadAdminConfig(); await loadEmployeeTasks(uid); await loadPersonalTasks(); renderAll();
+  }catch(error){ toast(error.message,true); cb.checked=!want; cb.closest('label')?.classList.toggle('on',!want); }
+  finally{ cb.disabled=false; }
+}
