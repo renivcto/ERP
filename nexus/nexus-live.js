@@ -1573,7 +1573,7 @@ function renderQuickAdd112(uid, enabled){
   let box=document.getElementById('admin-quick112');
   if(!box){ const anchor=document.querySelector('#admin-view-employee .admin-gen-label'); if(!anchor) return;
     box=document.createElement('section'); box.id='admin-quick112'; box.className='admin-emp-block quick112';
-    box.innerHTML='<h4>업무 소스 바로 연결</h4><div class="q-row112"><span class="q-tag112 trello">Trello</span><select id="q-board112" aria-label="Trello 보드"></select><input id="q-list112" maxlength="40" placeholder="목록 이름 포함 (선택)"><button type="button" id="q-board-add112">보드 연결</button></div><p class="admin-hint">선택한 보드의 진행 중인 카드(기존 카드 포함)가 업무로 표시됩니다. 완료되었거나 마감이 지난 카드는 빠집니다.</p><div class="q-slack116"><div class="q-slack-head116"><span class="q-tag112 slack">Slack</span><span>내 업무로 가져올 채널을 고르세요. 체크한 채널의 새 글·댓글이 <b>내가 처리할 업무</b>에 나옵니다.</span></div><div id="q-slack-list116" class="q-slack-list116"></div></div><h4 class="q-or112">또는 AI에게 말로 요청</h4>';
+    box.innerHTML='<h4>업무 소스 바로 연결</h4><div class="q-row112"><span class="q-tag112 trello">Trello</span><select id="q-board112" aria-label="Trello 보드"></select><input id="q-list112" maxlength="40" placeholder="목록 이름 포함 (선택)"><button type="button" id="q-board-add112">보드 연결</button></div><p class="admin-hint">선택한 보드의 진행 중인 카드(기존 카드 포함)가 업무로 표시됩니다. 완료되었거나 마감이 지난 카드는 빠집니다.</p><div class="q-slack116"><div class="q-slack-head116"><span class="q-tag112 slack">Slack</span><span>내 업무로 가져올 채널을 고르세요. 체크한 채널의 새 글·댓글이 <b>내가 처리할 업무</b>에 나옵니다. (최근 3일 글부터)</span></div><div id="q-slack-list116" class="q-slack-list116"></div></div><h4 class="q-or112">또는 AI에게 말로 요청</h4>';
     anchor.parentNode.insertBefore(box, anchor);
     box.addEventListener('click',onQuickAdd112);
   }
@@ -1717,7 +1717,8 @@ async function onSlackPick116(e){
     if(want){
       const off=rules.find(r=>r.enabled===false&&(r.sourceIds||[]).length===1&&String(r.sourceIds[0])===ch);
       const rule=off?{...off,enabled:true}:{assigneeUid:uid,title:'#'+name+' 새 글·댓글',kind:'slack_activity',sourceIds:[ch],enabled:true,expireAfterDue:false,due:null};
-      await api('/admin/task-rules',{method:'POST',body:JSON.stringify({rules:[buildRuleInput(rule)]})});
+      const input=buildRuleInput(rule); if(!off) input.lookbackDays=3;
+      await api('/admin/task-rules',{method:'POST',body:JSON.stringify({rules:[input]})});
       toast('#'+name+' 채널을 내 업무에 추가했습니다.');
     } else {
       for(const r of rules.filter(r=>r.enabled!==false&&(r.sourceIds||[]).map(String).includes(ch))){
