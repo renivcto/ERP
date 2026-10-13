@@ -1322,7 +1322,7 @@ function slackFilesHtml77(m){
 async function openSlackPopup77(url,opts){
   const ref=slackRef77(url); if(!ref){ window.open(url,'_blank','noopener'); return; }
   let ov=document.getElementById('slack-pop77');
-  if(!ov){ ov=document.createElement('div'); ov.id='slack-pop77'; ov.className='slack-pop77'; ov.innerHTML='<div class="sp-box77" role="dialog" aria-modal="true"><header><span class="sp-ch77"></span><a class="sp-open77" target="_blank" rel="noopener">Slack에서 열기</a><button type="button" class="sp-x77" aria-label="닫기">×</button></header><div class="sp-body77"></div><form class="sp-compose87" hidden><textarea rows="2" maxlength="4000" placeholder="답글을 입력하세요 (Ctrl+Enter로 보내기)"></textarea><button type="submit">답글 보내기</button></form></div>'; document.body.appendChild(ov);
+  if(!ov){ ov=document.createElement('div'); ov.id='slack-pop77'; ov.className='slack-pop77'; ov.innerHTML='<div class="sp-box77" role="dialog" aria-modal="true"><header><span class="sp-ch77"></span><a class="sp-open77" target="_blank" rel="noopener">Slack에서 열기</a><button type="button" class="sp-x77" aria-label="닫기">×</button></header><div class="sp-body77"></div><div class="wf-bar115" hidden></div><form class="sp-compose87" hidden><textarea rows="2" maxlength="4000" placeholder="답글을 입력하세요 (Ctrl+Enter로 보내기)"></textarea><button type="submit">답글 보내기</button></form></div>'; document.body.appendChild(ov);
     ov.addEventListener('click',e=>{ if(e.target===ov||e.target.closest('.sp-x77')) ov.hidden=true; });
     ov.addEventListener('click',slackPopupAction87);
     const form=ov.querySelector('.sp-compose87'), ta=form.querySelector('textarea');
@@ -1330,6 +1330,7 @@ async function openSlackPopup77(url,opts){
     ta.addEventListener('keydown',e=>{ if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); sendSlackReply87(); } });
     document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!ov.hidden&&document.getElementById('img-viewer76')?.hidden!==false&&!ov.querySelector('.sp-edit87')) ov.hidden=true; }); }
   ov._ref87=ref;
+  try{ renderWfBar115(ov,ref.channel); }catch{}
   ov.querySelector('.sp-open77').href=ref.url; const body=ov.querySelector('.sp-body77'); const form=ov.querySelector('.sp-compose87');
   if(!opts?.keep){ ov.querySelector('.sp-ch77').textContent='Slack'; body.innerHTML='<p class="sp-loading77">메시지를 불러오는 중…</p>'; form.hidden=true; form.querySelector('textarea').value=''; }
   ov.hidden=false;
@@ -1680,3 +1681,17 @@ async function submitWf115(dlg){
   finally{ btn.disabled=false; btn.textContent='요청 보내기'; }
 }
 document.addEventListener('click',e=>{ const b=e.target.closest('[data-wf115]'); if(b){ e.preventDefault(); openWf115(b.dataset.wf115); } });
+
+/* live122: request button also in the thread popup and in the right Slack panel when that channel is open */
+(function wfPanel122(){
+  const sel=document.getElementById('slack-channel-select')||document.querySelector('select[aria-label*="채널"]');
+  const place=()=>{
+    const form=document.getElementById('slack-compose-live')||document.querySelector('.p-slack form, .slack-compose-live, #slack-form-live'); 
+    const ch=String((state.slack&&state.slack.channel)||'');
+    let bar=document.getElementById('wf-panel122');
+    if(!WF115[ch]){ if(bar) bar.hidden=true; return; }
+    if(!bar){ const host=form||document.getElementById('slack-message-input')?.closest('form,div'); if(!host||!host.parentNode) return; bar=document.createElement('div'); bar.id='wf-panel122'; bar.className='wf-bar115 wf-panel122'; host.parentNode.insertBefore(bar,host); }
+    bar.hidden=false; bar.innerHTML='<button type="button" class="wf-btn115" data-wf115="'+escapeHtml(ch)+'">▷ '+escapeHtml(WF115[ch].label)+'</button>';
+  };
+  setInterval(place,1200);
+})();
