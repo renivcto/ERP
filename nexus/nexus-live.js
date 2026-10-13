@@ -1607,8 +1607,9 @@ async function onQuickAdd112(e){
 /* live114: name under the RENIV logo; '+ 업무추가' registers the person's own task (title, calendar date/time, short note) */
 (function syncRailName114(){
   const src=document.getElementById('viewer-name36'), dst=document.getElementById('rail-name114'); if(!src||!dst) return;
-  const apply=()=>{ const t=String(src.textContent||'').replace(/^\(|\)$/g,'').trim(); dst.textContent=/확인 중/.test(t)?'':t; dst.title=t; };
-  new MutationObserver(apply).observe(src,{childList:true,characterData:true,subtree:true}); apply();
+  const role=document.getElementById('viewer-role36');
+  const apply=()=>{ const t=String(src.textContent||'').replace(/^\(|\)$/g,'').trim(); const r=String(role&&role.textContent||'').trim(); const ok=t&&!/확인 중/.test(t); dst.innerHTML=ok?escapeHtml(t)+(r&&r!=='읽기 전용'?'<small>'+escapeHtml(r)+'</small>':''):''; dst.title=ok?t+(r?' · '+r:''):''; };
+  new MutationObserver(apply).observe(src,{childList:true,characterData:true,subtree:true}); if(role) new MutationObserver(apply).observe(role,{childList:true,characterData:true,subtree:true}); apply();
 })();
 function manualRow114(t){
   const when=t.due?(/^\d{4}-\d{2}-\d{2}$/.test(String(t.due))?String(t.due).slice(5).replace('-','/')+' 까지':formatDateTime(t.due)):'일정 없음';
