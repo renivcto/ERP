@@ -236,8 +236,7 @@ function renderPersonal(){
     $('personal-tasks').innerHTML = (tasks.length?rows:`<div class="personal-empty35"><strong>업무 없음</strong><p>${emptyMsg}</p></div>`) + warn;
     if(srcEl) srcEl.textContent = pt.mode==='rules' ? `관리자 규칙 기준 · 최근 확인 ${pt.lastScanAt?formatDateTime(pt.lastScanAt):'미확인'}` : 'ERP UID / Trello 멤버 ID 자동 기준(레거시)';
   }
-  const gearBtn=$('admin-tasks-btn'); if(gearBtn) gearBtn.hidden=!(state.status&&state.status.identity&&state.status.identity.isAdmin);
-}
+  const gearBtn=$('admin-tasks-btn'); if(gearBtn) gearBtn.hidden=!(state.status&&state.status.identity); }
 function productName(p){ const item=state.erp.items.find(i=>String(i?.id)===String(p?.productId)); return item?.name||p?.productName||'품목'; }
 function boardMap(){ return new Map(state.trello.boards.map(b=>[String(b.id),b])); }
 function toYmd(value,timezone='Asia/Seoul'){ if(!value) return ''; const d=new Date(value); if(Number.isNaN(d.getTime())) return String(value).slice(0,10); const parts=new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d); const get=t=>parts.find(p=>p.type===t)?.value; return `${get('year')}-${get('month')}-${get('day')}`; }
@@ -495,15 +494,16 @@ async function completeTask(id,version){
 
 function buildRuleInput(rule){
   const kind=rule.kind||'manual';
-  const needsSource = kind==='slack_activity'||kind==='trello_new_card';
+  const needsSource = kind==='slack_activity'||kind==='trello_new_card'||kind==='trello_board';
   const out={ assigneeUid:rule.assigneeUid||'', title:(rule.title||'').trim(), kind, sourceIds:needsSource?(Array.isArray(rule.sourceIds)?rule.sourceIds.filter(Boolean):[]):[], enabled:rule.enabled!==false, expireAfterDue:!!rule.expireAfterDue, due:rule.due||null };
   if(Array.isArray(rule.recordIds)) out.recordIds=rule.recordIds.slice();
+  if(kind==='trello_board') out.listFilter=String(rule.listFilter||'');
   if(rule.id){ out.id=rule.id; if(rule.version!=null) out.version=rule.version; }
   return out;
 }
 
 async function loadAdminConfig(){
-  if(!(state.status && state.status.identity && state.status.identity.isAdmin)) return;
+  if(!(state.status && state.status.identity)) return;
   const epoch=state.adminSeq, uid=state.user&&state.user.uid;
   state.admin.loading=true;
   try{
@@ -528,10 +528,19 @@ function showAdminList(){
   renderAdminDialog();
 }
 
-function openAdminDialog(){
+function isSelfMode112(){ return !(state.status&&state.status.identity&&state.status.identity.isAdmin); }
+async function openAdminDialog(){
   const dlg=$('admin-tasks-dialog'); if(!dlg) return;
-  if(!(state.status && state.status.identity && state.status.identity.isAdmin)) return;
+  if(!(state.status && state.status.identity)) return;
+  const self=isSelfMode112(); dlg.classList.toggle('self112',self);
+  const h=$('admin-tasks-heading'); if(h) h.textContent=self?'내 업무 설정':'업무 설정 (관리자 · 전체 직원)';
   if(!dlg.open) dlg.showModal();
+  if(self){
+    // live112: each employee lands directly on their own settings page
+    if(!state.admin.config && !state.admin.loading) await loadAdminConfig();
+    openEmployeeFocus(state.user&&state.user.uid);
+    return;
+  }
   showAdminList();
   if(!state.admin.config && !state.admin.loading) loadAdminConfig(); else renderAdminDialog();
 }
@@ -541,22 +550,23 @@ function employeeRow(emp){
   const nameSafe=escapeHtml(emp.name||'이름 없음');
   const metaSafe=escapeHtml([emp.email,emp.role].filter(Boolean).join(' · '));
   const statusBadge = emp.nexusEnabled ? '<span class="emp-status35 on">접속 허용됨</span>' : '<span class="emp-status35 off">접속 대기</span>';
-  const labels={slack_activity:'Slack',trello_new_card:'Trello',erp_approval:'결재',erp_expense:'지출',manual:'수동'};
+  const labels={slack_activity:'Slack',trello_new_card:'Trello',trello_board:'Trello',erp_approval:'결재',erp_expense:'지출',manual:'수동'};
   const breakdown=Object.entries(emp.taskCounts||{}).filter(([,n])=>Number(n)>0).map(([k,n])=>`${labels[k]||k} ${Number(n)}`).join(' · ');
   const counts=emp.countUnavailable!==true&&typeof emp.taskCount==='number'?`처리할 업무 ${emp.taskCount}건${breakdown?' · '+breakdown:''}`:(emp.nexusEnabled?'업무 수 확인 대기':'접속 허용 대기');
   return `<button type="button" class="admin-emp-card" data-uid="${uidSafe}"><div class="admin-emp-card-main"><strong>${nameSafe}</strong><small>${metaSafe}</small><small>${escapeHtml(counts)}</small></div>${statusBadge}</button>`;
 }
 
-const RULE_KIND_LABELS_MAP={manual:'수동 지정',slack_activity:'Slack 활동',trello_new_card:'Trello 새 카드',erp_approval:'ERP 결재',erp_expense:'ERP 지출'};
+const RULE_KIND_LABELS_MAP={manual:'수동 지정',slack_activity:'Slack 활동',trello_new_card:'Trello 새 카드',trello_board:'Trello 보드 카드',erp_approval:'ERP 결재',erp_expense:'ERP 지출'};
 
 function ruleConditionCard(rule){
   const kindLabel = RULE_KIND_LABELS_MAP[rule.kind]||rule.kind||'조건';
-  const catalog = rule.kind==='slack_activity' ? ((state.admin.config&&state.admin.config.catalog&&state.admin.config.catalog.slackChannels)||[]) : (rule.kind==='trello_new_card' ? ((state.admin.config&&state.admin.config.catalog&&state.admin.config.catalog.trelloBoards)||[]) : []);
+  const catalog = rule.kind==='slack_activity' ? ((state.admin.config&&state.admin.config.catalog&&state.admin.config.catalog.slackChannels)||[]) : ((rule.kind==='trello_new_card'||rule.kind==='trello_board') ? ((state.admin.config&&state.admin.config.catalog&&state.admin.config.catalog.trelloBoards)||[]) : []);
   const sourceNames = (rule.sourceIds||[]).map(id=>{ const found=catalog.find(c=>String(c.id)===String(id)); return found?found.name:id; });
   const dueTxt = rule.due?`마감 ${String(rule.due).slice(0,10)}`:'';
   const expireTxt = rule.expireAfterDue?'마감 후 자동 종료':'';
   const recordTxt = Array.isArray(rule.recordIds) && rule.recordIds.length ? `연결 문서 ${rule.recordIds.length}건` : '';
-  const metaParts=[kindLabel, sourceNames.length?`#${sourceNames.join(', #')}`:'', recordTxt, dueTxt, expireTxt].filter(Boolean).map(escapeHtml);
+  const listTxt = rule.listFilter?`목록 "${rule.listFilter}"`:'';
+  const metaParts=[kindLabel, sourceNames.length?`#${sourceNames.join(', #')}`:'', listTxt, recordTxt, dueTxt, expireTxt].filter(Boolean).map(escapeHtml);
   const stateCls = rule.enabled!==false?'on':'off';
   const idSafe=escapeHtml(rule.id||'');
   return `<article class="rule-cond-card ${stateCls}" data-rule-id="${idSafe}"><div class="rule-cond-main"><strong>${escapeHtml(rule.title||'(제목 없음)')}</strong><small>${metaParts.join(' · ')}</small></div><div class="rule-cond-actions"><label class="r-inline"><input type="checkbox" class="rc-enabled" ${rule.enabled!==false?'checked':''}>사용</label><button type="button" class="rc-delete">삭제</button></div></article>`;
@@ -593,6 +603,8 @@ function renderEmployeeFocus(){
   const genBtn=$('admin-gen-btn'); if(genBtn) genBtn.disabled = !enabled || state.admin.gen.loading;
   const genText=$('admin-gen-text'); if(genText) genText.disabled = !enabled || state.admin.gen.loading;
 
+  renderQuickAdd112(uid, enabled);
+  const backBtn=$('admin-emp-back'); if(backBtn) backBtn.hidden=isSelfMode112();
   const rules = (state.admin.allRules||[]).filter(r=>String(r.assigneeUid)===String(uid));
   const rulesEl=$('admin-emp-rules'); if(rulesEl) rulesEl.innerHTML = rules.length ? rules.map(ruleConditionCard).join('') : '<p class="admin-hint">등록된 업무 규칙이 없습니다.</p>';
 
@@ -634,7 +646,7 @@ function renderEmployeeFocus(){
   const genQ=$('admin-gen-questions'); if(genQ) genQ.innerHTML=(state.admin.gen.questions||[]).map(q=>`<li>${escapeHtml(typeof q==='string'?q:JSON.stringify(q))}</li>`).join('');
 }
 
-function adminContextValid(epoch,uid){ return epoch===state.adminSeq && state.user && state.user.uid===uid && state.status && state.status.identity && state.status.identity.isAdmin; }
+function adminContextValid(epoch,uid){ return epoch===state.adminSeq && state.user && state.user.uid===uid && state.status && state.status.identity; }
 function genContextValid(epoch,uid,selUid,token){ return adminContextValid(epoch,uid) && state.admin.selectedUid===selUid && (token===undefined || state.admin.focusToken===token); }
 
 function openEmployeeFocus(uid){
@@ -965,7 +977,7 @@ window.addEventListener('nexus-scene-ready',bindOriginalScene,{once:true});if(wi
 function lockApi(message){clearAll();setAuthOverlay('NEXUS 접근 차단',message||'NEXUS 서버 권한을 확인할 수 없습니다.',{logout:true})}
 async function handleActiveUser(user){
   clearExternal();stopFirestore();stopPolling();state.user=user;greet99(user);setAuthOverlay('NEXUS 권한 확인 중','서버의 nexus_access 권한과 활성 임원 계정을 확인하고 있습니다.');
-  try{const status=await api('/status');if(String(status?.identity?.uid||'')!==String(user.uid))throw Object.assign(new Error('서버 사용자와 현재 로그인 계정이 일치하지 않습니다.'),{status:403});state.status=status;state.profile={uid:user.uid,name:status.identity.displayName||user.displayName||'',email:status.identity.email||user.email||'',role:status.identity.isAdmin?'관리자':(status.identity.permission==='read'?'조회 권한':'임원')};state.authorized=true;greet99(user,status.identity.displayName);$('viewer-name').textContent=`(${state.profile.name||state.profile.email})`;$('viewer-role').textContent=state.profile.role;renderViewerFace();$('logout-button').textContent=(state.profile.name||'나').slice(0,1);showApp();subscribeERP();if($('admin-tasks-btn'))$('admin-tasks-btn').hidden=!status.identity.isAdmin;await Promise.all([loadTrello(),loadMeetings(),loadSlackChannels(),loadPersonalTasks(),loadDeskWork()]);state.lastPollAt=Date.now();renderAll();startPolling()}catch(error){clearAll();setAuthOverlay('접근할 수 없습니다',error.message,{logout:true})}
+  try{const status=await api('/status');if(String(status?.identity?.uid||'')!==String(user.uid))throw Object.assign(new Error('서버 사용자와 현재 로그인 계정이 일치하지 않습니다.'),{status:403});state.status=status;state.profile={uid:user.uid,name:status.identity.displayName||user.displayName||'',email:status.identity.email||user.email||'',role:status.identity.isAdmin?'관리자':(status.identity.permission==='read'?'조회 권한':'임원')};state.authorized=true;greet99(user,status.identity.displayName);$('viewer-name').textContent=`(${state.profile.name||state.profile.email})`;$('viewer-role').textContent=state.profile.role;renderViewerFace();$('logout-button').textContent=(state.profile.name||'나').slice(0,1);showApp();subscribeERP();if($('admin-tasks-btn'))$('admin-tasks-btn').hidden=false;await Promise.all([loadTrello(),loadMeetings(),loadSlackChannels(),loadPersonalTasks(),loadDeskWork()]);state.lastPollAt=Date.now();renderAll();startPolling()}catch(error){clearAll();setAuthOverlay('접근할 수 없습니다',error.message,{logout:true})}
 }
 
 $('login-button').onclick=async()=>{ $('login-button').disabled=true; try{await signInWithPopup(auth,provider);}catch(error){if(error.code!=='auth/popup-closed-by-user')setAuthOverlay('로그인 오류',error.message,{login:true});}finally{$('login-button').disabled=false;}};
@@ -1552,3 +1564,45 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const ov=document
 const TEAM_CHANNELS109={'재무팀':{id:'C0C3VTT6RNF',name:'재무팀'},'디자인팀':{id:'C0BP6CCGCG3',name:'디자인팀'},'국내영업팀':{id:'C0BNTRA5A73',name:'국내영업팀'},'마케팅팀':{id:'C0BPL2G41BJ',name:'마케팅팀'}};
 window.NEXUS.teamChannelLabel=team=>TEAM_CHANNELS109[team]?'#'+TEAM_CHANNELS109[team].name+' 채널 대화 열기':'';
 window.NEXUS.openTeamChannel=team=>{ const c=TEAM_CHANNELS109[team]; if(!c||!state.authorized) return false; openSlackChat103(c.id,{title:c.name}); return true; };
+
+/* live112: quick add — connect a Trello board (existing open cards, optional list filter) or a Slack channel */
+function renderQuickAdd112(uid, enabled){
+  let box=document.getElementById('admin-quick112');
+  if(!box){ const anchor=document.querySelector('#admin-view-employee .admin-gen-label'); if(!anchor) return;
+    box=document.createElement('section'); box.id='admin-quick112'; box.className='admin-emp-block quick112';
+    box.innerHTML='<h4>업무 소스 바로 연결</h4><div class="q-row112"><span class="q-tag112 trello">Trello</span><select id="q-board112" aria-label="Trello 보드"></select><input id="q-list112" maxlength="40" placeholder="목록 이름 포함 (선택)"><button type="button" id="q-board-add112">보드 연결</button></div><p class="admin-hint">선택한 보드의 진행 중인 카드(기존 카드 포함)가 업무로 표시됩니다. 완료되었거나 마감이 지난 카드는 빠집니다.</p><div class="q-row112"><span class="q-tag112 slack">Slack</span><select id="q-ch112" aria-label="Slack 채널"></select><button type="button" id="q-ch-add112">채널 연결</button></div><p class="admin-hint">연결한 뒤 이 채널에 올라오는 새 글과 댓글이 업무로 표시됩니다.</p><h4 class="q-or112">또는 AI에게 말로 요청</h4>';
+    anchor.parentNode.insertBefore(box, anchor);
+    box.addEventListener('click',onQuickAdd112);
+  }
+  const cat=(state.admin.config&&state.admin.config.catalog)||{};
+  const bSel=box.querySelector('#q-board112'), cSel=box.querySelector('#q-ch112');
+  const bv=bSel.value, cv=cSel.value;
+  bSel.innerHTML='<option value="">보드 선택</option>'+(cat.trelloBoards||[]).map(b=>'<option value="'+escapeHtml(b.id)+'">'+escapeHtml(b.name)+'</option>').join(''); bSel.value=bv;
+  cSel.innerHTML='<option value="">채널 선택</option>'+(cat.slackChannels||[]).slice().sort((a,b)=>String(a.name).localeCompare(String(b.name),'ko')).map(c=>'<option value="'+escapeHtml(c.id)+'">#'+escapeHtml(c.name)+'</option>').join(''); cSel.value=cv;
+  box.querySelectorAll('select,input,button').forEach(el=>el.disabled=!enabled);
+  // Slack rules read the assignee's own Slack account, so only the person themself can connect channels
+  const own=String(uid)===String(state.user&&state.user.uid);
+  const chRow=cSel.closest('.q-row112'); if(chRow){ chRow.hidden=!own; chRow.nextElementSibling.hidden=!own; }
+}
+async function onQuickAdd112(e){
+  const btn=e.target.closest('#q-board-add112,#q-ch-add112'); if(!btn||btn.disabled) return;
+  const uid=state.admin.selectedUid; if(!uid) return; const cat=(state.admin.config&&state.admin.config.catalog)||{};
+  let rule;
+  if(btn.id==='q-board-add112'){
+    const id=$('q-board112').value; if(!id){ toast('Trello 보드를 선택해 주세요.',true); return; }
+    const board=(cat.trelloBoards||[]).find(b=>String(b.id)===id); const lf=$('q-list112').value.trim();
+    rule={assigneeUid:uid,title:(board?board.name:'Trello')+(lf?' · '+lf:'')+' 카드',kind:'trello_board',sourceIds:[id],listFilter:lf,enabled:true,expireAfterDue:false,due:null};
+  } else {
+    const id=$('q-ch112').value; if(!id){ toast('Slack 채널을 선택해 주세요.',true); return; }
+    const ch=(cat.slackChannels||[]).find(c=>String(c.id)===id);
+    rule={assigneeUid:uid,title:'#'+(ch?ch.name:id)+' 새 글·댓글',kind:'slack_activity',sourceIds:[id],enabled:true,expireAfterDue:false,due:null};
+  }
+  btn.disabled=true; const old=btn.textContent; btn.textContent='연결 중…';
+  try{
+    const res=await api('/admin/task-rules',{method:'POST',body:JSON.stringify({rules:[rule]})});
+    toast('업무 소스를 연결했습니다.'+((res&&res.warnings&&res.warnings.length)?' ('+res.warnings[0]+')':''));
+    if($('q-list112')) $('q-list112').value='';
+    await loadAdminConfig(); await loadEmployeeTasks(uid); await loadPersonalTasks(); renderAll();
+  }catch(error){ toast(error.message,true); }
+  finally{ btn.disabled=false; btn.textContent=old; }
+}
