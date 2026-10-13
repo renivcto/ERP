@@ -1662,7 +1662,7 @@ function openWf115(ch){
     dlg.addEventListener('submit',e=>{ e.preventDefault(); submitWf115(dlg); }); }
   dlg.dataset.ch=ch;
   dlg.innerHTML='<form><header><h3>▷ '+escapeHtml(wf.label)+'</h3><button type="button" class="x114" aria-label="닫기">×</button></header><p class="wf-sub115">#'+(ch==='C0C1Q8VKMFF'?'광고영상-제작':'광고이미지-제작')+' 채널에 Slack 워크플로와 같은 형식으로 올라갑니다.</p>'
-    +wf.fields.map(f=>'<label>'+escapeHtml(f.l)+(f.req?' <em>*</em>':'')+(f.area?'<textarea data-k="'+f.k+'" rows="'+(f.big?6:3)+'" maxlength="3000" placeholder="'+escapeHtml(f.ph||'')+'"></textarea>':'<input data-k="'+f.k+'" maxlength="300" placeholder="'+escapeHtml(f.ph||'')+'"'+(f.list?' list="wf-'+f.list+'115"':'')+(f.url?' type="url"':'')+'>')+'</label>').join('')
+    +wf.fields.map(f=>'<label><span>'+escapeHtml(f.l)+(f.req?' <em>*</em>':'')+'</span>'+(f.area?'<textarea data-k="'+f.k+'" rows="'+(f.big?6:3)+'" maxlength="3000" placeholder="'+escapeHtml(f.ph||'')+'"></textarea>':'<input data-k="'+f.k+'" maxlength="300" placeholder="'+escapeHtml(f.ph||'')+'"'+(f.list?' list="wf-'+f.list+'115"':'')+(f.url?' type="url"':'')+'>')+'</label>').join('')
     +'<datalist id="wf-product115">'+wfSuggestions115('product').map(v=>'<option value="'+escapeHtml(v)+'">').join('')+'</datalist><datalist id="wf-platform115">'+wfSuggestions115('platform').map(v=>'<option value="'+escapeHtml(v)+'">').join('')+'</datalist>'
     +'<p class="at-err114" role="alert"></p><footer><button type="button" class="x114 ghost">취소</button><button type="submit" class="primary">요청 보내기</button></footer></form>';
   dlg.showModal(); setTimeout(()=>dlg.querySelector('[data-k]')?.focus(),30);
