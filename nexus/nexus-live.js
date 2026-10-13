@@ -1570,19 +1570,15 @@ function renderQuickAdd112(uid, enabled){
   let box=document.getElementById('admin-quick112');
   if(!box){ const anchor=document.querySelector('#admin-view-employee .admin-gen-label'); if(!anchor) return;
     box=document.createElement('section'); box.id='admin-quick112'; box.className='admin-emp-block quick112';
-    box.innerHTML='<h4>업무 소스 바로 연결</h4><div class="q-row112"><span class="q-tag112 trello">Trello</span><select id="q-board112" aria-label="Trello 보드"></select><input id="q-list112" maxlength="40" placeholder="목록 이름 포함 (선택)"><button type="button" id="q-board-add112">보드 연결</button></div><p class="admin-hint">선택한 보드의 진행 중인 카드(기존 카드 포함)가 업무로 표시됩니다. 완료되었거나 마감이 지난 카드는 빠집니다.</p><div class="q-row112"><span class="q-tag112 slack">Slack</span><select id="q-ch112" aria-label="Slack 채널"></select><button type="button" id="q-ch-add112">채널 연결</button></div><p class="admin-hint">연결한 뒤 이 채널에 올라오는 새 글과 댓글이 업무로 표시됩니다.</p><h4 class="q-or112">또는 AI에게 말로 요청</h4>';
+    box.innerHTML='<h4>업무 소스 바로 연결</h4><div class="q-row112"><span class="q-tag112 trello">Trello</span><select id="q-board112" aria-label="Trello 보드"></select><input id="q-list112" maxlength="40" placeholder="목록 이름 포함 (선택)"><button type="button" id="q-board-add112">보드 연결</button></div><p class="admin-hint">선택한 보드의 진행 중인 카드(기존 카드 포함)가 업무로 표시됩니다. 완료되었거나 마감이 지난 카드는 빠집니다.</p><div class="q-row112 q-auto113"><span class="q-tag112 slack">Slack</span><span>참여 중인 채널·대화는 <b>자동으로</b> 오른쪽 Slack 패널에 표시됩니다. 따로 선택할 필요가 없습니다.</span></div><h4 class="q-or112">또는 AI에게 말로 요청</h4>';
     anchor.parentNode.insertBefore(box, anchor);
     box.addEventListener('click',onQuickAdd112);
   }
   const cat=(state.admin.config&&state.admin.config.catalog)||{};
-  const bSel=box.querySelector('#q-board112'), cSel=box.querySelector('#q-ch112');
-  const bv=bSel.value, cv=cSel.value;
+  const bSel=box.querySelector('#q-board112');
+  const bv=bSel.value;
   bSel.innerHTML='<option value="">보드 선택</option>'+(cat.trelloBoards||[]).map(b=>'<option value="'+escapeHtml(b.id)+'">'+escapeHtml(b.name)+'</option>').join(''); bSel.value=bv;
-  cSel.innerHTML='<option value="">채널 선택</option>'+(cat.slackChannels||[]).slice().sort((a,b)=>String(a.name).localeCompare(String(b.name),'ko')).map(c=>'<option value="'+escapeHtml(c.id)+'">#'+escapeHtml(c.name)+'</option>').join(''); cSel.value=cv;
   box.querySelectorAll('select,input,button').forEach(el=>el.disabled=!enabled);
-  // Slack rules read the assignee's own Slack account, so only the person themself can connect channels
-  const own=String(uid)===String(state.user&&state.user.uid);
-  const chRow=cSel.closest('.q-row112'); if(chRow){ chRow.hidden=!own; chRow.nextElementSibling.hidden=!own; }
 }
 async function onQuickAdd112(e){
   const btn=e.target.closest('#q-board-add112,#q-ch-add112'); if(!btn||btn.disabled) return;
