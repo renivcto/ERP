@@ -230,7 +230,7 @@ function renderPersonal(){
     const tasks=personalTasks();
     const count = tasks.length;
     $('personal-task-count').textContent=String(count);
-    const rows=tasks.map(t=>{ if(t.kind==='trello_new_card') return trelloRow44(t); const slack=t.kind==='slack_activity'; const main=slack&&t.summary?t.summary:t.title; const posted=slack&&t.postedAt?shortWhen43(t.postedAt):''; const replied=slack&&t.activityAt&&t.postedAt&&(Date.parse(t.activityAt)-Date.parse(t.postedAt)>60000)?shortWhen43(t.activityAt):''; const timeMeta=slack?(posted?`<span class="task-time43">${escapeHtml(posted)} 등록</span>`:'')+(replied?`<span class="task-time43">답글 ${escapeHtml(replied)}</span>`:'')+(t.due?`<span>${escapeHtml(formatDateTime(t.due))}</span>`:''):`<span>${escapeHtml(t.status)}</span><span>${escapeHtml(t.due?formatDateTime(t.due):'일정 없음')}</span>`; return `<article class="task-row${slack?' task-slack41':''}">${slack?'<span class="task-slack-mark41" aria-label="Slack">#</span>':''}<a href="${escapeHtml(t.url||ERP_URL)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(t.title)}">${escapeHtml(main)}</a><div class="task-meta"><span class="task-source">${escapeHtml(t.source)}</span>${timeMeta}${t.canComplete?`<button type="button" class="task-ack35" data-id="${escapeHtml(t.id)}" data-version="${escapeHtml(JSON.stringify(t.version===undefined?null:t.version))}">완료 처리</button>`:''}</div></article>`; }).join('');
+    const rows=tasks.map(t=>{ if(t.kind==='trello_new_card') return trelloRow44(t); if(t.kind==='manual'&&t.source==='내 업무') return manualRow114(t); const slack=t.kind==='slack_activity'; const main=slack&&t.summary?t.summary:t.title; const posted=slack&&t.postedAt?shortWhen43(t.postedAt):''; const replied=slack&&t.activityAt&&t.postedAt&&(Date.parse(t.activityAt)-Date.parse(t.postedAt)>60000)?shortWhen43(t.activityAt):''; const timeMeta=slack?(posted?`<span class="task-time43">${escapeHtml(posted)} 등록</span>`:'')+(replied?`<span class="task-time43">답글 ${escapeHtml(replied)}</span>`:'')+(t.due?`<span>${escapeHtml(formatDateTime(t.due))}</span>`:''):`<span>${escapeHtml(t.status)}</span><span>${escapeHtml(t.due?formatDateTime(t.due):'일정 없음')}</span>`; return `<article class="task-row${slack?' task-slack41':''}">${slack?'<span class="task-slack-mark41" aria-label="Slack">#</span>':''}<a href="${escapeHtml(t.url||ERP_URL)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(t.title)}">${escapeHtml(main)}</a><div class="task-meta"><span class="task-source">${escapeHtml(t.source)}</span>${timeMeta}${t.canComplete?`<button type="button" class="task-ack35" data-id="${escapeHtml(t.id)}" data-version="${escapeHtml(JSON.stringify(t.version===undefined?null:t.version))}">완료 처리</button>`:''}</div></article>`; }).join('');
     const emptyMsg = pt.mode==='rules' ? '현재 적용된 관리자 규칙에서 배정된 미처리 업무가 없습니다.' : '현재 로그인 사용자에게 명시적으로 배정된 미처리 업무가 없습니다.';
     const warn = Array.isArray(pt.warnings)&&pt.warnings.length ? `<ul class="admin-warn-list">${pt.warnings.map(w=>`<li>${escapeHtml(typeof w==='string'?w:JSON.stringify(w))}</li>`).join('')}</ul>` : '';
     $('personal-tasks').innerHTML = (tasks.length?rows:`<div class="personal-empty35"><strong>업무 없음</strong><p>${emptyMsg}</p></div>`) + warn;
@@ -498,6 +498,7 @@ function buildRuleInput(rule){
   const out={ assigneeUid:rule.assigneeUid||'', title:(rule.title||'').trim(), kind, sourceIds:needsSource?(Array.isArray(rule.sourceIds)?rule.sourceIds.filter(Boolean):[]):[], enabled:rule.enabled!==false, expireAfterDue:!!rule.expireAfterDue, due:rule.due||null };
   if(Array.isArray(rule.recordIds)) out.recordIds=rule.recordIds.slice();
   if(kind==='trello_board') out.listFilter=String(rule.listFilter||'');
+  if(kind==='manual') out.note=String(rule.note||'');
   if(rule.id){ out.id=rule.id; if(rule.version!=null) out.version=rule.version; }
   return out;
 }
@@ -1602,3 +1603,32 @@ async function onQuickAdd112(e){
   }catch(error){ toast(error.message,true); }
   finally{ btn.disabled=false; btn.textContent=old; }
 }
+
+/* live114: name under the RENIV logo; '+ 업무추가' registers the person's own task (title, calendar date/time, short note) */
+(function syncRailName114(){
+  const src=document.getElementById('viewer-name36'), dst=document.getElementById('rail-name114'); if(!src||!dst) return;
+  const apply=()=>{ const t=String(src.textContent||'').replace(/^\(|\)$/g,'').trim(); dst.textContent=/확인 중/.test(t)?'':t; dst.title=t; };
+  new MutationObserver(apply).observe(src,{childList:true,characterData:true,subtree:true}); apply();
+})();
+function manualRow114(t){
+  const when=t.due?(/^\d{4}-\d{2}-\d{2}$/.test(String(t.due))?String(t.due).slice(5).replace('-','/')+' 까지':formatDateTime(t.due)):'일정 없음';
+  return '<article class="task-row task-manual114"><span class="task-manual-mark114" aria-hidden="true">✓</span><strong class="mt-title114">'+escapeHtml(t.title||'')+'</strong>'+(t.summary?'<p class="mt-note114">'+escapeHtml(t.summary)+'</p>':'')+'<div class="task-meta"><span class="task-source">내 업무</span><span>'+escapeHtml(when)+'</span>'+(t.canComplete?'<button type="button" class="task-ack35" data-id="'+escapeHtml(t.id)+'" data-version="'+escapeHtml(JSON.stringify(t.version===undefined?null:t.version))+'">완료 처리</button>':'')+'</div></article>';
+}
+(function wireAddTask114(){
+  const dlg=document.getElementById('add-task-dialog114'), btn=document.getElementById('add-task114'); if(!dlg||!btn) return;
+  const $q=id=>document.getElementById(id); const err=dlg.querySelector('.at-err114');
+  const kst=d=>new Date(Date.now()+9*3600e3+d*86400e3).toISOString().slice(0,10);
+  btn.onclick=()=>{ if(!state.authorized){ toast('로그인 확인 후 사용할 수 있습니다.',true); return; } $q('at-title114').value=''; $q('at-note114').value=''; $q('at-time114').value=''; $q('at-date114').value=kst(0); err.textContent=''; dlg.showModal(); setTimeout(()=>$q('at-title114').focus(),30); };
+  dlg.addEventListener('click',e=>{ if(e.target===dlg||e.target.closest('.x114')){ dlg.close(); return; } const q=e.target.closest('.at-quick114 button'); if(q){ $q('at-date114').value=q.dataset.d===''?'':kst(Number(q.dataset.d)); if(q.dataset.d==='') $q('at-time114').value=''; } });
+  dlg.querySelector('form').addEventListener('submit',async e=>{
+    e.preventDefault(); const title=$q('at-title114').value.trim(); if(!title){ err.textContent='업무 제목을 적어 주세요.'; return; }
+    const date=$q('at-date114').value, time=$q('at-time114').value; if(time&&!date){ err.textContent='시간을 넣으려면 날짜도 골라 주세요.'; return; }
+    const due=date?(time?date+'T'+time+':00+09:00':date):null;
+    const save=$q('at-save114'); save.disabled=true; save.textContent='등록 중…'; err.textContent='';
+    try{
+      await api('/admin/task-rules',{method:'POST',body:JSON.stringify({rules:[{assigneeUid:state.user.uid,title,kind:'manual',sourceIds:[],enabled:true,expireAfterDue:false,due,note:$q('at-note114').value.trim()}]})});
+      dlg.close(); toast('내 업무를 등록했습니다.'); await loadPersonalTasks(); renderAll(); state.admin.config=null;
+    }catch(error){ err.textContent=error.message||'등록하지 못했습니다.'; }
+    finally{ save.disabled=false; save.textContent='등록'; }
+  });
+})();
