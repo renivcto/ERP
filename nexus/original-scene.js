@@ -423,7 +423,7 @@ const zonelabels=[label('MEETING ROOM',RX+4,.06,4.2,'zone-label room-label')];wi
 
 let width=1,height=1,theta=0,phi=.35,radius=18.25,drag=false,moved=0,startX=0,startY=0,paused=matchMedia('(prefers-reduced-motion: reduce)').matches;let last=0;const target=new THREE.Vector3(1.28,1.85,-.6);function resize(){width=host.clientWidth;height=host.clientHeight;renderer.setSize(width,height,false);camera.aspect=width/height;camera.updateProjectionMatrix()}new ResizeObserver(resize).observe(host);resize();/* live126: mobile layout — same desks/avatars, rearranged for a portrait screen:
    front row 송희강(R&D)·이주연(재무), middle 권다빈·Greg(마케팅), back 백찬식·Ian(국내영업)·Jony(디자인) */
-const MOBILE126={on:false,fitK:1.12,view:{target:new THREE.Vector3(-.1,.4,0),radius:15.5,phi:.8},
+const MOBILE126={on:false,fitK:1.05,view:{target:new THREE.Vector3(-.1,.4,0),radius:15.5,phi:.8},
   delta:{'R&D팀':[2.6,1.2],'재무팀':[-2.6,1.2],'마케팅팀':[0,-3.4],'국내영업팀':[1.4,-2.4],'디자인팀':[-0.6,-2.4]},
   podTeam:{heeka:'R&D팀',juyeon:'재무팀',dabin:'마케팅팀',greg:'마케팅팀',chansik:'국내영업팀',ian:'국내영업팀',jony:'디자인팀'}};
 function setMobileLayout126(on){on=!!on;if(on===MOBILE126.on)return;const s=on?1:-1;const mv=(o,d)=>{o.position.x+=s*d[0];o.position.z+=s*d[1]};
