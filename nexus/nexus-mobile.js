@@ -38,7 +38,7 @@
       ws.addEventListener('touchcancel',function(){ ws.style.scrollSnapType=''; ws.style.scrollBehavior=''; mode=''; },{passive:true});
     })();
     // RENIV logo = home (page 1)
-    document.getElementById('home-logo')&&document.getElementById('home-logo').addEventListener('click',function(){ go(0); });
+    document.getElementById('home-logo')&&document.getElementById('home-logo').addEventListener('click',function(){ go(0); try{ window.NEXUS.setView('office'); }catch(e){} setTimeout(function(){ try{ syncCam(); }catch(e){} },50); });
     // name badge opens a small menu (settings, connections, logout)
     var nm=document.getElementById('rail-name114'); if(nm) nm.addEventListener('click',function(){ if(!mq.matches) return; var s=sheet(); document.getElementById('msheet-name').textContent=nm.textContent.replace(/관리자|임원|조회 권한/,'').trim()||'내 계정'; s.hidden=false; });
     setTimeout(function(){ window.dispatchEvent(new Event('resize')); },600);
@@ -70,7 +70,9 @@
     });
   }
   function applyLayout(){ window.__nxNoOrbit=false; try{ if(window.NEXUS&&window.NEXUS.setMobileLayout) window.NEXUS.setMobileLayout(mq.matches); }catch(e){} }
-  function openStage(v){ var cur=window.NEXUS&&window.NEXUS.currentView&&window.NEXUS.currentView(); var next=cur===v?'office':v; try{ window.NEXUS.setView(next); }catch(e){} ['ceo','room'].forEach(function(k){ var b=document.getElementById(k==='ceo'?'m-cam-ceo':'m-cam-room'); if(b) b.classList.toggle('on',next===k); }); }
+  function syncCam(){ var cur=(window.NEXUS&&window.NEXUS.currentView&&window.NEXUS.currentView())||'office'; [['ceo','m-cam-ceo','대표이사실'],['room','m-cam-room','미팅룸']].forEach(function(k){ var b=document.getElementById(k[1]); if(!b) return; var on=cur===k[0]; b.classList.toggle('on',on); b.textContent=on?'↩ 오피스로':k[2]; }); }
+  function openStage(v){ var cur=(window.NEXUS&&window.NEXUS.currentView&&window.NEXUS.currentView())||'office'; var next=cur===v?'office':v; try{ window.NEXUS.setView(next); }catch(e){} syncCam(); }
+  setInterval(function(){ if(mq.matches) syncCam(); },800);
   function closeStage(){ try{ window.NEXUS.setView('office'); }catch(e){} document.body.classList.remove('m-stage-open'); setTimeout(function(){ window.dispatchEvent(new Event('resize')); },50); }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',setup); else setup();
   mq.addEventListener&&mq.addEventListener('change',function(){ setup(); try{ applyLayout(); }catch(e){} window.dispatchEvent(new Event('resize')); });
