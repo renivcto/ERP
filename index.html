@@ -6394,7 +6394,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.889';
+const ERP_VERSION = 'v2.3.890';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -43815,13 +43815,6 @@ function editExpense(id) {
   try { updateExpenseKrwPreview(); } catch(_){}
   if ($('ape-account')) $('ape-account').value = e.account || '';
   if ($('ape-account-holder')) $('ape-account-holder').value = e.accountHolder || '';
-  // v2.3.888: 저장된 계좌가 비어 있으면 선택된 거래처의 계좌를 끌어온다.
-  //   (select.value 를 코드로 바꾸면 change 가 안 나서 onApeVendorSelect 가 안 불린다)
-  //   onApeVendorSelect 은 값이 이미 있으면 덮지 않으므로, 사람이 적어 둔 계좌는 보호된다.
-  try {
-    const _vs = document.getElementById('ape-vendor-select');
-    if (_vs && _vs.value) onApeVendorSelect();
-  } catch (_) {}
   if ($('ape-duedate')) $('ape-duedate').value = e.dueDate || '';
   if ($('ape-note')) $('ape-note').value = e.note || '';
   if ($('ape-paynow')) $('ape-paynow').checked = !!e.payNow;  // v2.3.556
@@ -43854,6 +43847,21 @@ function editExpense(id) {
     $('ape-ad-project').value = e.adProjectId || '';
   }
   try { onApeCategoryChange(); } catch(_){}
+  // v2.3.890: 모든 핸들러가 끝난 뒤 마지막에 거래처 계좌를 채운다.
+  //   select.value 를 코드로 바꾸면 change 가 안 나서 onApeVendorSelect 가 저절로 불리지 않는다.
+  //   중간에서 부르면 뒤따르는 핸들러가 덮을 수 있어 순서에 기대게 된다 → 맨 끝에서 한 번.
+  //   onApeVendorSelect 은 값이 이미 있으면 덮지 않으므로 사람이 적어 둔 계좌는 보호된다.
+  try {
+    const _vs = document.getElementById('ape-vendor-select');
+    if (_vs && _vs.value) {
+      onApeVendorSelect();
+      console.log('[ape] 거래처 계좌 연동:', _vs.value,
+        '| 계좌=' + ((document.getElementById('ape-account') || {}).value || '(없음)'),
+        '| 예금주=' + ((document.getElementById('ape-account-holder') || {}).value || '(없음)'));
+    } else {
+      console.log('[ape] 거래처 미선택 — 계좌 연동 건너뜀 (업체명: ' + (e.vendor || '-') + ')');
+    }
+  } catch (_) {}
   renderApeAttachList();
 }
 
