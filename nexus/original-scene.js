@@ -410,7 +410,7 @@ function animateAvatars(t,dt,paused){
     g.rotation.x=0;a.head.rotation.z=0;
    }
    g.position.y+=breathe;
-   if(a.state==='desk'&&MOBILE126.on&&!a.suite){a.labelPos.set(g.position.x+Math.sin(a.homeRot)*1.78,1.13,g.position.z+Math.cos(a.homeRot)*1.78)}else if(a.state==='desk'){const f=a.suite&&a.id==='jaeho'?2.05:1.92;const nd=LABEL_NUDGE[a.id]||[0,0,0];a.labelPos.set(g.position.x+Math.sin(a.homeRot)*f*1.13+nd[0],.98+nd[1],g.position.z+Math.cos(a.homeRot)*f*1.13+nd[2])}else a.labelPos.set(g.position.x,3.28,g.position.z);
+   if(a.state==='desk'&&MOBILE126.on&&!a.suite){a.labelPos.set(g.position.x+Math.sin(a.homeRot)*1.66,1.4,g.position.z+Math.cos(a.homeRot)*1.66)}else if(a.state==='desk'){const f=a.suite&&a.id==='jaeho'?2.05:1.92;const nd=LABEL_NUDGE[a.id]||[0,0,0];a.labelPos.set(g.position.x+Math.sin(a.homeRot)*f*1.13+nd[0],.98+nd[1],g.position.z+Math.cos(a.homeRot)*f*1.13+nd[2])}else a.labelPos.set(g.position.x,3.28,g.position.z);
   }
   if(a.phoneProp)a.phoneProp.visible=phoneOn;if(a.id==='chansik'&&deskHandset)deskHandset.visible=!phoneOn;
  });
