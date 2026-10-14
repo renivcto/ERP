@@ -138,7 +138,7 @@
   function setup(){
     var hdr=document.getElementById('header'); if(!hdr||document.querySelector('.nx-burger')) return;
     var b=document.createElement('button'); b.type='button'; b.className='nx-burger'; b.setAttribute('aria-label','메뉴 열기'); b.textContent='☰';
-    hdr.insertBefore(b,hdr.firstChild);
+    document.body.appendChild(b);
     var s=document.createElement('div'); s.className='nx-scrim'; document.body.appendChild(s);
     b.addEventListener('click',function(){ document.body.classList.toggle('nx-menu-open'); });
     s.addEventListener('click',function(){ document.body.classList.remove('nx-menu-open'); });
