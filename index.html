@@ -6391,7 +6391,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.884';
+const ERP_VERSION = 'v2.3.885';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -33131,7 +33131,12 @@ function _syncOverseasPoApprovalExpense(orderId) {
       expPre.title = `[해외 선급금] ${vendorName}`;
       expPre.vendor = vendorName;
       expPre.note = noteP;
-      expPre.poAmount = _prepayAmt; if (!expPre.amountManual) expPre.amount = _prepayAmt;  // v2.3.289: 실지급 override 보존
+      expPre.poAmount = _prepayAmt;  // v2.3.885: 지급 끝난 건은 발주서를 고쳐도 금액을 바꾸지 않는다(실제 이체액과 장부가 어긋남)
+      if (!expPre.amountManual) {
+        if (expPre.paidStatus === 'paid') {
+          if (Number(expPre.amount) !== Number(_prepayAmt)) _poPaidAmtDrift(expPre, _prepayAmt);
+        } else expPre.amount = _prepayAmt;
+      }
       expPre.dueDate = o.orderDate || expPre.dueDate || '';  // v2.3.554: 발주서 수정 시 예정일 동기화
       expPre.__krwConverted = false;
       expPre.updatedAt = Date.now();
@@ -33190,7 +33195,12 @@ function _syncOverseasPoApprovalExpense(orderId) {
     exp.vendor = vendorName;
     exp.note = note;
     exp.dueDate = dueDate || exp.dueDate || '';  // v2.3.554: 발주서 값이 있으면 동기화(빈값 채움→갱신)
-    exp.poAmount = _balanceAmt; if (!exp.amountManual) exp.amount = _balanceAmt;  // v2.3.289: 실지급 override 보존
+    exp.poAmount = _balanceAmt;  // v2.3.885: 지급 끝난 건은 발주서를 고쳐도 금액을 바꾸지 않는다(실제 이체액과 장부가 어긋남)
+    if (!exp.amountManual) {
+      if (exp.paidStatus === 'paid') {
+        if (Number(exp.amount) !== Number(_balanceAmt)) _poPaidAmtDrift(exp, _balanceAmt);
+      } else exp.amount = _balanceAmt;
+    }
     exp.__krwConverted = false;
     exp.updatedAt = Date.now();
   }
@@ -38658,7 +38668,12 @@ function syncOrderApprovalAndExpense(orderId, isEdit, opts) {
     } else {
       expPre.title = `[선입금 ${pctDisp}%] ${vendorName(o.vendorId)}`;
       expPre.vendor = vendorName(o.vendorId);
-      expPre.poAmount = prepay; if (!expPre.amountManual) expPre.amount = prepay;  // v2.3.289: 실지급 override 보존
+      expPre.poAmount = prepay;  // v2.3.885: 지급 끝난 건은 발주서를 고쳐도 금액을 바꾸지 않는다(실제 이체액과 장부가 어긋남)
+      if (!expPre.amountManual) {
+        if (expPre.paidStatus === 'paid') {
+          if (Number(expPre.amount) !== Number(prepay)) _poPaidAmtDrift(expPre, prepay);
+        } else expPre.amount = prepay;
+      }
       expPre.note = `${pctDisp}% 선입금 (발주금액 VAT포함 ${fmtWon(total)})`;
       // v2.3.554: 발주서 수정 시 선급금 지급예정일도 동기화(생성 규칙과 동일: 발주일).
       //   잔금(36165)만 동기화되고 선급금은 생성 때 값이 고정돼 "발주서 날짜를 바꿔도 안 바뀌는" 버그.
@@ -38710,7 +38725,12 @@ function syncOrderApprovalAndExpense(orderId, isEdit, opts) {
     } else {
       expBal.title = `[잔금 ${balPctDisp}%] ${(o.isOverseas && o.supplier && o.supplier.company) ? o.supplier.company : vendorName(o.vendorId)}`;
       expBal.vendor = (o.isOverseas && o.supplier && o.supplier.company) ? o.supplier.company : vendorName(o.vendorId);
-      expBal.poAmount = balance; if (!expBal.amountManual) expBal.amount = balance;  // v2.3.289: 실지급 override 보존
+      expBal.poAmount = balance;  // v2.3.885: 지급 끝난 건은 발주서를 고쳐도 금액을 바꾸지 않는다(실제 이체액과 장부가 어긋남)
+      if (!expBal.amountManual) {
+        if (expBal.paidStatus === 'paid') {
+          if (Number(expBal.amount) !== Number(balance)) _poPaidAmtDrift(expBal, balance);
+        } else expBal.amount = balance;
+      }
       expBal.dueDate = o.balanceDueDate || o.payDate || expBal.dueDate || '';
       expBal.note = `${balPctDisp}% 잔금 (발주금액 VAT포함 ${fmtWon(total)})`;
       expBal.updatedAt = Date.now();  // v2.3.554: 머지 EDIT RECOVERY 보호
@@ -43926,6 +43946,21 @@ function _nexusSubmittedAuthor16() {
   if (!authUser || !authUser.uid) return {};
   const me = window._currentUser || {};
   return {authorUid: String(authUser.uid), authorEmail: String(authUser.email || me.email || '').trim().toLowerCase(), authorName: me.displayName || me.name || authUser.displayName || authUser.email || ''};
+}
+/* v2.3.885: 지급이 끝난 지출결의서의 금액이 발주서 수정으로 달라질 뻔한 경우 —
+   장부(실제 이체액)를 지키고 사람에게 알린다. 종전엔 조용히 덮어써서
+   '결재·지급 기록은 옛 금액, 화면은 새 금액' 이 되어 사람마다 금액이 달라 보였다. */
+function _poPaidAmtDrift(exp, newAmt) {
+  try {
+    const won = n => '\u20a9' + (Number(n) || 0).toLocaleString();
+    const nm = exp.title || exp.vendor || exp.id;
+    console.warn('[PAID-LOCK] 지급 완료 건이라 금액을 바꾸지 않음 — ' + nm
+      + ' : 장부 ' + won(exp.amount) + ' / 발주서 ' + won(newAmt));
+    window._poAmtDrift = window._poAmtDrift || [];
+    window._poAmtDrift.push({ id: exp.id, title: exp.title || '', paid: Number(exp.amount) || 0, po: Number(newAmt) || 0 });
+    showNotif('\u26a0\ufe0f 이미 지급된 건이라 금액은 그대로 둡니다 — ' + nm
+      + ' (장부 ' + won(exp.amount) + ' / 발주서 ' + won(newAmt) + ')', 'warning');
+  } catch (_) {}
 }
 function saveExpense() {
   const title = $('ape-title').value.trim();
