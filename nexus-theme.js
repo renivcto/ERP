@@ -146,3 +146,24 @@
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',setup); else setup();
 })();
+
+/* m2: ERP mobile — turn wide tables into labelled cards (header text becomes the label of each value) */
+(function(){
+  var mq=window.matchMedia('(max-width: 820px)'), t=null;
+  function cardify(){
+    if(!mq.matches) return;
+    var tables=document.querySelectorAll('#content table');
+    for(var k=0;k<tables.length;k++){
+      var tb=tables[k]; if(tb.closest('#cal-grid')||tb.hasAttribute('data-nx-nocard')) continue;
+      var ths=tb.querySelectorAll('thead th'); if(ths.length<4) continue;
+      tb.classList.add('nx-cards');
+      var labels=[]; for(var i=0;i<ths.length;i++){ var span=+ths[i].colSpan||1; var txt=(ths[i].textContent||'').replace(/\s+/g,' ').trim(); for(var s=0;s<span;s++) labels.push(txt); }
+      var rows=tb.querySelectorAll('tbody tr');
+      for(var j=0;j<rows.length;j++){ var col=0, cells=rows[j].children; for(var c=0;c<cells.length;c++){ var td=cells[c], sp=+td.colSpan||1; if(!td.hasAttribute('data-label')) td.setAttribute('data-label', sp>1?'':(labels[col]||'')); col+=sp; } }
+    }
+  }
+  function schedule(){ clearTimeout(t); t=setTimeout(cardify,120); }
+  function start(){ var root=document.getElementById('content')||document.body; new MutationObserver(schedule).observe(root,{childList:true,subtree:true}); schedule(); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
+  mq.addEventListener&&mq.addEventListener('change',schedule);
+})();
