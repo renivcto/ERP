@@ -132,3 +132,17 @@
     }, 320);
   });
 })();
+
+/* m1: ERP mobile menu button (hamburger) + scrim; closes after choosing a menu item */
+(function(){
+  function setup(){
+    var hdr=document.getElementById('header'); if(!hdr||document.querySelector('.nx-burger')) return;
+    var b=document.createElement('button'); b.type='button'; b.className='nx-burger'; b.setAttribute('aria-label','메뉴 열기'); b.textContent='☰';
+    hdr.insertBefore(b,hdr.firstChild);
+    var s=document.createElement('div'); s.className='nx-scrim'; document.body.appendChild(s);
+    b.addEventListener('click',function(){ document.body.classList.toggle('nx-menu-open'); });
+    s.addEventListener('click',function(){ document.body.classList.remove('nx-menu-open'); });
+    var sb=document.getElementById('sidebar'); if(sb) sb.addEventListener('click',function(e){ var it=e.target.closest('[onclick*="go("]'); if(it&&!/clickNavItem/.test(it.getAttribute('onclick')||'')) setTimeout(function(){ document.body.classList.remove('nx-menu-open'); },150); });
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',setup); else setup();
+})();
