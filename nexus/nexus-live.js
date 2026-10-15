@@ -376,7 +376,8 @@ function renderSlackOverviewCards(list){
     else if(!hasMsg) body='<p class="slack-overview-empty">아직 표시할 대화가 없습니다.</p>';
     else body=`<p class="slack-overview-preview">${escapeHtml(text||'(내용 없음)')}</p>`;
     const lm=c?.latestMessage||null,rootTs=String(lm?.threadTs||lm?.thread_ts||lm?.ts||''),popTs=/^\d+\.\d+$/.test(rootTs)?rootTs:'';
-    return `<button type="button" class="slack-overview-card" data-open-channel="${escapeHtml(id)}"${popTs?` data-pop-ts="${escapeHtml(popTs)}"`:''}><div class="slack-overview-top"><span class="slack-overview-name">#${escapeHtml(name)}</span>${time?`<time>${escapeHtml(time)}</time>`:''}</div>${hasMsg?`<div class="slack-overview-meta">${escapeHtml(author)}</div>`:''}${body}<div class="slack-overview-foot">${replyCount>0?`<span class="slack-overview-replies">답글 ${replyCount}</span>`:'<span></span>'}<span class="slack-overview-open">채널 대화 보기 ›</span></div></button>`;
+    const starred=slackStars130().includes(id);
+    return `<button type="button" class="slack-overview-card${starred?' starred130':''}" data-open-channel="${escapeHtml(id)}"${popTs?` data-pop-ts="${escapeHtml(popTs)}"`:''}><div class="slack-overview-top"><span class="slack-star130${starred?' on':''}" role="button" tabindex="0" data-star130="${escapeHtml(id)}" title="${starred?'상단 고정 해제':'별표: 상단에 고정'}" aria-label="${starred?'상단 고정 해제':'상단에 고정'}">${starred?'★':'☆'}</span><span class="slack-overview-name">#${escapeHtml(name)}</span>${time?`<time>${escapeHtml(time)}</time>`:''}</div>${hasMsg?`<div class="slack-overview-meta">${escapeHtml(author)}</div>`:''}${body}<div class="slack-overview-foot">${replyCount>0?`<span class="slack-overview-replies">답글 ${replyCount}</span>`:'<span></span>'}<span class="slack-overview-open">채널 대화 보기 ›</span></div></button>`;
   }).join('');
 }
 function renderSlackOverviewFeed(feed){
@@ -386,7 +387,7 @@ function renderSlackOverviewFeed(feed){
   if(state.slack.partial)notices.push(`<div class="slack-feed-note partial">일부 채널을 불러오지 못했습니다${state.slack.failedChannelCount?` (${state.slack.failedChannelCount}개)`:''}.</div>`);
   if(state.slack.error&&!state.slack.channels.length){ feed.innerHTML=`<div class="empty">${escapeHtml(state.slack.error)}</div>`; return; }
   if(state.slack.loading&&!state.slack.channels.length){ feed.innerHTML=notices.join(''); return; }
-  const list=filteredOverviewChannels();
+  const stars130=slackStars130(); const list=filteredOverviewChannels().map((c,i)=>({c,i})).sort((a,b)=>{const sa=stars130.indexOf(String(a.c?.id||'')),sb=stars130.indexOf(String(b.c?.id||''));if(sa>=0&&sb>=0)return sa-sb;if(sa>=0)return -1;if(sb>=0)return 1;return a.i-b.i;}).map(x=>x.c);
   const body=list.length?`<div class="slack-overview-grid">${renderSlackOverviewCards(list)}</div>`:`<div class="empty">${overviewSearchQuery()?'검색 결과에 해당하는 채널이 없습니다.':'참여한 채널이 없습니다.'}</div>`;
   feed.innerHTML=notices.join('')+body;
 }
@@ -990,6 +991,7 @@ $('calendar-source-filter').onchange=renderCalendar; $('calendar-title-filter').
 $('slack-channel-select').onchange=async e=>{await selectSlackChannel(e.target.value);};
 $('slack-connect-button').onclick=async()=>{ $('slack-connect-button').disabled=true; try{const data=await api('/slack/connect',{method:'POST',body:'{}'}),url=safeUrl(data?.url);if(!url||!/(^|\.)slack\.com$/.test(new URL(url).hostname))throw new Error('유효한 Slack OAuth 주소를 받지 못했습니다.');window.location.assign(url);}catch(error){toast(error.message,true);}finally{$('slack-connect-button').disabled=false;}};
 $('slack-feed').onclick=async e=>{
+  const star=e.target.closest('[data-star130]'); if(star){ e.preventDefault(); e.stopPropagation(); toggleSlackStar130(star.dataset.star130); return; }
   const tg=e.target.closest('[data-toggle73]')||(!e.target.closest('button,a,input,textarea,.slack-message .slack-message')&&e.target.closest('.slack-click73'));
   if(tg){ const key=tg.dataset.toggle73||tg.dataset.msg73; const m=state.slack.messages.find(x=>String(x.channelId||state.slack.channel||'')+':'+String(x.ts||'')===key); if(tg.dataset.toggle73||(m&&((String(m.detail||'').trim()&&String(m.detail).trim().replace(/\s+/g,' ')!==slackText(m).trim().replace(/\s+/g,' '))||(Array.isArray(m.files)&&m.files.length)))){ state.slack.expanded73=state.slack.expanded73||new Set(); if(state.slack.expanded73.has(key)) state.slack.expanded73.delete(key); else state.slack.expanded73.add(key); renderSlack(); return; } }
   const openCard=e.target.closest('[data-open-channel]'); if(openCard){ const ch=openCard.dataset.openChannel||''; if(/^[CDG][A-Z0-9]{8,}$/.test(ch)){ const nm=openCard.querySelector('.slack-overview-name')?.textContent||''; openSlackChat103(ch,{title:nm}); return; } await selectSlackChannel(ch);return;}
@@ -1412,6 +1414,7 @@ document.addEventListener('click',e=>{
 /* live81: overview channel cards open the latest message in the Slack popup; '채널 대화 보기' still opens the channel */
 document.addEventListener('click',e=>{
   const card=e.target.closest('#slack-feed35 .slack-overview-card[data-pop-ts]'); if(!card) return;
+  if(e.target.closest('[data-star130]')) return;
   if(e.target.closest('.slack-overview-open')) return;
   const ch=card.dataset.openChannel, ts=card.dataset.popTs; if(!/^[CDG][A-Z0-9]{8,}$/.test(ch||'')) return;
   e.preventDefault(); e.stopPropagation();
@@ -1732,3 +1735,9 @@ async function onSlackPick116(e){
   }catch(error){ toast(error.message,true); cb.checked=!want; cb.closest('label')?.classList.toggle('on',!want); }
   finally{ cb.disabled=false; }
 }
+
+/* live130: star a Slack channel card to pin it to the top of the overview (saved per user on this device) */
+function slackStarKey130(){ return 'nexus_slack_stars:'+String(state.user&&state.user.uid||''); }
+function slackStars130(){ try{ const v=JSON.parse(localStorage.getItem(slackStarKey130())||'[]'); return Array.isArray(v)?v.map(String):[]; }catch{ return []; } }
+function toggleSlackStar130(id){ id=String(id||''); if(!id) return; const s=slackStars130(); const i=s.indexOf(id); if(i>=0) s.splice(i,1); else s.push(id); try{ localStorage.setItem(slackStarKey130(),JSON.stringify(s)); }catch{} toast(i>=0?'상단 고정을 해제했습니다.':'상단에 고정했습니다.'); renderSlack(); }
+document.addEventListener('keydown',e=>{ const s=e.target&&e.target.closest&&e.target.closest('[data-star130]'); if(s&&(e.key==='Enter'||e.key===' ')){ e.preventDefault(); e.stopPropagation(); toggleSlackStar130(s.dataset.star130); } },true);
