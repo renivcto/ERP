@@ -6394,7 +6394,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.896';
+const ERP_VERSION = 'v2.3.897';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -38608,6 +38608,7 @@ function _healOverseasExpenseFx() {
       const balance = total - prepay;
       DB.expenses.forEach(e => {
         if (!e || e.paidStatus === 'paid') return;
+        if (e.amountManual) return;   // v2.3.897: 수동 조정액을 환율 재환산이 덮으면 override 와 진동한다
         if (String(e.orderId) !== String(o.id)) return;
         let want = null;
         if (e.category === 'po_prepay') want = prepay;
@@ -41092,8 +41093,36 @@ async function _setExpenseAmountOverride(e, amount, reason, manual) {
     if (!keys.length) return;
     let map = window._expenseAmountOverrides;
     if (!map || typeof map !== 'object') {
-      map = (typeof loadSharedSetting === 'function') ? await loadSharedSetting('expense_amount_overrides') : null;
-      map = (map && typeof map === 'object' && !Array.isArray(map)) ? map : {};
+      const raw = (typeof loadSharedSetting === 'function') ? await loadSharedSetting('expense_amount_overrides') : null;
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) map = raw;
+      else {
+        /* v2.3.897: loadSharedSetting 은 Firestore 읽기가 실패해도 null 을 돌려준다.
+           그걸 {} 로 받아 '로드됨' 으로 쓰면, 이어지는 쓰기가 한 건짜리 맵으로
+           전체를 덮어 다른 금액 override 를 전부 날린다 — 이 기능이 지키려던 것
+           자체를 날리는 셈이다. 문서 존재를 직접 확인하고, 확인이 안 되면 쓰지 않는다. */
+        let exists = null;
+        try {
+          if (window._firestoreGetDoc && window._firestoreDoc && window._firebaseDb) {
+            const sn = await window._firestoreGetDoc(
+              window._firestoreDoc(window._firebaseDb, 'shared', 'expense_amount_overrides'));
+            exists = sn.exists();
+            if (exists) {
+              try {
+                const v = JSON.parse((sn.data() || {}).value || '{}');
+                if (v && typeof v === 'object' && !Array.isArray(v)) map = v;
+              } catch (_) {}
+            }
+          }
+        } catch (e) {
+          console.warn('[amt override] 기존 맵 확인 실패 — 덮어쓰지 않습니다:', e && (e.code || e.message));
+          return false;
+        }
+        if (exists === null) {
+          console.warn('[amt override] 기존 맵을 확인할 수 없어 덮어쓰지 않습니다 (Firestore 미준비)');
+          return false;
+        }
+        if (!map || typeof map !== 'object') map = {};
+      }
       window._expenseAmountOverrides = map;
     }
     const rec = manual
@@ -41178,6 +41207,7 @@ window.listExpenseAmountOverrides = function () {
   return rows.length;
 };
 window.clearExpenseAmountOverride = async function (expId) {
+  if (typeof requireWrite === 'function' && !requireWrite()) return;   // v2.3.897
   const e = (DB.expenses || []).find(x => x && String(x.id) === String(expId));
   if (!e) { console.warn('지출결의서를 찾을 수 없습니다:', expId); return; }
   await _setExpenseAmountOverride(e, 0, '', false);
@@ -46489,13 +46519,23 @@ async function openPoApprovalDetail(orderId) {
     paidDate: expBal?expBal.paidDate:''
   } : null;
   const payMethod = o.payMethod || (expPre && expPre.payMethod) || (expBal && expBal.payMethod) || '';
-  const _payChip = (r, label, pct) => {
+  const _payChip = (r, label, pct, exp) => {
     if (!r) return '';
+    /* v2.3.897: 실지급 금액을 수동 조정한 건은 발주서 청구액을 함께 찍는다.
+       종전엔 '합계 (VAT 포함) ₩9,299,400' 바로 밑에 '잔금 (100%) ₩8,885,800' 이
+       찍혀, 인쇄해 업체에 보내면 스스로 모순된 금액을 주장하는 문서가 됐다.
+       (지출결의서 전표에는 같은 안내가 이미 있다 — 발주서 쪽만 빠져 있었다) */
+    const _adj = (exp && exp.amountManual && exp.poAmount != null
+        && Math.round(Number(exp.poAmount) || 0) !== Math.round(Number(r.amt) || 0))
+      ? `<div style="font-size:11px;color:#a16207;font-weight:600;margin-top:3px">\u21b3 발주서 청구액 ${fmtWon(Number(exp.poAmount) || 0)}`
+        + (exp.amountReason ? ` \u00b7 ${String(exp.amountReason).replace(/&/g, '&amp;').replace(/</g, '&lt;')}` : '')
+        + `</div>`
+      : '';
     const st = r.paid
       ? `<span style="color:#166534;font-weight:700">✅ 지급완료${r.paidDate?` · ${r.paidDate}`:''}</span>`
       : `<span style="color:#c2410c;font-weight:700">⏳ 지급예정${r.due&&r.due!=='-'?` · ${r.due}`:''}</span>`;
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 2px;border-bottom:1px dotted #e2e8f0;font-size:12.5px">
-      <span style="color:#334155"><b>${label}</b> <span style="color:#64748b;font-size:11.5px">(${Math.round(pct * 10) / 10}%)</span></span>
+      <span style="color:#334155"><b>${label}</b> <span style="color:#64748b;font-size:11.5px">(${Math.round(pct * 10) / 10}%)</span>${_adj}</span>
       <span style="display:flex;align-items:center;gap:12px">
         <span style="color:#0f172a;font-weight:700;font-variant-numeric:tabular-nums">${fmtWon(r.amt)}</span>
         ${st}
@@ -46604,8 +46644,8 @@ async function openPoApprovalDetail(orderId) {
         <div style="margin-top:22px">
           <div style="font-size:12px;font-weight:800;color:#475569;margin-bottom:8px;letter-spacing:1px">■ 결 제 조 건${payMethod?` <span style="color:#64748b;font-weight:500;letter-spacing:0">· 결제수단 ${payMethod}</span>`:''}</div>
           <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px">
-            ${_payChip(prepayRow, '선 급 금', prepayPct) || ''}
-            ${_payChip(balRow, '잔    금', balPct) || ''}
+            ${_payChip(prepayRow, '선 급 금', prepayPct, expPre) || ''}
+            ${_payChip(balRow, '잔    금', balPct, expBal) || ''}
             ${!prepayRow && !balRow ? `<div style="color:#94a3b8;font-size:12.5px;padding:6px 2px">결제 조건 미설정</div>` : ''}
           </div>
         </div>
@@ -46802,13 +46842,23 @@ async function openPoApprovalPage(orderId) {
   const prepayRow = prepayPct > 0 ? { amt: _isOverseas ? Math.round(totalVat*prepayPct/100) : (expPre?expPre.amount:Math.round(totalVat*prepayPct/100)), due: expPre?(expPre.dueDate||'-'):'-', paid: expPre?expPre.paidStatus==='paid':false, paidDate: expPre?expPre.paidDate:'' } : null;
   const balRow = balPct > 0 ? { amt: _isOverseas ? Math.round(totalVat*balPct/100) : (expBal?expBal.amount:Math.round(totalVat*balPct/100)), due: expBal?(expBal.dueDate||'-'):'-', paid: expBal?expBal.paidStatus==='paid':false, paidDate: expBal?expBal.paidDate:'' } : null;
   const payMethod = o.payMethod || (expPre && expPre.payMethod) || (expBal && expBal.payMethod) || '';
-  const _payChip = (r, label, pct) => {
+  const _payChip = (r, label, pct, exp) => {
     if (!r) return '';
+    /* v2.3.897: 실지급 금액을 수동 조정한 건은 발주서 청구액을 함께 찍는다.
+       종전엔 '합계 (VAT 포함) ₩9,299,400' 바로 밑에 '잔금 (100%) ₩8,885,800' 이
+       찍혀, 인쇄해 업체에 보내면 스스로 모순된 금액을 주장하는 문서가 됐다.
+       (지출결의서 전표에는 같은 안내가 이미 있다 — 발주서 쪽만 빠져 있었다) */
+    const _adj = (exp && exp.amountManual && exp.poAmount != null
+        && Math.round(Number(exp.poAmount) || 0) !== Math.round(Number(r.amt) || 0))
+      ? `<div style="font-size:11px;color:#a16207;font-weight:600;margin-top:3px">\u21b3 발주서 청구액 ${fmtWon(Number(exp.poAmount) || 0)}`
+        + (exp.amountReason ? ` \u00b7 ${String(exp.amountReason).replace(/&/g, '&amp;').replace(/</g, '&lt;')}` : '')
+        + `</div>`
+      : '';
     const st = r.paid
       ? `<span style="color:#166534;font-weight:700">✅ 지급완료${r.paidDate?` · ${r.paidDate}`:''}</span>`
       : `<span style="color:#c2410c;font-weight:700">⏳ 지급예정${r.due&&r.due!=='-'?` · ${r.due}`:''}</span>`;
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 2px;border-bottom:1px dotted #e2e8f0;font-size:12.5px">
-      <span style="color:#334155"><b>${label}</b> <span style="color:#64748b;font-size:11.5px">(${Math.round(pct * 10) / 10}%)</span></span>
+      <span style="color:#334155"><b>${label}</b> <span style="color:#64748b;font-size:11.5px">(${Math.round(pct * 10) / 10}%)</span>${_adj}</span>
       <span style="display:flex;align-items:center;gap:12px">
         <span style="color:#0f172a;font-weight:700;font-variant-numeric:tabular-nums">${fmtWon(r.amt)}</span>
         ${st}
@@ -46900,8 +46950,8 @@ async function openPoApprovalPage(orderId) {
         <div style="margin-top:22px">
           <div style="font-size:12px;font-weight:800;color:#475569;margin-bottom:8px;letter-spacing:1px">■ 결 제 조 건${payMethod?` <span style="color:#64748b;font-weight:500;letter-spacing:0">· 결제수단 ${payMethod}</span>`:''}</div>
           <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px">
-            ${_payChip(prepayRow, '선 급 금', prepayPct) || ''}
-            ${_payChip(balRow, '잔    금', balPct) || ''}
+            ${_payChip(prepayRow, '선 급 금', prepayPct, expPre) || ''}
+            ${_payChip(balRow, '잔    금', balPct, expBal) || ''}
             ${!prepayRow && !balRow ? `<div style="color:#94a3b8;font-size:12.5px;padding:6px 2px">결제 조건 미설정</div>` : ''}
           </div>
         </div>
