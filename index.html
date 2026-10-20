@@ -5065,9 +5065,11 @@ EXP YYYYMMDD 까지</textarea></div>
             <div id="si-type-chips" style="display:flex;gap:4px;flex-wrap:wrap"></div>
             <input class="fi" id="si-item-search" placeholder="🔍 품명·코드 검색" style="flex:1;min-width:140px;padding:5px 10px;font-size:12px" oninput="onStockItemSearch('si')">
           </div>
-          <select class="fs" id="si-item" onchange="onStockItemSelect('si-item','si-price')"></select>
+          <select class="fs" id="si-item" onchange="onStockItemSelect('si-item','si-price');_siWhOptions()"></select>
         </div>
-        <div class="fg"><label>입고 수량<span class="req">*</span></label><input class="fi" id="si-qty" type="number" placeholder="0"></div>
+        <!-- v2.3.900: 어느 창고로 들어오는지 — 종전엔 전부 '미지정' 으로 쌓였다 -->
+        <div class="fg full"><label>입고 창고<span class="req">*</span></label><select class="fs" id="si-wh" onchange="this.dataset.touched='1';onSiWhChange()"></select><div id="si-wh-hint" style="font-size:11.5px;color:#64748b;margin-top:4px;line-height:1.5"></div></div>
+        <div class="fg"><label>입고 수량<span class="req">*</span></label><input class="fi" id="si-qty" type="number" placeholder="0" oninput="onSiWhChange()"></div>
         <div class="fg"><label>단가(원)</label><input class="fi" id="si-price" type="number" placeholder="0"></div>
         <div class="fg"><label>입고일<span class="req">*</span></label><input class="fi" id="si-date" type="date"></div>
         <div class="fg"><label>LOT번호</label><input class="fi" id="si-lot" placeholder="" style="font-family:monospace"></div>
@@ -6396,7 +6398,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.899';
+const ERP_VERSION = 'v2.3.900';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13179,6 +13181,12 @@ function openModal(id) {
       renderStockItemFilterChips('si');
       populateStockItemSelect('si-item', _siItemFilter.type, '');
       $('si-date').value = today(); $('si-price').value=''; $('si-qty').value=''; $('si-lot').value=''; $('si-note').value=''; $('si-exp').value='';
+      // v2.3.900: 창고 목록은 지연 로드 — 로드 후 품목별 보유량을 채운다
+      if ($('si-wh')) { $('si-wh').innerHTML = '<option value="">창고 목록 불러오는 중…</option>'; $('si-wh').dataset.touched = ''; }
+      try {
+        const _pi = (typeof _whEnsureLoaded === 'function') ? _whEnsureLoaded() : Promise.resolve();
+        Promise.resolve(_pi).then(() => _siWhOptions()).catch(() => _siWhOptions());
+      } catch(_) { try { _siWhOptions(); } catch(__) {} }
     }
     if (id === 'stock-out-modal') {
       _soItemFilter.type = (_stockTypeFilter && _stockTypeFilter !== '아카이브') ? _stockTypeFilter : '전체';
@@ -18266,6 +18274,45 @@ async function _saveShopOrderEdit(id){
 }
 
 // v2.3.409: 특정 창고에서 재고 출고 차감 — item.stock 전체 + 선택 창고 whStock 반영(음수 방지), 롤백함수 반환.
+/* v2.3.900: whStock 쓰기 규칙을 한 곳으로.
+   _itemWhEffective 는 '총재고 - 배정합' 잔여를 품목 기본창고(없으면 __un__)에 얹어
+   보여준다. 그래서 whStock 에 기본창고를 그대로 적으면 이중 계상이 된다 —
+   기본창고와 __un__ 은 빼고 적는다(잔여로 자동 계산된다). */
+function _whApplyEff(item, eff){
+  const dw = (item.defaultWh && typeof _whById==='function' && _whById(item.defaultWh)) ? String(item.defaultWh) : null;
+  const newWh = {};
+  Object.keys(eff).forEach(k => { if(k==='__un__') return; if(dw && k===dw) return; const q=Number(eff[k])||0; if(q!==0) newWh[k]=q; });
+  item.whStock = newWh;
+}
+
+/* v2.3.900: 특정 창고로 재고 입고 — _deductFromWarehouse 의 짝. 롤백함수 반환.
+   종전엔 입고가 item.stock 에만 더해서, 들어온 물량이 전부 '창고 미지정' 으로 쌓였다. */
+function _addToWarehouse(item, whId, qty, note, opts){
+  qty = Number(qty)||0;
+  const beforeStock = Number(item.stock)||0;
+  const beforeWh = JSON.stringify(item.whStock||{});
+  const beforeUpd = item.updatedAt;
+  const eff = (typeof _itemWhEffective==='function') ? _itemWhEffective(item) : {};
+  item.stock = beforeStock + qty;
+  if (whId && whId!=='__un__') { eff[whId] = (Number(eff[whId])||0) + qty; _whApplyEff(item, eff); }
+  item.updatedAt = Date.now();
+  DB.stockHistory = DB.stockHistory || [];
+  const hid = (typeof nextId==='function') ? nextId('stock') : (Date.now()+Math.floor(Math.random()*100000));
+  const _shRec = { id: hid, itemId: item.id, type:'in', qty: qty,
+    price: (opts && opts.price != null) ? opts.price : (item.price||0), toWh: whId||'',
+    date: (opts && opts.date) || new Date().toISOString().slice(0,10),
+    lot: (opts && opts.lot != null) ? opts.lot : (item.lot||''), note: note||'' };
+  DB.stockHistory.push((opts && opts.stamp && typeof _shStamp === 'function') ? _shStamp(_shRec) : _shRec);
+  return {
+    rollback: () => {
+      item.stock = beforeStock;
+      try { item.whStock = JSON.parse(beforeWh); } catch(_){ item.whStock = {}; }
+      item.updatedAt = beforeUpd;
+      DB.stockHistory = (DB.stockHistory||[]).filter(h => h && h.id !== hid);
+    }
+  };
+}
+
 function _deductFromWarehouse(item, whId, qty, note, opts){
   qty = Number(qty)||0;
   const beforeStock = Number(item.stock)||0;
@@ -18278,10 +18325,7 @@ function _deductFromWarehouse(item, whId, qty, note, opts){
   item.stock = beforeStock - qty;
   if (whId && whId!=='__un__') {
     eff[whId] = (Number(eff[whId])||0) - take;
-    const dw = (item.defaultWh && typeof _whById==='function' && _whById(item.defaultWh)) ? String(item.defaultWh) : null;
-    const newWh = {};
-    Object.keys(eff).forEach(k => { if(k==='__un__') return; if(dw && k===dw) return; const q=Number(eff[k])||0; if(q!==0) newWh[k]=q; });
-    item.whStock = newWh;
+    _whApplyEff(item, eff);   // v2.3.900: whStock 쓰기는 한 곳에서
   }
   item.updatedAt = Date.now();
   DB.stockHistory = DB.stockHistory || [];
@@ -32183,6 +32227,7 @@ function setStockItemFilter(prefix, type) {
   renderStockItemFilterChips(prefix);
   populateStockItemSelect(selId, type, search);
   if (prefix === 'so') { try { _soWhOptions(); } catch(_){} }   // v2.3.898
+  if (prefix === 'si') { try { _siWhOptions(); } catch(_){} }   // v2.3.900
 }
 
 function onStockItemSearch(prefix) {
@@ -32193,6 +32238,7 @@ function onStockItemSearch(prefix) {
   filter.search = search;
   populateStockItemSelect(selId, filter.type, search);
   if (prefix === 'so') { try { _soWhOptions(); } catch(_){} }   // v2.3.898
+  if (prefix === 'si') { try { _siWhOptions(); } catch(_){} }   // v2.3.900
 }
 
 function onStockItemSelect(selId, priceId) {
@@ -32207,22 +32253,72 @@ function onStockItemSelect(selId, priceId) {
   }
 }
 
+/* ═══════ v2.3.900: 재고 입고 — 입고 창고 선택 ═══════
+   출고(v2.3.898)와 같은 방식. 품목을 고르면 그 품목이 어느 창고에 얼마나
+   있는지 보여주고, 품목 기본창고 > 현재 가장 많이 가진 창고 순으로 기본 선택한다. */
+function _siWhOptions() {
+  const sel = document.getElementById('si-wh');
+  if (!sel) return;
+  const prev = sel.value;
+  const itemId = parseInt((document.getElementById('si-item') || {}).value || '', 10);
+  const item = itemId ? (DB.items || []).find(i => i && i.id === itemId) : null;
+  const whs = (window._WH && Array.isArray(window._WH.list)) ? window._WH.list : [];
+  const eff = (item && typeof _itemWhEffective === 'function') ? _itemWhEffective(item) : {};
+  const esc = v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const rows = whs.map(w => ({ id: String(w.id), name: String(w.name || ''), qty: Number(eff[String(w.id)]) || 0 }));
+  rows.sort((a, b) => (b.qty - a.qty) || a.name.localeCompare(b.name, 'ko'));
+  const unQty = Number(eff['__un__']) || 0;
+  let html = rows.map(r => '<option value="' + esc(r.id) + '" data-qty="' + r.qty + '" data-name="' + esc(r.name) + '">'
+    + esc(r.name) + ' — 현재 ' + _soWhFmtQ(r.qty) + '</option>').join('');
+  html += '<option value="__un__" data-qty="' + unQty + '" data-name="">창고 미지정 (현재 잔여 ' + _soWhFmtQ(unQty) + ')</option>';
+  sel.innerHTML = html;
+  const has = v => Array.prototype.some.call(sel.options, o => o.value === v);
+  const top = rows.find(r => r.qty > 0);
+  const defWh = (item && item.defaultWh) ? String(item.defaultWh) : '';
+  const touched = sel.dataset && sel.dataset.touched === '1';
+  if (touched && prev && has(prev)) sel.value = prev;
+  else if (defWh && has(defWh)) sel.value = defWh;
+  else if (top) sel.value = top.id;
+  else sel.value = '__un__';
+  onSiWhChange();
+}
+function onSiWhChange() {
+  const sel = document.getElementById('si-wh');
+  const hint = document.getElementById('si-wh-hint');
+  if (!sel || !hint) return;
+  const opt = sel.options[sel.selectedIndex];
+  const cur = opt ? (Number(opt.getAttribute('data-qty')) || 0) : 0;
+  const isUn = !opt || opt.value === '__un__';
+  const qty = parseFloat((document.getElementById('si-qty') || {}).value) || 0;
+  if (isUn) {
+    hint.textContent = '창고를 지정하지 않고 총재고에만 더합니다. (창고별 현황에는 잡히지 않습니다)';
+    hint.style.color = '#b45309';
+  } else {
+    hint.textContent = '선택한 창고로 입고합니다. 현재 ' + _soWhFmtQ(cur)
+      + (qty > 0 ? ' → ' + _soWhFmtQ(cur + qty) : '');
+    hint.style.color = '#64748b';
+  }
+}
 function saveStockIn() {
   const itemId = parseInt($('si-item').value);
   const qty = parseFloat($('si-qty').value)||0;
   const price = parseFloat($('si-price').value)||0;
   const date = $('si-date').value;
   if (!itemId||!qty||!date) { showNotif('필수 항목을 입력하세요','warning'); return; }
-  // Update item stock
-  const idx = DB.items.findIndex(i=>i.id===itemId);
-  if (idx>=0) {
-    DB.items[idx].stock += qty;
-    if ($('si-lot').value) DB.items[idx].lot = $('si-lot').value;
-    if ($('si-exp').value) DB.items[idx].expiry = $('si-exp').value;
-  }
-  DB.stockHistory.push(_shStamp({id:nextId('stock'), itemId, type:'in', qty, price, date, lot:$('si-lot').value, note:$('si-note').value}));
+  const item = getItem(itemId);
+  if (!item || item.id == null) { showNotif('품목을 찾을 수 없습니다','error'); return; }
+  // v2.3.900: 어느 창고로 들어오는지. _addToWarehouse 가 stock·whStock·이력을 함께 처리한다.
+  const _whSel = $('si-wh');
+  const _whOpt = _whSel ? _whSel.options[_whSel.selectedIndex] : null;
+  const _whId = _whOpt ? _whOpt.value : '__un__';
+  const _whName = _whOpt ? (_whOpt.getAttribute('data-name') || '') : '';
+  const _siLot = $('si-lot').value, _siExp = $('si-exp').value;
+  if (_siLot) item.lot = _siLot;
+  if (_siExp) item.expiry = _siExp;
+  const _siNote = (($('si-note').value || '') + (_whName ? ' [' + _whName + ']' : '')).trim();
+  _addToWarehouse(item, _whId, qty, _siNote, { date: date, price: price, lot: _siLot, stamp: true });
   saveData(); closeModal('stock-in-modal'); renderStock(); updateBadges();
-  showNotif('재고 입고가 처리되었습니다','success');
+  showNotif('재고 입고가 처리되었습니다' + (_whName ? ' (' + _whName + ')' : ''), 'success');
 }
 
 /* ═══════ v2.3.898: 재고 출고 — 출고 창고 선택 ═══════
@@ -62586,8 +62682,21 @@ function deleteStockHistory(id) {
         item.whStock[from] = (Number(item.whStock[from]) || 0) + qty;
       }
       item.updatedAt = Date.now();
-    } else if (h.type === 'in') item.stock -= h.qty;
-    else item.stock += h.qty;
+    } else {
+      // v2.3.900: 창고를 지정한 입출고는 창고별 수량도 되돌린다.
+      //   종전엔 총재고만 역산해, 지운 뒤에도 창고 배정이 어긋난 채 남았다.
+      //   ⚠️ eff 는 stock 을 바꾸기 '전' 에 구해야 한다(잔여가 stock 에서 계산된다).
+      const _q = Number(h.qty) || 0;
+      const _delta = (h.type === 'in') ? -_q : _q;
+      const _w = (h.type === 'in') ? h.toWh : h.fromWh;
+      const _eff = (typeof _itemWhEffective === 'function') ? _itemWhEffective(item) : {};
+      item.stock = (Number(item.stock) || 0) + _delta;
+      if (_w && _w !== '__un__' && typeof _whApplyEff === 'function') {
+        _eff[_w] = Math.max(0, (Number(_eff[_w]) || 0) + _delta);
+        _whApplyEff(item, _eff);
+      }
+      item.updatedAt = Date.now();
+    }
   }
   DB.stockHistory = DB.stockHistory.filter(x => x.id !== id);
   // v2.3.757: 같은 기록이 금고(_whMoveVault)에서 되살아나지 않게 —
