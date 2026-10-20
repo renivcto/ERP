@@ -5094,9 +5094,11 @@ EXP YYYYMMDD 까지</textarea></div>
             <div id="so-type-chips" style="display:flex;gap:4px;flex-wrap:wrap"></div>
             <input class="fi" id="so-item-search" placeholder="🔍 품명·코드 검색" style="flex:1;min-width:140px;padding:5px 10px;font-size:12px" oninput="onStockItemSearch('so')">
           </div>
-          <select class="fs" id="so-item" onchange="onStockItemSelect('so-item','')"></select>
+          <select class="fs" id="so-item" onchange="onStockItemSelect('so-item','');_soWhOptions()"></select>
         </div>
-        <div class="fg"><label>출고 수량<span class="req">*</span></label><input class="fi" id="so-qty" type="number" placeholder="0"></div>
+        <!-- v2.3.898: 어느 창고 재고를 쓰는지 — 품목을 고르면 창고별 보유량이 함께 나온다 -->
+        <div class="fg full"><label>출고 창고<span class="req">*</span></label><select class="fs" id="so-wh" onchange="onSoWhChange()"></select><div id="so-wh-hint" style="font-size:11.5px;color:#64748b;margin-top:4px;line-height:1.5"></div></div>
+        <div class="fg"><label>출고 수량<span class="req">*</span></label><input class="fi" id="so-qty" type="number" placeholder="0" oninput="onSoWhChange()"></div>
         <div class="fg"><label>출고일<span class="req">*</span></label><input class="fi" id="so-date" type="date"></div>
         <div class="fg full"><label>출고 사유</label><select class="fs" id="so-reason"><option>생산 투입</option><option>샘플 출고</option><option>약국 영업</option><option>폐기</option><option>반품</option><option>기타</option></select><input class="fi" id="so-reason-etc" placeholder="상세 사유를 입력하세요." maxlength="120" style="margin-top:6px"></div>
       </div>
@@ -6394,7 +6396,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.897';
+const ERP_VERSION = 'v2.3.898';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13185,6 +13187,13 @@ function openModal(id) {
       renderStockItemFilterChips('so');
       populateStockItemSelect('so-item', _soItemFilter.type, '');
       $('so-date').value = today();
+      if ($('so-qty')) $('so-qty').value = '';
+      // v2.3.898: 창고 목록은 지연 로드다 — 먼저 로드한 뒤 품목별 보유량을 채운다
+      if ($('so-wh')) $('so-wh').innerHTML = '<option value="__un__">창고 목록 불러오는 중…</option>';
+      try {
+        const _p = (typeof _whEnsureLoaded === 'function') ? _whEnsureLoaded() : Promise.resolve();
+        Promise.resolve(_p).then(() => _soWhOptions()).catch(() => _soWhOptions());
+      } catch(_) { try { _soWhOptions(); } catch(__) {} }
     }
     if (id === 'add-quote') { populateVendorSelect('q-vendor'); ensureQuoteRows(); }
     if (id === 'add-order') {
@@ -18255,7 +18264,7 @@ async function _saveShopOrderEdit(id){
 }
 
 // v2.3.409: 특정 창고에서 재고 출고 차감 — item.stock 전체 + 선택 창고 whStock 반영(음수 방지), 롤백함수 반환.
-function _deductFromWarehouse(item, whId, qty, note){
+function _deductFromWarehouse(item, whId, qty, note, opts){
   qty = Number(qty)||0;
   const beforeStock = Number(item.stock)||0;
   const beforeWh = JSON.stringify(item.whStock||{});
@@ -18275,7 +18284,12 @@ function _deductFromWarehouse(item, whId, qty, note){
   item.updatedAt = Date.now();
   DB.stockHistory = DB.stockHistory || [];
   const hid = (typeof nextId==='function') ? nextId('stock') : (Date.now()+Math.floor(Math.random()*100000));
-  DB.stockHistory.push({ id: hid, itemId: item.id, type:'out', qty: qty, price: item.price||0, fromWh: whId||'', date: new Date().toISOString().slice(0,10), lot: item.lot||'', note: note||'수동 주문 재고 차감' });
+  // v2.3.898: opts.date 로 사람이 고른 출고일을 쓴다(없으면 종전대로 오늘).
+  //   opts.stamp 면 작성자를 남긴다 — 자동 차감은 종전대로 무기명.
+  const _shRec = { id: hid, itemId: item.id, type:'out', qty: qty, price: item.price||0, fromWh: whId||'',
+    date: (opts && opts.date) || new Date().toISOString().slice(0,10),
+    lot: (opts && opts.lot != null) ? opts.lot : (item.lot||''), note: note||'수동 주문 재고 차감' };
+  DB.stockHistory.push((opts && opts.stamp && typeof _shStamp === 'function') ? _shStamp(_shRec) : _shRec);
   return {
     short: qty > avail,
     avail: avail,
@@ -32166,6 +32180,7 @@ function setStockItemFilter(prefix, type) {
   const search = $(searchId) ? $(searchId).value : '';
   renderStockItemFilterChips(prefix);
   populateStockItemSelect(selId, type, search);
+  if (prefix === 'so') { try { _soWhOptions(); } catch(_){} }   // v2.3.898
 }
 
 function onStockItemSearch(prefix) {
@@ -32175,6 +32190,7 @@ function onStockItemSearch(prefix) {
   const search = $(searchId) ? $(searchId).value : '';
   filter.search = search;
   populateStockItemSelect(selId, filter.type, search);
+  if (prefix === 'so') { try { _soWhOptions(); } catch(_){} }   // v2.3.898
 }
 
 function onStockItemSelect(selId, priceId) {
@@ -32207,6 +32223,57 @@ function saveStockIn() {
   showNotif('재고 입고가 처리되었습니다','success');
 }
 
+/* ═══════ v2.3.898: 재고 출고 — 출고 창고 선택 ═══════
+   종전엔 총재고(item.stock)에서만 빼서 창고별 배정(whStock)이 실제와 어긋났다.
+   품목을 고르면 그 품목이 어느 창고에 얼마나 있는지 수량과 함께 보여주고,
+   재고가 많은 창고를 위로 올려 기본 선택한다. */
+function _soWhFmtQ(q) { return (Math.round((Number(q) || 0) * 10000) / 10000).toLocaleString(); }
+function _soWhOptions() {
+  const sel = document.getElementById('so-wh');
+  if (!sel) return;
+  const prev = sel.value;
+  const itemId = parseInt((document.getElementById('so-item') || {}).value || '', 10);
+  const item = itemId ? (DB.items || []).find(i => i && i.id === itemId) : null;
+  const whs = (window._WH && Array.isArray(window._WH.list)) ? window._WH.list : [];
+  const eff = (item && typeof _itemWhEffective === 'function') ? _itemWhEffective(item) : {};
+  const esc = v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const rows = whs.map(w => ({ id: String(w.id), name: String(w.name || ''), qty: Number(eff[String(w.id)]) || 0 }));
+  // 재고가 있는 창고를 위로, 그 안에서 많은 순 → 고르기 쉽게
+  rows.sort((a, b) => (b.qty - a.qty) || a.name.localeCompare(b.name, 'ko'));
+  const unQty = Number(eff['__un__']) || 0;
+  let html = rows.map(r => '<option value="' + esc(r.id) + '" data-qty="' + r.qty + '" data-name="' + esc(r.name) + '">'
+    + esc(r.name) + ' — 재고 ' + _soWhFmtQ(r.qty) + '</option>').join('');
+  html += '<option value="__un__" data-qty="' + unQty + '" data-name="">창고 미지정 (잔여 ' + _soWhFmtQ(unQty) + ')</option>';
+  sel.innerHTML = html;
+  const has = v => Array.prototype.some.call(sel.options, o => o.value === v);
+  const top = rows.find(r => r.qty > 0);
+  const defWh = (item && item.defaultWh) ? String(item.defaultWh) : '';
+  if (prev && has(prev)) sel.value = prev;                                        // 사람이 고른 것 유지
+  else if (defWh && has(defWh) && (Number(eff[defWh]) || 0) > 0) sel.value = defWh;  // 품목 기본창고
+  else if (top) sel.value = top.id;                                               // 가장 많이 가진 창고
+  else sel.value = '__un__';
+  onSoWhChange();
+}
+function onSoWhChange() {
+  const sel = document.getElementById('so-wh');
+  const hint = document.getElementById('so-wh-hint');
+  if (!sel || !hint) return;
+  const opt = sel.options[sel.selectedIndex];
+  const avail = opt ? (Number(opt.getAttribute('data-qty')) || 0) : 0;
+  const isUn = !opt || opt.value === '__un__';
+  const qty = parseFloat((document.getElementById('so-qty') || {}).value) || 0;
+  if (!isUn && qty > 0 && qty > avail) {
+    hint.innerHTML = '\u26a0\ufe0f 이 창고 재고는 <b>' + _soWhFmtQ(avail) + '</b> 입니다 — 모자란 '
+      + _soWhFmtQ(qty - avail) + ' 은 창고 미지정 잔여분에서 빠집니다.';
+    hint.style.color = '#b45309';
+  } else if (isUn) {
+    hint.textContent = '특정 창고에 배정되지 않은 잔여 재고에서 차감합니다.';
+    hint.style.color = '#64748b';
+  } else {
+    hint.textContent = '선택한 창고의 재고에서 차감합니다. (보유 ' + _soWhFmtQ(avail) + ')';
+    hint.style.color = '#64748b';
+  }
+}
 function saveStockOut() {
   const itemId = parseInt($('so-item').value);
   const qty = parseFloat($('so-qty').value)||0;
@@ -32214,13 +32281,24 @@ function saveStockOut() {
   if (!itemId||!qty||!date) { showNotif('필수 항목을 입력하세요','warning'); return; }
   const item = getItem(itemId);
   if (item.stock < qty) { showNotif('재고가 부족합니다 (현재: '+item.stock+')','error'); return; }
-  const idx = DB.items.findIndex(i=>i.id===itemId);
-  if (idx>=0) DB.items[idx].stock -= qty;
+  // v2.3.898: 어느 창고에서 빼는지. 창고 차감은 _deductFromWarehouse(v2.3.409)가
+  //   item.stock·whStock·이력을 한 번에 처리한다(주문판매 자동차감과 같은 경로).
+  const _whSel = $('so-wh');
+  const _whOpt = _whSel ? _whSel.options[_whSel.selectedIndex] : null;
+  const _whId = _whOpt ? _whOpt.value : '__un__';
+  const _whName = _whOpt ? (_whOpt.getAttribute('data-name') || '') : '';
+  const _whAvail = _whOpt ? (Number(_whOpt.getAttribute('data-qty')) || 0) : 0;
+  if (_whId && _whId !== '__un__' && qty > _whAvail) {
+    const _short = Math.round((qty - _whAvail) * 10000) / 10000;
+    if (!confirm('⚠️ ' + _whName + ' 재고는 ' + _soWhFmtQ(_whAvail) + ' 입니다.\n\n'
+        + '요청한 ' + _soWhFmtQ(qty) + ' 중 모자란 ' + _soWhFmtQ(_short)
+        + ' 은 창고 미지정 잔여분에서 빠집니다.\n\n이대로 출고할까요?')) return;
+  }
   const _soEtc = (($('so-reason-etc')||{}).value||'').trim();   // v2.3.802: 모든 사유에 상세 입력 허용
-  const _soR = $('so-reason').value + (_soEtc ? ' — ' + _soEtc : '');
-  DB.stockHistory.push(_shStamp({id:nextId('stock'), itemId, type:'out', qty, price:item.price, date, lot:item.lot||'', note:_soR}));
+  const _soR = $('so-reason').value + (_soEtc ? ' — ' + _soEtc : '') + (_whName ? ' [' + _whName + ']' : '');
+  _deductFromWarehouse(item, _whId, qty, _soR, { date: date, lot: item.lot||'', stamp: true });
   saveData(); closeModal('stock-out-modal'); renderStock(); updateBadges();
-  showNotif('재고 출고가 처리되었습니다','success');
+  showNotif('재고 출고가 처리되었습니다' + (_whName ? ' (' + _whName + ')' : ''), 'success');
 }
 
 function exportStockReport() {
