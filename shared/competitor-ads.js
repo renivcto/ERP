@@ -101,6 +101,38 @@ const _caImg = (key, h) => '<div style="align-self:start;position:relative;backg
   '<div class="ca-img-wait" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#64748b;font-size:12px">장면 이미지 불러오는 중…</div>' +
   '<img data-ca-img="' + _caEsc(key) + '" onclick="_caOpenImg(this)" title="클릭하면 크게 봅니다" style="display:block;width:100%;height:auto;opacity:0;transition:opacity .2s;cursor:zoom-in;position:relative"></div>';
 
+
+// Date summaries stay compact; expansion is independent for each analysis page.
+window._caApplySummary = function (kind) {
+  const cfg = window._CA_CFG[kind]; if (!cfg) return;
+  const state = window[cfg.st], root = document.getElementById(cfg.root);
+  const card = root && root.querySelector('[data-ca-summary]'); if (!card) return;
+  const expanded = state.summaryExpanded === true;
+  card.querySelectorAll('[data-ca-summary-body] table > tbody > tr').forEach((row, i) => {
+    const hide = i > 0 && !expanded;
+    row.hidden = hide;
+    if (hide) row.style.setProperty('display', 'none', 'important');
+    else row.style.removeProperty('display');
+  });
+  const button = card.querySelector('[data-ca-summary-toggle]');
+  if (button) {
+    button.setAttribute('aria-expanded', String(expanded));
+    button.textContent = expanded ? '접기 (세로 위 방향)' : '전체 보기 (세로 아래 방향)';
+  }
+};
+window._caToggleSummary = function (kind) {
+  const cfg = window._CA_CFG[kind]; if (!cfg) return;
+  const state = window[cfg.st]; state.summaryExpanded = state.summaryExpanded !== true;
+  window._caApplySummary(kind);
+};
+function _caSummaryCard(index, sel, title, kind) {
+  const cfg = window._CA_CFG[kind], state = window[cfg.st];
+  const rows = (index || []).slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const expanded = state.summaryExpanded === true, id = cfg.root + '-summary-table';
+  const toggle = rows.length > 1 ? '<button type="button" class="btn btn-sm" data-ca-summary-toggle aria-expanded="' + expanded + '" aria-controls="' + id + '" onclick="_caToggleSummary(\'' + kind + '\')" style="min-height:30px;padding:4px 10px;border:1px solid #b9cbc1;border-radius:8px;background:#fff;color:#315f51;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">' + (expanded ? '접기 (세로 위 방향)' : '전체 보기 (세로 아래 방향)') + '</button>' : '';
+  return '<div class="card" data-ca-summary style="padding:18px;margin-bottom:14px"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px"><div style="font-size:15px;font-weight:800;color:#0f172a">' + title + '</div>' + toggle + '</div><div id="' + id + '" data-ca-summary-body>' + _caIndexTable(rows, sel) + '</div></div>';
+}
+
 function _caIndexTable(index, sel) {
   if (!index.length) return '<div style="color:#94a3b8;font-size:12.5px">아직 분석 기록이 없습니다.</div>';
   if (window._CAK === 'google') return _caIndexTableG(index, sel);
@@ -280,8 +312,9 @@ function _caRender(kind) {
     '<button class="btn btn-sm" onclick="window.' + K.st + '.ts=0;' + K.render + '()" style="height:28px;font-size:12px">🔄 새로고침</button>' +
     window._adsDatePicker(C.index.map(r => r.date), date, '_caPick', '분석 날짜') + '</div>';
   const _ym = (date || '').slice(0, 7); const _mIdx = C.index.filter(r => r.date.slice(0, 7) === _ym);
-  h += _caCard('📅 날짜별 요약 · ' + _ym.slice(0, 4) + '년 ' + (+_ym.slice(5)) + '월 <span style="font-size:12px;color:#94a3b8;font-weight:500">(' + _mIdx.length + '일 · 다른 달은 위 날짜 선택에서 고르세요)</span>', _caIndexTable(_mIdx.length ? _mIdx : C.index, date));
-  if (!rep) { host.innerHTML = h + '<div class="card" style="padding:24px;color:#94a3b8;font-size:13px">선택한 날짜의 분석이 없습니다.</div>'; return; }
+  if (C.summaryMonth !== _ym) { C.summaryMonth = _ym; C.summaryExpanded = false; }
+  h += _caSummaryCard(_mIdx.length ? _mIdx : C.index, date, '📅 날짜별 요약' + (_ym ? ' · ' + _ym.slice(0, 4) + '년 ' + (+_ym.slice(5)) + '월 <span style="font-size:12px;color:#94a3b8;font-weight:500">(' + _mIdx.length + '일 · 다른 달은 위 날짜 선택에서 고르세요)</span>' : ''), kind);
+  if (!rep) { host.innerHTML = h + '<div class="card" style="padding:24px;color:#94a3b8;font-size:13px">선택한 날짜의 분석이 없습니다.</div>'; window._caApplySummary(kind); return; }
   const m = rep.method || {}, s = rep.stats || {};
   h += '<div class="card" style="padding:16px 18px;margin-bottom:14px;background:linear-gradient(135deg,#eff6ff,#f0fdf4)">' +
     '<div style="font-size:15px;font-weight:800;color:#0f172a;margin-bottom:6px">🔍 ' + _caDateK(rep.date) + ' 한 줄 결론</div><div style="font-size:13.5px;color:#1e293b;line-height:1.6;margin-bottom:10px">' + _caEsc(rep.headline) + '</div>' +
@@ -304,5 +337,6 @@ function _caRender(kind) {
       _caTd('<b>' + _caEsc(a.what) + '</b>', 'left', ';white-space:nowrap') + _caTd(_caEsc(a.how), 'left', ';line-height:1.55') + _caTd(_caEsc(a.kpi), 'center', ';white-space:nowrap;color:#1d4ed8;font-weight:700') + '</tr>').join('') + '</tbody></table></div>' +
     '<div style="font-size:11px;color:#94a3b8;margin-top:6px">경쟁사 효율은 공개 지표 기반 추정입니다. 광고 켜기/끄기·예산 변경은 이 화면에서 하지 않습니다.</div>');
   host.innerHTML = h;
+  window._caApplySummary(kind);
   _caFillImages(rep.date);
 }
