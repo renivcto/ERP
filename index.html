@@ -3050,6 +3050,7 @@ try{
             <colgroup>
               <col style="width:70px">
               <col style="width:150px">
+              <col style="width:90px">
               <col style="width:110px">
               <col style="width:100px">
               <col style="width:80px">
@@ -3058,6 +3059,7 @@ try{
             <thead><tr style="font-size:11.5px;background:#f9fafb">
               <th style="text-align:center;padding:10px 8px">등급</th>
               <th style="text-align:center;padding:10px 8px">약국명</th>
+              <th style="text-align:center;padding:10px 8px">약사명</th>
               <th style="text-align:center;padding:10px 8px">연락처</th>
               <th style="text-align:center;padding:10px 8px">최근 주문일</th>
               <th style="text-align:center;padding:10px 8px">주문 횟수</th>
@@ -6398,7 +6400,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.900';
+const ERP_VERSION = 'v2.3.901';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -14834,7 +14836,7 @@ function _aggregateCustomers(searchText) {
     if (!k) return;
     if (!map.has(k)) {
       map.set(k, {
-        key: k, name: '', phone: '', email: '', addresses: new Set(),
+        key: k, name: '', phone: '', email: '', pharmacist: '', addresses: new Set(),
         orders: [], orderNos: new Set(), totalSpent: 0, lastDate: '', shops: new Map()
       });
     }
@@ -14842,6 +14844,8 @@ function _aggregateCustomers(searchText) {
     if (!c.name && o.customerName) c.name = o.customerName;
     if (!c.phone && (o.customerPhone || o.recipientPhone || o.phone)) c.phone = o.customerPhone || o.recipientPhone || o.phone;
     if (!c.email && (o.email || o.customerEmail)) c.email = o.email || o.customerEmail;
+    // v2.3.901: 주문에 적힌 약사명(배송메모 '약사 OOO')을 먼저 쓴다
+    if (!c.pharmacist) { const _pn = (typeof _pharmacistFromOrder === 'function') ? _pharmacistFromOrder(o) : ''; if (_pn) c.pharmacist = _pn; }
     if (o.address) c.addresses.add(o.address);
     c.orders.push(o);
     try {
@@ -14993,6 +14997,50 @@ function setCustomerTier(key, tier) {
 
 // 고객 정보 페이지 렌더
 // v2.3.628: 약국 고객 판별 — 바로팜(약국 판매 채널) 주문 고객
+/* ═══════ v2.3.901: 약국 약사명 ═══════
+   바로팜 주문 엑셀엔 '약사명' 컬럼이 있는데 ERP 로 들어올 때 버려졌다.
+   서버가 가져온 최근 건만 deliveryNote 에 '약사 OOO' 로 남아 있어(64건 중 34건)
+   그것만으로는 절반이 빈다. 약국명 → 약사명 대응표를 공유 문서에 두고 채운다.
+     1순위 주문에 적힌 '약사 OOO'  2순위 대응표(shared/pharmacy_pharmacists)
+   대응표는 사람이 고칠 수 있어야 하므로 주문 데이터를 덮어쓰지 않는다. */
+window._phPharmacists = window._phPharmacists || {};
+function _loadPharmacistMap() {
+  return loadSharedSetting('pharmacy_pharmacists').then(v => {
+    window._phPharmacists = (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+    try {
+      if (typeof renderPharmaciesList === 'function'
+          && document.getElementById('page-pharmacies')
+          && document.getElementById('page-pharmacies').classList.contains('active')) renderPharmaciesList();
+    } catch (_) {}
+    return window._phPharmacists;
+  }).catch(() => {
+    if (!window._phPharmacists || typeof window._phPharmacists !== 'object') window._phPharmacists = {};
+    return window._phPharmacists;
+  });
+}
+// 주문 한 건에서 약사명 — 서버 수집본은 배송메모에 '약사 OOO' 로 들어온다
+function _pharmacistFromOrder(o) {
+  if (!o) return '';
+  if (o.pharmacist) return String(o.pharmacist).trim();
+  const m = /^\s*약사\s*(.+?)\s*$/.exec(String(o.deliveryNote || ''));
+  return m ? m[1].trim() : '';
+}
+// 고객(약국) 한 곳의 약사명
+function _pharmacistOf(c) {
+  if (!c) return '';
+  if (c.pharmacist) return String(c.pharmacist).trim();
+  const map = window._phPharmacists || {};
+  const nm = String(c.name || '').trim();
+  if (nm && map[nm]) return String(map[nm]).trim();
+  // 공백 차이만 있는 이름도 찾아본다 ('미소짓는 약국' vs '미소짓는약국')
+  if (nm) {
+    const flat = nm.replace(/\s+/g, '');
+    for (const k of Object.keys(map)) {
+      if (String(k).replace(/\s+/g, '') === flat) return String(map[k]).trim();
+    }
+  }
+  return '';
+}
 function _isPharmacyCustomer(c) {
   try { return c && c.shops && c.shops.has('바로팜'); } catch(_) { return false; }
 }
@@ -15019,13 +15067,19 @@ function renderPharmaciesList() {
   const tbody = document.getElementById('ph-tbody');
   if (!tbody) return;
   const search = document.getElementById('ph-search')?.value || '';
-  let list = _aggregateCustomers(search).filter(_isPharmacyCustomer);
+  // v2.3.901: 검색창에 약사명을 쳐도 찾아진다 — 집계 단계 검색은 약사명을 모른다
+  const _q = String(search || '').trim().toLowerCase();
+  let list = _aggregateCustomers('').filter(_isPharmacyCustomer);
+  if (_q) list = list.filter(c => (String(c.name||'').toLowerCase().includes(_q))
+    || (String(c.phone||'').includes(_q))
+    || (String(c.email||'').toLowerCase().includes(_q))
+    || (String(_pharmacistOf(c)).toLowerCase().includes(_q)));
   const tier = window._phTierFilter || 'all';
   if (tier !== 'all') list = list.filter(c => _pharmacyTier(c) === tier);
   const cntEl = document.getElementById('ph-total-count');
   if (cntEl) cntEl.textContent = list.length;
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--gray-400);padding:30px">조건에 맞는 약국이 없습니다</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:30px">조건에 맞는 약국이 없습니다</td></tr>';
     return;
   }
   const fmtW = n => '₩' + Math.round(Number(n)||0).toLocaleString();
@@ -15041,6 +15095,7 @@ function renderPharmaciesList() {
   tbody.innerHTML = list.map(c => `<tr style="cursor:pointer;text-align:center;font-size:12.5px" onclick="showCustomerCard('${escFn(c.key)}')">
       <td style="padding:9px 8px">${tierBadge(c)}</td>
       <td style="padding:9px 8px;color:#1e40af;font-weight:700;font-size:13px;letter-spacing:-.2px">${escFn(c.name||'-')}</td>
+      <td style="padding:9px 8px;color:var(--gray-700)">${(()=>{const _p=_pharmacistOf(c);return _p?escFn(_p):'<span style="color:var(--gray-300)">-</span>';})()}</td>
       <td style="padding:9px 8px;color:var(--gray-700)">${escFn(c.phone||'-')}</td>
       <td style="padding:9px 8px;color:var(--gray-700)">${escFn(c.lastDate||'-')}</td>
       <td style="padding:9px 8px;font-weight:700">${_customerOrderCount(c)}건</td>
@@ -15226,6 +15281,7 @@ function showCustomerCard(key) {
         <!-- 기본 정보 -->
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;margin-bottom:18px;font-size:12.5px">
           <div style="display:flex;gap:8px"><span style="color:var(--gray-500);font-weight:600;min-width:60px">📞 연락처</span><span style="color:var(--gray-800);font-weight:600">${escFn(c.phone||'-')}</span></div>
+          ${(()=>{const _p=(typeof _pharmacistOf==='function')?_pharmacistOf(c):'';return _p?`<div style="display:flex;gap:8px"><span style="color:var(--gray-500);font-weight:600;min-width:60px">👩‍⚕️ 약사명</span><span style="color:var(--gray-800);font-weight:700">${escFn(_p)}</span></div>`:'';})()}
           <div style="display:flex;gap:8px"><span style="color:var(--gray-500);font-weight:600;min-width:60px">📧 이메일</span><span style="color:var(--gray-800);font-weight:600">${escFn(c.email||'-')}</span></div>
           <div style="display:flex;gap:8px"><span style="color:var(--gray-500);font-weight:600;min-width:60px">📦 주문</span><span style="color:var(--gray-800);font-weight:700">${_customerOrderCount(c)}건 · 총 ${fmtW(c.totalSpent)}</span></div>
           <div style="display:flex;gap:8px"><span style="color:var(--gray-500);font-weight:600;min-width:60px">📅 최근</span><span style="color:var(--gray-800);font-weight:600">${escFn(c.lastDate||'-')}</span></div>
@@ -60292,6 +60348,7 @@ function _sharedSettingCollection(key) {
       || k === 'gemini_api_key' || k === 'claude_api_key' || k === 'warehouse_list'
       || k === 'pluscl_stock' || k === 'pluscl_item_map' || k === 'ad_refunds'
       || k === 'approval_signatures' || k === 'pharmacy_cal_events' || k === 'claims'
+      || k === 'pharmacy_pharmacists'   // v2.3.901: 약국별 약사명 — 전 직원이 읽어야 함
       || k === 'item_channels'   // v2.3.543: 완제품 판매 채널 목록(약국·온라인·홈쇼핑 등) — 전 직원 공유
       // v2.3.592: 정기 결제(구독) — 자동결제 건이 고정비·자금계획에 반영되므로 기기 로컬만으론
       //   기기마다 현금흐름 예측이 갈린다. 전 직원 read 필요 → shared/.
@@ -64473,6 +64530,7 @@ function initERPWhenReady() {
       try { if (typeof _loadApnSignatures === 'function') _loadApnSignatures(); } catch(_){}
       // v2.3.398: 약국 영업 캘린더 직접입력 일정 로드 — 전 직원 공유(shared)
       try { if (typeof _loadPharmacyCalEvents === 'function') _loadPharmacyCalEvents(); } catch(_){}
+      try { if (typeof _loadPharmacistMap === 'function') _loadPharmacistMap(); } catch(_){}   // v2.3.901
       // v2.3.171: 지급완료 override 적용 (머지 후 마지막에 강제 — paid 되돌림 영구 차단)
       try {
         if (typeof loadSharedSetting === 'function') {
