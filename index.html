@@ -6405,7 +6405,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.910';
+const ERP_VERSION = 'v2.3.911';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -37063,7 +37063,25 @@ function _feedPostFilesHtml(p){
 /* v2.3.906: 피드·대시보드 카드는 innerHTML 로 통째로 다시 그린다 —
    그릴 때마다 서식 편집기를 다시 배선한다(_rtWireEditors 는 멱등). */
 function _rtWireSoon() {
-  try { setTimeout(function(){ try { _rtWireEditors(); } catch(_){} }, 0); } catch(_){}
+  try { setTimeout(function(){
+    try { _rtWireEditors(); } catch(_){}
+    try { _feedWireCardEditors(); } catch(_){}   // v2.3.911
+  }, 0); } catch(_){}
+}
+/* v2.3.911: 피드 카드 댓글창의 파일 훅. 상세 팝업과 같은 버퍼를 쓰되, 한 번에 한 칸만
+   쓰므로 다른 칸으로 옮기면 옛 칸을 먼저 비우고 미리보기 위치를 옮긴다. */
+function _feedWireCardEditors() {
+  document.querySelectorAll('[id^="feed-comment-input-"]').forEach(function(el){
+    var pid = 'feed-cmt-att-' + el.id.slice('feed-comment-input-'.length);
+    el._rtFileHook = function(files){
+      if (window._notesCmtPreviewId !== pid) {
+        window._notesCmtAttach = []; window._notesCmtEditKeep = [];
+        try { _notesCmtRenderPreview(); } catch(_){}   // 옛 칸 비우기
+        window._notesCmtPreviewId = pid;
+      }
+      try { [].forEach.call(files, _notesCmtAddFile); } catch(_){}
+    };
+  });
 }
 function renderFeedCardHtml(p){
   const cat = feedCatInfo(p.category);
@@ -37187,9 +37205,10 @@ function renderFeedCardHtml(p){
             <!-- v2.3.906: 서식 편집기 — 이미지·파일은 붙여넣거나 끌어넣기 -->
             <div style="flex:1;min-width:0">
               <div class="rt-toolbar" data-for="feed-comment-input-${p.id}"></div>
-              <div class="rt-editor rt-sm" id="feed-comment-input-${p.id}" contenteditable="true"
-                   data-ph="댓글을 남겨보세요… (이미지·파일은 붙여넣거나 끌어넣기)"
+              <div class="rt-editor rt-sm" id="feed-comment-input-${p.id}" contenteditable="true" data-files="1"
+                   data-ph="댓글을 남겨보세요… (📎 파일 버튼, 또는 붙여넣기·끌어넣기)"
                    onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();addFeedComment(${p.id});}"></div>
+              <div id="feed-cmt-att-${p.id}" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
             </div>
             <button onclick="addFeedComment(${p.id})" style="background:#0a0a0a;color:#fff;border:0;border-radius:999px;padding:7px 14px;font-size:11.5px;font-weight:700;cursor:pointer;letter-spacing:-.1px">전송</button>
           </div>
@@ -38431,7 +38450,10 @@ async function addFeedComment(postId){
   const input = document.getElementById(`feed-comment-input-${postId}`);
   if (!input) return;
   const text = (input.value||'').trim();
-  if (!text) return;
+  // v2.3.911: 이 칸에서 붙인 첨부만 가져온다(버퍼는 상세 팝업과 공용)
+  const _pend = (window._notesCmtPreviewId === ('feed-cmt-att-' + postId) && Array.isArray(window._notesCmtAttach))
+    ? window._notesCmtAttach.slice() : [];
+  if (!text && !_pend.length) return;
   const p = DB.feedPosts.find(x => x.id === postId);
   if (!p) return;
   if (!Array.isArray(p.comments)) p.comments = [];
@@ -38444,7 +38466,15 @@ async function addFeedComment(postId){
   //   (Date.now() 는 ms 단위 13자리, +Math.floor(Math.random()*1000) 으로 1ms 내 동시작성도 구분)
   //   기존 _nextId.feedComment 카운터는 더 이상 사용하지 않음 (다중사용자 충돌 원인)
   const newCid = Date.now() * 1000 + Math.floor(Math.random() * 1000);
-  p.comments.push({
+  // v2.3.911: 첨부 Storage 업로드 (있을 때만) — 상세 팝업과 같은 경로·같은 함수
+  let _atts = [];
+  if (_pend.length) {
+    try { showNotif('⏳ 첨부 업로드 중…', 'info'); } catch(_){}
+    try { _atts = await _feedUploadFileList(_pend, 'commentFiles/feedcmt/' + postId + '/' + newCid); } catch(_){}
+    window._notesCmtAttach = []; window._notesCmtPreviewId = '';
+    try { _notesCmtRenderPreview(); } catch(_){}
+  }
+  const _newCmt = {
     id: newCid,
     text,
     parentId: parentId,
@@ -38452,7 +38482,9 @@ async function addFeedComment(postId){
     authorName: u.name,
     authorEmail: u.email,
     createdAt: new Date().toISOString(),
-  });
+  };
+  if (_atts.length) _newCmt.attachments = _atts;
+  p.comments.push(_newCmt);
   input.value = '';
   input.style.height = '36px';
   // 답글 모드 초기화
