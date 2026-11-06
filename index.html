@@ -6405,7 +6405,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.909';
+const ERP_VERSION = 'v2.3.910';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -14417,29 +14417,50 @@ function _notesDetailEditComment(postId, commentId) {
   var actEl = document.getElementById('notes-cm-actions-' + postId + '-' + cidStr);
   if (!textEl || !actEl) return;
   // v2.3.905: 수정도 서식 편집기로 — 저장된 서식을 그대로 고칠 수 있어야 한다
-  textEl.innerHTML = '<div class="rt-toolbar" data-for="notes-cm-edit-' + postId + '-' + cidStr + '"></div>'
-    + '<div class="rt-editor rt-sm" id="notes-cm-edit-' + postId + '-' + cidStr + '" contenteditable="true" data-ph="댓글을 입력해 주세요…"></div>';
+  var _eid = 'notes-cm-edit-' + postId + '-' + cidStr;
+  textEl.innerHTML = '<div class="rt-toolbar" data-for="' + _eid + '"></div>'
+    + '<div class="rt-editor rt-sm" id="' + _eid + '" contenteditable="true" data-files="1" data-ph="댓글을 입력해 주세요… (📎 파일 버튼, 또는 붙여넣기·끌어넣기)"></div>'
+    + '<div id="' + _eid + '-att" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>';
+  // v2.3.910: 수정 중에도 파일을 붙일 수 있다. 이미 붙어 있던 첨부는 keep 에 두고 거기서 뺀다.
+  window._notesCmtAttach = [];
+  window._notesCmtEditKeep = Array.isArray(c.attachments) ? c.attachments.slice() : [];
+  window._notesCmtPreviewId = _eid + '-att';
   try {
     _rtWireEditors();
-    var _ce = document.getElementById('notes-cm-edit-' + postId + '-' + cidStr);
-    if (_ce) _ce.value = c.text || '';
+    var _ce = document.getElementById(_eid);
+    if (_ce) {
+      _ce.value = c.text || '';
+      _ce._rtFileHook = function(files){ try { [].forEach.call(files, _notesCmtAddFile); } catch(_){} };
+    }
   } catch(_){}
+  try { _notesCmtRenderPreview(); } catch(_){}
   actEl.innerHTML = ''
     + '<button onclick="_notesDetailSaveEdit(' + postId + ',\'' + cidStr + '\')" style="background:#16a34a;color:#fff;border:1px solid #15803d;border-radius:6px;padding:4px 12px;font-size:11.5px;font-weight:700;cursor:pointer">💾 저장</button>'
     + '<button onclick="_notesDetailCancelEdit(' + postId + ')" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;padding:4px 12px;font-size:11.5px;font-weight:700;cursor:pointer">취소</button>';
   var ta = document.getElementById('notes-cm-edit-' + postId + '-' + cidStr);
   if (ta) { try { ta.focus(); } catch(_){} }
 }
-function _notesDetailSaveEdit(postId, commentId) {
+async function _notesDetailSaveEdit(postId, commentId) {
   var cidStr = String(commentId);
   var ta = document.getElementById('notes-cm-edit-' + postId + '-' + cidStr);
   if (!ta) return;
   var newText = ta.value.trim();
-  if (!newText) { try { showNotif('내용을 입력하세요','warning'); } catch(_){} return; }
+  // v2.3.910: 첨부만 바꾸는 수정도 있다 — 글이 비어도 첨부가 있으면 저장한다
+  var _keep = Array.isArray(window._notesCmtEditKeep) ? window._notesCmtEditKeep.slice() : [];
+  var _pend = Array.isArray(window._notesCmtAttach) ? window._notesCmtAttach.slice() : [];
+  if (!newText && !_keep.length && !_pend.length) { try { showNotif('내용을 입력하세요','warning'); } catch(_){} return; }
   var p = (DB.feedPosts||[]).find(function(x){ return x && x.id === postId; });
   if (!p) return;
   var c = (p.comments||[]).find(function(x){ return x && String(x.id) === cidStr; });
   if (!c) return;
+  var _added = [];
+  if (_pend.length) {
+    try { showNotif('⏳ 첨부 업로드 중…', 'info'); } catch(_){}
+    try { _added = await _feedUploadFileList(_pend, 'commentFiles/feedcmt/' + postId + '/' + cidStr); } catch(_){}
+  }
+  var _merged = _keep.concat(_added);
+  if (_merged.length) c.attachments = _merged; else delete c.attachments;
+  window._notesCmtAttach = []; window._notesCmtEditKeep = []; window._notesCmtPreviewId = '';
   c.text = newText;
   c.updatedAt = new Date().toISOString();
   try { if (typeof saveDataNow === 'function') saveDataNow(); else if (typeof saveData === 'function') saveData(); } catch(_){}
@@ -14447,6 +14468,8 @@ function _notesDetailSaveEdit(postId, commentId) {
   try { showNotif('✅ 수정 완료','success'); } catch(_){}
 }
 function _notesDetailCancelEdit(postId) {
+  // v2.3.910: 수정 취소 — 첨부 버퍼와 미리보기 위치를 되돌린다
+  window._notesCmtAttach = []; window._notesCmtEditKeep = []; window._notesCmtPreviewId = '';
   _notesDetailRefresh(postId);
 }
 
@@ -14584,19 +14607,31 @@ function _notesCmtAddFile(file){
   reader.readAsDataURL(file);
 }
 function _notesCmtAttachRemove(idx){ (window._notesCmtAttach||[]).splice(idx, 1); _notesCmtRenderPreview(); }
+/* v2.3.910: 미리보기를 '지금 쓰고 있는 칸' 에 그린다 — 맨 아래 작성란이거나, 수정 중인 댓글.
+   수정 중에는 이미 붙어 있던 첨부(keep)도 같이 보여 주고 거기서 뺄 수 있어야 한다. */
+window._notesCmtEditKeep = window._notesCmtEditKeep || [];
+function _notesCmtEditKeepRemove(idx){ (window._notesCmtEditKeep||[]).splice(idx, 1); _notesCmtRenderPreview(); }
 function _notesCmtRenderPreview(){
-  var box = document.getElementById('notes-cmt-attach-preview');
+  var box = document.getElementById(window._notesCmtPreviewId || 'notes-cmt-attach-preview')
+         || document.getElementById('notes-cmt-attach-preview');
   if (!box) return;
+  var keep = window._notesCmtEditKeep || [];
   var a = window._notesCmtAttach || [];
-  if (!a.length) { box.innerHTML = ''; return; }
-  box.innerHTML = a.map(function(at, idx){
-    var isImg = (at.type||'').indexOf('image/') === 0;
-    var prev = isImg ? '<img src="' + at.data + '" style="width:30px;height:30px;object-fit:cover;border-radius:5px;flex-shrink:0">' : '<span style="font-size:15px;flex-shrink:0">📄</span>';
-    var nm = (at.name||'파일').replace(/</g,'&lt;');
+  if (!keep.length && !a.length) { box.innerHTML = ''; return; }
+  var chip = function(prev, nm, onclick){
     return '<div style="display:flex;align-items:center;gap:6px;padding:4px 7px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;max-width:200px">' + prev
       + '<span style="flex:1;min-width:0;font-size:11px;font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + nm + '</span>'
-      + '<button type="button" onclick="_notesCmtAttachRemove(' + idx + ')" title="제거" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;cursor:pointer;flex-shrink:0">✕</button></div>';
-  }).join('');
+      + '<button type="button" onclick="' + onclick + '" title="제거" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;cursor:pointer;flex-shrink:0">\u2715</button></div>';
+  };
+  var thumb = function(at){
+    var isImg = (at.type||'').indexOf('image/') === 0;
+    var src = at.url || at.data || '';
+    return (isImg && src) ? '<img src="' + src + '" style="width:30px;height:30px;object-fit:cover;border-radius:5px;flex-shrink:0">'
+                          : '<span style="font-size:15px;flex-shrink:0">\uD83D\uDCCE</span>';
+  };
+  box.innerHTML =
+      keep.map(function(at, idx){ return chip(thumb(at), (at.name||'파일').replace(/</g,'&lt;'), '_notesCmtEditKeepRemove(' + idx + ')'); }).join('')
+    + a.map(function(at, idx){ return chip(thumb(at), (at.name||'파일').replace(/</g,'&lt;'), '_notesCmtAttachRemove(' + idx + ')'); }).join('');
 }
 // v2.3.242: 임의 첨부 배열을 Storage 업로드 → [{name,type,size,url}] 반환(실패분 제외, base64 durable 미포함)
 async function _feedUploadFileList(list, pathPrefix){
@@ -14688,6 +14723,8 @@ window._notesOpenPostDetail = function(postId) {
     const p = (DB.feedPosts||[]).find(x => x && x.id === postId);
     if (!p) return;
     window._notesCmtAttach = [];  // v2.3.242: 댓글 첨부 컴포저 초기화
+    // v2.3.910: 수정 중 모달을 그냥 닫았을 때 남는 찌꺼기 제거
+    window._notesCmtEditKeep = []; window._notesCmtPreviewId = '';
 
     // 기존 팝업 제거
     document.getElementById('notes-post-detail-overlay')?.remove();
@@ -47663,6 +47700,8 @@ function openExpenseDetail(expenseId) {
 
 /* v2.3.909: 결재 의견 편집기 배선 — 쉘을 그린 뒤와, 다시 그린 뒤에 부른다. */
 function _apWireCmtEditor() {
+  // v2.3.910: 작성란을 다시 배선한다는 건 수정 모드가 아니라는 뜻 — 수정용 첨부 버퍼를 비운다
+  window._apCmtEditKeep = []; window._apCmtPreviewId = 'ap-comment-attach-preview';
   try { _rtWireEditors(); } catch(_){}
   const _e = document.getElementById('ap-comment-input');
   if (_e) _e._rtFileHook = files => { window._apCmtPreviewId = 'ap-comment-attach-preview'; _apCommentAddFiles(files); };
@@ -48000,10 +48039,16 @@ function _apCommentRenderAttachPreview() {
   const wrap = document.getElementById(window._apCmtPreviewId || 'ap-comment-attach-preview')
             || document.getElementById('ap-comment-attach-preview');
   if (!wrap) return;
+  const keep = window._apCmtEditKeep || [];   // v2.3.910: 수정 중 — 이미 붙어 있던 첨부
   const files = window._apCommentAttachments || [];
-  if (!files.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  if (!keep.length && !files.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
   wrap.style.display = 'flex';
-  wrap.innerHTML = files.map((f, i) => {
+  wrap.innerHTML = keep.map((f, i) =>
+      '<div style="display:flex;align-items:center;gap:6px;padding:5px 9px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:11.5px">'
+    + '<span>' + ((f.type||'').indexOf('image/')===0 ? '🖼️' : '📎') + '</span>'
+    + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (f.name||'?').replace(/</g,'&lt;') + '</span>'
+    + '<button type="button" onclick="_apCmtEditKeepRemove(' + i + ')" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;padding:1px 7px;font-size:10.5px;cursor:pointer">제거</button>'
+    + '</div>').join('') + files.map((f, i) => {
     const sz = f.size < 1024 ? f.size+'B' : f.size < 1024*1024 ? Math.round(f.size/1024)+'KB' : (f.size/1024/1024).toFixed(1)+'MB';
     return '<div style="display:flex;align-items:center;gap:6px;padding:5px 9px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:11.5px">'
       + '<span>' + ((f.type||'').indexOf('image/')===0 ? '🖼️' : '📄') + '</span>'
@@ -48015,6 +48060,12 @@ function _apCommentRenderAttachPreview() {
 function _apCommentRemoveAttach(idx) {
   if (!Array.isArray(window._apCommentAttachments)) return;
   window._apCommentAttachments.splice(idx, 1);
+  _apCommentRenderAttachPreview();
+}
+// v2.3.910: 수정 중 이미 붙어 있던 첨부 빼기
+function _apCmtEditKeepRemove(idx) {
+  if (!Array.isArray(window._apCmtEditKeep)) return;
+  window._apCmtEditKeep.splice(idx, 1);
   _apCommentRenderAttachPreview();
 }
 
@@ -48233,12 +48284,21 @@ function editComment(commentId) {
   if (!textEl || !actEl) return;
   // v2.3.902: 수정도 서식 편집기로 — 저장된 HTML 을 그대로 고칠 수 있어야 한다
   textEl.innerHTML = '<div class="rt-toolbar" data-for="apcm-edit-' + cidStr + '"></div>'
-    + '<div class="rt-editor rt-sm" id="apcm-edit-' + cidStr + '" contenteditable="true" data-ph="의견을 입력해 주세요…"></div>';
+    + '<div class="rt-editor rt-sm" id="apcm-edit-' + cidStr + '" contenteditable="true" data-files="1" data-ph="의견을 입력해 주세요… (📎 파일 버튼, 또는 붙여넣기·끌어넣기)"></div>'
+    + '<div id="apcm-edit-att-' + cidStr + '" style="display:none;flex-wrap:wrap;gap:6px;margin-top:8px"></div>';
+  // v2.3.910: 수정 중에도 파일을 붙일 수 있다. 이미 붙어 있던 첨부는 keep 에 두고 거기서 뺀다.
+  window._apCommentAttachments = [];
+  window._apCmtEditKeep = Array.isArray(c.attachments) ? c.attachments.slice() : [];
+  window._apCmtPreviewId = 'apcm-edit-att-' + cidStr;
   try {
     _rtWireEditors();
     var _ed = document.getElementById('apcm-edit-' + cidStr);
-    if (_ed) _ed.value = c.text || '';
+    if (_ed) {
+      _ed.value = c.text || '';
+      _ed._rtFileHook = function(files){ window._apCmtPreviewId = 'apcm-edit-att-' + cidStr; _apCommentAddFiles(files); };
+    }
   } catch(_){}
+  try { _apCommentRenderAttachPreview(); } catch(_){}
   actEl.innerHTML = ''
     + '<button onclick="saveCommentEdit(\'' + cidStr + '\')" style="background:#16a34a;color:#fff;border:1px solid #15803d;border-radius:6px;padding:6px 16px;font-size:12.5px;font-weight:700;cursor:pointer">💾 저장</button>'
     + '<button onclick="cancelCommentEdit(\'' + cidStr + '\')" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;padding:6px 16px;font-size:12.5px;font-weight:700;cursor:pointer">취소</button>';
@@ -48246,15 +48306,56 @@ function editComment(commentId) {
   if (ta) { try { ta.focus(); } catch(_){} }
 }
 
-function saveCommentEdit(commentId) {
+/* v2.3.910: 수정에서 새로 붙인 파일을 등록(addApprovalComment)과 같은 규칙으로 보관한다 —
+   900KB 이상은 Storage 로 올리고 URL 만 남긴다(Firestore 1MB 한도). */
+async function _apCmtPersistAttaches(cmtId, attaches) {
+  for (var i = 0; i < attaches.length; i++) {
+    var at = attaches[i];
+    if (!at || typeof at.data !== 'string' || at.data.indexOf('data:') !== 0) continue;
+    if (at.data.length < 900000) continue;
+    if (typeof window._storageUploadDataUrl !== 'function') {
+      try { showNotif('⚠️ 1MB 초과 파일은 Storage 설정 후 공유됩니다 — 현재 이 기기에서만 보임', 'warning'); } catch(_){}
+      continue;
+    }
+    try {
+      var _safe = String(at.name || 'file').replace(/[^\w.\-가-힣]/g, '_');
+      var _path = 'commentFiles/' + cmtId + '/e' + Date.now() + '_' + i + '_' + _safe;
+      var _url = await window._storageUploadDataUrl(_path, at.data, at.type || '');
+      if (_url) attaches[i] = Object.assign({}, at, { data: _url, storagePath: _path });
+    } catch(e) {
+      console.warn('[v2.3.910] Storage 업로드 실패:', e);
+      try { showNotif('⚠️ ' + (at.name||'파일') + ' 업로드 실패 — 이 기기에서만 보입니다', 'warning'); } catch(_){}
+    }
+  }
+  return attaches;
+}
+async function saveCommentEdit(commentId) {
   var cidStr = String(commentId);
   var ta = document.getElementById('apcm-edit-' + cidStr);
   if (!ta) return;
   var newText = ta.value.trim();
-  if (!newText) { try { showNotif('내용을 입력하세요','warning'); } catch(_){} return; }
+  // v2.3.910: 첨부만 바꾸는 수정도 있다 — 글이 비어도 첨부가 있으면 저장한다
+  var _keep = Array.isArray(window._apCmtEditKeep) ? window._apCmtEditKeep.slice() : [];
+  var _pend = Array.isArray(window._apCommentAttachments) ? window._apCommentAttachments.slice() : [];
+  if (!newText && !_keep.length && !_pend.length) { try { showNotif('내용을 입력하세요','warning'); } catch(_){} return; }
   var idx = (DB.approvalComments||[]).findIndex(function(x){ return x && String(x.id) === cidStr; });
   if (idx < 0) { try { showNotif('의견을 찾을 수 없습니다','warning'); } catch(_){} return; }
   var ref = DB.approvalComments[idx].approvalId;
+  if (_pend.length) {
+    try { showNotif('⏳ 첨부 업로드 중…', 'info'); } catch(_){}
+    try { _pend = await _apCmtPersistAttaches(cidStr, _pend); } catch(_){}
+  }
+  var _merged = _keep.concat(_pend);
+  DB.approvalComments[idx].attachments = _merged;
+  // 작은 첨부는 공유 저장소에도 — 다른 기기·사용자가 볼 수 있게(등록과 같은 규칙)
+  try {
+    if (typeof _saveSharedCommentImage === 'function') {
+      _merged.forEach(function(at, ai){
+        if (at && typeof at.data === 'string' && at.data.indexOf('data:') === 0 && at.data.length > 100 && at.data.length < 900000) _saveSharedCommentImage(cidStr, ai, at.data);
+      });
+    }
+  } catch(_){}
+  window._apCommentAttachments = []; window._apCmtEditKeep = []; window._apCmtPreviewId = 'ap-comment-attach-preview';
   DB.approvalComments[idx].text = newText;
   DB.approvalComments[idx].updatedAt = Date.now();
   console.log('✏️ [COMMENT EDIT] id=' + cidStr + ' text=' + newText.slice(0, 40));
@@ -48269,6 +48370,8 @@ function saveCommentEdit(commentId) {
 }
 
 function cancelCommentEdit(commentId) {
+  // v2.3.910: 수정 취소 — 첨부 버퍼와 미리보기 위치를 되돌린다
+  window._apCommentAttachments = []; window._apCmtEditKeep = []; window._apCmtPreviewId = 'ap-comment-attach-preview';
   var cidStr = String(commentId);
   var c = (DB.approvalComments||[]).find(function(x){ return x && String(x.id) === cidStr; });
   if (!c) return;
