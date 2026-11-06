@@ -5498,10 +5498,13 @@ EXP YYYYMMDD 까지</textarea></div>
           <div style="display:flex;gap:6px;align-items:flex-end">
             <button type="button" onclick="event.stopPropagation();toggleNpInputEmojiPicker(this,'np-comment-input')" title="이모지 넣기" style="padding:6px 10px;background:#fff;border:1px solid var(--gray-300);border-radius:8px;font-size:16px;cursor:pointer;line-height:1;flex-shrink:0;height:36px" onmouseenter="this.style.background='#f3f4f6';this.style.borderColor='var(--sky-400)'" onmouseleave="this.style.background='#fff';this.style.borderColor='var(--gray-300)'">🙂</button>
             <!-- v1.9.347: textarea + 자동 크기 조절 + Enter 전송 / Shift+Enter 줄바꿈 -->
-            <textarea class="fi" id="np-comment-input" placeholder="의견을 남겨주세요... (Shift+Enter 줄바꿈)" rows="1"
-                      style="flex:1;resize:none;min-height:36px;max-height:160px;line-height:1.5;padding:8px 12px;font-family:inherit;font-size:13px;overflow-y:auto"
-                      oninput="_autoGrowNpCommentInput(this)"
-                      onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();addNpComment();}"></textarea>
+            <!-- v2.3.907: 서식 편집기 — 이미지·파일은 붙여넣거나 끌어넣기 -->
+            <div style="flex:1;min-width:0">
+              <div class="rt-toolbar" data-for="np-comment-input"></div>
+              <div class="rt-editor rt-sm" id="np-comment-input" contenteditable="true"
+                   data-ph="의견을 남겨주세요… (이미지는 붙여넣기)"
+                   onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();addNpComment();}"></div>
+            </div>
             <button type="button" onclick="addNpComment()" style="padding:6px 16px;background:var(--sky-500);color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:700;height:36px;flex-shrink:0">전송</button>
           </div>
         </div>
@@ -6402,7 +6405,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.905';
+const ERP_VERSION = 'v2.3.907';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -13938,7 +13941,7 @@ function renderDashStats() {
             + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:11.5px;font-weight:700;color:#334155">' + escFnX(c.authorName||'익명') + '</span><span style="font-size:10px;color:#94a3b8">' + t + '</span>'
             + (mine ? ('<button type="button" onclick="event.stopPropagation();_dashEditComment(' + top.id + ',\'' + c.id + '\')" style="margin-left:6px;background:#eaf2fe;color:#2563eb;border:1px solid #bfdbfe;border-radius:6px;padding:1px 8px;font-size:10px;font-weight:700;cursor:pointer;line-height:1.5">수정</button><button type="button" onclick="event.stopPropagation();_dashDeleteComment(' + top.id + ',\'' + c.id + '\')" style="margin-left:4px;background:#fef2f3;color:#e5484d;border:1px solid #fbd5d5;border-radius:6px;padding:1px 8px;font-size:10px;font-weight:700;cursor:pointer;line-height:1.5">삭제</button>') : '')
             + '</div>'
-            + '<div style="font-size:12px;color:#475569;line-height:1.5;white-space:pre-wrap;word-break:break-word;margin-top:2px">' + escFnX(c.text||'') + '</div>'
+            + '<div style="font-size:12px;color:#475569;line-height:1.5;word-break:break-word;margin-top:2px">' + ((typeof _rtNoteHtml==='function') ? _rtNoteHtml(c.text||'') : ('<div style="white-space:pre-wrap">' + escFnX(c.text||'') + '</div>')) + '</div>'   // v2.3.906
             + '</div>';
         }).join('');
     const dashInteractiveHtml = '<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eef2f6" onclick="event.stopPropagation()">'
@@ -13946,9 +13949,14 @@ function renderDashStats() {
       + '<div style="font-size:11px;color:#64748b;font-weight:700;margin-bottom:6px">💬 댓글 ' + _dCmts.length + '</div>'
       + '<div>' + _dCmtRows + '</div>'
       + '<div style="display:flex;gap:6px;align-items:flex-end;margin-top:8px">'
-      + '<textarea id="dash-cmt-input-' + top.id + '" placeholder="댓글을 남겨보세요... (Enter 전송)" rows="1" onclick="event.stopPropagation()" onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();_dashAddComment(' + top.id + ')}" oninput="this.style.height=\'auto\';this.style.height=Math.min(this.scrollHeight,90)+\'px\'" style="flex:1;resize:none;min-height:34px;max-height:90px;line-height:1.5;padding:7px 10px;font-family:inherit;font-size:12.5px;border:1px solid #cbd5e1;border-radius:8px;outline:none;box-sizing:border-box"></textarea>'
+      + '<div style="flex:1;min-width:0" onclick="event.stopPropagation()">'   /* v2.3.906: 서식 편집기 */
+      +   '<div class="rt-toolbar" data-for="dash-cmt-input-' + top.id + '"></div>'
+      +   '<div class="rt-editor rt-sm" id="dash-cmt-input-' + top.id + '" contenteditable="true" data-ph="\uB313\uAE00\uC744 \uB0A8\uACA8\uBCF4\uC138\uC694\u2026" '
+      +     'onkeydown="if(event.key===\'Enter\'&&(event.ctrlKey||event.metaKey)){event.preventDefault();_dashAddComment(' + top.id + ');}"></div>'
+      + '</div>'
       + '<button type="button" onclick="event.stopPropagation();_dashAddComment(' + top.id + ')" style="background:#0f172a;color:#fff;border:0;border-radius:8px;padding:0 14px;height:34px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0">전송</button>'
       + '</div></div>';
+    try { _rtWireSoon(); } catch(_){}   // v2.3.906: 대시보드 카드 서식 편집기 배선
     const topMainHtml = `
       <div style="cursor:pointer;border-radius:8px;padding:8px 6px;margin:0 -6px;transition:background .12s;flex:1 1 auto;min-height:0;display:flex;flex-direction:column"
            onclick="event.stopPropagation();_notesOpenPostDetail(${top.id})"
@@ -37006,6 +37014,11 @@ function _feedPostFilesHtml(p){
   </div>`;
 }
 
+/* v2.3.906: 피드·대시보드 카드는 innerHTML 로 통째로 다시 그린다 —
+   그릴 때마다 서식 편집기를 다시 배선한다(_rtWireEditors 는 멱등). */
+function _rtWireSoon() {
+  try { setTimeout(function(){ try { _rtWireEditors(); } catch(_){} }, 0); } catch(_){}
+}
 function renderFeedCardHtml(p){
   const cat = feedCatInfo(p.category);
   // v2.3.241: hydrate 전/실패 시 남는 마커(__idb__/__stored__)는 제외 — 깨진 <img> 방지(상세팝업과 동일 필터)
@@ -37050,6 +37063,7 @@ function renderFeedCardHtml(p){
   // 최근 3건만 표시 시 부모 포함하여 자식도 같이 표시되도록 그냥 트리 전체 렌더 후 일부 자르기는 복잡 → 전체 렌더, 최대 6건 까지 표시.
   const commentsLatestN = comments.slice(-6);
   const commentsHtml = (typeof renderFeedCommentTreeHtml==='function') ? renderFeedCommentTreeHtml(commentsLatestN, p.id, myEmail, isAdmin) : '';
+  try { _rtWireSoon(); } catch(_){}   // v2.3.906
   const hiddenCount = Math.max(0, comments.length - commentsLatestN.length);
   const moreCommentsBtn = hiddenCount > 0 ? `<button onclick="toggleFeedAllComments(${p.id})" id="feed-more-${p.id}" style="background:none;border:0;color:#2563eb;font-size:11.5px;font-weight:600;cursor:pointer;padding:4px 0">댓글 ${hiddenCount}개 더보기</button>` : '';
 
@@ -37124,7 +37138,13 @@ function renderFeedCardHtml(p){
           ${moreCommentsBtn}
           <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
             ${feedAvatarHtml(feedCurrentUser().name, feedCurrentUser().email, 26)}
-            <textarea id="feed-comment-input-${p.id}" placeholder="댓글을 남겨보세요... (Shift+Enter 줄바꿈)" rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addFeedComment(${p.id})}else if(event.key==='Escape'){this.dataset.parentId='';this.placeholder='댓글을 남겨보세요... (Shift+Enter 줄바꿈)';}" oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'" style="flex:1;background:#fff;border:1px solid #cbd5e1;border-radius:14px;padding:9px 14px;font-size:12.5px;font-family:inherit;outline:none;transition:all .18s;letter-spacing:-.1px;resize:none;min-height:38px;max-height:120px;line-height:1.5;box-sizing:border-box" onfocus="this.style.borderColor='#64748b';this.style.boxShadow='0 0 0 3px rgba(100,116,139,.12)'" onblur="this.style.borderColor='#cbd5e1';this.style.boxShadow='none'"></textarea>
+            <!-- v2.3.906: 서식 편집기 — 이미지·파일은 붙여넣거나 끌어넣기 -->
+            <div style="flex:1;min-width:0">
+              <div class="rt-toolbar" data-for="feed-comment-input-${p.id}"></div>
+              <div class="rt-editor rt-sm" id="feed-comment-input-${p.id}" contenteditable="true"
+                   data-ph="댓글을 남겨보세요… (이미지·파일은 붙여넣거나 끌어넣기)"
+                   onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();addFeedComment(${p.id});}"></div>
+            </div>
             <button onclick="addFeedComment(${p.id})" style="background:#0a0a0a;color:#fff;border:0;border-radius:999px;padding:7px 14px;font-size:11.5px;font-weight:700;cursor:pointer;letter-spacing:-.1px">전송</button>
           </div>
         </div>
@@ -38239,7 +38259,9 @@ function _renderFeedCommentNode(c, postId, myEmail, isAdmin, depth) {
   var safeName = (typeof esc==='function') ? esc(c.authorName||'익명') : (c.authorName||'익명');
   var time = (typeof feedTimeAgo==='function') ? feedTimeAgo(c.createdAt) : '';
   var editedTag = c.updatedAt && c.updatedAt !== c.createdAt ? ' · 수정됨' : '';
-  var textSafe = (typeof esc==='function') ? esc(c.text||'').replace(/\n/g,'<br>') : (c.text||'');
+  // v2.3.906: 서식 댓글은 정화된 HTML(상세 팝업과 같은 규칙), 옛 글은 종전대로
+  var textSafe = (typeof _rtNoteHtml === 'function') ? _rtNoteHtml(c.text||'')
+    : ((typeof esc==='function') ? esc(c.text||'').replace(/\n/g,'<br>') : (c.text||''));
   var reactions = c.reactions || {};
   var reactionsHtml = Object.keys(reactions).filter(function(k){ return Number(reactions[k])>0; }).map(function(k){
     return '<span style="display:inline-block;background:#f0f9ff;border:1px solid #bae6fd;border-radius:999px;padding:1px 8px;font-size:11px;margin-right:4px;cursor:pointer" onclick="toggleFeedCommentReaction(' + JSON.stringify(postId) + ',' + JSON.stringify(c.id) + ',\'' + k + '\')">' + k + ' ' + reactions[k] + '</span>';
@@ -38254,7 +38276,7 @@ function _renderFeedCommentNode(c, postId, myEmail, isAdmin, depth) {
     +     '<span class="name" style="font-size:12px;font-weight:700;color:#0f172a">' + arrow + safeName + '</span>'
     +     '<span class="time" style="font-size:10.5px;color:#94a3b8">' + time + editedTag + '</span>'
     +   '</div>'
-    +   '<div id="feed-cm-text-' + postId + '-' + c.id + '" style="font-size:12.5px;color:#1e293b;line-height:1.55;white-space:pre-wrap;word-break:break-word">' + textSafe + '</div>'
+    +   '<div id="feed-cm-text-' + postId + '-' + c.id + '" style="font-size:12.5px;color:#1e293b;line-height:1.55;word-break:break-word">' + textSafe + '</div>'
     +   _feedCommentAttachHtml(c)
     +   (reactionsHtml ? '<div style="margin-top:4px">' + reactionsHtml + '</div>' : '')
     +   '<div id="feed-cm-actions-' + postId + '-' + c.id + '" style="display:flex;gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap">'
@@ -46963,18 +46985,9 @@ async function openPoApprovalDetail(orderId) {
       </div>
     </div>
 
-    <!-- ⑥ 의견/댓글 -->
-    <div id="ap-comments-list" style="margin-bottom:12px"></div>
-    <div id="ap-reply-hint" style="display:none;font-size:11.5px;color:var(--sky-700);background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:6px 10px;margin-bottom:6px;align-items:center;justify-content:space-between">
-      <span id="ap-reply-hint-text"></span>
-      <button onclick="cancelApReply()" style="background:none;border:none;color:#b91c1c;cursor:pointer;font-size:11.5px;font-weight:700">✕ 취소</button>
-    </div>
-    <div style="display:flex;gap:8px;align-items:flex-end;background:#fff;border:1px solid var(--gray-200);border-radius:10px;padding:10px 12px;box-shadow:0 2px 8px rgba(0,0,0,.03)">
-      <button onclick="toggleApEmojiPicker(event)" style="background:none;border:none;cursor:pointer;font-size:20px;line-height:1;flex-shrink:0;padding:4px" title="이모지 추가">😊</button>
-      <textarea id="ap-comment-inp" placeholder="의견을 입력해 주세요..." rows="1" style="flex:1;border:none;resize:none;outline:none;font-size:13px;font-family:inherit;min-height:24px;max-height:120px;line-height:1.5;padding:4px 0" oninput="autoResizeTextarea(this)" onkeydown="if((event.ctrlKey||event.metaKey)&&event.key==='Enter')addApComment(${ap.id})"></textarea>
-      <button class="btn btn-primary btn-sm" onclick="addApComment(${ap.id})" style="flex-shrink:0">등록</button>
-    </div>
-    <div style="font-size:10.5px;color:var(--gray-400);margin-top:4px;text-align:right">Ctrl/Cmd + Enter 로 등록</div>
+    <!-- ⑥ 의견/댓글 — v2.3.906: 다른 결재 화면과 같은 공통 쉘.
+         종전엔 자체 마크업이었고 등록 버튼이 부르는 addApComment 가 없어 동작하지 않았다. -->
+    ${renderCommentSectionShell()}
   `;
 
   // 모달 헤더 — 문서번호 + 발주서 PDF 보기 + 인쇄 버튼
@@ -54954,6 +54967,7 @@ function openPmDetail(pid) {
 }
 
 function _pmRenderComments(p) {
+  try { _rtWireSoon(); } catch(_){}   // v2.3.907: 그릴 때마다 서식 편집기 배선
   const me = _pmCurrentUser();
   const cs = Array.isArray(p.comments) ? p.comments : [];
   let h = '<div style="border-top:1px solid #eef2f6;padding-top:14px">';
@@ -54967,13 +54981,19 @@ function _pmRenderComments(p) {
     rs.forEach(function(r){ h += _pmRenderOneComment(p, r, me, true); });
     if (_pmReplyOpenFor === c.id) {
       h += '<div style="margin:2px 0 12px 30px;display:flex;gap:6px">'
-        + '<textarea id="pm-reply-input" rows="1" placeholder="답글 입력..." style="flex:1;border:1px solid #cbd5e1;border-radius:7px;padding:6px 8px;font-size:12.5px;resize:vertical;font-family:inherit;box-sizing:border-box"></textarea>'
+        + '<div style="flex:1;min-width:0">'   /* v2.3.907: 서식 편집기 */
+        +   '<div class="rt-toolbar" data-for="pm-reply-input"></div>'
+        +   '<div class="rt-editor rt-sm" id="pm-reply-input" contenteditable="true" data-ph="\uB2F5\uAE00 \uC785\uB825\u2026"></div>'
+        + '</div>'
         + '<button onclick="addPmReply(\'' + p.id + '\',\'' + c.id + '\')" style="padding:6px 12px;background:#0f172a;color:#fff;border:0;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">등록</button>'
         + '</div>';
     }
   });
   h += '<div style="display:flex;gap:6px;margin-top:10px">'
-    + '<textarea id="pm-comment-input" rows="2" placeholder="댓글을 입력하세요..." style="flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:8px;font-size:12.5px;resize:vertical;font-family:inherit;box-sizing:border-box"></textarea>'
+    + '<div style="flex:1;min-width:0">'   /* v2.3.907: 서식 편집기 */
+    +   '<div class="rt-toolbar" data-for="pm-comment-input"></div>'
+    +   '<div class="rt-editor rt-sm" id="pm-comment-input" contenteditable="true" data-ph="\uB313\uAE00\uC744 \uC785\uB825\uD558\uC138\uC694\u2026"></div>'
+    + '</div>'
     + '<button onclick="addPmComment(\'' + p.id + '\')" style="padding:8px 14px;background:#0f172a;color:#fff;border:0;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer">등록</button>'
     + '</div>';
   h += '</div>';
@@ -54998,7 +55018,10 @@ function _pmRenderOneComment(p, c, me, isReply) {
       + '<button onclick="pmCancelEdit(\'' + p.id + '\')" style="padding:4px 10px;background:#fff;color:#64748b;border:1px solid #cbd5e1;border-radius:6px;font-size:11.5px;cursor:pointer">취소</button>'
       + '</div>';
   } else {
-    h += '<div style="font-size:12.5px;color:#1e293b;line-height:1.5;white-space:pre-wrap;word-break:break-word">' + _esc(c.text||'') + '</div>';
+    // v2.3.907: 서식이면 정화된 HTML, 옛 글은 종전대로
+    h += '<div style="font-size:12.5px;color:#1e293b;line-height:1.5;word-break:break-word">'
+      + ((typeof _rtNoteHtml === 'function') ? _rtNoteHtml(c.text||'') : ('<div style="white-space:pre-wrap">' + _esc(c.text||'') + '</div>'))
+      + '</div>';
     // v2.2.3: 이모지 반응 영역
     var reactions = c.reactions || {};
     var reactionBadges = Object.keys(reactions).filter(function(k){ return Number(reactions[k])>0; }).map(function(k){
@@ -55723,7 +55746,12 @@ Gross 마진 ${estMarginNum !== null ? estMarginNum.toLocaleString()+'원' : '-'
           <div id="np-card-cmt-list-${it.id}" style="max-height:220px;overflow-y:auto;margin-bottom:6px;padding:4px;background:#fafafa;border:1px solid var(--gray-200);border-radius:8px">${commentsHtml}</div>
           <div style="display:flex;gap:4px;align-items:center">
             <button type="button" onclick="event.stopPropagation();toggleNpInputEmojiPicker(this,'np-card-cmt-input-${it.id}')" title="이모지 넣기" style="padding:4px 7px;background:#fff;border:1px solid var(--gray-300);border-radius:5px;font-size:14px;cursor:pointer;line-height:1;flex-shrink:0" onmouseenter="this.style.background='#f3f4f6';this.style.borderColor='var(--sky-400)'" onmouseleave="this.style.background='#fff';this.style.borderColor='var(--gray-300)'">🙂</button>
-            <textarea class="fi" id="np-card-cmt-input-${it.id}" placeholder="의견 (Shift+Enter 줄바꿈)" rows="1" style="flex:1;font-size:12px;padding:5px 8px;resize:none;font-family:inherit;min-height:26px;max-height:80px;line-height:1.4" oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,80)+'px'" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();event.stopPropagation();addNpCardComment('${it.id}');}" onclick="event.stopPropagation()"></textarea>
+            <!-- v2.3.907: 서식 편집기 -->
+            <div style="flex:1;min-width:0">
+              <div class="rt-toolbar" data-for="np-card-cmt-input-${it.id}"></div>
+              <div class="rt-editor rt-sm" id="np-card-cmt-input-${it.id}" contenteditable="true" data-ph="의견 (이미지는 붙여넣기)"
+                   onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();addNpCardComment('${it.id}');}"></div>
+            </div>
             <button type="button" onclick="event.stopPropagation();addNpCardComment('${it.id}')" style="padding:4px 12px;background:var(--sky-500);color:#fff;border:none;border-radius:5px;font-size:11.5px;cursor:pointer;font-weight:700">전송</button>
           </div>
         </div>
@@ -59437,6 +59465,7 @@ function renderNpComments() {
   }
   const myEmail = window._currentUser && window._currentUser.email;
   const myKey = _npMyKey();
+  try { _rtWireSoon(); } catch(_){}   // v2.3.907: 그릴 때마다 서식 편집기 배선
   container.innerHTML = _npComments.map((c, i) => {
     const isMe = myEmail && (c.authorEmail === myEmail
       || c.author === myEmail
@@ -59482,7 +59511,7 @@ function renderNpComments() {
             <button type="button" onclick="event.stopPropagation();saveEditNpComment(${i})" style="padding:3px 10px;background:var(--sky-500);color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-weight:700">저장</button>
           </div>
         </div>`
-      : escapeHtml(c.text);
+      : ((typeof _rtNoteHtml === 'function') ? _rtNoteHtml(c.text||'') : escapeHtml(c.text));   // v2.3.907
 
     // v1.9.188 — 아바타 아래에 addBtn 배치 (컬럼으로 묶음)
     const avatarCol = `<div style="display:flex;flex-direction:column;align-items:center;gap:5px;flex-shrink:0">
