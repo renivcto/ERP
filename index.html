@@ -6402,7 +6402,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.904';
+const ERP_VERSION = 'v2.3.905';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -14317,7 +14317,8 @@ function _notesRenderCommentNode(c, postId, myEmail, isAdmin, depth) {
   var editedTag = c.updatedAt && c.updatedAt !== c.createdAt ? ' · 수정됨' : '';
   var indent = Math.min(depth, 3) * 28;
   var arrow = depth > 0 ? '<span style="color:#94a3b8;margin-right:3px">↳</span>' : '';
-  var textSafe = escFn(c.text||'').replace(/\n/g,'<br>');
+  // v2.3.905: 서식 댓글은 정화된 HTML, 옛 글은 종전대로 줄바꿈 보존
+  var textSafe = (typeof _rtNoteHtml === 'function') ? _rtNoteHtml(c.text||'') : escFn(c.text||'').replace(/\n/g,'<br>');
   var bg = depth > 0 ? '#f8fafc' : '#fff';
   var html = '<div style="display:flex;gap:8px;padding:8px;margin-left:' + indent + 'px;background:' + bg + ';border-radius:6px;margin-bottom:2px">'
     + avatar
@@ -14333,6 +14334,7 @@ function _notesRenderCommentNode(c, postId, myEmail, isAdmin, depth) {
     +     (canEdit ? '<button type="button" onclick="_notesDetailEditComment(' + postId + ',\'' + c.id + '\')" style="background:#eef2ff;border:1px solid #c7d2fe;color:#4338ca;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;cursor:pointer;margin-left:auto">✏️ 수정</button>' : '')
     +     (canDel ? '<button type="button" onclick="_notesDetailDeleteComment(' + postId + ',\'' + c.id + '\')" style="background:transparent;border:0;color:#9ca3af;font-size:11px;cursor:pointer;text-decoration:underline">삭제</button>' : '')
     +   '</div>'
+    +   '<div id="notes-cm-reply-' + postId + '-' + c.id + '" style="display:none;margin-top:8px"></div>'   // v2.3.905: 답글창 자리
     + '</div>'
     + '</div>';
   if (c._children && c._children.length) {
@@ -14344,30 +14346,58 @@ function _notesRenderCommentsTree(comments, postId, myEmail, isAdmin) {
   var tree = _notesBuildCommentTree(comments);
   return tree.map(function(c){ return _notesRenderCommentNode(c, postId, myEmail, isAdmin, 0); }).join('');
 }
-// 답글 모드 진입
+/* v2.3.905: 답글을 그 댓글 바로 밑에서 쓴다 — 종전엔 맨 아래 입력칸으로 내려가야 했다.
+   한 번에 하나만 연다. 첨부 배열은 공용이라 열 때 비운다. */
+function _notesCloseInlineReply() {
+  // 답글 입력창(notes-cm-reply-input-…)이 아니라 '담는 칸' 만 비운다
+  document.querySelectorAll('[id^="notes-cm-reply-"]').forEach(function(el){
+    if (String(el.id).indexOf('notes-cm-reply-input-') === 0) return;
+    el.style.display = 'none'; el.innerHTML = '';
+  });
+}
 function _notesDetailReplyComment(postId, commentId) {
-  var inp = document.getElementById('notes-detail-comment-input');
-  if (!inp) return;
-  inp.dataset.parentId = String(commentId);
-  inp.placeholder = '답글 작성 중... (Esc 취소)';
-  inp.focus();
-  // hint 추가
   var p = (DB.feedPosts||[]).find(function(x){ return x && x.id === postId; });
   var c = p && (p.comments||[]).find(function(x){ return x && String(x.id) === String(commentId); });
-  var hint = document.getElementById('notes-reply-hint');
-  if (!hint) {
-    hint = document.createElement('div');
-    hint.id = 'notes-reply-hint';
-    hint.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:6px 10px;margin-top:6px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;font-size:11.5px;color:#0369a1';
-    inp.parentElement.appendChild(hint);
-  }
-  if (c) {
-    var snippet = (c.text||'').slice(0,30) + ((c.text||'').length>30?'...':'');
-    hint.innerHTML = '<span>↳ <b>' + (c.authorName||'담당자') + '</b> 에 답글 — "' + snippet.replace(/[<>&"]/g,'') + '"</span>'
-      + '<button onclick="document.getElementById(\'notes-detail-comment-input\').dataset.parentId=\'\';document.getElementById(\'notes-detail-comment-input\').placeholder=\'댓글을 남겨주세요... (Shift+Enter 줄바꿈)\';this.parentElement.remove()" style="background:none;border:0;color:#b91c1c;cursor:pointer;font-size:11.5px;font-weight:700">✕ 취소</button>';
-    hint.style.display = 'flex';
+  if (!c) return;
+  _notesCloseInlineReply();
+  var box = document.getElementById('notes-cm-reply-' + postId + '-' + commentId);
+  if (!box) return;
+  var eid = 'notes-cm-reply-input-' + postId + '-' + commentId;
+  var who = String(c.authorName||'담당자').replace(/</g,'&lt;');
+  box.innerHTML =
+      '<div style="font-size:11px;color:#0369a1;margin-bottom:4px">\u21b3 ' + who + ' 님에게 답글</div>'
+    + '<div style="display:flex;gap:6px;align-items:stretch">'
+    +   '<button type="button" title="이모지 넣기" onclick="event.stopPropagation();toggleNpInputEmojiPicker(this,\'' + eid + '\')" '
+    +     'style="height:40px;align-self:flex-end;padding:0 10px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;font-size:16px;cursor:pointer;line-height:1;flex-shrink:0">🙂</button>'
+    +   '<div style="flex:1;min-width:0">'
+    +     '<div class="rt-toolbar" data-for="' + eid + '"></div>'
+    +     '<div class="rt-editor rt-sm" id="' + eid + '" contenteditable="true" data-ph="답글을 입력해 주세요… (이미지·파일은 붙여넣거나 끌어넣기)"></div>'
+    +   '</div>'
+    +   '<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;justify-content:flex-end">'
+    +     '<button type="button" onclick="_notesDetailAddComment(' + postId + ',\'' + eid + '\',\'' + c.id + '\')" style="background:#0f172a;color:#fff;border:0;border-radius:8px;height:40px;padding:0 14px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">전송</button>'
+    +     '<button type="button" onclick="_notesCancelReply()" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;padding:3px 14px;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap">취소</button>'
+    +   '</div>'
+    + '</div>';
+  box.style.display = 'block';
+  window._notesCmtAttach = [];
+  try { _notesCmtRenderPreview(); } catch(_){}
+  try { _rtWireEditors(); } catch(_){}
+  var inp = document.getElementById(eid);
+  if (inp) {
+    inp._rtFileHook = function(files){ try { [].forEach.call(files, _notesCmtAddFile); } catch(_){} };
+    inp.addEventListener('keydown', function(ev){
+      if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); _notesDetailAddComment(postId, eid, String(c.id)); }
+    });
+    try { inp.focus(); } catch(_){}
+    try { box.scrollIntoView({ block:'nearest', behavior:'smooth' }); } catch(_){}
   }
 }
+function _notesCancelReply() {
+  _notesCloseInlineReply();
+  window._notesCmtAttach = [];
+  try { _notesCmtRenderPreview(); } catch(_){}
+}
+
 // 수정 모드 진입
 function _notesDetailEditComment(postId, commentId) {
   var cidStr = String(commentId);
@@ -14378,13 +14408,19 @@ function _notesDetailEditComment(postId, commentId) {
   var textEl = document.getElementById('notes-cm-text-' + postId + '-' + cidStr);
   var actEl = document.getElementById('notes-cm-actions-' + postId + '-' + cidStr);
   if (!textEl || !actEl) return;
-  var safe = (c.text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
-  textEl.innerHTML = '<textarea id="notes-cm-edit-' + postId + '-' + cidStr + '" style="width:100%;min-height:60px;border:1px solid #c7d2fe;border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit;resize:vertical;outline:none;box-sizing:border-box">' + safe + '</textarea>';
+  // v2.3.905: 수정도 서식 편집기로 — 저장된 서식을 그대로 고칠 수 있어야 한다
+  textEl.innerHTML = '<div class="rt-toolbar" data-for="notes-cm-edit-' + postId + '-' + cidStr + '"></div>'
+    + '<div class="rt-editor rt-sm" id="notes-cm-edit-' + postId + '-' + cidStr + '" contenteditable="true" data-ph="댓글을 입력해 주세요…"></div>';
+  try {
+    _rtWireEditors();
+    var _ce = document.getElementById('notes-cm-edit-' + postId + '-' + cidStr);
+    if (_ce) _ce.value = c.text || '';
+  } catch(_){}
   actEl.innerHTML = ''
     + '<button onclick="_notesDetailSaveEdit(' + postId + ',\'' + cidStr + '\')" style="background:#16a34a;color:#fff;border:1px solid #15803d;border-radius:6px;padding:4px 12px;font-size:11.5px;font-weight:700;cursor:pointer">💾 저장</button>'
     + '<button onclick="_notesDetailCancelEdit(' + postId + ')" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;padding:4px 12px;font-size:11.5px;font-weight:700;cursor:pointer">취소</button>';
   var ta = document.getElementById('notes-cm-edit-' + postId + '-' + cidStr);
-  if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+  if (ta) { try { ta.focus(); } catch(_){} }
 }
 function _notesDetailSaveEdit(postId, commentId) {
   var cidStr = String(commentId);
@@ -14427,7 +14463,7 @@ function _notesDetailInteractiveHtml(p) {
 
   // 댓글 리스트 — v2.2.18: 트리 구조 (대댓글 들여쓰기, 수정/삭제 버튼 포함)
   const commentsHtml = comments.length === 0
-    ? `<div style="font-size:12px;color:#94a3b8;padding:6px 0">아직 댓글이 없습니다. 첫 댓글을 남겨보세요!</div>`
+    ? ''   // v2.3.905: 댓글이 없으면 아무것도 그리지 않는다(작성란만 보이면 된다)
     : (typeof _notesRenderCommentsTree === 'function')
       ? _notesRenderCommentsTree(comments, p.id, myEmail, isAdmin)
       : '';
@@ -14435,16 +14471,21 @@ function _notesDetailInteractiveHtml(p) {
   // 댓글 입력 — v2.3.242: 이미지·파일 첨부 지원
   const inputArea = `
     <div id="notes-cmt-attach-preview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
-    <div style="display:flex;gap:8px;align-items:flex-end;margin-top:8px">
+    <!-- v2.3.905: 📎 제거 — 이미지·파일 모두 편집기에 붙여넣거나 끌어넣는다 -->
+    <div style="display:none">
       <button type="button" onclick="document.getElementById('notes-cmt-file').click()" title="이미지·파일 첨부" style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;height:36px;width:40px;font-size:16px;cursor:pointer;flex-shrink:0;color:#475569">📎</button>
       <input type="file" id="notes-cmt-file" multiple style="display:none" onchange="_notesCmtAttachSelect(this.files);this.value=''">
-      <textarea id="notes-detail-comment-input" placeholder="댓글을 남겨주세요... (Shift+Enter 줄바꿈 · 이미지 붙여넣기 가능)" rows="1"
-        style="flex:1;resize:none;min-height:36px;max-height:120px;line-height:1.5;padding:8px 12px;font-family:inherit;font-size:13px;border:1px solid #e2e8f0;border-radius:8px;outline:none"
-        oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"
-        onpaste="_notesCmtPaste(event)"
-        onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();_notesDetailAddComment(${p.id});}"></textarea>
-      <button type="button" onclick="_notesDetailAddComment(${p.id})" style="background:#0f172a;color:#fff;border:0;border-radius:8px;padding:0 16px;height:36px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0">전송</button>
-    </div>`;
+    </div>
+    <div style="display:flex;gap:8px;align-items:stretch;margin-top:8px">
+      <div style="flex:1;min-width:0">
+        <div class="rt-toolbar" data-for="notes-detail-comment-input"></div>
+        <div class="rt-editor rt-sm" id="notes-detail-comment-input" contenteditable="true"
+             data-ph="댓글을 남겨주세요… (이미지·파일은 복사해서 붙여넣거나 끌어넣기)"
+             onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();_notesDetailAddComment(${p.id});}"></div>
+      </div>
+      <button type="button" onclick="_notesDetailAddComment(${p.id})" style="align-self:flex-end;background:#0f172a;color:#fff;border:0;border-radius:8px;padding:0 16px;height:44px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;white-space:nowrap">전송</button>
+    </div>
+    <div style="font-size:10.5px;color:#94a3b8;margin-top:4px;text-align:right">Ctrl/Cmd + Enter 로 전송 · 🖼 이미지·📎 파일 모두 편집기에 붙여넣거나 끌어넣으면 됩니다</div></div>`;
 
   return reactionsRow
     + `<div style="font-size:11.5px;color:#64748b;font-weight:700;letter-spacing:.2px;margin-bottom:6px;display:flex;align-items:center;gap:6px"><span>💬</span><span>댓글 ${comments.length}</span></div>`
@@ -14459,6 +14500,12 @@ function _notesDetailRefresh(postId) {
   if (!p) return;
   container.innerHTML = _notesDetailInteractiveHtml(p);
   try { _notesCmtRenderPreview(); } catch(_){}  // v2.3.242: 재렌더 후에도 작성 중 첨부 미리보기 유지
+  // v2.3.905: 서식 편집기 배선 — 이미지가 아닌 파일은 기존 첨부 목록으로 보낸다
+  try {
+    _rtWireEditors();
+    const _e = document.getElementById('notes-detail-comment-input');
+    if (_e) _e._rtFileHook = files => { try { [].forEach.call(files, _notesCmtAddFile); } catch(_){} };
+  } catch(_){}
 }
 
 async function _notesDetailToggleReaction(postId, emoji) {
@@ -14555,8 +14602,9 @@ async function _feedUploadFileList(list, pathPrefix){
   return out;
 }
 
-async function _notesDetailAddComment(postId) {
-  const inp = document.getElementById('notes-detail-comment-input');
+async function _notesDetailAddComment(postId, srcId, replyToId) {
+  // v2.3.905: 맨 아래 작성란(기본) 또는 댓글 밑 답글창
+  const inp = document.getElementById(srcId || 'notes-detail-comment-input');
   if (!inp) return;
   const text = (inp.value||'').trim();
   const pending = Array.isArray(window._notesCmtAttach) ? window._notesCmtAttach.slice() : [];
@@ -14566,7 +14614,7 @@ async function _notesDetailAddComment(postId) {
   if (!Array.isArray(p.comments)) p.comments = [];
   const u = (typeof feedCurrentUser === 'function') ? feedCurrentUser() : ((window._currentUser)||{name:'익명'});
   // v2.2.18: 대댓글 parentId 처리 + timestamp 기반 ID (다중사용자 ID 충돌 방지)
-  const parentIdRaw = inp.dataset && inp.dataset.parentId;
+  const parentIdRaw = replyToId || (inp.dataset && inp.dataset.parentId);   // v2.3.905
   let parentId = null;
   if (parentIdRaw) { var pn = Number(parentIdRaw); parentId = isNaN(pn) ? parentIdRaw : pn; }
   const newCid = Date.now() * 1000 + Math.floor(Math.random() * 1000);
@@ -14589,10 +14637,10 @@ async function _notesDetailAddComment(postId) {
   window._notesCmtAttach = [];  // 컴포저 초기화
   try { if (typeof saveDataNow === 'function') saveDataNow(); else if (typeof saveData === 'function') saveData(); } catch(_){}
   inp.value = '';
-  inp.style.height = '36px';
+  try { if (inp.style && inp.tagName === 'TEXTAREA') inp.style.height = '36px'; } catch(_){}
   // 답글 모드 초기화
   if (inp.dataset) inp.dataset.parentId = '';
-  inp.placeholder = '댓글을 남겨주세요... (Shift+Enter 줄바꿈 · 이미지 붙여넣기 가능)';
+  try { _notesCloseInlineReply(); } catch(_){}   // v2.3.905
   var hint = document.getElementById('notes-reply-hint');
   if (hint) hint.remove();
   _notesDetailRefresh(postId);
