@@ -6405,7 +6405,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.908';
+const ERP_VERSION = 'v2.3.909';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -14501,6 +14501,18 @@ function _notesDetailInteractiveHtml(p) {
     + inputArea;
 }
 
+/* v2.3.909: 피드 상세 댓글 편집기 배선 — 처음 열 때와 다시 그릴 때 모두 필요하다.
+   처음 열 때는 _notesDetailInteractiveHtml 을 템플릿에서 직접 부르므로
+   _notesDetailRefresh 를 안 거친다. 거기에만 훅이 있어서, 모달을 열자마자
+   📎 파일을 누르면 훅이 없어 첨부가 막혔다. */
+function _notesWireCmtEditor() {
+  try { _rtWireEditors(); } catch(_){}
+  const hook = files => { try { [].forEach.call(files, _notesCmtAddFile); } catch(_){} };
+  const e1 = document.getElementById('notes-detail-comment-input');
+  if (e1) e1._rtFileHook = hook;
+  // 열려 있는 답글창도 같이
+  document.querySelectorAll('[id^="notes-cm-reply-input-"]').forEach(el => { el._rtFileHook = hook; });
+}
 function _notesDetailRefresh(postId) {
   const container = document.getElementById('notes-detail-interactive');
   if (!container) return;
@@ -14508,12 +14520,7 @@ function _notesDetailRefresh(postId) {
   if (!p) return;
   container.innerHTML = _notesDetailInteractiveHtml(p);
   try { _notesCmtRenderPreview(); } catch(_){}  // v2.3.242: 재렌더 후에도 작성 중 첨부 미리보기 유지
-  // v2.3.905: 서식 편집기 배선 — 이미지가 아닌 파일은 기존 첨부 목록으로 보낸다
-  try {
-    _rtWireEditors();
-    const _e = document.getElementById('notes-detail-comment-input');
-    if (_e) _e._rtFileHook = files => { try { [].forEach.call(files, _notesCmtAddFile); } catch(_){} };
-  } catch(_){}
+  try { _notesWireCmtEditor(); } catch(_){}   // v2.3.905/909: 서식 편집기 + 파일 훅
 }
 
 async function _notesDetailToggleReaction(postId, emoji) {
@@ -14820,6 +14827,8 @@ window._notesOpenPostDetail = function(postId) {
     _obs.observe(document.body, { childList: true });
 
     document.body.appendChild(overlay);
+    // v2.3.909: 처음 열 때도 댓글 편집기를 배선한다(파일 훅 포함)
+    try { setTimeout(() => { try { _notesWireCmtEditor(); } catch(_){} }, 0); } catch(_){}
   } catch(e) { console.warn('notes post detail:', e); }
 };
 
@@ -47652,18 +47661,17 @@ function openExpenseDetail(expenseId) {
   renderApprovalComments('exp:' + e.id);
 }
 
+/* v2.3.909: 결재 의견 편집기 배선 — 쉘을 그린 뒤와, 다시 그린 뒤에 부른다. */
+function _apWireCmtEditor() {
+  try { _rtWireEditors(); } catch(_){}
+  const _e = document.getElementById('ap-comment-input');
+  if (_e) _e._rtFileHook = files => { window._apCmtPreviewId = 'ap-comment-attach-preview'; _apCommentAddFiles(files); };
+}
 // v1.9.208: 의견 입력 섹션 (공통 쉘) — 이모지 드롭다운 + 서식 편집기 + 대댓글 지원
 function renderCommentSectionShell() {
   // v2.3.902: 이 문자열이 DOM 에 꽂힌 뒤에 편집기를 배선한다(주입 지점 3곳 공통).
   //   _rtWireEditors 는 멱등(_rtWired·data-rt-ready)이라 여러 번 불려도 안전하다.
-  try { setTimeout(() => {
-    try { _rtWireEditors(); } catch(_){}
-    // v2.3.903: 편집기에 끌어넣은 '이미지가 아닌' 파일을 첨부로 받는다
-    try {
-      const _e = document.getElementById('ap-comment-input');
-      if (_e) _e._rtFileHook = files => { window._apCmtPreviewId = 'ap-comment-attach-preview'; _apCommentAddFiles(files); };
-    } catch(_){}
-  }, 0); } catch(_){}
+  try { setTimeout(() => { try { _apWireCmtEditor(); } catch(_){} }, 0); } catch(_){}
   return `
     <!-- v1.9.332: 의견 영역 헤더 강조 — 글씨 크기/색상 업, 좌측 컬러 바 -->
     <div style="display:flex;align-items:center;gap:8px;margin:18px 0 12px 0;padding:10px 14px;background:linear-gradient(90deg,#eef2ff,#f5f3ff);border-left:4px solid #6366f1;border-radius:8px">
@@ -47959,6 +47967,7 @@ function renderApprovalComments(refKey, hideEmptyState) {
   };
   sortByTs(roots);
   list.innerHTML = roots.map(n => walk(n, 0)).join('');
+  try { _apWireCmtEditor(); } catch(_){}   // v2.3.909: 목록을 다시 그려도 작성란 배선 유지
 }
 
 // v2.2.75: 댓글 파일 첨부 - 임시 저장소
