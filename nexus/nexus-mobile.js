@@ -123,7 +123,7 @@
     if(document.getElementById('mquick')) return;
     var wrap=document.querySelector('.stage-wrap'); if(!wrap) return;
     var q=document.createElement('div'); q.id='mquick';
-    q.innerHTML='<button type="button" data-q="erp:hsbroadcast">📺 홈쇼핑</button>'
+    q.innerHTML='<button type="button" data-q="erp:hsbroadcast">📺 홈쇼핑 분석</button>'
       +'<button type="button" data-q="panel:3">🗂️ 업무 현황</button>'
       +'<button type="button" data-q="erp:approval">🧾 결재 현황</button>'
       +'<button type="button" data-q="erp:stock">📦 재고 현황</button>'
