@@ -70,7 +70,7 @@ function _hsbImgTag(p, px) {
   return '<img src="' + _hEsc(u) + '" alt="" loading="lazy" referrerpolicy="no-referrer" '
     + 'onerror="this.style.display=&quot;none&quot;" '
     + 'style="width:' + n + 'px;height:' + n + 'px;border-radius:7px;object-fit:cover;'
-    + 'background:#f1f5f9;border:1px solid #e2e8f0;flex:0 0 auto">';
+    + 'background:#f1f5f9;border:1px solid #e2e8f0;display:inline-block;vertical-align:middle;margin-right:8px">';
 }
 //   '무료배송' 은 빼고 할인율 %·무이자 개월을 정확히 적는다.
 //   서버가 숫자(dcRt·noIntMm)를 보내기 전 기록은 글자 혜택에서 무료배송만 뺀다.
@@ -197,11 +197,9 @@ function _hsbDetailHtml(b) {
     + '</tr></thead><tbody>';
   (b.products || []).forEach(p => {
     h += '<tr style="border-bottom:1px solid #f1f5f9">'
-      + '<td style="padding:7px 9px;color:#0f172a"><div style="display:flex;align-items:center;gap:8px;min-width:0">'
-      + _hsbImgTag(p, 40)
-      + '<span style="min-width:0">' + _hEsc(p.name)
-      + (p.soldOut ? ' <span style="color:#dc2626;font-size:10.5px;font-weight:700">품절</span>' : '')
-      + '</span></div></td>'
+      + '<td style="padding:7px 9px;color:#0f172a;vertical-align:middle">'
+      + _hsbImgTag(p, 40) + _hEsc(p.name)
+      + (p.soldOut ? ' <span style="color:#dc2626;font-size:10.5px;font-weight:700">품절</span>' : '') + '</td>'
       + '<td style="padding:7px 9px;text-align:right;white-space:nowrap">' + _hWon(p.salePrice) + '</td>'
       + '<td style="padding:7px 9px;text-align:right;font-weight:700;color:#15803d;white-space:nowrap">' + _hNum(p.sold) + '개</td>'
       + '<td style="padding:7px 9px;text-align:right;color:#a16207;white-space:nowrap">' + _hWon((p.sold || 0) * (p.salePrice || 0)) + '</td>'
