@@ -262,8 +262,8 @@
         });
       }
       bar.innerHTML = (kind==='installed')
-        ? '<span>🏠 설치돼 있습니다 — 오른쪽 위 <b>⋮</b> → <b>앱으로 열기</b></span>'
-          + '<button type="button" data-a="how">어디에?</button>'
+        ? '<span>🏠 설치돼 있습니다 — 홈 화면을 <b>위로 쓸어올려</b> 앱 목록에서 <b>NEXUS</b></span>'
+          + '<button type="button" data-a="how">자세히</button>'
           + '<button type="button" data-a="later" aria-label="닫기">✕</button>'
         : '<span>📱 NEXUS를 앱으로 설치하면 주소창 없이 바로 열립니다</span>'
           + '<button type="button" data-a="go">설치</button>'
@@ -276,9 +276,12 @@
       if(installedApp){ if(!force && snoozed()) return; build('installed'); return; }
       if(force) say(reason());
     }
+    /* ⚠️ 크롬 ⋮ 메뉴의 '앱으로 열기' 는 버전에 따라 없다. 메뉴에 기대지 않는다.
+       설치되면 안드로이드가 **일반 앱으로** 등록하므로 앱 목록에는 반드시 있다. */
     function whereIsIt(){
-      return 'NEXUS 아이콘은 홈 화면, 또는 화면을 위로 쓸어올리면 나오는 앱 목록에 있습니다. '
-        + '거기서 NEXUS 를 누르면 주소창 없이 열립니다. 아이콘이 안 보이면 크롬 ⋮ 메뉴 → "앱 설치" 로 다시 설치하세요.';
+      return '① 홈 버튼을 눌러 홈 화면으로 나갑니다 → ② 화면 가운데를 위로 쓸어올리면 앱 목록이 열립니다 '
+        + '→ ③ 맨 위 검색칸에 NEX 를 치면 NEXUS 가 나옵니다 → ④ 누르면 주소창 없이 열립니다. '
+        + '길게 눌러 홈 화면으로 끌어다 두면 다음부터 바로 열 수 있습니다.';
     }
     function reason(){
       if(standalone()) return '이미 앱으로 실행 중입니다.';
