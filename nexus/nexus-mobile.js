@@ -10,9 +10,10 @@
     var l=dots.querySelector('.mlabel'); l.textContent=NAMES[i]||''; dots.classList.add('show'); clearTimeout(labelTimer); labelTimer=setTimeout(function(){dots.classList.remove('show');},1200);
     if(i===0) setTimeout(function(){window.dispatchEvent(new Event('resize'));},350); }
   function sheet(){ var s=document.getElementById('msheet'); if(s) return s; s=document.createElement('div'); s.id='msheet'; s.className='msheet'; s.hidden=true;
-    s.innerHTML='<div class="msheet-box"><h4 id="msheet-name"></h4><button type="button" data-a="settings">업무 설정</button><button type="button" data-a="conn">연동 상태</button><button type="button" data-a="pc">PC 화면으로 보기</button><button type="button" class="danger" data-a="logout">로그아웃</button><button type="button" class="cancel" data-a="close">닫기</button></div>';
+    s.innerHTML='<div class="msheet-box"><h4 id="msheet-name"></h4><button type="button" data-a="install" id="msheet-install" hidden>📱 앱으로 설치</button><button type="button" data-a="settings">업무 설정</button><button type="button" data-a="conn">연동 상태</button><button type="button" data-a="pc">PC 화면으로 보기</button><button type="button" class="danger" data-a="logout">로그아웃</button><button type="button" class="cancel" data-a="close">닫기</button></div>';
     document.body.appendChild(s);
     s.addEventListener('click',function(e){ var b=e.target.closest('button'); if(e.target===s||!b){ if(e.target===s) s.hidden=true; return; } s.hidden=true; var a=b.dataset.a;
+      if(a==='install'){ try{ window.NEXUS_INSTALL && window.NEXUS_INSTALL.show(); }catch(err){} }
       if(a==='settings') document.getElementById('admin-tasks-btn')&&document.getElementById('admin-tasks-btn').click();
       if(a==='conn') document.querySelector('nav.rail [data-panel="connections"]')&&document.querySelector('nav.rail [data-panel="connections"]').click();
       if(a==='logout') document.getElementById('viewer-badge-live')&&document.getElementById('viewer-badge-live').click();
@@ -40,7 +41,10 @@
     // RENIV logo = home (page 1)
     document.getElementById('home-logo')&&document.getElementById('home-logo').addEventListener('click',function(){ go(0); try{ window.NEXUS.setView('office'); }catch(e){} setTimeout(function(){ try{ syncCam(); }catch(e){} },50); });
     // name badge opens a small menu (settings, connections, logout)
-    var nm=document.getElementById('rail-name114'); if(nm) nm.addEventListener('click',function(){ if(!mq.matches) return; var s=sheet(); document.getElementById('msheet-name').textContent=nm.textContent.replace(/관리자|임원|조회 권한/,'').trim()||'내 계정'; s.hidden=false; });
+    var nm=document.getElementById('rail-name114'); if(nm) nm.addEventListener('click',function(){ if(!mq.matches) return; var s=sheet(); document.getElementById('msheet-name').textContent=nm.textContent.replace(/관리자|임원|조회 권한/,'').trim()||'내 계정';
+      var ib=document.getElementById('msheet-install');
+      if(ib) ib.hidden = !(window.NEXUS_INSTALL && window.NEXUS_INSTALL.available());
+      s.hidden=false; });
     setTimeout(function(){ window.dispatchEvent(new Event('resize')); },600);
     buildOffice3();
   }
@@ -78,4 +82,45 @@
   mq.addEventListener&&mq.addEventListener('change',function(){ setup(); try{ applyLayout(); }catch(e){} window.dispatchEvent(new Event('resize')); });
   // PWA: allow "홈 화면에 추가" / 설치
   if('serviceWorker' in navigator){ window.addEventListener('load',function(){ navigator.serviceWorker.register('./sw.js',{scope:'./'}).catch(function(){}); }); }
+
+  /* PWA 설치 버튼 (2026-11-13)
+     크롬 메뉴의 '앱 설치'는 버전·기기마다 이름과 위치가 달라 사용자가 못 찾는다.
+     beforeinstallprompt 를 잡아 두었다가 앱 안의 버튼으로 설치창을 띄운다.
+     이 이벤트가 뜬다는 것 자체가 '설치 요건을 다 갖췄다'는 크롬의 신호다. */
+  (function installBar(){
+    var SNOOZE='nx_install_snooze', deferred=null, bar=null;
+    function installed(){
+      return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    }
+    function snoozed(){
+      try{ var t=+localStorage.getItem(SNOOZE)||0; return Date.now()-t < 7*24*60*60*1000; }catch(e){ return false; }
+    }
+    function hide(){ if(bar){ bar.hidden=true; } }
+    function show(){
+      if(!mq.matches || installed() || snoozed() || !deferred) return;
+      if(!bar){
+        bar=document.createElement('div'); bar.id='minstall'; bar.className='minstall';
+        bar.innerHTML='<span>📱 NEXUS를 앱으로 설치하면 주소창 없이 바로 열립니다</span>'+
+          '<button type="button" data-a="go">설치</button>'+
+          '<button type="button" data-a="later" aria-label="나중에">✕</button>';
+        document.body.appendChild(bar);
+        bar.addEventListener('click',function(e){
+          var b=e.target.closest('button'); if(!b) return;
+          if(b.dataset.a==='later'){ try{ localStorage.setItem(SNOOZE,String(Date.now())); }catch(err){} hide(); return; }
+          if(!deferred) return;
+          hide();
+          deferred.prompt();
+          deferred.userChoice.then(function(c){
+            if(c && c.outcome==='accepted'){ deferred=null; }
+            else { try{ localStorage.setItem(SNOOZE,String(Date.now())); }catch(err){} }
+          }).catch(function(){});
+        });
+      }
+      bar.hidden=false;
+    }
+    window.addEventListener('beforeinstallprompt',function(e){ e.preventDefault(); deferred=e; show(); });
+    window.addEventListener('appinstalled',function(){ deferred=null; hide(); try{ localStorage.removeItem(SNOOZE); }catch(e){} });
+    mq.addEventListener && mq.addEventListener('change',function(){ if(mq.matches) show(); else hide(); });
+    window.NEXUS_INSTALL = { available:function(){ return !!deferred; }, show:function(){ try{ localStorage.removeItem(SNOOZE); }catch(e){} show(); } };
+  })();
 })();
