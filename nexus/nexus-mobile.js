@@ -47,7 +47,60 @@
       s.hidden=false; });
     setTimeout(function(){ window.dispatchEvent(new Event('resize')); },600);
     buildOffice3();
+    quickMenu();
+    shortMeetingLabel();
   }
+
+  /* 빠른 메뉴 2x2 + 하단 한 줄 (2026-11-13) */
+  function openErp(page){
+    var fr=document.getElementById('erp-frame37'), sh=document.getElementById('erp-shell37');
+    if(!fr||!sh) return;
+    if(!fr.getAttribute('src')) fr.src=new URL('../',location.href).href;
+    sh.hidden=false;
+    /* ERP 는 부팅을 마치며 대시보드로 넘어간다. 한 번만 go() 하면 그 뒤에 덮인다.
+       목표 페이지가 될 때까지 다시 부르고, 되면 바로 멈춘다. */
+    var n=0, want='page-'+page;
+    (function tick(){
+      n++;
+      var done=false;
+      try{
+        var cw=fr.contentWindow, cd=cw.document, cur=cd.querySelector('#content .page.active');
+        if(typeof cw.go==='function' && cur){
+          if(cur.id===want) done=true; else cw.go(page);
+        }
+      }catch(e){}
+      if(!done && n<60) setTimeout(tick,450);
+    })();
+  }
+
+  function quickMenu(){
+    if(document.getElementById('mquick')) return;
+    var wrap=document.querySelector('.stage-wrap'); if(!wrap) return;
+    var q=document.createElement('div'); q.id='mquick';
+    q.innerHTML='<button type="button" data-q="erp:hsbroadcast">📺 홈쇼핑</button>'
+      +'<button type="button" data-q="panel:3">🗂️ 업무 현황</button>'
+      +'<button type="button" data-q="erp:stock">📦 재고</button>'
+      +'<button type="button" data-q="erp:item">🏷️ 품목</button>';
+    wrap.appendChild(q);
+    q.addEventListener('click',function(e){
+      var b=e.target.closest('button'); if(!b) return;
+      var v=(b.dataset.q||'').split(':');
+      if(v[0]==='panel'){ go(parseInt(v[1],10)||0); return; }
+      if(v[0]==='erp') openErp(v[1]);
+    });
+  }
+
+  /* '예정된 미팅 없음' 은 한 줄에 네 개를 넣기엔 길다. 예정이 있을 때의 날짜 표기는
+     그대로 두고, 비어 있을 때만 짧게 바꾼다. nexus-live.js 가 다시 쓰므로 관찰자로 건다. */
+  function shortMeetingLabel(){
+    var mn=document.getElementById('meeting-next'); if(!mn||mn.dataset.shortHooked) return;
+    mn.dataset.shortHooked='1';
+    var fix=function(){ if(mn.textContent.trim()==='예정된 미팅 없음') mn.textContent='미팅 없음'; };
+    fix();
+    try{ new MutationObserver(fix).observe(mn,{childList:true,characterData:true,subtree:true}); }catch(e){}
+  }
+
+
   /* v3: people grid (2·2·3) with live 3D portraits; CAM buttons open the 3D view full screen */
   var ROWS=[['heeka','juyeon'],['dabin','greg'],['chansik','ian','jony']];
   function person(id){ var P=(window.NEXUS&&window.NEXUS.PEOPLE)||[]; for(var i=0;i<P.length;i++) if(P[i].id===id) return P[i]; return {id:id,name:id}; }
