@@ -42,8 +42,11 @@
     document.getElementById('home-logo')&&document.getElementById('home-logo').addEventListener('click',goHome);
     // name badge opens a small menu (settings, connections, logout)
     var nm=document.getElementById('rail-name114'); if(nm) nm.addEventListener('click',function(){ if(!mq.matches) return; var s=sheet(); document.getElementById('msheet-name').textContent=nm.textContent.replace(/관리자|임원|조회 권한/,'').trim()||'내 계정';
+      /* 항상 보여 준다 — 설치를 못 띄우는 경우에도 이유를 알려 주는 게 낫다 */
       var ib=document.getElementById('msheet-install');
-      if(ib) ib.hidden = !(window.NEXUS_INSTALL && window.NEXUS_INSTALL.available());
+      if(ib){ ib.hidden=false;
+        ib.textContent = (window.NEXUS_INSTALL && window.NEXUS_INSTALL.installed())
+          ? '📱 앱 설치 상태 확인' : '📱 앱으로 설치'; }
       s.hidden=false; });
     setTimeout(function(){ window.dispatchEvent(new Event('resize')); },600);
     buildOffice3();
@@ -216,53 +219,104 @@
      beforeinstallprompt 를 잡아 두었다가 앱 안의 버튼으로 설치창을 띄운다.
      이 이벤트가 뜬다는 것 자체가 '설치 요건을 다 갖췄다'는 크롬의 신호다. */
   (function installBar(){
-    var SNOOZE='nx_install_snooze', DONE='nx_installed', deferred=null, bar=null;
-    function installed(){
-      return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    /* 실측으로 확인한 두 가지를 고쳤다 (2026-11-14)
+       · 스누즈가 7일이라, ✕ 한 번 또는 설치창 '취소' 한 번으로 설치 경로가 일주일 막혔다.
+         -> 1일로 줄이고, 설치창에서 취소한 경우에는 스누즈하지 않는다.
+       · 이름 메뉴의 '앱 설치' 가 설치 가능할 때만 보였다 -> 항상 보이고, 못 띄우면 이유를 말한다.
+       설치 여부는 추측하지 않고 navigator.getInstalledRelatedApps() 에 묻는다
+       (manifest 의 related_applications 에 자기 자신을 적어 뒀다). */
+    var SNOOZE='nx_install_snooze', DONE='nx_installed', DAY=24*60*60*1000;
+    var deferred=null, bar=null, installedApp=null;
+
+    function standalone(){
+      try{ return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; }catch(e){ return false; }
     }
     function snoozed(){
-      try{ var t=+localStorage.getItem(SNOOZE)||0; return Date.now()-t < 7*24*60*60*1000; }catch(e){ return false; }
+      try{ var t=+localStorage.getItem(SNOOZE)||0; return Date.now()-t < DAY; }catch(e){ return false; }
     }
-    function hide(){ if(bar){ bar.hidden=true; } }
-    function show(){
-      if(!mq.matches || installed() || snoozed() || !deferred) return;
+    function mark(k,v){ try{ v==null?localStorage.removeItem(k):localStorage.setItem(k,String(v)); }catch(e){} }
+    function say(msg){
+      var el=document.getElementById('toast'); if(!el){ return; }
+      el.textContent=msg; el.classList.add('show');
+      clearTimeout(say.t); say.t=setTimeout(function(){ el.classList.remove('show'); },5200);
+    }
+    function checkInstalled(){
+      if(typeof navigator.getInstalledRelatedApps!=='function') return Promise.resolve(null);
+      return navigator.getInstalledRelatedApps().then(function(list){
+        installedApp=(list||[]).filter(function(a){ return a && a.platform==='webapp'; })[0]||null;
+        if(installedApp) mark(DONE,'1');
+        return installedApp;
+      }).catch(function(){ return null; });
+    }
+
+    function hide(){ if(bar) bar.hidden=true; }
+    function build(kind){
       if(!bar){
         bar=document.createElement('div'); bar.id='minstall'; bar.className='minstall';
-        bar.innerHTML='<span>📱 NEXUS를 앱으로 설치하면 주소창 없이 바로 열립니다</span>'+
-          '<button type="button" data-a="go">설치</button>'+
-          '<button type="button" data-a="later" aria-label="나중에">✕</button>';
         document.body.appendChild(bar);
         bar.addEventListener('click',function(e){
           var b=e.target.closest('button'); if(!b) return;
-          if(b.dataset.a==='later'){ try{ localStorage.setItem(SNOOZE,String(Date.now())); }catch(err){} hide(); return; }
-          if(!deferred) return;
-          hide();
-          deferred.prompt();
-          deferred.userChoice.then(function(c){
-            if(c && c.outcome==='accepted'){ deferred=null; try{ localStorage.setItem(DONE,'1'); }catch(err){} }
-            else { try{ localStorage.setItem(SNOOZE,String(Date.now())); }catch(err){} }
-          }).catch(function(){});
+          if(b.dataset.a==='later'){ mark(SNOOZE,Date.now()); hide(); return; }
+          if(b.dataset.a==='go') doPrompt();
         });
       }
+      bar.innerHTML = (kind==='installed')
+        ? '<span>🏠 이미 설치돼 있습니다 — 홈 화면의 NEXUS 아이콘으로 열면 주소창이 사라집니다</span>'
+          + '<button type="button" data-a="later" aria-label="닫기">✕</button>'
+        : '<span>📱 NEXUS를 앱으로 설치하면 주소창 없이 바로 열립니다</span>'
+          + '<button type="button" data-a="go">설치</button>'
+          + '<button type="button" data-a="later" aria-label="나중에">✕</button>';
       bar.hidden=false;
     }
-    window.addEventListener('beforeinstallprompt',function(e){ e.preventDefault(); deferred=e; show(); });
-    window.addEventListener('appinstalled',function(){ deferred=null; hide(); try{ localStorage.removeItem(SNOOZE); localStorage.setItem(DONE,'1'); }catch(e){} setTimeout(tip,800); });
-    /* 설치해 놓고 크롬 탭으로 열면 주소창이 그대로다 — 설치가 안 된 게 아니라
-       '앱이 아닌 탭' 을 보고 있는 것이다. 그 경우에만 한 번 알려 준다. */
-    function tip(){
-      if(!mq.matches||installed()) return;
-      var done=false; try{ done=localStorage.getItem(DONE)==='1'; }catch(e){}
-      if(!done||deferred) return;   /* 설치창이 다시 뜬다면 설치된 게 아니다 */
-      if(document.getElementById('minstall-tip')) return;
-      var t=document.createElement('div'); t.id='minstall-tip'; t.className='minstall';
-      t.innerHTML='<span>🏠 홈 화면의 NEXUS 아이콘으로 열면 주소창이 사라집니다</span>'+
-        '<button type="button" data-a="later" aria-label="닫기">✕</button>';
-      document.body.appendChild(t);
-      t.addEventListener('click',function(e){ if(e.target.closest('button')) t.remove(); });
+    function show(force){
+      if(!mq.matches || standalone()) return;
+      if(deferred){ if(!force && snoozed()) return; build('prompt'); return; }
+      if(installedApp){ if(!force && snoozed()) return; build('installed'); return; }
+      if(force) say(reason());
     }
-    setTimeout(tip,4000);
-    mq.addEventListener && mq.addEventListener('change',function(){ if(mq.matches) show(); else hide(); });
-    window.NEXUS_INSTALL = { available:function(){ return !!deferred; }, show:function(){ try{ localStorage.removeItem(SNOOZE); }catch(e){} show(); } };
+    function reason(){
+      if(standalone()) return '이미 앱으로 실행 중입니다.';
+      if(installedApp) return '이미 설치돼 있습니다. 홈 화면의 NEXUS 아이콘으로 열어 주세요.';
+      if(/iPhone|iPad|iPod/i.test(navigator.userAgent))
+        return 'iPhone은 Safari 공유 버튼 → "홈 화면에 추가" 로 설치합니다.';
+      return '크롬 ⋮ 메뉴 → "앱 설치" 또는 "홈 화면에 추가" 를 눌러 주세요. 잠시 뒤 설치 버튼이 다시 나타날 수도 있습니다.';
+    }
+    function doPrompt(){
+      if(!deferred){ say(reason()); return; }
+      hide();
+      var d=deferred;
+      d.prompt();
+      d.userChoice.then(function(c){
+        if(c && c.outcome==='accepted'){ deferred=null; mark(DONE,'1'); mark(SNOOZE,null); }
+        /* 취소는 스누즈하지 않는다 — 오탭일 수 있고, 다시 누를 길을 남긴다 */
+        else { setTimeout(function(){ show(false); },1200); }
+      }).catch(function(){});
+    }
+
+    window.addEventListener('beforeinstallprompt',function(e){
+      e.preventDefault(); deferred=e; installedApp=null; show(false);
+    });
+    window.addEventListener('appinstalled',function(){
+      deferred=null; hide(); mark(SNOOZE,null); mark(DONE,'1');
+      say('설치했습니다. 홈 화면의 NEXUS 아이콘으로 열어 주세요.');
+      setTimeout(checkInstalled,1500);
+    });
+    mq.addEventListener && mq.addEventListener('change',function(){ if(mq.matches) show(false); else hide(); });
+
+    /* 설치창이 안 뜨는 경우(= 이미 설치됨)를 사실로 확인해 안내한다 */
+    checkInstalled().then(function(){ setTimeout(function(){ show(false); },3000); });
+
+    window.NEXUS_INSTALL = {
+      available: function(){ return !!deferred; },
+      installed: function(){ return !!installedApp || standalone(); },
+      show: function(){ mark(SNOOZE,null); show(true); },
+      reason: reason,
+      diagnose: function(){
+        return checkInstalled().then(function(){
+          return { deferred:!!deferred, installedApp:installedApp, standalone:standalone(),
+                   snoozed:snoozed(), mobile:mq.matches, ua:navigator.userAgent };
+        });
+      }
+    };
   })();
 })();
