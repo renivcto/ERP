@@ -257,11 +257,13 @@
         bar.addEventListener('click',function(e){
           var b=e.target.closest('button'); if(!b) return;
           if(b.dataset.a==='later'){ mark(SNOOZE,Date.now()); hide(); return; }
+          if(b.dataset.a==='how'){ say(whereIsIt()); return; }
           if(b.dataset.a==='go') doPrompt();
         });
       }
       bar.innerHTML = (kind==='installed')
-        ? '<span>🏠 이미 설치돼 있습니다 — 홈 화면의 NEXUS 아이콘으로 열면 주소창이 사라집니다</span>'
+        ? '<span>🏠 설치돼 있습니다 — 오른쪽 위 <b>⋮</b> → <b>앱으로 열기</b></span>'
+          + '<button type="button" data-a="how">어디에?</button>'
           + '<button type="button" data-a="later" aria-label="닫기">✕</button>'
         : '<span>📱 NEXUS를 앱으로 설치하면 주소창 없이 바로 열립니다</span>'
           + '<button type="button" data-a="go">설치</button>'
@@ -274,9 +276,13 @@
       if(installedApp){ if(!force && snoozed()) return; build('installed'); return; }
       if(force) say(reason());
     }
+    function whereIsIt(){
+      return 'NEXUS 아이콘은 홈 화면, 또는 화면을 위로 쓸어올리면 나오는 앱 목록에 있습니다. '
+        + '거기서 NEXUS 를 누르면 주소창 없이 열립니다. 아이콘이 안 보이면 크롬 ⋮ 메뉴 → "앱 설치" 로 다시 설치하세요.';
+    }
     function reason(){
       if(standalone()) return '이미 앱으로 실행 중입니다.';
-      if(installedApp) return '이미 설치돼 있습니다. 홈 화면의 NEXUS 아이콘으로 열어 주세요.';
+      if(installedApp) return '이미 설치돼 있습니다. ' + whereIsIt();
       if(/iPhone|iPad|iPod/i.test(navigator.userAgent))
         return 'iPhone은 Safari 공유 버튼 → "홈 화면에 추가" 로 설치합니다.';
       return '크롬 ⋮ 메뉴 → "앱 설치" 또는 "홈 화면에 추가" 를 눌러 주세요. 잠시 뒤 설치 버튼이 다시 나타날 수도 있습니다.';
