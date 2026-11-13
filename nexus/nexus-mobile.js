@@ -54,6 +54,7 @@
     shortMeetingLabel();
     railIcons();
     backStack();
+    setupPullRefresh();
   }
 
   /* 빠른 메뉴 + 하단 한 줄 + 뒤로가기 (2026-11-13) */
@@ -175,6 +176,112 @@
     go(0);
     try{ window.NEXUS.setView('office'); }catch(e){}
     setTimeout(function(){ try{ syncCam(); }catch(e){} },50);
+  }
+
+
+  /* ── 당겨서 새로고침 (2026-11-14) ─────────────────────────────────
+     브라우저 기본 동작은 못 쓴다: 가로 4페이지 구조 때문에 html,body 가
+     overflow:hidden + overscroll-behavior:none 이라 문서가 세로로 안 움직인다.
+     설치한 앱에는 주소창도 없어서 새로고침할 다른 길이 없다. 직접 만든다. */
+  function pullRefresh(doc, onRefresh){
+    if(!doc || doc.__ptrHooked) return; doc.__ptrHooked=1;
+    var TH=72, MAX=120;
+    var win=doc.defaultView, ind=null, sc=null, y0=0, x0=0, dist=0, live=false, busy=false;
+
+    function ring(){
+      if(ind && ind.isConnected) return ind;
+      ind=doc.createElement('div'); ind.className='mptr'; ind.innerHTML='<i></i>';
+      (doc.body||doc.documentElement).appendChild(ind);
+      return ind;
+    }
+    function draw(d){
+      var e=ring(); e.classList.add('on'); e.classList.remove('spin');
+      e.style.transform='translate(-50%,'+Math.round(d)+'px) scale('+(0.7+Math.min(1,d/TH)*0.3)+')';
+      e.style.opacity=String(Math.min(1,d/(TH*0.7)));
+      e.firstChild.style.transform='rotate('+Math.round(d*3)+'deg)';
+    }
+    function spin(){
+      var e=ring(); e.classList.add('on','spin');
+      e.style.transform='translate(-50%,'+TH+'px) scale(1)'; e.style.opacity='1';
+      e.firstChild.style.transform='';
+    }
+    function hide(){ if(ind){ ind.classList.remove('on','spin'); ind.style.opacity='0'; } }
+
+    /* 손이 닿은 지점에서 바깥으로 올라가며 '세로로 스크롤되는 상자' 를 찾는다 */
+    function scrollerOf(t){
+      for(var n=t; n && n.nodeType===1 && n!==doc.body && n!==doc.documentElement; n=n.parentElement){
+        var cs; try{ cs=win.getComputedStyle(n); }catch(e){ break; }
+        if(/(auto|scroll)/.test(cs.overflowY) && n.scrollHeight>n.clientHeight+2) return n;
+      }
+      return doc.scrollingElement||doc.documentElement;
+    }
+
+    doc.addEventListener('touchstart',function(e){
+      live=false;
+      if(busy || !mq.matches || e.touches.length!==1) return;
+      var t=e.target;
+      if(t && t.closest && t.closest('#stage')) return;     /* 3D 는 시점 조작이 우선 */
+      sc=scrollerOf(t);
+      if(!sc || (sc.scrollTop||0) > 0) return;
+      y0=e.touches[0].clientY; x0=e.touches[0].clientX; dist=0; live=true;
+    },{passive:true});
+
+    doc.addEventListener('touchmove',function(e){
+      if(!live) return;
+      var dy=e.touches[0].clientY-y0, dx=Math.abs(e.touches[0].clientX-x0);
+      if(dy<=0 || dx>dy){ live=false; hide(); return; }      /* 가로 스와이프는 페이지 넘김 */
+      if(sc && (sc.scrollTop||0)>0){ live=false; hide(); return; }
+      dist=Math.min(MAX, dy*0.55);
+      if(e.cancelable) e.preventDefault();
+      draw(dist);
+    },{passive:false});
+
+    function end(){
+      if(!live) return; live=false;
+      if(dist>=TH){ busy=true; spin(); setTimeout(function(){ onRefresh(function(){ busy=false; hide(); }); },260); }
+      else hide();
+    }
+    doc.addEventListener('touchend',end,{passive:true});
+    doc.addEventListener('touchcancel',function(){ live=false; hide(); },{passive:true});
+  }
+
+  function setupPullRefresh(){
+    pullRefresh(document,function(done){
+      /* 슬랙 페이지는 자체 새로고침이 있다 — 통째로 다시 띄우는 것보다 훨씬 빠르다 */
+      try{
+        if(idx===1){
+          var rb=document.querySelector('.slack-panel35 [class*="slack-refresh"]');
+          if(rb){ rb.click(); setTimeout(done,1400); return; }
+        }
+      }catch(e){}
+      location.reload();
+    });
+    /* ERP 화면이 열리면 그 안에서도 되게 한다 (같은 오리진) */
+    var fr=document.getElementById('erp-frame37');
+    if(fr && !fr.dataset.ptr){
+      fr.dataset.ptr='1';
+      fr.addEventListener('load',function(){
+        try{
+          var cd=fr.contentWindow.document;
+          injectPtrCss(cd);
+          pullRefresh(cd,function(){ try{ fr.contentWindow.location.reload(); }catch(e){} });
+        }catch(e){}
+      });
+    }
+  }
+
+  /* 아이프레임 문서에는 nexus-mobile.css 가 없다 — 표시기 모양만 따로 넣어 준다 */
+  function injectPtrCss(cd){
+    if(!cd || cd.getElementById('mptr-css')) return;
+    var s=cd.createElement('style'); s.id='mptr-css';
+    s.textContent='.mptr{position:fixed;left:50%;top:0;z-index:2147482000;width:34px;height:34px;border-radius:50%;'
+      +'background:#fff;box-shadow:0 2px 10px rgba(22,35,31,.22);display:none;align-items:center;justify-content:center;'
+      +'pointer-events:none;opacity:0;transition:opacity .15s}'
+      +'.mptr.on{display:flex}'
+      +'.mptr i{display:block;width:16px;height:16px;border-radius:50%;border:2px solid #d6e0dc;border-top-color:#27537f}'
+      +'.mptr.spin i{animation:mptrspin .7s linear infinite}'
+      +'@keyframes mptrspin{to{transform:rotate(360deg)}}';
+    (cd.head||cd.documentElement).appendChild(s);
   }
 
   /* v3: people grid (2·2·3) with live 3D portraits; CAM buttons open the 3D view full screen */
