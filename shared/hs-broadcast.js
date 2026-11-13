@@ -55,6 +55,52 @@ function _hBadge(b) {
     + 'color:#fff;background:' + c + '">' + _hEsc(b) + '</span>';
 }
 
+// ── 제품 사진 · 혜택 ──
+//   GS샵 이미지는 prdCd 로 주소가 정해진다. 저장된 기록에 img 가 없어도 그려진다.
+//   서버(hs_gs.py)가 p.img 를 보내기 시작하면 그 값을 먼저 쓴다.
+function _hsbImgUrl(p) {
+  let u = String((p && p.img) || '');
+  if (!u && /^[0-9]{6,}$/.test(String((p && p.prdCd) || ''))) u = 'https://asset.m-gs.kr/prod/' + p.prdCd + '/1/200';
+  if (u.indexOf('//') === 0) u = 'https:' + u;
+  return /^https:\/\//.test(u) ? u : '';
+}
+function _hsbImgTag(p, px) {
+  const u = _hsbImgUrl(p); if (!u) return '';
+  const n = px || 40;
+  return '<img src="' + _hEsc(u) + '" alt="" loading="lazy" referrerpolicy="no-referrer" '
+    + 'onerror="this.style.display=&quot;none&quot;" '
+    + 'style="width:' + n + 'px;height:' + n + 'px;border-radius:7px;object-fit:cover;'
+    + 'background:#f1f5f9;border:1px solid #e2e8f0;flex:0 0 auto">';
+}
+//   '무료배송' 은 빼고 할인율 %·무이자 개월을 정확히 적는다.
+//   서버가 숫자(dcRt·noIntMm)를 보내기 전 기록은 글자 혜택에서 무료배송만 뺀다.
+function _hsbEventText(p) {
+  if (!p) return '-';
+  const out = [];
+  let dc = Number(p.dcRt || 0);
+  if (!dc && p.listPrice && p.salePrice && p.listPrice > p.salePrice) {
+    dc = Math.round((p.listPrice - p.salePrice) * 100 / p.listPrice);
+  }
+  const mm = Number(p.noIntMm || 0);
+  const raw = String(p.benefit || '');
+  if (dc > 0) out.push('할인 ' + dc + '%');
+  if (p.gsPayDc || /GS Pay/i.test(raw)) out.push('GS Pay 할인');   // GS 는 할인율을 편성표에 안 적는다
+  if (p.vipDc) out.push('VIP 할인');
+  if (mm > 0) out.push('무이자 ' + mm + '개월');
+  if (mm > 0 || dc > 0) {
+    // 숫자로 적을 수 없는 나머지 혜택도 흘리지 않는다 (무료배송만 뺀다)
+    ['쿠폰', '적립', '사은품', '추가 증정'].forEach(k => { if (raw.indexOf(k) >= 0) out.push(k); });
+    return _hEsc(out.join(' · '));
+  }
+  // 서버가 숫자를 보내기 전 기록: 글자 뭉치에서 무료배송만 뺀다.
+  // ⚠️ 공백으로 쪼개면 'GS Pay 할인' 이 세 조각이 된다 — 편성표가 쓰는 칩 이름으로 끊는다.
+  const CHIPS = ['GS Pay 할인', 'VIP 할인', '카드 할인', '쿠폰 할인', '쿠폰', '무이자', '적립', '사은품', '추가 증정'];
+  const hit = CHIPS.filter(k => raw.indexOf(k) >= 0);
+  if (hit.length) return _hEsc(hit.filter((k, i) => !hit.some((o, j) => j !== i && o.indexOf(k) >= 0 && o !== k)).join(' · '));
+  const txt = raw.replace(/무료배송/g, ' ').replace(/\s+/g, ' ').trim();
+  return txt ? _hEsc(txt) : '-';
+}
+
 // ── 상단 요약 8칸 (선택한 방송 기준 + 최근 30일 집계 1칸) ──
 //   ⚠️ 1~6·8번은 '선택한 방송', 7번만 30일 집계다. 부연 줄로 구분해 둔다.
 function _hMinFrom(start, t) {
@@ -82,7 +128,7 @@ function _hsbSummary(list, b) {
     ['제품명', top ? _hEsc(top.name) : (b ? _hEsc((b.brands || []).join(' / ') || b.title) : '-'),
       topSub, '#f5f3ff', '#6d28d9', 14],
     ['판매가', top ? _hWon(top.salePrice) : '-', top && top.soldOut ? '품절' : '', '#f8fafc', '#334155', 19],
-    ['이벤트', (top && top.benefit) ? _hEsc(top.benefit) : '-', '', '#fff7ed', '#c2410c', 14],
+    ['이벤트', _hsbEventText(top), '', '#fff7ed', '#c2410c', 14],
     ['추적 판매 수량', b ? (_hNum(b.sold) + '개') : '-', '이 방송', '#f0fdf4', '#15803d', 19],
     ['추정 매출', b ? _hWon(b.amount) : '-', '이 방송', '#fefce8', '#a16207', 19],
     ['최근 30일 방송', _hNum(rec.length) + '회', '등장 브랜드 ' + _hNum(brands.size) + '개', '#eef2ff', '#4338ca', 19],
@@ -145,19 +191,21 @@ function _hsbDetailHtml(b) {
   h += '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin-bottom:6px">구성별 판매</div>'
     + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
     + '<thead><tr style="background:#f8fafc">'
-    + ['구성 (제품)', '판매가', '방송 중 판매', '추정 매출', '누적(시작→끝)', '혜택'].map((t, i) =>
-      '<th style="padding:7px 9px;text-align:' + (i === 0 || i === 5 ? 'left' : 'right') + ';border-bottom:1px solid #e2e8f0;'
+    + ['구성 (제품)', '판매가', '방송 중 판매', '추정 매출', '누적(시작→끝)'].map((t, i) =>
+      '<th style="padding:7px 9px;text-align:' + (i === 0 ? 'left' : 'right') + ';border-bottom:1px solid #e2e8f0;'
       + 'font-size:11px;color:#475569;white-space:nowrap">' + t + '</th>').join('')
     + '</tr></thead><tbody>';
   (b.products || []).forEach(p => {
     h += '<tr style="border-bottom:1px solid #f1f5f9">'
-      + '<td style="padding:7px 9px;color:#0f172a">' + _hEsc(p.name)
-      + (p.soldOut ? ' <span style="color:#dc2626;font-size:10.5px;font-weight:700">품절</span>' : '') + '</td>'
+      + '<td style="padding:7px 9px;color:#0f172a"><div style="display:flex;align-items:center;gap:8px;min-width:0">'
+      + _hsbImgTag(p, 40)
+      + '<span style="min-width:0">' + _hEsc(p.name)
+      + (p.soldOut ? ' <span style="color:#dc2626;font-size:10.5px;font-weight:700">품절</span>' : '')
+      + '</span></div></td>'
       + '<td style="padding:7px 9px;text-align:right;white-space:nowrap">' + _hWon(p.salePrice) + '</td>'
       + '<td style="padding:7px 9px;text-align:right;font-weight:700;color:#15803d;white-space:nowrap">' + _hNum(p.sold) + '개</td>'
       + '<td style="padding:7px 9px;text-align:right;color:#a16207;white-space:nowrap">' + _hWon((p.sold || 0) * (p.salePrice || 0)) + '</td>'
       + '<td style="padding:7px 9px;text-align:right;color:#94a3b8;white-space:nowrap">' + _hNum(p.first) + ' → ' + _hNum(p.last) + '</td>'
-      + '<td style="padding:7px 9px;color:#64748b;font-size:11px">' + _hEsc(p.benefit || '') + '</td>'
       + '</tr>';
   });
   h += '</tbody></table></div>';
