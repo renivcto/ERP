@@ -55,23 +55,47 @@ function _hBadge(b) {
     + 'color:#fff;background:' + c + '">' + _hEsc(b) + '</span>';
 }
 
-// ── 상단 요약 (최근 30일) ──
-function _hsbSummary(list) {
+// ── 상단 요약 8칸 (선택한 방송 기준 + 최근 30일 집계 1칸) ──
+//   ⚠️ 1~6·8번은 '선택한 방송', 7번만 30일 집계다. 부연 줄로 구분해 둔다.
+function _hMinFrom(start, t) {
+  const p = (s) => { const m = String(s || '').match(/^(\d{1,2}):(\d{2})/); return m ? (+m[1] * 60 + +m[2]) : null; };
+  const a = p(start), c = p(t);
+  if (a == null || c == null) return null;
+  let d = c - a; if (d < 0) d += 24 * 60;      // 자정을 넘긴 방송
+  return d;
+}
+function _hsbSummary(list, b) {
   const cut = (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10).replace(/-/g, ''); })();
-  const rec = list.filter(b => b.date >= cut);
-  const sold = rec.reduce((s, b) => s + (b.sold || 0), 0);
-  const amt = rec.reduce((s, b) => s + (b.amount || 0), 0);
-  const brands = new Set(); rec.forEach(b => (b.brands || []).forEach(x => brands.add(x)));
+  const rec = list.filter(x => x.date >= cut);
+  const brands = new Set(); rec.forEach(x => (x.brands || []).forEach(v => brands.add(v)));
+
+  // 구성이 여러 개면 가장 많이 팔린 것을 대표로 쓴다
+  const prods = ((b && b.products) || []).slice().sort((x, y) => (y.sold || 0) - (x.sold || 0));
+  const top = prods[0] || null;
+  const topSub = prods.length > 1 ? ('구성 ' + prods.length + '건 중 최다 판매') : '';
+  const peakMin = (b && b.peak) ? _hMinFrom(b.start, b.peak.t) : null;
+
+  // [라벨, 값, 부연, 배경, 글자색, 값 글자크기]
   const cards = [
-    ['최근 30일 방송', _hNum(rec.length) + '회', '#eff6ff', '#1d4ed8'],
-    ['추적 판매 수량', _hNum(sold) + '개', '#f0fdf4', '#15803d'],
-    ['추정 매출', _hWon(amt), '#fefce8', '#a16207'],
-    ['등장 브랜드', _hNum(brands.size) + '개', '#fdf2f8', '#9d174d'],
+    ['방송 시간', b ? (_hEsc(b.start) + '~' + _hEsc(b.end)) : '-',
+      b ? (_hBadge(b.broadcaster) + ' <span style="color:#94a3b8">' + _hDateK(b.date) + '</span>') : '', '#eff6ff', '#1d4ed8', 19],
+    ['제품명', top ? _hEsc(top.name) : (b ? _hEsc((b.brands || []).join(' / ') || b.title) : '-'),
+      topSub, '#f5f3ff', '#6d28d9', 14],
+    ['판매가', top ? _hWon(top.salePrice) : '-', top && top.soldOut ? '품절' : '', '#f8fafc', '#334155', 19],
+    ['이벤트', (top && top.benefit) ? _hEsc(top.benefit) : '-', '', '#fff7ed', '#c2410c', 14],
+    ['추적 판매 수량', b ? (_hNum(b.sold) + '개') : '-', '이 방송', '#f0fdf4', '#15803d', 19],
+    ['추정 매출', b ? _hWon(b.amount) : '-', '이 방송', '#fefce8', '#a16207', 19],
+    ['최근 30일 방송', _hNum(rec.length) + '회', '등장 브랜드 ' + _hNum(brands.size) + '개', '#eef2ff', '#4338ca', 19],
+    ['최다 판매', (peakMin == null) ? '-' : (_hNum(peakMin) + '분'),
+      (b && b.peak) ? ('시작 후 · ' + _hEsc(b.peak.t) + ' · ' + _hNum(b.peak.sold) + '개') : '방송 시작 후', '#fdf2f8', '#9d174d', 19],
   ];
-  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px">'
-    + cards.map(c => '<div style="background:' + c[2] + ';border-radius:10px;padding:12px 14px">'
+  return '<div id="hsb-kpi" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-bottom:14px;max-width:980px">'
+    + cards.map(c => '<div style="background:' + c[3] + ';border-radius:10px;padding:10px 12px;min-width:0">'
       + '<div style="font-size:11.5px;color:#64748b;font-weight:600">' + c[0] + '</div>'
-      + '<div style="font-size:19px;font-weight:800;color:' + c[3] + ';margin-top:2px">' + c[1] + '</div></div>').join('')
+      + '<div style="font-size:' + c[5] + 'px;font-weight:800;color:' + c[4] + ';margin-top:3px;line-height:1.3;'
+      + 'overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:anywhere">' + c[1] + '</div>'
+      + (c[2] ? '<div style="font-size:10.5px;color:#94a3b8;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + c[2] + '</div>' : '')
+      + '</div>').join('')
     + '</div>';
 }
 
@@ -108,21 +132,8 @@ function _hsbListHtml(list, selId) {
 function _hsbDetailHtml(b) {
   if (!b) return '';
   const hasTicks = (b.ticks || []).length > 0;
+  // 머리말(방송사·브랜드·시간)과 판매/매출/피크 줄은 상단 8칸과 같은 내용이라 뺐다.
   let h = '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:14px;background:#fff">';
-  h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px">'
-    + _hBadge(b.broadcaster)
-    + '<span style="font-size:17px;font-weight:800;color:#0f172a">' + _hEsc((b.brands || []).join(' / ') || b.title) + '</span>'
-    + '<span style="font-size:12.5px;color:#64748b">' + _hDateK(b.date) + ' ' + _hEsc(b.start) + '~' + _hEsc(b.end) + '</span>'
-    + (b.host ? '<span style="font-size:12px;color:#64748b">쇼호스트 ' + _hEsc(b.host) + '</span>' : '')
-    + '</div>';
-  h += '<div style="display:flex;gap:18px;flex-wrap:wrap;margin:10px 0 14px">'
-    + '<div><span style="font-size:11.5px;color:#64748b">방송 중 판매</span> '
-    + '<b style="font-size:16px;color:#15803d">' + _hNum(b.sold) + '개</b></div>'
-    + '<div><span style="font-size:11.5px;color:#64748b">추정 매출</span> '
-    + '<b style="font-size:16px;color:#a16207">' + _hWon(b.amount) + '</b></div>'
-    + (b.peak ? '<div><span style="font-size:11.5px;color:#64748b">피크 구간</span> '
-      + '<b style="font-size:16px;color:#1d4ed8">' + _hEsc(b.peak.t) + ' · ' + _hNum(b.peak.sold) + '개</b></div>' : '')
-    + '</div>';
 
   if (hasTicks) {
     h += '<div style="height:200px;margin-bottom:16px"><canvas id="hsb-chart"></canvas></div>';
@@ -200,9 +211,8 @@ function renderHsBroadcastPage() {
     + '<span style="font-size:12px;color:#64748b">서버 갱신 '
     + (H.ts ? new Date(H.ts).toLocaleString('ko-KR', { hour12: false }) : '-')
     + ' · 화장품 생방송 중 5분마다 자동 기록</span>'
-    + '<button class="btn btn-sm" onclick="window._HSB.loadedAt=0;renderHsBroadcastPage()" style="height:28px;font-size:12px">🔄 새로고침</button>'
     + '</div>'
-    + _hsbSummary(H.list)
+    + _hsbSummary(H.list, sel)
     + _hsbDetailHtml(sel)
     + '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin-bottom:6px">방송 이력</div>'
     + _hsbListHtml(H.list, sel && sel.id);
