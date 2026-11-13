@@ -39,7 +39,7 @@
       ws.addEventListener('touchcancel',function(){ ws.style.scrollSnapType=''; ws.style.scrollBehavior=''; mode=''; },{passive:true});
     })();
     // RENIV logo = home (page 1)
-    document.getElementById('home-logo')&&document.getElementById('home-logo').addEventListener('click',function(){ go(0); try{ window.NEXUS.setView('office'); }catch(e){} setTimeout(function(){ try{ syncCam(); }catch(e){} },50); });
+    document.getElementById('home-logo')&&document.getElementById('home-logo').addEventListener('click',goHome);
     // name badge opens a small menu (settings, connections, logout)
     var nm=document.getElementById('rail-name114'); if(nm) nm.addEventListener('click',function(){ if(!mq.matches) return; var s=sheet(); document.getElementById('msheet-name').textContent=nm.textContent.replace(/관리자|임원|조회 권한/,'').trim()||'내 계정';
       var ib=document.getElementById('msheet-install');
@@ -49,28 +49,74 @@
     buildOffice3();
     quickMenu();
     shortMeetingLabel();
+    railIcons();
+    backStack();
   }
 
-  /* 빠른 메뉴 2x2 + 하단 한 줄 (2026-11-13) */
+  /* 빠른 메뉴 + 하단 한 줄 + 뒤로가기 (2026-11-13) */
+
+  /* ERP 는 부팅 끝에 localStorage reniv_last_page 와 sessionStorage
+     reniv_session_active 를 보고 시작 페이지를 정한다(index.html doRender).
+     아이프레임은 늘 '새 세션' 이라 dashboard 로 갔다 — 그래서 눌러 둔 페이지가
+     잠깐 보이다 홈으로 넘어갔다. NEXUS 와 ERP 는 같은 오리진이니 열기 전에
+     그 두 값을 넣어 두면 부팅이 목표 페이지에서 끝난다. */
   function openErp(page){
     var fr=document.getElementById('erp-frame37'), sh=document.getElementById('erp-shell37');
     if(!fr||!sh) return;
+    try{ localStorage.setItem('reniv_last_page', page); }catch(e){}
+    try{ sessionStorage.setItem('reniv_session_active','1'); }catch(e){}
+    if(sh.hidden){ sh.hidden=false; nxPush(); }
     if(!fr.getAttribute('src')) fr.src=new URL('../',location.href).href;
-    sh.hidden=false;
-    /* ERP 는 부팅을 마치며 대시보드로 넘어간다. 한 번만 go() 하면 그 뒤에 덮인다.
-       목표 페이지가 될 때까지 다시 부르고, 되면 바로 멈춘다. */
-    var n=0, want='page-'+page;
-    (function tick(){
-      n++;
-      var done=false;
+    var seq=(openErp.seq=(openErp.seq||0)+1), want='page-'+page, tries=0, held=0;
+    function at(){
+      if(seq!==openErp.seq||sh.hidden) return;
+      tries++;
+      var ready=false;
       try{
-        var cw=fr.contentWindow, cd=cw.document, cur=cd.querySelector('#content .page.active');
-        if(typeof cw.go==='function' && cur){
-          if(cur.id===want) done=true; else cw.go(page);
+        var cw=fr.contentWindow, cd=cw&&cw.document;
+        if(cd&&cd.readyState==='complete'&&typeof cw.go==='function'&&cd.getElementById(want)){
+          ready=true;
+          var cur=cd.querySelector('#content .page.active');
+          if(!cur||cur.id!==want){ cw.go(page); held=0; } else held++;
         }
       }catch(e){}
-      if(!done && n<60) setTimeout(tick,450);
-    })();
+      /* 목표 페이지에 3번 연속 머무르면(약 3.6초) 손을 뗀다 — 그 뒤 사용자가
+         ERP 메뉴로 이동하는 것을 방해하지 않기 위해서다. */
+      if(ready){ if(held<3) setTimeout(at,1200); return; }
+      if(tries<120) setTimeout(at,250);
+    }
+    at();
+  }
+
+  /* 뒤로가기 — 폰에서 ERP 화면이나 대표이사실로 들어간 뒤 뒤로가기를 누르면
+     사이트를 통째로 나가 버렸다. 들어갈 때 히스토리에 한 겹을 쌓아 두고,
+     뒤로가기는 맨 위의 겹 하나만 닫는다. */
+  var backBusy=false, inPop=false;
+  function nxPush(){ try{ history.pushState({nxLayer:((history.state&&history.state.nxLayer)||0)+1},''); }catch(e){} }
+  function nxPop(){ if(inPop) return; try{ if(history.state&&history.state.nxLayer){ backBusy=true; history.back(); setTimeout(function(){ backBusy=false; },400); } }catch(e){} }
+  function closeTop(){
+    var s=document.getElementById('msheet'); if(s&&!s.hidden){ s.hidden=true; return true; }
+    var sh=document.getElementById('erp-shell37');
+    if(sh&&!sh.hidden){ var hb=document.getElementById('erp-home37'); if(hb) hb.click(); else sh.hidden=true; return true; }
+    var dr=document.getElementById('drawer');
+    if(dr&&!dr.hidden){ var c=document.getElementById('drawer-close-live'); if(c) c.click(); else dr.hidden=true; return true; }
+    try{ if(window.NEXUS&&window.NEXUS.currentView&&window.NEXUS.currentView()!=='office'){ window.NEXUS.setView('office'); syncCam(); return true; } }catch(e){}
+    if(idx>0){ go(0); return true; }
+    return false;
+  }
+  function backStack(){
+    if(window.__nxBackHooked) return; window.__nxBackHooked=true;
+    window.addEventListener('popstate',function(){
+      if(backBusy){ backBusy=false; return; }
+      if(!mq.matches) return;
+      /* 이 겹은 이미 브라우저가 걷어냈다. 닫는 동안 nxPop 이 또 부르지 않게 막는다. */
+      inPop=true; try{ closeTop(); } finally { setTimeout(function(){ inPop=false; },0); }
+    });
+    /* 셸 머리말의 '홈으로' 로 닫았을 때도 겹을 같이 걷어낸다 */
+    var hb=document.getElementById('erp-home37');
+    if(hb) hb.addEventListener('click',function(){ nxPop(); });
+    var nb=document.getElementById('nav-erp37');
+    if(nb) nb.addEventListener('click',function(){ if(mq.matches) nxPush(); });
   }
 
   function quickMenu(){
@@ -79,8 +125,9 @@
     var q=document.createElement('div'); q.id='mquick';
     q.innerHTML='<button type="button" data-q="erp:hsbroadcast">📺 홈쇼핑</button>'
       +'<button type="button" data-q="panel:3">🗂️ 업무 현황</button>'
-      +'<button type="button" data-q="erp:stock">📦 재고</button>'
-      +'<button type="button" data-q="erp:item">🏷️ 품목</button>';
+      +'<button type="button" data-q="erp:approval">🧾 결재 현황</button>'
+      +'<button type="button" data-q="erp:stock">📦 재고 현황</button>'
+      +'<button type="button" data-q="erp:item">🏷️ 품목 현황</button>';
     wrap.appendChild(q);
     q.addEventListener('click',function(e){
       var b=e.target.closest('button'); if(!b) return;
@@ -100,6 +147,32 @@
     try{ new MutationObserver(fix).observe(mn,{childList:true,characterData:true,subtree:true}); }catch(e){}
   }
 
+
+
+  /* 하단 탭바 모양 통일 (2026-11-13)
+     ERP 는 테두리 친 글자 배지, 르니브는 잘린 로고 이미지라 혼자 달랐다.
+     둘 다 '아이콘 + 글씨' 로 맞춘다. onclick 은 요소 속성이라 내용을 갈아도 남는다. */
+  function railIcons(){
+    if(!mq.matches) return;
+    var e=document.getElementById('nav-erp37');
+    if(e&&!e.dataset.mIcon){ e.dataset.mIcon='1';
+      e.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-grid"/></svg><span>ERP</span>'; }
+    var h=document.getElementById('home-logo');
+    if(h&&!h.dataset.mIcon){ h.dataset.mIcon='1'; h.setAttribute('title','홈 화면');
+      h.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.6 12 3.2l9 7.4"/><path d="M5.6 9.6V20.3h12.8V9.6"/><path d="M9.9 20.3v-5h4.2v5"/></svg><span>Home</span>'; }
+  }
+
+  /* 홈 버튼은 지금까지 go(0) 만 했다. ERP 셸이 열려 있으면 그 위를 덮고 있어
+     화면이 안 바뀌었다 — 열려 있는 것을 먼저 닫는다. */
+  function goHome(){
+    var sh=document.getElementById('erp-shell37');
+    if(sh&&!sh.hidden){ var hb=document.getElementById('erp-home37'); if(hb) hb.click(); else { sh.hidden=true; nxPop(); } }
+    var dr=document.getElementById('drawer');
+    if(dr&&!dr.hidden){ var c=document.getElementById('drawer-close-live'); if(c) c.click(); }
+    go(0);
+    try{ window.NEXUS.setView('office'); }catch(e){}
+    setTimeout(function(){ try{ syncCam(); }catch(e){} },50);
+  }
 
   /* v3: people grid (2·2·3) with live 3D portraits; CAM buttons open the 3D view full screen */
   var ROWS=[['heeka','juyeon'],['dabin','greg'],['chansik','ian','jony']];
@@ -128,7 +201,9 @@
   }
   function applyLayout(){ window.__nxNoOrbit=false; try{ if(window.NEXUS&&window.NEXUS.setMobileLayout) window.NEXUS.setMobileLayout(mq.matches); }catch(e){} }
   function syncCam(){ var cur=(window.NEXUS&&window.NEXUS.currentView&&window.NEXUS.currentView())||'office'; [['ceo','m-cam-ceo','대표이사실'],['room','m-cam-room','미팅룸']].forEach(function(k){ var b=document.getElementById(k[1]); if(!b) return; var on=cur===k[0]; b.classList.toggle('on',on); b.textContent=on?'↩ 오피스로':k[2]; }); }
-  function openStage(v){ var cur=(window.NEXUS&&window.NEXUS.currentView&&window.NEXUS.currentView())||'office'; var next=cur===v?'office':v; try{ window.NEXUS.setView(next); }catch(e){} syncCam(); }
+  function openStage(v){ var cur=(window.NEXUS&&window.NEXUS.currentView&&window.NEXUS.currentView())||'office'; var next=cur===v?'office':v; try{ window.NEXUS.setView(next); }catch(e){}
+    if(mq.matches){ if(next==='office') nxPop(); else if(cur==='office') nxPush(); }
+    syncCam(); }
   setInterval(function(){ if(mq.matches) syncCam(); },800);
   function closeStage(){ try{ window.NEXUS.setView('office'); }catch(e){} document.body.classList.remove('m-stage-open'); setTimeout(function(){ window.dispatchEvent(new Event('resize')); },50); }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',setup); else setup();
@@ -141,7 +216,7 @@
      beforeinstallprompt 를 잡아 두었다가 앱 안의 버튼으로 설치창을 띄운다.
      이 이벤트가 뜬다는 것 자체가 '설치 요건을 다 갖췄다'는 크롬의 신호다. */
   (function installBar(){
-    var SNOOZE='nx_install_snooze', deferred=null, bar=null;
+    var SNOOZE='nx_install_snooze', DONE='nx_installed', deferred=null, bar=null;
     function installed(){
       return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
     }
@@ -164,7 +239,7 @@
           hide();
           deferred.prompt();
           deferred.userChoice.then(function(c){
-            if(c && c.outcome==='accepted'){ deferred=null; }
+            if(c && c.outcome==='accepted'){ deferred=null; try{ localStorage.setItem(DONE,'1'); }catch(err){} }
             else { try{ localStorage.setItem(SNOOZE,String(Date.now())); }catch(err){} }
           }).catch(function(){});
         });
@@ -172,7 +247,21 @@
       bar.hidden=false;
     }
     window.addEventListener('beforeinstallprompt',function(e){ e.preventDefault(); deferred=e; show(); });
-    window.addEventListener('appinstalled',function(){ deferred=null; hide(); try{ localStorage.removeItem(SNOOZE); }catch(e){} });
+    window.addEventListener('appinstalled',function(){ deferred=null; hide(); try{ localStorage.removeItem(SNOOZE); localStorage.setItem(DONE,'1'); }catch(e){} setTimeout(tip,800); });
+    /* 설치해 놓고 크롬 탭으로 열면 주소창이 그대로다 — 설치가 안 된 게 아니라
+       '앱이 아닌 탭' 을 보고 있는 것이다. 그 경우에만 한 번 알려 준다. */
+    function tip(){
+      if(!mq.matches||installed()) return;
+      var done=false; try{ done=localStorage.getItem(DONE)==='1'; }catch(e){}
+      if(!done||deferred) return;   /* 설치창이 다시 뜬다면 설치된 게 아니다 */
+      if(document.getElementById('minstall-tip')) return;
+      var t=document.createElement('div'); t.id='minstall-tip'; t.className='minstall';
+      t.innerHTML='<span>🏠 홈 화면의 NEXUS 아이콘으로 열면 주소창이 사라집니다</span>'+
+        '<button type="button" data-a="later" aria-label="닫기">✕</button>';
+      document.body.appendChild(t);
+      t.addEventListener('click',function(e){ if(e.target.closest('button')) t.remove(); });
+    }
+    setTimeout(tip,4000);
     mq.addEventListener && mq.addEventListener('change',function(){ if(mq.matches) show(); else hide(); });
     window.NEXUS_INSTALL = { available:function(){ return !!deferred; }, show:function(){ try{ localStorage.removeItem(SNOOZE); }catch(e){} show(); } };
   })();
