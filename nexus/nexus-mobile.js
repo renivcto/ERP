@@ -69,7 +69,8 @@
     if(!fr||!sh) return;
     try{ localStorage.setItem('reniv_last_page', page); }catch(e){}
     try{ sessionStorage.setItem('reniv_session_active','1'); }catch(e){}
-    if(sh.hidden){ sh.hidden=false; nxPush(); }
+    sh.hidden=false;
+    if(!erpLayer){ erpLayer=true; nxPush(); }
     if(!fr.getAttribute('src')) fr.src=new URL('../',location.href).href;
     var seq=(openErp.seq=(openErp.seq||0)+1), want='page-'+page, tries=0, held=0;
     function at(){
@@ -95,13 +96,13 @@
   /* 뒤로가기 — 폰에서 ERP 화면이나 대표이사실로 들어간 뒤 뒤로가기를 누르면
      사이트를 통째로 나가 버렸다. 들어갈 때 히스토리에 한 겹을 쌓아 두고,
      뒤로가기는 맨 위의 겹 하나만 닫는다. */
-  var backBusy=false, inPop=false;
+  var backBusy=false, inPop=false, erpLayer=false;
   function nxPush(){ try{ history.pushState({nxLayer:((history.state&&history.state.nxLayer)||0)+1},''); }catch(e){} }
   function nxPop(){ if(inPop) return; try{ if(history.state&&history.state.nxLayer){ backBusy=true; history.back(); setTimeout(function(){ backBusy=false; },400); } }catch(e){} }
   function closeTop(){
     var s=document.getElementById('msheet'); if(s&&!s.hidden){ s.hidden=true; return true; }
     var sh=document.getElementById('erp-shell37');
-    if(sh&&!sh.hidden){ var hb=document.getElementById('erp-home37'); if(hb) hb.click(); else sh.hidden=true; return true; }
+    if(sh&&!sh.hidden){ erpLayer=false; var hb=document.getElementById('erp-home37'); if(hb) hb.click(); else sh.hidden=true; return true; }
     var dr=document.getElementById('drawer');
     if(dr&&!dr.hidden){ var c=document.getElementById('drawer-close-live'); if(c) c.click(); else dr.hidden=true; return true; }
     try{ if(window.NEXUS&&window.NEXUS.currentView&&window.NEXUS.currentView()!=='office'){ window.NEXUS.setView('office'); syncCam(); return true; } }catch(e){}
@@ -118,9 +119,11 @@
     });
     /* 셸 머리말의 '홈으로' 로 닫았을 때도 겹을 같이 걷어낸다 */
     var hb=document.getElementById('erp-home37');
-    if(hb) hb.addEventListener('click',function(){ nxPop(); });
+    if(hb) hb.addEventListener('click',function(){ erpLayer=false; nxPop(); });
+    /* ERP 탭은 언제나 ERP 홈으로. 빠른 메뉴로 다른 페이지를 열면 reniv_last_page 가
+       그 값으로 남아 부팅이 거기로 복원된다 — 'dashboard' 로 덮어쓴다. */
     var nb=document.getElementById('nav-erp37');
-    if(nb) nb.addEventListener('click',function(){ if(mq.matches) nxPush(); });
+    if(nb) nb.addEventListener('click',function(){ if(mq.matches) openErp('dashboard'); });
   }
 
   function quickMenu(){
@@ -170,7 +173,7 @@
      화면이 안 바뀌었다 — 열려 있는 것을 먼저 닫는다. */
   function goHome(){
     var sh=document.getElementById('erp-shell37');
-    if(sh&&!sh.hidden){ var hb=document.getElementById('erp-home37'); if(hb) hb.click(); else { sh.hidden=true; nxPop(); } }
+    if(sh&&!sh.hidden){ erpLayer=false; var hb=document.getElementById('erp-home37'); if(hb) hb.click(); else { sh.hidden=true; nxPop(); } }
     var dr=document.getElementById('drawer');
     if(dr&&!dr.hidden){ var c=document.getElementById('drawer-close-live'); if(c) c.click(); }
     go(0);
