@@ -55,6 +55,7 @@
     railIcons();
     backStack();
     setupPullRefresh();
+    erpHeaderDate();
   }
 
   /* 빠른 메뉴 + 하단 한 줄 + 뒤로가기 (2026-11-13) */
@@ -181,6 +182,20 @@
     setTimeout(function(){ try{ syncCam(); }catch(e){} },50);
   }
 
+
+
+  /* ERP 셸 머리말의 '원본 ERP 권한 적용' 자리에 오늘 날짜를 짧게 (2026-11-14)
+     ERP 홈의 긴 영문 날짜 줄(November 14, 2026 · 토요일)은 폰에서 숨기고 여기로 옮겼다. */
+  function erpHeaderDate(){
+    var el=document.getElementById('erp-status37'); if(!el) return;
+    var set=function(){
+      if(!mq.matches) return;
+      var d=new Date();
+      el.textContent=(d.getMonth()+1)+'월 '+d.getDate()+'일 ('+'일월화수목금토'[d.getDay()]+')';
+    };
+    set();
+    if(!erpHeaderDate.timer) erpHeaderDate.timer=setInterval(set,60*60*1000);
+  }
 
   /* ── 당겨서 새로고침 (2026-11-14) ─────────────────────────────────
      브라우저 기본 동작은 못 쓴다: 가로 4페이지 구조 때문에 html,body 가
