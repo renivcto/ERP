@@ -178,18 +178,18 @@ function _hsbListHtml(list, selId) {
         + 'border-top:1px solid #e2e8f0">' + _hDateK(b.date) + '</div>';
     }
     const on = b.id === selId;
-    h += '<div onclick="window._hsbPick(\'' + _hEsc(b.id) + '\')" style="display:flex;align-items:center;gap:9px;'
+    h += '<div onclick="window._hsbPick(\'' + _hEsc(b.id) + '\')" style="display:flex;align-items:center;gap:7px;'
       + 'padding:8px 12px;cursor:pointer;border-top:1px solid #f1f5f9;'
       + (on ? 'background:#eef2ff' : 'background:#fff') + '">'
       + _hBadge(b.broadcaster)
-      + '<span style="font-size:12px;font-weight:700;color:#0f172a;width:104px;flex-shrink:0">' + _hEsc(b.start) + '~' + _hEsc(b.end) + '</span>'
+      + '<span style="font-size:11px;font-weight:700;color:#0f172a;width:76px;flex-shrink:0;letter-spacing:-.3px">' + _hEsc(b.start) + '~' + _hEsc(b.end) + '</span>'
       /* 이름은 두 줄까지 허용해 다 보이게 (전에는 한 줄로 잘려 '에버…' 가 됐다) */
-      + '<span style="font-size:12.5px;font-weight:700;color:#0f172a;flex:1;min-width:0;line-height:1.3;'
+      + '<span style="font-size:12px;font-weight:700;color:#0f172a;flex:1;min-width:0;line-height:1.3;'
       + 'word-break:keep-all;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden">'
       + _hEsc((b.brands || []).join(' / ') || b.title) + '</span>'
       /* 금액 위 · 수량 아래, 오른쪽 정렬 — 한 칸으로 합쳐 이름 쪽에 96px 을 돌려준다 */
-      + '<span style="display:flex;flex-direction:column;align-items:flex-end;width:118px;flex-shrink:0;line-height:1.25">'
-      + '<b style="font-size:11.5px;color:#a16207;font-weight:700">' + _hWon(b.amount) + '</b>'
+      + '<span style="display:flex;flex-direction:column;align-items:flex-end;width:96px;flex-shrink:0;line-height:1.25">'
+      + '<b style="font-size:11.5px;color:#a16207;font-weight:700;letter-spacing:-.3px">' + _hWon(b.amount) + '</b>'
       + '<small style="font-size:11px;color:#15803d;font-weight:700">' + _hNum(b.sold) + '개</small>'
       + '</span>'
       + '</div>';
