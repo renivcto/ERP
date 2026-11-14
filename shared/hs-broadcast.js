@@ -67,11 +67,29 @@ function _hsbImgUrl(p) {
 function _hsbImgTag(p, px) {
   const u = _hsbImgUrl(p); if (!u) return '';
   const n = px || 40;
+  /* 누르면 크게 — GS 이미지는 주소 끝 숫자가 크기다 (/1/200 -> /1/800, 실측 확인) */
+  const big = u.replace(/\/(\d+)$/, '/800');
   return '<img src="' + _hEsc(u) + '" alt="" loading="lazy" referrerpolicy="no-referrer" '
+    + 'onclick="event.stopPropagation();window._hsbZoom(&quot;' + _hEsc(big) + '&quot;)" '
+    + 'title="크게 보기" '
     + 'onerror="this.style.display=&quot;none&quot;" '
-    + 'style="width:' + n + 'px;height:' + n + 'px;border-radius:7px;object-fit:cover;'
+    + 'style="width:' + n + 'px;height:' + n + 'px;border-radius:7px;object-fit:cover;cursor:zoom-in;'
     + 'background:#f1f5f9;border:1px solid #e2e8f0;display:inline-block;vertical-align:middle;margin-right:8px">';
 }
+
+/* 제품 사진 크게 보기 — 아무 데나 누르면 닫힌다 */
+window._hsbZoom = function (url) {
+  if (!url) return;
+  const old = document.getElementById('hsb-zoom'); if (old) old.remove();
+  const ov = document.createElement('div');
+  ov.id = 'hsb-zoom';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(10,15,20,.88);'
+    + 'display:flex;align-items:center;justify-content:center;padding:18px;cursor:zoom-out';
+  ov.innerHTML = '<img src="' + _hEsc(url) + '" alt="" referrerpolicy="no-referrer" '
+    + 'style="max-width:100%;max-height:100%;border-radius:12px;background:#fff;box-shadow:0 10px 40px rgba(0,0,0,.5)">';
+  ov.addEventListener('click', function () { ov.remove(); });
+  document.body.appendChild(ov);
+};
 //   '무료배송' 은 빼고 할인율 %·무이자 개월을 정확히 적는다.
 //   서버가 숫자(dcRt·noIntMm)를 보내기 전 기록은 글자 혜택에서 무료배송만 뺀다.
 function _hsbEventText(p) {
@@ -160,15 +178,20 @@ function _hsbListHtml(list, selId) {
         + 'border-top:1px solid #e2e8f0">' + _hDateK(b.date) + '</div>';
     }
     const on = b.id === selId;
-    h += '<div onclick="window._hsbPick(\'' + _hEsc(b.id) + '\')" style="display:flex;align-items:center;gap:10px;'
-      + 'padding:10px 14px;cursor:pointer;border-top:1px solid #f1f5f9;'
+    h += '<div onclick="window._hsbPick(\'' + _hEsc(b.id) + '\')" style="display:flex;align-items:center;gap:9px;'
+      + 'padding:8px 12px;cursor:pointer;border-top:1px solid #f1f5f9;'
       + (on ? 'background:#eef2ff' : 'background:#fff') + '">'
       + _hBadge(b.broadcaster)
       + '<span style="font-size:12px;font-weight:700;color:#0f172a;width:104px;flex-shrink:0">' + _hEsc(b.start) + '~' + _hEsc(b.end) + '</span>'
-      + '<span style="font-size:12.5px;font-weight:700;color:#0f172a;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+      /* 이름은 두 줄까지 허용해 다 보이게 (전에는 한 줄로 잘려 '에버…' 가 됐다) */
+      + '<span style="font-size:12.5px;font-weight:700;color:#0f172a;flex:1;min-width:0;line-height:1.3;'
+      + 'word-break:keep-all;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden">'
       + _hEsc((b.brands || []).join(' / ') || b.title) + '</span>'
-      + '<span style="font-size:11.5px;color:#15803d;font-weight:700;width:96px;text-align:right;flex-shrink:0">' + _hNum(b.sold) + '개</span>'
-      + '<span style="font-size:11.5px;color:#a16207;font-weight:700;width:118px;text-align:right;flex-shrink:0">' + _hWon(b.amount) + '</span>'
+      /* 금액 위 · 수량 아래, 오른쪽 정렬 — 한 칸으로 합쳐 이름 쪽에 96px 을 돌려준다 */
+      + '<span style="display:flex;flex-direction:column;align-items:flex-end;width:118px;flex-shrink:0;line-height:1.25">'
+      + '<b style="font-size:11.5px;color:#a16207;font-weight:700">' + _hWon(b.amount) + '</b>'
+      + '<small style="font-size:11px;color:#15803d;font-weight:700">' + _hNum(b.sold) + '개</small>'
+      + '</span>'
       + '</div>';
   });
   return h + '</div>';
