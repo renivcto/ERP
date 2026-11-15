@@ -167,3 +167,35 @@
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
   mq.addEventListener&&mq.addEventListener('change',schedule);
 })();
+
+/* m3: 결재 관리 — '작성' 버튼을 분류 칩 줄 아래로 (폰에서만)
+   버튼은 탭 줄(툴바) 안에 있고 칩 줄은 다른 부모라 CSS order 로는 못 옮긴다.
+   ERP 의 탭 전환 코드는 이 버튼들을 id 로 찾아 style.display 만 바꾸므로
+   위치를 옮겨도 그대로 동작한다. */
+(function(){
+  var mq=window.matchMedia('(max-width: 820px)'), t=null;
+  function shown(el){ return !!(el && el.offsetParent !== null); }
+  function move(){
+    if(!mq.matches) return;
+    var page=document.getElementById('page-approval'); if(!page||!shown(page)) return;
+    var subs=page.querySelectorAll('.ap-sub'), sub=null;
+    for(var j=0;j<subs.length;j++){ if(shown(subs[j])){ sub=subs[j]; break; } }
+    if(!sub) return;
+    var anchor=sub.firstElementChild; if(!anchor) return;      /* 분류 칩 줄 */
+    var btns=page.querySelectorAll('button[id^="ap-add-btn-"]');
+    for(var i=0;i<btns.length;i++){
+      var b=btns[i]; if(!shown(b)) continue;
+      if(b.parentElement===sub && b.previousElementSibling===anchor) continue;  /* 이미 옮겼다 */
+      sub.insertBefore(b, anchor.nextSibling);
+    }
+  }
+  function schedule(){ clearTimeout(t); t=setTimeout(move,150); }
+  function start(){
+    var root=document.getElementById('content')||document.body;
+    new MutationObserver(schedule).observe(root,{childList:true,subtree:true});
+    document.addEventListener('click',schedule,true);
+    schedule();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
+  mq.addEventListener&&mq.addEventListener('change',schedule);
+})();
