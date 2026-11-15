@@ -181,15 +181,16 @@
     var subs=page.querySelectorAll('.ap-sub'), sub=null;
     for(var j=0;j<subs.length;j++){ if(shown(subs[j])){ sub=subs[j]; break; } }
     if(!sub) return;
-    var anchor=sub.firstElementChild; if(!anchor) return;      /* 분류 칩 줄 */
-    /* ⚠️ 칩 줄이 있는 탭에서만 옮긴다. 일반 결재처럼 첫 자식이 목록 카드면
-       버튼이 목록 맨 아래에 파묻힌다 — 그 탭은 원래 자리에 둔다. */
-    if(anchor.classList.contains('card') || anchor.getBoundingClientRect().height > 160) return;
+    /* 목록 카드 **바로 위** 에 둔다.
+       - 지출 결의서: 분류 칩 줄 -> 버튼 -> 목록
+       - 일반 결재  : 버튼 -> 목록 (칩 줄이 없다)
+       전에는 '첫 자식 다음' 에 넣어서, 칩 줄이 없는 탭에서 버튼이 목록 아래로 갔다. */
+    var card=sub.querySelector(':scope>.card');
     var btns=page.querySelectorAll('button[id^="ap-add-btn-"]');
     for(var i=0;i<btns.length;i++){
       var b=btns[i]; if(!shown(b)) continue;
-      if(b.parentElement===sub && b.previousElementSibling===anchor) continue;  /* 이미 옮겼다 */
-      sub.insertBefore(b, anchor.nextSibling);
+      if(b.parentElement===sub && b.nextElementSibling===card) continue;   /* 이미 제자리 */
+      if(card) sub.insertBefore(b, card); else sub.appendChild(b);
     }
   }
   function schedule(){ clearTimeout(t); t=setTimeout(move,150); }
