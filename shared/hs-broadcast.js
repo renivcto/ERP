@@ -363,14 +363,8 @@ function _hsbSummary(list, b) {
 // ── 방송 목록 ──
 function _hsbListHtml(list, selId) {
   if (!list.length) {
-    const EMPTY = {
-      'GS샵': '아직 기록된 방송이 없습니다. 서버가 화장품 생방송 시간에 5분마다 자동으로 쌓습니다.',
-      '롯데홈쇼핑': '아직 기록된 롯데 방송이 없습니다. 롯데는 판매수량을 공개하지 않아, 앱 화면에서 관측한 누적 구매수량만 기록합니다.',
-      'CJ온스타일': '아직 기록된 CJ 방송이 없습니다. 주간 편성표를 #홈쇼핑분석 에 올려 주시면 다음 날 아침에 읽어 갑니다.',
-      '현대홈쇼핑': '아직 기록된 현대 방송이 없습니다. 공개 편성표를 매일 아침 자동으로 받아 옵니다.',
-    };
     return '<div style="padding:26px;color:#94a3b8;font-size:13px;background:#f8fafc;border-radius:10px">'
-      + _hEsc(EMPTY[window._HSB.bc] || EMPTY['GS샵']) + '</div>';
+      + '기록된 방송이 없습니다.</div>';
   }
   let h = '<div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">';
   let lastDate = '';
@@ -452,7 +446,7 @@ function _hsbMediaHtml(b) {
     + '</div>';
   if (!list.length) {
     h += '<div style="font-size:11.5px;color:#94a3b8;padding:8px 0">'
-      + '아직 올린 사진·영상이 없습니다. 방송 화면을 찍어 올려 두면 이 방송 기록에 남습니다.</div>';
+      + '없음</div>';
   } else {
     h += '<div style="display:flex;gap:9px;overflow-x:auto;padding:2px 0 6px">'
       + list.map((m, i) => '<figure style="margin:0;flex:0 0 auto;width:168px;position:relative">'
@@ -539,13 +533,8 @@ function chr10() { return String.fromCharCode(10); }
 /* v2.3.942: 롯데 관측 표 — 시각 · 누적 · 직전 대비 · 방송 중 여부 + 그때 화면 */
 function _hsbObsHtml(b) {
   const shots = (window._HSB_SHOTS && window._HSB_SHOTS.map) || {};
-  let h = '<div style="padding:11px 13px;background:#fff7ed;border:1px solid #fed7aa;border-radius:9px;'
-    + 'font-size:12px;color:#9a3412;line-height:1.7;margin-bottom:14px">'
-    + '<b>관측 기록입니다.</b> ' + _hEsc(b.broadcaster || '') + '은 판매수량을 공개하지 않아, '
-    + '앱 상품 화면에 뜨는 수량을 직접 보고 적은 값입니다. GS처럼 5분마다 자동으로 쌓은 값이 아닙니다. '
-    + '방송사가 집계 기간·단위를 공시한 값은 아니지만, 한 방송 분량으로 들어맞아 <b>그 방송의 집계</b>로 읽습니다.'
-    + (b.obsNote ? '<br>' + _hEsc(b.obsNote) : '')
-    + '</div>';
+  /* v2.3.948: 안내 문구 상자는 화면에서 뺀다. obsNote 는 문서에 그대로 남는다. */
+  let h = '';
 
   (b.products || []).forEach(p => {
     const obs = p.obs || [];
@@ -610,12 +599,7 @@ function _hsbDetailHtml(b) {
 
   /* v2.3.945: 편성만 있는 기록(롯데·CJ) — 수량은 비공개. 손으로 적을 길만 열어 둔다. */
   if (b.src === 'schedule') {
-    h += '<div style="padding:11px 13px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;'
-      + 'font-size:12px;color:#475569;line-height:1.7;margin-bottom:12px">'
-      + '<b>편성 기록입니다.</b> ' + _hEsc(b.broadcaster || '') + '은 판매수량을 공개하지 않아 '
-      + '방송 시간과 상품만 남겼습니다. 화면에서 수량을 보셨다면 아래 <b>+ 판매 수량 적기</b> 로 남길 수 있고, '
-      + 'Aside 가 자동으로 적어 넣기도 합니다.</div>'
-      + '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin-bottom:6px">편성 상품</div>'
+    h += '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin-bottom:6px">편성 상품</div>'
       + _hsbSchedProdHtml(b);
     h += _hsbMediaHtml(b);
     return h + '</div>';
@@ -623,9 +607,6 @@ function _hsbDetailHtml(b) {
 
   if (hasTicks) {
     h += '<div style="height:200px;margin-bottom:16px"><canvas id="hsb-chart"></canvas></div>';
-  } else {
-    h += '<div style="padding:14px;background:#fffbeb;border-radius:8px;font-size:12px;color:#92400e;margin-bottom:14px">'
-      + '아직 구간 데이터가 없습니다 — 방송이 시작되면 5분마다 쌓입니다.</div>';
   }
 
   h += '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin-bottom:6px">구성별 판매</div>'
@@ -647,9 +628,6 @@ function _hsbDetailHtml(b) {
       + '</tr>';
   });
   h += '</tbody></table></div>';
-  h += '<div style="margin-top:10px;font-size:11px;color:#94a3b8;line-height:1.6">'
-    + '· 홈쇼핑이 공개한 누적 구매수량을 5분마다 읽어 그 차이를 적은 값입니다. 재방송은 제외합니다.<br>'
-    + '· 추정 매출 = 구간 판매량 × 판매가. 취소·옵션 차이는 반영되지 않습니다.</div>';
   h += _hsbMediaHtml(b);
   return h + '</div>';
 }
@@ -743,18 +721,12 @@ function renderHsBroadcastPage() {
   const list = H.list.filter(b => b.broadcaster === H.bc);
   const sel = list.find(b => b.id === H.sel) || list[0];
   H.sel = sel ? sel.id : null;
-  const SRC = {
-    'GS샵': '편성표에 공개된 누적 구매수량을 생방송 중 5분마다 읽어 차이를 적습니다.',
-    '롯데홈쇼핑': '롯데는 판매수량을 공개하지 않습니다. 앱 상품 화면의 “지금까지 N개 구매된 상품입니다” 를 눈으로 관측해 적은 값입니다.',
-    'CJ온스타일': 'CJ는 판매수량을 공개하지 않습니다. 슬랙에 올려 주신 주간 편성표를 읽어 편성만 기록합니다.',
-    '현대홈쇼핑': '현대는 판매수량을 공개하지 않습니다. 공개 편성표에서 가격·쿠폰·무이자까지 자동으로 받아 편성만 기록합니다.',
-  };
   host.innerHTML =
     _hsbTabsHtml(H.bc)
     + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
     + '<span style="font-size:12px;color:#64748b">서버 갱신 '
     + (H.ts ? new Date(H.ts).toLocaleString('ko-KR', { hour12: false }) : '-')
-    + ' · ' + _hEsc(SRC[H.bc] || '') + '</span>'
+    + '</span>'
     + '</div>'
     + (sel ? (_hsbSummary(list, sel) + _hsbDetailHtml(sel)) : '')
     + '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin-bottom:6px">방송 이력</div>'
