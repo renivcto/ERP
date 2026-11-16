@@ -180,14 +180,18 @@ function _hsbSummary(list, b) {
   /* v2.3.942: 롯데처럼 '관측' 으로 모은 기록은 GS 의 5분 자동 기록과 뜻이 다르다.
      같은 칸에 같은 이름으로 넣으면 숫자를 잘못 읽게 되므로 라벨과 부연을 바꾼다. */
   const isObs = !!(b && b.src === 'app-observation');
+  /* v2.3.944: 대표 숫자는 '마지막 관측값' = 그 방송의 판매 수량.
+     종료 후에 찍었으면 최종, 방송 중에 찍었으면 최종은 그보다 크다 — 부연에 적는다. */
   const qtyCard = isObs
-    ? (b.sold > 0
-        ? ['관측 구간 판매', _hNum(b.sold) + '개', '첫 관측 → 마지막 관측', '#f0fdf4', '#15803d', 19]
-        : ['관측 누적 구매', _hNum(b.obsTotal || 0) + '개', '이 방송 몫 분리 불가', '#f0fdf4', '#15803d', 19])
+    ? ['방송 판매 수량', _hNum(b.obsTotal || 0) + '개',
+       b.obsFinal ? '방송 종료 후 관측 · 최종' : '방송 중 관측 · 최종은 더 큽니다',
+       '#f0fdf4', '#15803d', 19]
     : ['추적 판매 수량', b ? (_hNum(b.sold) + '개') : '-', '이 방송', '#f0fdf4', '#15803d', 19];
   const amtCard = (b && !b.amount)
     ? ['추정 매출', '—', isObs ? '판매가 미확인' : '-', '#fefce8', '#a16207', 19]
-    : ['추정 매출', b ? _hWon(b.amount) : '-', '이 방송', '#fefce8', '#a16207', 19];
+    : ['추정 매출', b ? _hWon(b.amount) : '-',
+       isObs ? (b.obsFinal ? '방송 종료 후 관측 · 최종' : '방송 중 관측 · 최종은 더 큼') : '이 방송',
+       '#fefce8', '#a16207', 19];
 
   // [라벨, 값, 부연, 배경, 글자색, 값 글자크기]
   const cards = [
@@ -253,8 +257,8 @@ function _hsbListHtml(list, selId) {
       + '<b style="font-size:13px;color:#a16207;font-weight:800;letter-spacing:-.3px">'
       + (b.amount ? _hWon(b.amount) : '<span style="color:#cbd5e1">—</span>') + '</b>'
       + '<small style="font-size:11px;color:#15803d;font-weight:700">'
-      + (b.sold ? (_hNum(b.sold) + '개') : (b.src === 'app-observation'
-          ? ('누적 ' + _hNum(b.obsTotal || 0) + '개') : '0개')) + '</small>'
+      + _hNum(b.sold || (b.src === 'app-observation' ? (b.obsTotal || 0) : 0)) + '개'
+      + (b.src === 'app-observation' && !b.obsFinal ? '<span style="color:#94a3b8">+</span>' : '') + '</small>'
       + '</span>'
       + '</div>';
   });
@@ -268,7 +272,8 @@ function _hsbObsHtml(b) {
   let h = '<div style="padding:11px 13px;background:#fff7ed;border:1px solid #fed7aa;border-radius:9px;'
     + 'font-size:12px;color:#9a3412;line-height:1.7;margin-bottom:14px">'
     + '<b>관측 기록입니다.</b> 롯데는 판매수량을 공개하지 않아, 앱 상품 화면에 뜨는 '
-    + '“지금까지 N개 구매된 상품입니다”(누적 구매수량)를 직접 찍어 적었습니다. GS처럼 5분마다 자동으로 쌓은 값이 아닙니다.'
+    + '“지금까지 N개 구매된 상품입니다” 를 직접 찍어 적었습니다. GS처럼 5분마다 자동으로 쌓은 값이 아닙니다. '
+    + '롯데가 집계 기간·단위를 공시한 값은 아니지만, 네 방송 모두 한 방송 분량으로 들어맞아 <b>그 방송의 집계</b>로 읽었습니다.'
     + (b.obsNote ? '<br>' + _hEsc(b.obsNote) : '')
     + '</div>';
 
@@ -282,7 +287,7 @@ function _hsbObsHtml(b) {
       + '</div>'
       + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
       + '<thead><tr style="background:#f8fafc">'
-      + ['관측 시각(KST)', '화면 누적 수량', '직전 관측 대비', '방송 상태'].map((t, i) =>
+      + ['관측 시각(KST)', '화면 표시 수량', '직전 관측 대비', '방송 상태'].map((t, i) =>
         '<th style="padding:7px 9px;text-align:' + (i === 0 ? 'left' : 'right') + ';border-bottom:1px solid #e2e8f0;'
         + 'font-size:11px;color:#475569;white-space:nowrap">' + t + '</th>').join('')
       + '</tr></thead><tbody>';
