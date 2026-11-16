@@ -210,8 +210,8 @@ function _hDateK(d) {
   const dt = new Date(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8));
   return d.slice(0, 4) + '.' + d.slice(4, 6) + '.' + d.slice(6, 8) + ' (' + '일월화수목금토'[dt.getDay()] + ')';
 }
-const _HS_COLOR = { 'GS샵': '#e11d48', 'CJ온스타일': '#7c3aed', '롯데홈쇼핑': '#ea580c' };
-const _HS_SHORT = { 'GS샵': 'GS', 'CJ온스타일': 'CJ', '롯데홈쇼핑': '롯데' };
+const _HS_COLOR = { 'GS샵': '#e11d48', 'CJ온스타일': '#7c3aed', '롯데홈쇼핑': '#ea580c', '현대홈쇼핑': '#0f766e' };
+const _HS_SHORT = { 'GS샵': 'GS', 'CJ온스타일': 'CJ', '롯데홈쇼핑': '롯데', '현대홈쇼핑': '현대' };
 /* compact=true 는 방송 이력 목록용 — 좁은 줄이라 짧고 작게 쓴다.
    상단 '방송 시간' 칸은 자리가 넉넉하고 'GS샵' 이 더 분명하므로 그대로 둔다. */
 function _hBadge(b, compact) {
@@ -269,11 +269,13 @@ function _hsbEventText(p) {
   }
   const mm = Number(p.noIntMm || 0);
   const raw = String(p.benefit || '');
+  const cp = Number(p.cpnRt || 0);
+  if (cp > 0) out.push('쿠폰 ' + cp + '%');
   if (dc > 0) out.push('할인 ' + dc + '%');
   if (p.gsPayDc || /GS Pay/i.test(raw)) out.push('GS Pay 할인');   // GS 는 할인율을 편성표에 안 적는다
   if (p.vipDc) out.push('VIP 할인');
   if (mm > 0) out.push('무이자 ' + mm + '개월');
-  if (mm > 0 || dc > 0) {
+  if (mm > 0 || dc > 0 || cp > 0) {
     // 숫자로 적을 수 없는 나머지 혜택도 흘리지 않는다 (무료배송만 뺀다)
     ['쿠폰', '적립', '사은품', '추가 증정'].forEach(k => { if (raw.indexOf(k) >= 0) out.push(k); });
     return _hEsc(out.join(' · '));
@@ -364,7 +366,8 @@ function _hsbListHtml(list, selId) {
     const EMPTY = {
       'GS샵': '아직 기록된 방송이 없습니다. 서버가 화장품 생방송 시간에 5분마다 자동으로 쌓습니다.',
       '롯데홈쇼핑': '아직 기록된 롯데 방송이 없습니다. 롯데는 판매수량을 공개하지 않아, 앱 화면에서 관측한 누적 구매수량만 기록합니다.',
-      'CJ온스타일': 'CJ온스타일은 편성 수집을 준비 중입니다. 아직 기록된 방송이 없습니다.',
+      'CJ온스타일': '아직 기록된 CJ 방송이 없습니다. 주간 편성표를 #홈쇼핑분석 에 올려 주시면 다음 날 아침에 읽어 갑니다.',
+      '현대홈쇼핑': '아직 기록된 현대 방송이 없습니다. 공개 편성표를 매일 아침 자동으로 받아 옵니다.',
     };
     return '<div style="padding:26px;color:#94a3b8;font-size:13px;background:#f8fafc;border-radius:10px">'
       + _hEsc(EMPTY[window._HSB.bc] || EMPTY['GS샵']) + '</div>';
@@ -402,6 +405,34 @@ function _hsbListHtml(list, selId) {
 }
 
 // ── 방송 상세 ──
+/* v2.3.947: 편성 상품 — 방송사가 가격·쿠폰·무이자·썸네일까지 주면 그대로 보여 준다.
+   (현대는 다 준다. 롯데·CJ 는 이름만 오므로 자동으로 이름 줄만 나온다) */
+function _hsbSchedProdHtml(b) {
+  const ps = b.products || [];
+  const rich = ps.some(p => p.salePrice || p.img || p.noIntMm || p.cpnRt || p.dcRt);
+  if (!rich) {
+    return '<div style="font-size:12.5px;color:#0f172a;line-height:1.7">'
+      + ps.map(p => '· ' + _hEsc(p.name)).join('<br>') + '</div>';
+  }
+  return '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    + '<thead><tr style="background:#f8fafc">'
+    + ['구성 (제품)', '판매가', '정가', '혜택'].map((t, i) =>
+      '<th style="padding:7px 9px;text-align:' + (i === 0 ? 'left' : 'right') + ';border-bottom:1px solid #e2e8f0;'
+      + 'font-size:11px;color:#475569;white-space:nowrap">' + t + '</th>').join('')
+    + '</tr></thead><tbody>'
+    + ps.map(p => '<tr style="border-bottom:1px solid #f1f5f9">'
+      + '<td style="padding:7px 9px;color:#0f172a;vertical-align:middle;line-height:1.4">'
+      + _hsbImgTag(p, 40) + _hEsc(p.name) + '</td>'
+      + '<td style="padding:7px 9px;text-align:right;white-space:nowrap;font-weight:700">'
+      + (p.salePrice ? _hWon(p.salePrice) : '-') + '</td>'
+      + '<td style="padding:7px 9px;text-align:right;white-space:nowrap;color:#94a3b8">'
+      + (p.listPrice && p.listPrice !== p.salePrice ? _hWon(p.listPrice) : '-') + '</td>'
+      + '<td style="padding:7px 9px;text-align:right;white-space:nowrap;color:#c2410c;font-size:11.5px">'
+      + _hsbEventText(p) + '</td>'
+      + '</tr>').join('')
+    + '</tbody></table></div>';
+}
+
 /* v2.3.945: 사진·영상 — 어떤 방송에든 손으로 붙일 수 있다.
    파일은 Firebase Storage 로 가고 문서에는 URL 만 남는다(문서 1MB 한계). */
 function _hsbMediaHtml(b) {
@@ -585,8 +616,7 @@ function _hsbDetailHtml(b) {
       + '방송 시간과 상품만 남겼습니다. 화면에서 수량을 보셨다면 아래 <b>+ 판매 수량 적기</b> 로 남길 수 있고, '
       + 'Aside 가 자동으로 적어 넣기도 합니다.</div>'
       + '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin-bottom:6px">편성 상품</div>'
-      + '<div style="font-size:12.5px;color:#0f172a;line-height:1.6">'
-      + (b.products || []).map(p => '\u00b7 ' + _hEsc(p.name)).join('<br>') + '</div>';
+      + _hsbSchedProdHtml(b);
     h += _hsbMediaHtml(b);
     return h + '</div>';
   }
@@ -658,6 +688,7 @@ const _HSB_TABS = [
   { bc: 'GS샵', label: 'GS홈쇼핑', navId: 'nav-hsb-GS' },
   { bc: '롯데홈쇼핑', label: '롯데홈쇼핑', navId: 'nav-hsb-LOTTE' },
   { bc: 'CJ온스타일', label: 'CJ홈쇼핑', navId: 'nav-hsb-CJ' },
+  { bc: '현대홈쇼핑', label: '현대홈쇼핑', navId: 'nav-hsb-HD' },
 ];
 function _hsbTabsHtml(cur) {
   const all = window._HSB.list || [];
@@ -667,7 +698,7 @@ function _hsbTabsHtml(cur) {
       const on = t.bc === cur;
       const c = _HS_COLOR[t.bc] || '#475569';
       return '<button type="button" onclick="window._hsbTab(&quot;' + t.bc + '&quot;)" '
-        + 'style="flex:1 1 0;min-width:0;height:38px;padding:0 10px;border-radius:10px;cursor:pointer;'
+        + 'style="flex:1 1 calc(25% - 5px);min-width:132px;height:38px;padding:0 8px;border-radius:10px;cursor:pointer;'
         + 'font-size:13px;font-weight:800;white-space:nowrap;'
         + (on ? ('background:' + c + ';color:#fff;border:1px solid ' + c + ';')
               : ('background:#fff;color:#475569;border:1px solid #e2e8f0;'))
@@ -715,7 +746,8 @@ function renderHsBroadcastPage() {
   const SRC = {
     'GS샵': '편성표에 공개된 누적 구매수량을 생방송 중 5분마다 읽어 차이를 적습니다.',
     '롯데홈쇼핑': '롯데는 판매수량을 공개하지 않습니다. 앱 상품 화면의 “지금까지 N개 구매된 상품입니다” 를 눈으로 관측해 적은 값입니다.',
-    'CJ온스타일': 'CJ는 편성 수집을 준비 중입니다.',
+    'CJ온스타일': 'CJ는 판매수량을 공개하지 않습니다. 슬랙에 올려 주신 주간 편성표를 읽어 편성만 기록합니다.',
+    '현대홈쇼핑': '현대는 판매수량을 공개하지 않습니다. 공개 편성표에서 가격·쿠폰·무이자까지 자동으로 받아 편성만 기록합니다.',
   };
   host.innerHTML =
     _hsbTabsHtml(H.bc)
