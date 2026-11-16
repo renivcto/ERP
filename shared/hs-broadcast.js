@@ -58,7 +58,8 @@ async function _hsbLoad(force) {
       (arr || []).forEach(b => { if (b && b.id) byId.set(b.id, b); }));
     H.obs = await readMap('hsbObservations');
     H.media = await readMap('hsbMedia');
-    H.list = Array.from(byId.values()).map(b => _hsbApplyObs(b, H.obs[b.id]))
+    H.list = Array.from(byId.values())
+      .map(b => _hsbApplyManual(_hsbApplyObs(b, H.obs[b.id]), H.obs[b.id]))
       .sort((a, b) => (a.date + a.start) < (b.date + b.start) ? 1 : -1);   // 최신 먼저
     H.ts = Math.max(auto.ts || 0, man.ts || 0, sch.ts || 0);
     H.loadedAt = Date.now();
@@ -127,6 +128,96 @@ function _hsbApplyObs(b, rec) {
   }
   return out;
 }
+
+/* v2.3.950: 손으로 고친 값 입히기. 관측(obs)과 같은 문서, 같은 id 아래 manual 에 둔다.
+   obs 가 없어도(편성만 있는 기록) 적용된다 — _hsbApplyObs 와 따로 도는 이유다. */
+function _hsbApplyManual(b, rec) {
+  const m = rec && rec.manual;
+  if (!b || !m) return b;
+  const out = JSON.parse(JSON.stringify(b));
+  const prods = (out.products && out.products.length) ? out.products
+    : [{ name: out.title || '-', salePrice: 0 }];
+  out._man = {};
+  if (m.price !== undefined && m.price !== null && m.price !== '') {
+    prods[0].salePrice = Number(m.price) || 0;
+    out._man.price = true;
+  }
+  if (m.event !== undefined && m.event !== null && m.event !== '') {
+    prods[0].manualEvent = String(m.event);
+    out._man.event = true;
+  }
+  out.products = prods;
+  if (m.sold !== undefined && m.sold !== null && m.sold !== '') {
+    out.sold = Number(m.sold) || 0;
+    out.obsTotal = out.sold;
+    out._man.sold = true;
+  }
+  if (m.amount !== undefined && m.amount !== null && m.amount !== '') {
+    out.amount = Number(m.amount) || 0;
+    out._man.amount = true;
+  } else {
+    /* 판매가만 적어도 매출이 나오게 — 수량 × 판매가 */
+    const a = (Number(out.sold) || 0) * (Number(prods[0].salePrice) || 0);
+    if (a) { out.amount = a; out._man.amountAuto = true; }
+  }
+  return out;
+}
+
+/* 한 항목만 저장한다. 빈 값이면 그 항목을 지워 원래대로 되돌린다. */
+window.hsbSetManual = async function (id, key, value) {
+  const db = window._firebaseDb, docF = window._firestoreDoc, setF = window._firestoreSetDoc;
+  const getFn = window._firestoreGetDocFromServer || window._firestoreGetDoc;
+  if (!db || !docF || !setF) throw new Error('Firestore 준비 안 됨');
+  const ref = docF(db, 'erp_data', 'hsbObservations');
+  const snap = await getFn(ref);
+  let map = {};
+  try {
+    const d = snap && snap.exists && snap.exists() ? snap.data() : null;
+    map = d ? (typeof d.data === 'string' ? JSON.parse(d.data) : (d.data || {})) : {};
+  } catch (_) { map = {}; }
+  const cur = map[id] || {};
+  cur.manual = cur.manual || {};
+  if (value === '' || value === null || value === undefined) delete cur.manual[key];
+  else cur.manual[key] = value;
+  cur.manualBy = (window._currentUser && window._currentUser.name) || '';
+  cur.manualAt = new Date().toISOString();
+  if (!Object.keys(cur.manual).length) delete cur.manual;
+  map[id] = cur;
+  await setF(ref, { data: JSON.stringify(map), ts: Date.now() }, { merge: true });
+  window._HSB.obs = map;
+  window._HSB.loadedAt = 0;
+  await _hsbLoad(true);
+  renderHsBroadcastPage();
+};
+
+/* 요약 칸을 눌렀을 때 뜨는 입력창 */
+const _HSB_FIELD = {
+  price: { label: '판매가', hint: '숫자만 (예: 139000). 비우면 지웁니다', num: true },
+  event: { label: '이벤트', hint: '예: 쿠폰 10% · 무이자 12개월. 비우면 지웁니다', num: false },
+  sold: { label: '방송 판매 수량', hint: '숫자만. 비우면 관측값으로 돌아갑니다', num: true },
+  amount: { label: '추정 매출', hint: '숫자만. 비우면 수량 × 판매가로 자동 계산합니다', num: true },
+};
+window._hsbEditField = async function (id, key) {
+  const f = _HSB_FIELD[key]; if (!f) return;
+  const rec = (window._HSB.obs || {})[id] || {};
+  const cur = (rec.manual || {})[key];
+  const v = prompt(f.label + ' 을 적어주세요.' + String.fromCharCode(10) + f.hint,
+    cur === undefined || cur === null ? '' : String(cur));
+  if (v === null) return;
+  const s = String(v).trim();
+  let val = s;
+  if (s !== '') {
+    if (f.num) {
+      const n = s.replace(/[, 원]/g, '');
+      if (!/^[0-9]+$/.test(n)) { alert('숫자만 적어주세요'); return; }
+      val = parseInt(n, 10);
+    }
+  } else { val = ''; }
+  try {
+    await window.hsbSetManual(id, key, val);
+    if (typeof showNotif === 'function') showNotif(f.label + (val === '' ? ' 을 지웠습니다' : ' 을 적었습니다'), 'success');
+  } catch (e) { alert('저장 실패: ' + (e && e.message)); }
+};
 
 /* ── Aside·사람이 쓰는 입력구 ──────────────────────────────────────────
    await hsbAddObservation('lotte-20261116-1135', [{t:'11:40', n:120}], {final:false, note:''})
@@ -262,6 +353,7 @@ window._hsbZoom = function (url) {
 //   서버가 숫자(dcRt·noIntMm)를 보내기 전 기록은 글자 혜택에서 무료배송만 뺀다.
 function _hsbEventText(p) {
   if (!p) return '-';
+  if (p.manualEvent) return _hEsc(p.manualEvent);      /* v2.3.950: 손으로 적은 이벤트가 이긴다 */
   const out = [];
   let dc = Number(p.dcRt || 0);
   if (!dc && p.listPrice && p.salePrice && p.listPrice > p.salePrice) {
@@ -316,17 +408,19 @@ function _hsbSummary(list, b) {
   /* v2.3.944: 대표 숫자는 '마지막 관측값' = 그 방송의 판매 수량.
      종료 후에 찍었으면 최종, 방송 중에 찍었으면 최종은 그보다 크다 — 부연에 적는다. */
   const qtyCard = isSch
-    ? ['방송 판매 수량', '비공개', (b.broadcaster || '') + '은 수량을 공개하지 않습니다', '#f8fafc', '#64748b', 19]
+    ? ['방송 판매 수량', (b.sold ? (_hNum(b.sold) + '개') : '비공개'),
+       (b.sold ? '' : (b.broadcaster || '') + '은 수량을 공개하지 않습니다'), '#f8fafc', '#64748b', 19, 'sold']
     : isObs
     ? ['방송 판매 수량', _hNum(b.obsTotal || 0) + '개',
        b.obsFinal ? '방송 종료 후 관측 · 최종' : '방송 중 관측 · 최종은 더 큽니다',
-       '#f0fdf4', '#15803d', 19]
-    : ['추적 판매 수량', b ? (_hNum(b.sold) + '개') : '-', '이 방송', '#f0fdf4', '#15803d', 19];
+       '#f0fdf4', '#15803d', 19, 'sold']
+    : ['추적 판매 수량', b ? (_hNum(b.sold) + '개') : '-', '이 방송', '#f0fdf4', '#15803d', 19, 'sold'];
   const amtCard = (b && !b.amount)
-    ? ['추정 매출', '—', isSch ? '수량 비공개' : (isObs ? '판매가 미확인' : '-'), '#fefce8', '#a16207', 19]
+    ? ['추정 매출', '—', isSch ? '수량 비공개' : (isObs ? '판매가 미확인' : '-'), '#fefce8', '#a16207', 19, 'amount']
     : ['추정 매출', b ? _hWon(b.amount) : '-',
-       isObs ? (b.obsFinal ? '방송 종료 후 관측 · 최종' : '방송 중 관측 · 최종은 더 큼') : '이 방송',
-       '#fefce8', '#a16207', 19];
+       (b && b._man && b._man.amountAuto) ? '수량 × 판매가'
+         : (isObs ? (b.obsFinal ? '방송 종료 후 관측 · 최종' : '방송 중 관측 · 최종은 더 큼') : '이 방송'),
+       '#fefce8', '#a16207', 19, 'amount'];
 
   // [라벨, 값, 부연, 배경, 글자색, 값 글자크기]
   const cards = [
@@ -337,8 +431,8 @@ function _hsbSummary(list, b) {
     ['판매가', (top && top.salePrice) ? _hWon(top.salePrice)
       : (top && top.listPrice ? _hWon(top.listPrice) : '-'),
       (top && !top.salePrice && top.listPrice) ? '정가 (판매가 화면 가려짐)' : (top && top.soldOut ? '품절' : ''),
-      '#f8fafc', '#334155', 19],
-    ['이벤트', _hsbEventText(top), '', '#fff7ed', '#c2410c', 14],
+      '#f8fafc', '#334155', 19, 'price'],
+    ['이벤트', _hsbEventText(top), '', '#fff7ed', '#c2410c', 14, 'event'],
     qtyCard,
     amtCard,
     ['최근 30일 방송', _hNum(rec.length) + '회', '등장 브랜드 ' + _hNum(brands.size) + '개', '#eef2ff', '#4338ca', 19],
@@ -351,12 +445,23 @@ function _hsbSummary(list, b) {
          (b && b.peak) ? ('시작 후 · ' + _hEsc(b.peak.t) + ' · ' + _hNum(b.peak.sold) + '개') : '방송 시작 후', '#fdf2f8', '#9d174d', 19],
   ];
   return '<div id="hsb-kpi" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-bottom:14px;max-width:980px">'
-    + cards.map(c => '<div style="background:' + c[3] + ';border-radius:10px;padding:10px 12px;min-width:0">'
-      + '<div style="font-size:11.5px;color:#64748b;font-weight:600">' + c[0] + '</div>'
+    + cards.map(c => {
+      const key = c[6] || '';
+      const man = !!(key && b && b._man && b._man[key]);
+      const click = (key && b) ? (' onclick="window._hsbEditField(&quot;' + _hEsc(b.id) + '&quot;,&quot;' + key + '&quot;)"'
+        + ' title="눌러서 직접 적기"') : '';
+      return '<div' + click + ' style="background:' + c[3] + ';border-radius:10px;padding:10px 12px;min-width:0'
+      + (key && b ? ';cursor:pointer' : '') + '">'
+      + '<div style="font-size:11.5px;color:#64748b;font-weight:600">' + c[0]
+      + (man ? '<span style="display:inline-block;margin-left:5px;padding:1px 6px;border-radius:999px;'
+        + 'background:#1e293b;color:#fff;font-size:9.5px;font-weight:800;vertical-align:1px">수동</span>' : '')
+      + (key && b && !man ? '<span style="margin-left:5px;color:#cbd5e1;font-size:10.5px">✎</span>' : '')
+      + '</div>'
       + '<div style="font-size:' + c[5] + 'px;font-weight:800;color:' + c[4] + ';margin-top:3px;line-height:1.3;'
       + 'overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:anywhere">' + c[1] + '</div>'
       + (c[2] ? '<div style="font-size:10.5px;color:#94a3b8;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + c[2] + '</div>' : '')
-      + '</div>').join('')
+      + '</div>';
+    }).join('')
     + '</div>';
 }
 
