@@ -360,15 +360,28 @@ function _hsbSummary(list, b) {
     + '</div>';
 }
 
+/* v2.3.949: '지금'(한국시간) 을 'YYYYMMDDHH:MM' 한 덩어리로. 방송 키와 문자열로 비교한다.
+   ⚠️ 브라우저가 호주 시간이라 로컬 시각으로 재면 안 된다 — KST(UTC+9) 로 환산한다. */
+function _hNowKstKey() {
+  const n = new Date();
+  const k = new Date(n.getTime() + n.getTimezoneOffset() * 60000 + 9 * 3600000);
+  const p = (v) => String(v).padStart(2, '0');
+  return '' + k.getFullYear() + p(k.getMonth() + 1) + p(k.getDate())
+    + p(k.getHours()) + ':' + p(k.getMinutes());
+}
+
 // ── 방송 목록 ──
 function _hsbListHtml(list, selId) {
   if (!list.length) {
     return '<div style="padding:26px;color:#94a3b8;font-size:13px;background:#f8fafc;border-radius:10px">'
       + '기록된 방송이 없습니다.</div>';
   }
+  const nowKey = _hNowKstKey();
   let h = '<div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">';
   let lastDate = '';
   list.forEach(b => {
+    /* 시작 시각이 아직 안 왔으면 '예정' — 방송한 것과 눈에 띄게 갈라 둔다 */
+    const soon = (b.date + (b.start || '')) > nowKey;
     if (b.date !== lastDate) {
       lastDate = b.date;
       h += '<div style="background:#f8fafc;padding:7px 14px;font-size:11.5px;font-weight:800;color:#475569;'
@@ -379,19 +392,23 @@ function _hsbListHtml(list, selId) {
       + 'padding:8px 12px;cursor:pointer;border-top:1px solid #f1f5f9;'
       + (on ? 'background:#eef2ff' : 'background:#fff') + '">'
       + _hBadge(b.broadcaster, true)
-      + '<span style="font-size:11px;font-weight:700;color:#0f172a;width:76px;flex-shrink:0;letter-spacing:-.3px">' + _hEsc(b.start) + '~' + _hEsc(b.end) + '</span>'
+      + '<span style="font-size:11px;font-weight:700;color:' + (soon ? '#94a3b8' : '#0f172a')
+      + ';width:76px;flex-shrink:0;letter-spacing:-.3px">' + _hEsc(b.start) + '~' + _hEsc(b.end) + '</span>'
       /* 이름은 두 줄까지 허용해 다 보이게 (전에는 한 줄로 잘려 '에버…' 가 됐다) */
-      + '<span style="font-size:12px;font-weight:700;color:#0f172a;flex:1;min-width:0;line-height:1.3;'
+      + '<span style="font-size:12px;font-weight:700;color:' + (soon ? '#94a3b8' : '#0f172a') + ';flex:1;min-width:0;line-height:1.3;'
       + 'word-break:keep-all;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden">'
       + _hEsc((b.brands || []).join(' / ') || b.title) + '</span>'
       /* 금액 위 · 수량 아래, 오른쪽 정렬 — 한 칸으로 합쳐 이름 쪽에 96px 을 돌려준다 */
       + '<span style="display:flex;flex-direction:column;align-items:flex-end;width:104px;flex-shrink:0;line-height:1.25">'
-      + '<b style="font-size:13px;color:#a16207;font-weight:800;letter-spacing:-.3px">'
-      + (b.amount ? _hWon(b.amount) : '<span style="color:#cbd5e1">—</span>') + '</b>'
-      + '<small style="font-size:11px;color:#15803d;font-weight:700">'
-      + (b.src === 'schedule' ? '<span style="color:#94a3b8;font-weight:600">비공개</span>'
-          : (_hNum(b.sold || 0) + '개'
-             + (b.src === 'app-observation' && !b.obsFinal ? '<span style="color:#94a3b8">+</span>' : ''))) + '</small>'
+      + (soon
+        ? ('<span style="display:inline-block;padding:2px 9px;border-radius:999px;background:#f1f5f9;'
+           + 'border:1px solid #e2e8f0;color:#64748b;font-size:11px;font-weight:800">예정</span>')
+        : ('<b style="font-size:13px;color:#a16207;font-weight:800;letter-spacing:-.3px">'
+           + (b.amount ? _hWon(b.amount) : '<span style="color:#cbd5e1">—</span>') + '</b>'
+           + '<small style="font-size:11px;color:#15803d;font-weight:700">'
+           + (b.src === 'schedule' ? '<span style="color:#94a3b8;font-weight:600">비공개</span>'
+               : (_hNum(b.sold || 0) + '개'
+                  + (b.src === 'app-observation' && !b.obsFinal ? '<span style="color:#94a3b8">+</span>' : ''))) + '</small>'))
       + '</span>'
       + '</div>';
   });
