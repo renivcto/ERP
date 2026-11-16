@@ -6308,9 +6308,10 @@ EXP YYYYMMDD 까지</textarea></div>
     <div class="modal-body">
       <div class="fg2">
         <div class="fg"><label>이름<span class="req">*</span></label><input class="fi" id="u-name"></div>
-        <div class="fg"><label>이메일</label><input class="fi" id="u-email" type="email"></div>
+        <div class="fg"><label>이메일</label><input class="fi" id="u-email" type="email"><div id="u-email-hint" style="display:none;font-size:10.5px;color:var(--gray-400);margin-top:4px;line-height:1.5">로그인 계정은 바꿀 수 없습니다 — 구글 계정으로 판별합니다.<br>계정을 옮기려면 새 계정으로 가입(로그인)한 뒤, 올라온 승인대기 행을 승인하고 이 행을 비활성화하세요.</div></div>
         <div class="fg"><label>역할</label>
           <select class="fs" id="u-role">
+            <option>멤버</option>
             <option>CEO</option>
             <option>COO</option>
             <option>CMO</option>
@@ -6411,7 +6412,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.939';
+const ERP_VERSION = 'v2.3.940';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -50715,6 +50716,8 @@ function editUser(id) {
   editingId['edit-user'] = id;
   $('u-name').value  = u.name  || '';
   $('u-email').value = u.email || '';
+  // v2.3.940: Firestore 편집에서 잠가 둔 이메일 칸을 로컬 사용자에선 되돌린다
+  _uEmailLock(false);
   $('u-role').value  = u.role  || '기타';
   $('u-status').value = u.status || '활성';
   $('u-permission').value = u.permission || 'read';
@@ -50729,16 +50732,50 @@ function editUser(id) {
   openModal('edit-user');
 }
 
+// v2.3.940: 편집창 이메일 칸 잠금 — Firestore 사용자는 읽기 전용(로그인 계정 = uid)
+function _uEmailLock(lock) {
+  const el = document.getElementById('u-email');
+  const hint = document.getElementById('u-email-hint');
+  if (el) {
+    el.readOnly = !!lock;
+    el.style.background = lock ? 'var(--gray-100)' : '';
+    el.style.color = lock ? 'var(--gray-500)' : '';
+    el.style.cursor = lock ? 'not-allowed' : '';
+    el.title = lock ? '로그인 계정은 변경할 수 없습니다' : '';
+  }
+  if (hint) hint.style.display = lock ? '' : 'none';
+}
+
+// v2.3.940: 목록에 없는 값이 와도 첫 옵션(CEO)으로 둔갑하지 않게 옵션을 만들어 선택한다.
+//   종전엔 역할 '멤버' 옵션이 없어, 멤버를 열고 이름만 고쳐 저장해도 CEO 가 됐다.
+function _uSetSelect(id, value) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  const v = String(value == null ? '' : value);
+  if (v && !Array.prototype.some.call(sel.options, o => o.value === v || o.text === v)) {
+    const o = document.createElement('option');
+    o.value = v; o.text = v;
+    sel.insertBefore(o, sel.firstChild);
+  }
+  sel.value = v;
+}
+
 // Firestore 사용자 편집 (이름 클릭 시)
 function editFirestoreUser(uid, name, email, role, permission) {
   // edit-user 모달 재사용
   editingId['edit-user'] = 'firestore_' + uid;
   editingId['_firestoreUid'] = uid;
+  // v2.3.940: 실제 문서 값으로 채운다 — 종전엔 상태를 항상 '활성' 으로 띄워
+  //   승인대기·비활성 사용자가 활성으로 보였다.
+  const _doc = (window._cachedFirestoreUsers || []).find(u => u && u.uid === uid) || {};
   if ($('u-name'))       $('u-name').value = name || '';
   if ($('u-email'))      $('u-email').value = email || '';
-  if ($('u-role'))       $('u-role').value = role || '멤버';
-  if ($('u-status'))     $('u-status').value = '활성';
-  if ($('u-permission')) $('u-permission').value = permission || 'read';
+  // 로그인은 Firebase Auth uid 로 판별한다 — 이 칸을 고쳐도 로그인 계정은 안 바뀐다.
+  //   종전엔 입력을 받아 놓고 저장 시 버려서 '바꿨다'고 착각하게 했다.
+  _uEmailLock(true);
+  if ($('u-role'))       _uSetSelect('u-role', role || _doc.role || '멤버');
+  if ($('u-status'))     _uSetSelect('u-status', _doc.status || '활성');
+  if ($('u-permission')) $('u-permission').value = permission || _doc.permission || 'read';
   if ($('u-memo'))       $('u-memo').value = '';
   // 자기 자신은 삭제 불가, 관리자도 삭제 불가
   const isTargetAdmin = window._cachedFirestoreUsers && window._cachedFirestoreUsers.find(u=>u.uid===uid)?.isAdmin;
@@ -50790,9 +50827,15 @@ function saveUser() {
     const uid = editingId['_firestoreUid'];
     const permission = $('u-permission').value;
     const role = $('u-role').value;
+    // v2.3.940: 상태도 저장한다 (종전엔 화면에만 있고 저장되지 않아 바꿔도 그대로였다).
+    //   이메일은 저장하지 않는다 — 로그인 계정은 Firebase Auth uid 로 정해지므로
+    //   여기서 바꿔도 아무 효과가 없다. 그래서 입력칸 자체를 읽기 전용으로 잠갔다.
+    const status = $('u-status') ? $('u-status').value : '';
     if (window._firestoreSetDoc && window._firestoreDoc && window._firebaseDb) {
       const userRef = window._firestoreDoc(window._firebaseDb, 'users', uid);
-      window._firestoreSetDoc(userRef, { name, role, permission }, { merge: true })
+      const _patch = { name, role, permission };
+      if (status) _patch.status = status;
+      window._firestoreSetDoc(userRef, _patch, { merge: true })
         .then(() => {
           showNotif(name + ' 정보가 수정되었습니다', 'success');
           closeModal('edit-user');
