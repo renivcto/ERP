@@ -40,12 +40,27 @@ async function _hsbLoad(force) {
         return { arr: Array.isArray(arr) ? arr : [], ts: (d && d.ts) || 0 };
       } catch (e) { console.warn('hsb read ' + name, e); return { arr: [], ts: 0 }; }
     };
-    const auto = await read('hsBroadcasts');
-    const man = await read('hsBroadcastsManual');
-    const seen = new Set(man.arr.map(b => b && b.id));
-    H.list = man.arr.concat(auto.arr.filter(b => b && !seen.has(b.id))).slice().sort((a, b) =>
-      (a.date + a.start) < (b.date + b.start) ? 1 : -1);          // 최신 먼저
-    H.ts = Math.max(auto.ts || 0, man.ts || 0);
+    const readMap = async (name) => {
+      try {
+        const snap = await getFn(docF(db, 'erp_data', name));
+        const d = (snap && snap.exists && snap.exists()) ? snap.data() : null;
+        let m = d ? d.data : {};
+        if (typeof m === 'string') m = JSON.parse(m);
+        return (m && typeof m === 'object') ? m : {};
+      } catch (e) { console.warn('hsb read ' + name, e); return {}; }
+    };
+    const auto = await read('hsBroadcasts');     // GS — 5분 자동 기록
+    const sch = await read('hsSchedule');        // 롯데·CJ 편성 (수량 비공개)
+    const man = await read('hsBroadcastsManual');// 손으로 넣은 기록
+    /* 같은 id 면 manual > auto > schedule — 나중에 넣은 것이 이긴다 */
+    const byId = new Map();
+    [sch.arr, auto.arr, man.arr].forEach(arr =>
+      (arr || []).forEach(b => { if (b && b.id) byId.set(b.id, b); }));
+    H.obs = await readMap('hsbObservations');
+    H.media = await readMap('hsbMedia');
+    H.list = Array.from(byId.values()).map(b => _hsbApplyObs(b, H.obs[b.id]))
+      .sort((a, b) => (a.date + a.start) < (b.date + b.start) ? 1 : -1);   // 최신 먼저
+    H.ts = Math.max(auto.ts || 0, man.ts || 0, sch.ts || 0);
     H.loadedAt = Date.now();
     /* v2.3.941: 선택 보정은 renderHsBroadcastPage 가 방송사별로 한다 */
   } finally { H.loading = false; }
@@ -70,6 +85,121 @@ async function _hsbLoadShots() {
   } catch (e) { console.warn('hsbShots', e); S.map = {}; }
   finally { S.loading = false; }
 }
+
+/* v2.3.945: 관측(수량)을 방송 기록에 입힌다.
+   관측은 erp_data/hsbObservations 에 id 별로 쌓인다 — 편성 기록을 덮어쓰지 않고 얹는다.
+     { "<id>": { obs:[{t,n,pi?,live?,left?,shot?}], final:true, note:"" } }
+   pi 는 구성(products) 번호, 없으면 0번. t 는 한국시간 HH:MM, n 은 화면에 뜬 수량. */
+function _hsbApplyObs(b, rec) {
+  if (!b || !rec || !Array.isArray(rec.obs) || !rec.obs.length) return b;
+  const out = JSON.parse(JSON.stringify(b));
+  const prods = out.products && out.products.length ? out.products : [{ name: out.title || '-', salePrice: 0 }];
+  prods.forEach(p => { p.obs = []; });
+  rec.obs.slice().sort((x, y) => String(x.t || '') < String(y.t || '') ? -1 : 1)
+    .forEach(o => {
+      const i = Math.min(Math.max(Number(o.pi) || 0, 0), prods.length - 1);
+      prods[i].obs.push(o);
+    });
+  let tot = 0, amt = 0;
+  prods.forEach(p => {
+    if (!p.obs.length) return;
+    const last = Number(p.obs[p.obs.length - 1].n) || 0;
+    p.first = Number(p.obs[0].n) || 0;
+    p.last = last; p.sold = last;
+    tot += last; amt += last * (Number(p.salePrice) || 0);
+  });
+  out.products = prods;
+  out.sold = tot; out.amount = amt; out.obsTotal = tot;
+  out.obsFinal = rec.final === true;
+  out.obsNote = rec.note || out.obsNote || '';
+  out.src = 'app-observation';
+  /* 구간 막대그래프 — 첫 관측은 그때까지 쌓인 양, 이후는 직전 대비 증가분 */
+  const flat = prods.reduce((a, p) => a.concat(p.obs || []), [])
+    .slice().sort((x, y) => String(x.t || '') < String(y.t || '') ? -1 : 1);
+  if (flat.length > 1 && prods.filter(p => (p.obs || []).length).length === 1) {
+    let prev = null;
+    out.ticks = flat.map(o => {
+      const n = Number(o.n) || 0;
+      const d = (prev == null) ? n : (n - prev);
+      prev = n;
+      return { t: o.t, sold: d, amount: 0 };
+    });
+  }
+  return out;
+}
+
+/* ── Aside·사람이 쓰는 입력구 ──────────────────────────────────────────
+   await hsbAddObservation('lotte-20261116-1135', [{t:'11:40', n:120}], {final:false, note:''})
+   같은 시각(t)이 이미 있으면 덮어쓴다. 방송 끝난 뒤 값이면 final:true 로 준다. */
+window.hsbAddObservation = async function (id, obs, opts) {
+  if (!id || !Array.isArray(obs) || !obs.length) throw new Error('id 와 obs 배열이 필요합니다');
+  const db = window._firebaseDb, docF = window._firestoreDoc, setF = window._firestoreSetDoc;
+  const getFn = window._firestoreGetDocFromServer || window._firestoreGetDoc;
+  if (!db || !docF || !setF) throw new Error('Firestore 준비 안 됨');
+  const ref = docF(db, 'erp_data', 'hsbObservations');
+  const snap = await getFn(ref);
+  let map = {};
+  try { const d = snap && snap.exists && snap.exists() ? snap.data() : null;
+        map = d ? (typeof d.data === 'string' ? JSON.parse(d.data) : (d.data || {})) : {}; } catch (_) { map = {}; }
+  const cur = map[id] || { obs: [] };
+  const keep = (cur.obs || []).filter(o => !obs.some(n => String(n.t) === String(o.t) && (Number(n.pi) || 0) === (Number(o.pi) || 0)));
+  cur.obs = keep.concat(obs).sort((x, y) => String(x.t || '') < String(y.t || '') ? -1 : 1);
+  if (opts && typeof opts.final === 'boolean') cur.final = opts.final;
+  if (opts && opts.note != null) cur.note = String(opts.note);
+  cur.updatedAt = new Date().toISOString();
+  map[id] = cur;
+  await setF(ref, { data: JSON.stringify(map), ts: Date.now() }, { merge: true });
+  window._HSB.obs = map;
+  try { if (document.getElementById('hsbroadcast-root')) { window._HSB.loadedAt = 0; await _hsbLoad(true); renderHsBroadcastPage(); } } catch (_) {}
+  return cur;
+};
+
+/* 사진·영상 등록. file 은 <input type=file> 의 File, 또는 {url, caption} 으로 링크만 달 수도 있다.
+   파일은 Firebase Storage 로 올리고 문서에는 URL 만 남긴다 — 문서 1MB 한계를 넘기지 않기 위해서다. */
+window.hsbAddMedia = async function (id, file, caption) {
+  if (!id) throw new Error('id 가 필요합니다');
+  const db = window._firebaseDb, docF = window._firestoreDoc, setF = window._firestoreSetDoc;
+  const getFn = window._firestoreGetDocFromServer || window._firestoreGetDoc;
+  if (!db || !docF || !setF) throw new Error('Firestore 준비 안 됨');
+  let item;
+  if (file && file.url) {
+    item = { type: file.type || (/\.(mp4|mov|webm|m4v)(\?|$)/i.test(file.url) ? 'video' : 'image'),
+             url: String(file.url), caption: String(file.caption || caption || '') };
+  } else {
+    if (!window._storageUploadFile) throw new Error('Storage 준비 안 됨');
+    const kind = /^video\//.test(file.type || '') ? 'video' : 'image';
+    const path = 'erp/hsb/' + id + '/' + Date.now() + '_' + String(file.name || 'file').replace(/[^\w.\-]/g, '_');
+    const url = await window._storageUploadFile(path, file);
+    item = { type: kind, url: url, path: path, caption: String(caption || ''), size: file.size || 0 };
+  }
+  item.ts = Date.now();
+  item.by = (window._currentUser && window._currentUser.name) || '';
+  const ref = docF(db, 'erp_data', 'hsbMedia');
+  const snap = await getFn(ref);
+  let map = {};
+  try { const d = snap && snap.exists && snap.exists() ? snap.data() : null;
+        map = d ? (typeof d.data === 'string' ? JSON.parse(d.data) : (d.data || {})) : {}; } catch (_) { map = {}; }
+  map[id] = (map[id] || []).concat([item]);
+  await setF(ref, { data: JSON.stringify(map), ts: Date.now() }, { merge: true });
+  window._HSB.media = map;
+  try { renderHsBroadcastPage(); } catch (_) {}
+  return item;
+};
+
+window.hsbRemoveMedia = async function (id, idx) {
+  const db = window._firebaseDb, docF = window._firestoreDoc, setF = window._firestoreSetDoc;
+  const map = window._HSB.media || {};
+  const arr = map[id] || [];
+  const it = arr[idx];
+  if (!it) return;
+  if (!confirm('이 ' + (it.type === 'video' ? '영상' : '사진') + '을 삭제할까요?')) return;
+  arr.splice(idx, 1);
+  map[id] = arr;
+  await setF(docF(db, 'erp_data', 'hsbMedia'), { data: JSON.stringify(map), ts: Date.now() }, { merge: true });
+  if (it.path && window._storageDeletePath) { try { await window._storageDeletePath(it.path); } catch (_) {} }
+  window._HSB.media = map;
+  renderHsBroadcastPage();
+};
 
 // ── 포맷 ──
 const _hEsc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -180,15 +310,18 @@ function _hsbSummary(list, b) {
   /* v2.3.942: 롯데처럼 '관측' 으로 모은 기록은 GS 의 5분 자동 기록과 뜻이 다르다.
      같은 칸에 같은 이름으로 넣으면 숫자를 잘못 읽게 되므로 라벨과 부연을 바꾼다. */
   const isObs = !!(b && b.src === 'app-observation');
+  const isSch = !!(b && b.src === 'schedule');
   /* v2.3.944: 대표 숫자는 '마지막 관측값' = 그 방송의 판매 수량.
      종료 후에 찍었으면 최종, 방송 중에 찍었으면 최종은 그보다 크다 — 부연에 적는다. */
-  const qtyCard = isObs
+  const qtyCard = isSch
+    ? ['방송 판매 수량', '비공개', (b.broadcaster || '') + '은 수량을 공개하지 않습니다', '#f8fafc', '#64748b', 19]
+    : isObs
     ? ['방송 판매 수량', _hNum(b.obsTotal || 0) + '개',
        b.obsFinal ? '방송 종료 후 관측 · 최종' : '방송 중 관측 · 최종은 더 큽니다',
        '#f0fdf4', '#15803d', 19]
     : ['추적 판매 수량', b ? (_hNum(b.sold) + '개') : '-', '이 방송', '#f0fdf4', '#15803d', 19];
   const amtCard = (b && !b.amount)
-    ? ['추정 매출', '—', isObs ? '판매가 미확인' : '-', '#fefce8', '#a16207', 19]
+    ? ['추정 매출', '—', isSch ? '수량 비공개' : (isObs ? '판매가 미확인' : '-'), '#fefce8', '#a16207', 19]
     : ['추정 매출', b ? _hWon(b.amount) : '-',
        isObs ? (b.obsFinal ? '방송 종료 후 관측 · 최종' : '방송 중 관측 · 최종은 더 큼') : '이 방송',
        '#fefce8', '#a16207', 19];
@@ -207,7 +340,9 @@ function _hsbSummary(list, b) {
     qtyCard,
     amtCard,
     ['최근 30일 방송', _hNum(rec.length) + '회', '등장 브랜드 ' + _hNum(brands.size) + '개', '#eef2ff', '#4338ca', 19],
-    isObs
+    isSch
+      ? ['관측 횟수', '0회', '아래에서 수량을 적을 수 있습니다', '#fdf2f8', '#9d174d', 19]
+      : isObs
       ? ['관측 횟수', _hNum(((b.products || [])[0] || {}).obs ? ((b.products || [])[0].obs || []).length : 0) + '회',
          '화면을 직접 찍은 횟수', '#fdf2f8', '#9d174d', 19]
       : ['최다 판매', (peakMin == null) ? '-' : (_hNum(peakMin) + '분'),
@@ -257,8 +392,9 @@ function _hsbListHtml(list, selId) {
       + '<b style="font-size:13px;color:#a16207;font-weight:800;letter-spacing:-.3px">'
       + (b.amount ? _hWon(b.amount) : '<span style="color:#cbd5e1">—</span>') + '</b>'
       + '<small style="font-size:11px;color:#15803d;font-weight:700">'
-      + _hNum(b.sold || (b.src === 'app-observation' ? (b.obsTotal || 0) : 0)) + '개'
-      + (b.src === 'app-observation' && !b.obsFinal ? '<span style="color:#94a3b8">+</span>' : '') + '</small>'
+      + (b.src === 'schedule' ? '<span style="color:#94a3b8;font-weight:600">비공개</span>'
+          : (_hNum(b.sold || 0) + '개'
+             + (b.src === 'app-observation' && !b.obsFinal ? '<span style="color:#94a3b8">+</span>' : ''))) + '</small>'
       + '</span>'
       + '</div>';
   });
@@ -266,6 +402,109 @@ function _hsbListHtml(list, selId) {
 }
 
 // ── 방송 상세 ──
+/* v2.3.945: 사진·영상 — 어떤 방송에든 손으로 붙일 수 있다.
+   파일은 Firebase Storage 로 가고 문서에는 URL 만 남는다(문서 1MB 한계). */
+function _hsbMediaHtml(b) {
+  const list = ((window._HSB.media || {})[b.id]) || [];
+  const BTN = 'height:30px;padding:0 11px;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer;';
+  let h = '<div style="margin-top:14px;border-top:1px solid #f1f5f9;padding-top:12px">'
+    + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
+    + '<span style="font-size:12.5px;font-weight:800;color:#0f172a">사진 · 영상</span>'
+    + '<span style="font-size:11px;color:#94a3b8">' + _hNum(list.length) + '개</span>'
+    + '<span style="flex:1"></span>'
+    + '<button type="button" onclick="window._hsbPickFile(&quot;' + _hEsc(b.id) + '&quot;)" '
+    + 'style="' + BTN + 'border:1px solid #cbd5e1;background:#fff;color:#334155">+ 사진·영상 올리기</button>'
+    + '<button type="button" onclick="window._hsbLinkMedia(&quot;' + _hEsc(b.id) + '&quot;)" '
+    + 'style="' + BTN + 'border:1px solid #cbd5e1;background:#fff;color:#334155">+ 링크로 달기</button>'
+    + '<button type="button" onclick="window._hsbAskObs(&quot;' + _hEsc(b.id) + '&quot;)" '
+    + 'style="' + BTN + 'border:0;background:#2f6f5c;color:#fff">+ 판매 수량 적기</button>'
+    + '</div>';
+  if (!list.length) {
+    h += '<div style="font-size:11.5px;color:#94a3b8;padding:8px 0">'
+      + '아직 올린 사진·영상이 없습니다. 방송 화면을 찍어 올려 두면 이 방송 기록에 남습니다.</div>';
+  } else {
+    h += '<div style="display:flex;gap:9px;overflow-x:auto;padding:2px 0 6px">'
+      + list.map((m, i) => '<figure style="margin:0;flex:0 0 auto;width:168px;position:relative">'
+        + (m.type === 'video'
+            ? ('<video src="' + _hEsc(m.url) + '" controls preload="metadata" '
+               + 'style="width:168px;border-radius:9px;border:1px solid #e2e8f0;display:block;background:#000"></video>')
+            : ('<img src="' + _hEsc(m.url) + '" alt="" loading="lazy" '
+               + 'onclick="window._hsbZoom(&quot;' + _hEsc(m.url) + '&quot;)" '
+               + 'style="width:168px;border-radius:9px;border:1px solid #e2e8f0;cursor:zoom-in;display:block">'))
+        + '<button type="button" title="삭제" onclick="window.hsbRemoveMedia(&quot;' + _hEsc(b.id) + '&quot;,' + i + ')" '
+        + 'style="position:absolute;top:4px;right:4px;width:22px;height:22px;border-radius:50%;border:0;'
+        + 'background:rgba(15,23,42,.72);color:#fff;font-size:12px;line-height:1;cursor:pointer">x</button>'
+        + '<figcaption style="font-size:10.5px;color:#64748b;margin-top:3px;line-height:1.35">'
+        + _hEsc(m.caption || (m.type === 'video' ? '영상' : '사진')) + '</figcaption></figure>').join('')
+      + '</div>';
+  }
+  return h + '</div>';
+}
+
+/* 파일 고르기 — 숨은 input 하나를 만들어 돌려 쓴다 */
+window._hsbPickFile = function (id) {
+  let el = document.getElementById('hsb-file');
+  if (!el) {
+    el = document.createElement('input');
+    el.type = 'file'; el.id = 'hsb-file'; el.accept = 'image/*,video/*'; el.multiple = true;
+    el.style.display = 'none';
+    document.body.appendChild(el);
+  }
+  el.onchange = async function () {
+    const files = Array.prototype.slice.call(el.files || []);
+    el.value = '';
+    if (!files.length) return;
+    if (files.some(f => f.size > 200 * 1024 * 1024)) {
+      alert('200MB 가 넘는 파일은 올릴 수 없습니다. 드라이브에 올리고 "+ 링크로 달기" 를 쓰세요.');
+      return;
+    }
+    for (const f of files) {
+      try {
+        if (typeof showNotif === 'function') showNotif(f.name + ' 올리는 중...', 'info');
+        await window.hsbAddMedia(id, f, '');
+      } catch (e) { alert('올리기 실패: ' + (e && e.message)); return; }
+    }
+    if (typeof showNotif === 'function') showNotif(files.length + '개 올렸습니다', 'success');
+  };
+  el.click();
+};
+
+window._hsbLinkMedia = async function (id) {
+  const url = prompt('사진·영상 주소를 붙여넣으세요 (드라이브 공유 링크 등)');
+  if (!url) return;
+  const cap = prompt('설명 (없으면 비워 두세요)') || '';
+  try { await window.hsbAddMedia(id, { url: url.trim(), caption: cap }, cap); }
+  catch (e) { alert('실패: ' + (e && e.message)); }
+};
+
+/* 판매 수량 손으로 적기 — Aside 가 쓰는 hsbAddObservation 과 같은 곳에 쌓인다 */
+window._hsbAskObs = async function (id) {
+  const b = (window._HSB.list || []).find(x => x.id === id);
+  const prods = (b && b.products) || [];
+  const t = prompt('관측 시각 (한국시간, 예: 15:35)');
+  if (!t) return;
+  if (!/^[0-9]{1,2}:[0-9]{2}$/.test(t.trim())) { alert('시각은 HH:MM 으로 적어주세요'); return; }
+  const n = prompt('화면에 뜬 수량 (숫자만)');
+  if (n == null) return;
+  const num = String(n).replace(/[, ]/g, '');
+  if (!/^[0-9]+$/.test(num)) { alert('숫자만 적어주세요'); return; }
+  let pi = 0;
+  if (prods.length > 1) {
+    const menu = prods.map((p, i) => (i + 1) + '. ' + String(p.name || '').slice(0, 40)).join(chr10());
+    const pick = prompt('구성 번호를 고르세요' + chr10() + menu, '1');
+    if (pick == null) return;
+    pi = Math.max(0, Math.min(prods.length - 1, (parseInt(pick, 10) || 1) - 1));
+  }
+  const fin = confirm('방송이 끝난 뒤에 본 값인가요?' + chr10() + chr10()
+    + '확인 = 방송 종료 후(최종)' + chr10() + '취소 = 방송 중');
+  try {
+    await window.hsbAddObservation(id,
+      [{ t: t.trim(), n: parseInt(num, 10), pi: pi, live: !fin }], { final: fin });
+    if (typeof showNotif === 'function') showNotif('수량을 적었습니다', 'success');
+  } catch (e) { alert('실패: ' + (e && e.message)); }
+};
+function chr10() { return String.fromCharCode(10); }
+
 /* v2.3.942: 롯데 관측 표 — 시각 · 누적 · 직전 대비 · 방송 중 여부 + 그때 화면 */
 function _hsbObsHtml(b) {
   const shots = (window._HSB_SHOTS && window._HSB_SHOTS.map) || {};
@@ -334,6 +573,21 @@ function _hsbDetailHtml(b) {
   if (b.src === 'app-observation') {
     if (hasTicks) h += '<div style="height:190px;margin-bottom:14px"><canvas id="hsb-chart"></canvas></div>';
     h += _hsbObsHtml(b);
+    h += _hsbMediaHtml(b);
+    return h + '</div>';
+  }
+
+  /* v2.3.945: 편성만 있는 기록(롯데·CJ) — 수량은 비공개. 손으로 적을 길만 열어 둔다. */
+  if (b.src === 'schedule') {
+    h += '<div style="padding:11px 13px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;'
+      + 'font-size:12px;color:#475569;line-height:1.7;margin-bottom:12px">'
+      + '<b>편성 기록입니다.</b> ' + _hEsc(b.broadcaster || '') + '은 판매수량을 공개하지 않아 '
+      + '방송 시간과 상품만 남겼습니다. 화면에서 수량을 보셨다면 아래 <b>+ 판매 수량 적기</b> 로 남길 수 있고, '
+      + 'Aside 가 자동으로 적어 넣기도 합니다.</div>'
+      + '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin-bottom:6px">편성 상품</div>'
+      + '<div style="font-size:12.5px;color:#0f172a;line-height:1.6">'
+      + (b.products || []).map(p => '\u00b7 ' + _hEsc(p.name)).join('<br>') + '</div>';
+    h += _hsbMediaHtml(b);
     return h + '</div>';
   }
 
@@ -366,6 +620,7 @@ function _hsbDetailHtml(b) {
   h += '<div style="margin-top:10px;font-size:11px;color:#94a3b8;line-height:1.6">'
     + '· 홈쇼핑이 공개한 누적 구매수량을 5분마다 읽어 그 차이를 적은 값입니다. 재방송은 제외합니다.<br>'
     + '· 추정 매출 = 구간 판매량 × 판매가. 취소·옵션 차이는 반영되지 않습니다.</div>';
+  h += _hsbMediaHtml(b);
   return h + '</div>';
 }
 

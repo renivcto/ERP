@@ -14,13 +14,13 @@
 <script src="shared/margin-analysis.js"></script>
 <!-- v2.3.741: 광고비 KPI 카드 8개 — 임원용·직원용이 함께 읽는 한 벌 -->
 <script src="shared/ads-kpi.js"></script>
-<script src="shared/meta-ads.js?v=878"></script><script src="shared/competitor-ads.js?v=881"></script><script src="shared/google-ads.js?v=878"></script><script src="shared/hs-broadcast.js?v=944"></script><!-- v2.3.912: 홈쇼핑 방송 기록 (서버가 Firestore 에 쓴 결과만 읽는다) --><!-- v2.3.877: 구글 광고 + 구글 다른 회사 광고 분석 --><!-- v2.3.873: 다른 회사 광고 분석 (매일 아침 분석 결과를 Firestore 에서 읽기만) --><!-- v2.3.851: 메타 광고 일일 리포트 (서버가 Firestore 에 쓴 결과만 읽는다) -->
+<script src="shared/meta-ads.js?v=878"></script><script src="shared/competitor-ads.js?v=881"></script><script src="shared/google-ads.js?v=878"></script><script src="shared/hs-broadcast.js?v=945"></script><!-- v2.3.912: 홈쇼핑 방송 기록 (서버가 Firestore 에 쓴 결과만 읽는다) --><!-- v2.3.877: 구글 광고 + 구글 다른 회사 광고 분석 --><!-- v2.3.873: 다른 회사 광고 분석 (매일 아침 분석 결과를 Firestore 에서 읽기만) --><!-- v2.3.851: 메타 광고 일일 리포트 (서버가 Firestore 에 쓴 결과만 읽는다) -->
 <!-- Firebase -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
   import { getFirestore, doc, getDoc, getDocFromServer, getDocFromCache, setDoc, deleteDoc, collection, getDocs, waitForPendingWrites, writeBatch, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-  import { getStorage, ref as _storageRefFn, uploadString as _storageUploadString, getDownloadURL as _storageGetUrl, deleteObject as _storageDelete } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
+  import { getStorage, ref as _storageRefFn, uploadString as _storageUploadString, uploadBytes as _storageUploadBytes, getDownloadURL as _storageGetUrl, deleteObject as _storageDelete } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
   import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";  // v2.3.341: onCall(스마트스토어 수동수집)
 
   const firebaseConfig = {
@@ -91,6 +91,14 @@
     window._storageUploadDataUrl = async function(path, dataUrl, contentType) {
       const r = _storageRefFn(storage, path);
       await _storageUploadString(r, dataUrl, 'data_url', contentType ? { contentType } : undefined);
+      return await _storageGetUrl(r);
+    };
+    // v2.3.945: 영상·큰 파일은 원본 바이트로 올린다. data_url 로 올리면 base64 로 1.33배
+    //   부풀어 브라우저 메모리에 통째로 올라간다(수백 MB 영상이면 그대로 터진다).
+    window._storageUploadFile = async function(path, file, onProgress) {
+      const r = _storageRefFn(storage, path);
+      await _storageUploadBytes(r, file, file && file.type ? { contentType: file.type } : undefined);
+      if (typeof onProgress === 'function') { try { onProgress(1); } catch(_){} }
       return await _storageGetUrl(r);
     };
     window._storageDeletePath = async function(path) {
@@ -6418,7 +6426,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.944';
+const ERP_VERSION = 'v2.3.945';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
