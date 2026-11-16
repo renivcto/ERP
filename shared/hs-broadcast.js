@@ -510,9 +510,9 @@ function _hsbObsHtml(b) {
   const shots = (window._HSB_SHOTS && window._HSB_SHOTS.map) || {};
   let h = '<div style="padding:11px 13px;background:#fff7ed;border:1px solid #fed7aa;border-radius:9px;'
     + 'font-size:12px;color:#9a3412;line-height:1.7;margin-bottom:14px">'
-    + '<b>관측 기록입니다.</b> 롯데는 판매수량을 공개하지 않아, 앱 상품 화면에 뜨는 '
-    + '“지금까지 N개 구매된 상품입니다” 를 직접 찍어 적었습니다. GS처럼 5분마다 자동으로 쌓은 값이 아닙니다. '
-    + '롯데가 집계 기간·단위를 공시한 값은 아니지만, 네 방송 모두 한 방송 분량으로 들어맞아 <b>그 방송의 집계</b>로 읽었습니다.'
+    + '<b>관측 기록입니다.</b> ' + _hEsc(b.broadcaster || '') + '은 판매수량을 공개하지 않아, '
+    + '앱 상품 화면에 뜨는 수량을 직접 보고 적은 값입니다. GS처럼 5분마다 자동으로 쌓은 값이 아닙니다. '
+    + '방송사가 집계 기간·단위를 공시한 값은 아니지만, 한 방송 분량으로 들어맞아 <b>그 방송의 집계</b>로 읽습니다.'
     + (b.obsNote ? '<br>' + _hEsc(b.obsNote) : '')
     + '</div>';
 
