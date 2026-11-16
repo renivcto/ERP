@@ -16,7 +16,9 @@
                       window._firebaseDb / _firestoreDoc / _firestoreGetDocFromServer
    ============================================================================= */
 
-window._HSB = window._HSB || { list: [], ts: 0, loadedAt: 0, sel: null, loading: false, chart: null };
+/* v2.3.941: bc = 보고 있는 방송사. 페이지를 열면 GS샵이 기본이다. */
+window._HSB = window._HSB || { list: [], ts: 0, loadedAt: 0, sel: null, loading: false, chart: null, bc: 'GS샵' };
+if (!window._HSB.bc) window._HSB.bc = 'GS샵';
 
 async function _hsbLoad(force) {
   const H = window._HSB;
@@ -27,16 +29,46 @@ async function _hsbLoad(force) {
     const db = window._firebaseDb, docF = window._firestoreDoc;
     const getFn = window._firestoreGetDocFromServer || window._firestoreGetDoc;
     if (!db || !docF || !getFn) throw new Error('Firestore 준비 안 됨');
-    const snap = await getFn(docF(db, 'erp_data', 'hsBroadcasts'));
-    const d = (snap && snap.exists && snap.exists()) ? snap.data() : null;
-    let arr = d ? d.data : [];
-    if (typeof arr === 'string') arr = JSON.parse(arr);
-    H.list = (Array.isArray(arr) ? arr : []).slice().sort((a, b) =>
+    /* v2.3.943: 서버가 5분마다 hsBroadcasts 를 통째로 다시 쓴다. 손으로 넣은 관측 기록
+       (롯데 등)은 거기 두면 다음 tick 에 지워지므로 hsBroadcastsManual 에 따로 두고 합친다. */
+    const read = async (name) => {
+      try {
+        const snap = await getFn(docF(db, 'erp_data', name));
+        const d = (snap && snap.exists && snap.exists()) ? snap.data() : null;
+        let arr = d ? d.data : [];
+        if (typeof arr === 'string') arr = JSON.parse(arr);
+        return { arr: Array.isArray(arr) ? arr : [], ts: (d && d.ts) || 0 };
+      } catch (e) { console.warn('hsb read ' + name, e); return { arr: [], ts: 0 }; }
+    };
+    const auto = await read('hsBroadcasts');
+    const man = await read('hsBroadcastsManual');
+    const seen = new Set(man.arr.map(b => b && b.id));
+    H.list = man.arr.concat(auto.arr.filter(b => b && !seen.has(b.id))).slice().sort((a, b) =>
       (a.date + a.start) < (b.date + b.start) ? 1 : -1);          // 최신 먼저
-    H.ts = (d && d.ts) || 0;
+    H.ts = Math.max(auto.ts || 0, man.ts || 0);
     H.loadedAt = Date.now();
-    if (!H.sel || !H.list.find(b => b.id === H.sel)) H.sel = H.list.length ? H.list[0].id : null;
+    /* v2.3.941: 선택 보정은 renderHsBroadcastPage 가 방송사별로 한다 */
   } finally { H.loading = false; }
+}
+
+/* v2.3.942: 롯데 관측 캡처 — 본문(hsBroadcasts)과 분리해 따로 읽는다.
+   한 번 읽으면 세션 동안 캐시한다. 없으면 조용히 비워 둔다. */
+window._HSB_SHOTS = window._HSB_SHOTS || { map: null, loading: false };
+async function _hsbLoadShots() {
+  const S = window._HSB_SHOTS;
+  if (S.map || S.loading) return;
+  S.loading = true;
+  try {
+    const db = window._firebaseDb, docF = window._firestoreDoc;
+    const getFn = window._firestoreGetDocFromServer || window._firestoreGetDoc;
+    if (!db || !docF || !getFn) throw new Error('Firestore 준비 안 됨');
+    const snap = await getFn(docF(db, 'erp_data', 'hsbShots'));
+    const d = (snap && snap.exists && snap.exists()) ? snap.data() : null;
+    let m = d ? d.data : {};
+    if (typeof m === 'string') m = JSON.parse(m);
+    S.map = m || {};
+  } catch (e) { console.warn('hsbShots', e); S.map = {}; }
+  finally { S.loading = false; }
 }
 
 // ── 포맷 ──
@@ -145,19 +177,37 @@ function _hsbSummary(list, b) {
   const topSub = prods.length > 1 ? ('구성 ' + prods.length + '건 중 최다 판매') : '';
   const peakMin = (b && b.peak) ? _hMinFrom(b.start, b.peak.t) : null;
 
+  /* v2.3.942: 롯데처럼 '관측' 으로 모은 기록은 GS 의 5분 자동 기록과 뜻이 다르다.
+     같은 칸에 같은 이름으로 넣으면 숫자를 잘못 읽게 되므로 라벨과 부연을 바꾼다. */
+  const isObs = !!(b && b.src === 'app-observation');
+  const qtyCard = isObs
+    ? (b.sold > 0
+        ? ['관측 구간 판매', _hNum(b.sold) + '개', '첫 관측 → 마지막 관측', '#f0fdf4', '#15803d', 19]
+        : ['관측 누적 구매', _hNum(b.obsTotal || 0) + '개', '이 방송 몫 분리 불가', '#f0fdf4', '#15803d', 19])
+    : ['추적 판매 수량', b ? (_hNum(b.sold) + '개') : '-', '이 방송', '#f0fdf4', '#15803d', 19];
+  const amtCard = (b && !b.amount)
+    ? ['추정 매출', '—', isObs ? '판매가 미확인' : '-', '#fefce8', '#a16207', 19]
+    : ['추정 매출', b ? _hWon(b.amount) : '-', '이 방송', '#fefce8', '#a16207', 19];
+
   // [라벨, 값, 부연, 배경, 글자색, 값 글자크기]
   const cards = [
     ['방송 시간', b ? (_hEsc(b.start) + '~' + _hEsc(b.end)) : '-',
       b ? (_hBadge(b.broadcaster) + ' <span style="color:#94a3b8">' + _hDateK(b.date) + '</span>') : '', '#eff6ff', '#1d4ed8', 19],
     ['제품명', top ? _hEsc(top.name) : (b ? _hEsc((b.brands || []).join(' / ') || b.title) : '-'),
       topSub, '#f5f3ff', '#6d28d9', 14],
-    ['판매가', top ? _hWon(top.salePrice) : '-', top && top.soldOut ? '품절' : '', '#f8fafc', '#334155', 19],
+    ['판매가', (top && top.salePrice) ? _hWon(top.salePrice)
+      : (top && top.listPrice ? _hWon(top.listPrice) : '-'),
+      (top && !top.salePrice && top.listPrice) ? '정가 (판매가 화면 가려짐)' : (top && top.soldOut ? '품절' : ''),
+      '#f8fafc', '#334155', 19],
     ['이벤트', _hsbEventText(top), '', '#fff7ed', '#c2410c', 14],
-    ['추적 판매 수량', b ? (_hNum(b.sold) + '개') : '-', '이 방송', '#f0fdf4', '#15803d', 19],
-    ['추정 매출', b ? _hWon(b.amount) : '-', '이 방송', '#fefce8', '#a16207', 19],
+    qtyCard,
+    amtCard,
     ['최근 30일 방송', _hNum(rec.length) + '회', '등장 브랜드 ' + _hNum(brands.size) + '개', '#eef2ff', '#4338ca', 19],
-    ['최다 판매', (peakMin == null) ? '-' : (_hNum(peakMin) + '분'),
-      (b && b.peak) ? ('시작 후 · ' + _hEsc(b.peak.t) + ' · ' + _hNum(b.peak.sold) + '개') : '방송 시작 후', '#fdf2f8', '#9d174d', 19],
+    isObs
+      ? ['관측 횟수', _hNum(((b.products || [])[0] || {}).obs ? ((b.products || [])[0].obs || []).length : 0) + '회',
+         '화면을 직접 찍은 횟수', '#fdf2f8', '#9d174d', 19]
+      : ['최다 판매', (peakMin == null) ? '-' : (_hNum(peakMin) + '분'),
+         (b && b.peak) ? ('시작 후 · ' + _hEsc(b.peak.t) + ' · ' + _hNum(b.peak.sold) + '개') : '방송 시작 후', '#fdf2f8', '#9d174d', 19],
   ];
   return '<div id="hsb-kpi" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-bottom:14px;max-width:980px">'
     + cards.map(c => '<div style="background:' + c[3] + ';border-radius:10px;padding:10px 12px;min-width:0">'
@@ -172,8 +222,13 @@ function _hsbSummary(list, b) {
 // ── 방송 목록 ──
 function _hsbListHtml(list, selId) {
   if (!list.length) {
+    const EMPTY = {
+      'GS샵': '아직 기록된 방송이 없습니다. 서버가 화장품 생방송 시간에 5분마다 자동으로 쌓습니다.',
+      '롯데홈쇼핑': '아직 기록된 롯데 방송이 없습니다. 롯데는 판매수량을 공개하지 않아, 앱 화면에서 관측한 누적 구매수량만 기록합니다.',
+      'CJ온스타일': 'CJ온스타일은 편성 수집을 준비 중입니다. 아직 기록된 방송이 없습니다.',
+    };
     return '<div style="padding:26px;color:#94a3b8;font-size:13px;background:#f8fafc;border-radius:10px">'
-      + '아직 기록된 방송이 없습니다. 서버가 화장품 생방송 시간에 5분마다 자동으로 쌓습니다.</div>';
+      + _hEsc(EMPTY[window._HSB.bc] || EMPTY['GS샵']) + '</div>';
   }
   let h = '<div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">';
   let lastDate = '';
@@ -195,8 +250,11 @@ function _hsbListHtml(list, selId) {
       + _hEsc((b.brands || []).join(' / ') || b.title) + '</span>'
       /* 금액 위 · 수량 아래, 오른쪽 정렬 — 한 칸으로 합쳐 이름 쪽에 96px 을 돌려준다 */
       + '<span style="display:flex;flex-direction:column;align-items:flex-end;width:104px;flex-shrink:0;line-height:1.25">'
-      + '<b style="font-size:13px;color:#a16207;font-weight:800;letter-spacing:-.3px">' + _hWon(b.amount) + '</b>'
-      + '<small style="font-size:11px;color:#15803d;font-weight:700">' + _hNum(b.sold) + '개</small>'
+      + '<b style="font-size:13px;color:#a16207;font-weight:800;letter-spacing:-.3px">'
+      + (b.amount ? _hWon(b.amount) : '<span style="color:#cbd5e1">—</span>') + '</b>'
+      + '<small style="font-size:11px;color:#15803d;font-weight:700">'
+      + (b.sold ? (_hNum(b.sold) + '개') : (b.src === 'app-observation'
+          ? ('누적 ' + _hNum(b.obsTotal || 0) + '개') : '0개')) + '</small>'
       + '</span>'
       + '</div>';
   });
@@ -204,11 +262,75 @@ function _hsbListHtml(list, selId) {
 }
 
 // ── 방송 상세 ──
+/* v2.3.942: 롯데 관측 표 — 시각 · 누적 · 직전 대비 · 방송 중 여부 + 그때 화면 */
+function _hsbObsHtml(b) {
+  const shots = (window._HSB_SHOTS && window._HSB_SHOTS.map) || {};
+  let h = '<div style="padding:11px 13px;background:#fff7ed;border:1px solid #fed7aa;border-radius:9px;'
+    + 'font-size:12px;color:#9a3412;line-height:1.7;margin-bottom:14px">'
+    + '<b>관측 기록입니다.</b> 롯데는 판매수량을 공개하지 않아, 앱 상품 화면에 뜨는 '
+    + '“지금까지 N개 구매된 상품입니다”(누적 구매수량)를 직접 찍어 적었습니다. GS처럼 5분마다 자동으로 쌓은 값이 아닙니다.'
+    + (b.obsNote ? '<br>' + _hEsc(b.obsNote) : '')
+    + '</div>';
+
+  (b.products || []).forEach(p => {
+    const obs = p.obs || [];
+    h += '<div style="margin-bottom:16px">'
+      + '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin-bottom:2px;line-height:1.4">' + _hEsc(p.name) + '</div>'
+      + '<div style="font-size:11.5px;color:#64748b;margin-bottom:7px">'
+      + (p.salePrice ? ('판매가 ' + _hWon(p.salePrice))
+          : (p.listPrice ? ('정가 ' + _hWon(p.listPrice) + ' · 판매가는 화면에서 가려짐') : '판매가 미확인'))
+      + '</div>'
+      + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+      + '<thead><tr style="background:#f8fafc">'
+      + ['관측 시각(KST)', '화면 누적 수량', '직전 관측 대비', '방송 상태'].map((t, i) =>
+        '<th style="padding:7px 9px;text-align:' + (i === 0 ? 'left' : 'right') + ';border-bottom:1px solid #e2e8f0;'
+        + 'font-size:11px;color:#475569;white-space:nowrap">' + t + '</th>').join('')
+      + '</tr></thead><tbody>';
+    let prev = null;
+    obs.forEach(o => {
+      const diff = (prev == null) ? null : (o.n - prev);
+      prev = o.n;
+      h += '<tr style="border-bottom:1px solid #f1f5f9">'
+        + '<td style="padding:7px 9px;color:#0f172a;white-space:nowrap">' + _hEsc(o.t) + '</td>'
+        + '<td style="padding:7px 9px;text-align:right;font-weight:700;white-space:nowrap">' + _hNum(o.n) + '개</td>'
+        + '<td style="padding:7px 9px;text-align:right;white-space:nowrap;color:' + (diff ? '#15803d' : '#94a3b8') + ';font-weight:' + (diff ? '700' : '400') + '">'
+        + (diff == null ? '기준' : ('+' + _hNum(diff) + '개')) + '</td>'
+        + '<td style="padding:7px 9px;text-align:right;white-space:nowrap;color:#64748b">'
+        + (o.live ? ('방송 중' + (o.left ? ' · ' + _hEsc(o.left) + ' 남음' : '')) : '방송 종료 후') + '</td>'
+        + '</tr>';
+    });
+    h += '</tbody></table></div>';
+
+    const imgs = obs.filter(o => shots[o.shot]);
+    if (imgs.length) {
+      h += '<div style="display:flex;gap:8px;overflow-x:auto;padding:9px 0 2px">'
+        + imgs.map(o => '<figure style="margin:0;flex:0 0 auto;width:150px">'
+          + '<img src="' + shots[o.shot] + '" alt="" loading="lazy" '
+          + 'onclick="window._hsbZoom(&quot;' + shots[o.shot] + '&quot;)" '
+          + 'style="width:150px;border-radius:8px;border:1px solid #e2e8f0;cursor:zoom-in;display:block">'
+          + '<figcaption style="font-size:10.5px;color:#64748b;margin-top:3px;text-align:center">'
+          + _hEsc(o.t) + ' · ' + _hNum(o.n) + '개</figcaption></figure>').join('')
+        + '</div>';
+    } else {
+      h += '<div style="font-size:11px;color:#94a3b8;padding:6px 0">화면 캡처를 불러오는 중…</div>';
+    }
+    h += '</div>';
+  });
+  return h;
+}
+
 function _hsbDetailHtml(b) {
   if (!b) return '';
   const hasTicks = (b.ticks || []).length > 0;
   // 머리말(방송사·브랜드·시간)과 판매/매출/피크 줄은 상단 8칸과 같은 내용이라 뺐다.
   let h = '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:14px;background:#fff">';
+
+  /* v2.3.942: 관측 기록(롯데)은 5분 자동 기록이 아니라 전용 블록으로 그린다 */
+  if (b.src === 'app-observation') {
+    if (hasTicks) h += '<div style="height:190px;margin-bottom:14px"><canvas id="hsb-chart"></canvas></div>';
+    h += _hsbObsHtml(b);
+    return h + '</div>';
+  }
 
   if (hasTicks) {
     h += '<div style="height:200px;margin-bottom:16px"><canvas id="hsb-chart"></canvas></div>';
@@ -269,6 +391,52 @@ function _hsbChart(b) {
   });
 }
 
+/* ── v2.3.941: 방송사 탭 ──────────────────────────────────────────────
+   데이터의 broadcaster 값은 'GS샵' / '롯데홈쇼핑' / 'CJ온스타일' 이고,
+   화면에는 사용자가 부르는 이름(GS홈쇼핑 / 롯데홈쇼핑 / CJ홈쇼핑)으로 쓴다. */
+const _HSB_TABS = [
+  { bc: 'GS샵', label: 'GS홈쇼핑', navId: 'nav-hsb-GS' },
+  { bc: '롯데홈쇼핑', label: '롯데홈쇼핑', navId: 'nav-hsb-LOTTE' },
+  { bc: 'CJ온스타일', label: 'CJ홈쇼핑', navId: 'nav-hsb-CJ' },
+];
+function _hsbTabsHtml(cur) {
+  const all = window._HSB.list || [];
+  return '<div id="hsb-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">'
+    + _HSB_TABS.map(t => {
+      const n = all.filter(b => b.broadcaster === t.bc).length;
+      const on = t.bc === cur;
+      const c = _HS_COLOR[t.bc] || '#475569';
+      return '<button type="button" onclick="window._hsbTab(&quot;' + t.bc + '&quot;)" '
+        + 'style="flex:1 1 0;min-width:0;height:38px;padding:0 10px;border-radius:10px;cursor:pointer;'
+        + 'font-size:13px;font-weight:800;white-space:nowrap;'
+        + (on ? ('background:' + c + ';color:#fff;border:1px solid ' + c + ';')
+              : ('background:#fff;color:#475569;border:1px solid #e2e8f0;'))
+        + '">' + _hEsc(t.label)
+        + '<span style="font-size:11px;font-weight:700;margin-left:6px;opacity:.85">' + _hNum(n) + '</span>'
+        + '</button>';
+    }).join('')
+    + '</div>';
+}
+function _hsbSyncNav() {
+  _HSB_TABS.forEach(t => {
+    const el = document.getElementById(t.navId);
+    if (el) el.classList.toggle('active', t.bc === window._HSB.bc);
+  });
+}
+window._hsbTab = function (bc) {
+  const H = window._HSB;
+  if (H.bc === bc) return;
+  H.bc = bc; H.sel = null;
+  renderHsBroadcastPage();
+};
+/* 사이드바 하위 메뉴에서 바로 그 방송사로 들어간다 */
+window.goHsb = function (bc) {
+  const H = window._HSB;
+  if (H.bc !== bc) { H.bc = bc; H.sel = null; }
+  if (typeof go === 'function') go('hsbroadcast');
+  else renderHsBroadcastPage();
+};
+
 window._hsbPick = function (id) { window._HSB.sel = id; renderHsBroadcastPage(); };
 
 function renderHsBroadcastPage() {
@@ -280,16 +448,29 @@ function renderHsBroadcastPage() {
       .catch(e => { host.innerHTML = '<div style="padding:30px;color:#dc2626;font-size:13px">불러오기 실패: ' + _hEsc(e && e.message) + '</div>'; });
     return;
   }
-  const sel = H.list.find(b => b.id === H.sel) || H.list[0];
+  /* v2.3.941: 선택한 방송사만 본다. 집계(최근 30일 등)도 그 방송사 안에서만 센다. */
+  const list = H.list.filter(b => b.broadcaster === H.bc);
+  const sel = list.find(b => b.id === H.sel) || list[0];
+  H.sel = sel ? sel.id : null;
+  const SRC = {
+    'GS샵': '편성표에 공개된 누적 구매수량을 생방송 중 5분마다 읽어 차이를 적습니다.',
+    '롯데홈쇼핑': '롯데는 판매수량을 공개하지 않습니다. 앱 상품 화면의 “지금까지 N개 구매된 상품입니다” 를 눈으로 관측해 적은 값입니다.',
+    'CJ온스타일': 'CJ는 편성 수집을 준비 중입니다.',
+  };
   host.innerHTML =
-    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    _hsbTabsHtml(H.bc)
+    + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
     + '<span style="font-size:12px;color:#64748b">서버 갱신 '
     + (H.ts ? new Date(H.ts).toLocaleString('ko-KR', { hour12: false }) : '-')
-    + ' · 화장품 생방송 중 5분마다 자동 기록</span>'
+    + ' · ' + _hEsc(SRC[H.bc] || '') + '</span>'
     + '</div>'
-    + _hsbSummary(H.list, sel)
-    + _hsbDetailHtml(sel)
+    + (sel ? (_hsbSummary(list, sel) + _hsbDetailHtml(sel)) : '')
     + '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin-bottom:6px">방송 이력</div>'
-    + _hsbListHtml(H.list, sel && sel.id);
+    + _hsbListHtml(list, sel && sel.id);
+  _hsbSyncNav();
   try { _hsbChart(sel); } catch (e) { console.warn('hsb chart', e); }
+  /* 관측 캡처는 무거워서 따로 읽는다 — 다 읽으면 그 자리만 다시 그린다 */
+  if (sel && sel.src === 'app-observation' && !(window._HSB_SHOTS.map)) {
+    _hsbLoadShots().then(() => { if (window._HSB.sel === sel.id) renderHsBroadcastPage(); });
+  }
 }
