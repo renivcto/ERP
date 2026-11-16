@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signOut } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { getFirestore, doc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 /* live85: Slack :shortcode: -> emoji */
 const SLACK_EMOJI85={"100":"💯","white_check_mark":"✅","heavy_check_mark":"✔️","check":"✔️","ballot_box_with_check":"☑️","x":"❌","negative_squared_cross_mark":"❎","warning":"⚠️","exclamation":"❗","heavy_exclamation_mark":"❗","question":"❓","bangbang":"‼️","no_entry":"⛔","no_entry_sign":"🚫","rotating_light":"🚨","fire":"🔥","sparkles":"✨","star":"⭐","star2":"🌟","tada":"🎉","confetti_ball":"🎊","gift":"🎁","trophy":"🏆","medal":"🏅","first_place_medal":"🥇","dart":"🎯","rocket":"🚀","zap":"⚡","bulb":"💡","package":"📦","date":"📅","calendar":"📆","spiral_calendar_pad":"🗓️","alarm_clock":"⏰","stopwatch":"⏱️","hourglass":"⌛","hourglass_flowing_sand":"⏳","clock1":"🕐","moneybag":"💰","money_with_wings":"💸","dollar":"💵","won":"💴","credit_card":"💳","chart_with_upwards_trend":"📈","chart_with_downwards_trend":"📉","bar_chart":"📊","sunny":"☀️","cloud":"☁️","umbrella":"☔","snowflake":"❄️","rainbow":"🌈","factory":"🏭","office":"🏢","house":"🏠","hospital":"🏥","convenience_store":"🏪","mega":"📣","loudspeaker":"📢","bell":"🔔","clapper":"🎬","movie_camera":"🎥","camera":"📷","camera_with_flash":"📸","tv":"📺","brain":"🧠","open_file_folder":"📂","file_folder":"📁","card_index_dividers":"🗂️","wrench":"🔧","hammer":"🔨","hammer_and_wrench":"🛠️","gear":"⚙️","nut_and_bolt":"🔩","memo":"📝","pencil":"📝","pencil2":"✏️","page_facing_up":"📄","page_with_curl":"📃","clipboard":"📋","pushpin":"📌","round_pushpin":"📍","paperclip":"📎","link":"🔗","lock":"🔒","key":"🔑","mag":"🔍","mag_right":"🔎","email":"📧","envelope":"✉️","inbox_tray":"📥","outbox_tray":"📤","phone":"☎️","iphone":"📱","computer":"💻","desktop_computer":"🖥️","coffee":"☕","tea":"🍵","pizza":"🍕","cake":"🍰","bust_in_silhouette":"👤","busts_in_silhouette":"👥","robot_face":"🤖","robot":"🤖","recycle":"♻️","arrows_counterclockwise":"🔄","repeat":"🔁","arrow_right":"➡️","arrow_left":"⬅️","arrow_up":"⬆️","arrow_down":"⬇️","arrow_forward":"▶️","point_right":"👉","point_left":"👈","point_up":"☝️","point_down":"👇","thumbsup":"👍","+1":"👍","thumbsdown":"👎","-1":"👎","ok_hand":"👌","clap":"👏","pray":"🙏","muscle":"💪","raised_hands":"🙌","wave":"👋","eyes":"👀","heart":"❤️","heart_eyes":"😍","smile":"😄","smiley":"😃","grinning":"😀","laughing":"😆","joy":"😂","sweat_smile":"😅","wink":"😉","blush":"😊","thinking_face":"🤔","thinking":"🤔","sob":"😭","cry":"😢","scream":"😱","sunglasses":"😎","woman_raising_hand":"🙋‍♀️","woman-raising-hand":"🙋‍♀️","man_raising_hand":"🙋‍♂️","man-raising-hand":"🙋‍♂️","raising_hand":"🙋","information_source":"ℹ️","new":"🆕","sos":"🆘","ok":"🆗","red_circle":"🔴","large_blue_circle":"🔵","large_green_circle":"🟢","large_yellow_circle":"🟡","large_orange_circle":"🟠","white_circle":"⚪","black_circle":"⚫","small_blue_diamond":"🔹","small_orange_diamond":"🔸","large_blue_diamond":"🔷","heavy_plus_sign":"➕","heavy_minus_sign":"➖","one":"1️⃣","two":"2️⃣","three":"3️⃣","four":"4️⃣","five":"5️⃣","six":"6️⃣","seven":"7️⃣","eight":"8️⃣","nine":"9️⃣","keycap_ten":"🔟","lipstick":"💄","test_tube":"🧪","microscope":"🔬","pill":"💊","syringe":"💉","shopping_cart":"🛒","shopping_bags":"🛍️","truck":"🚚","airplane":"✈️","ship":"🚢","globe_with_meridians":"🌐","earth_asia":"🌏","flag_kr":"🇰🇷","flag-kr":"🇰🇷","kr":"🇰🇷","flag_cn":"🇨🇳","flag-cn":"🇨🇳","cn":"🇨🇳","jp":"🇯🇵","us":"🇺🇸","seedling":"🌱","herb":"🌿","four_leaf_clover":"🍀","hibiscus":"🌺","rose":"🌹","cherry_blossom":"🌸","droplet":"💧","sweat_drops":"💦","gem":"💎","crown":"👑","speech_balloon":"💬","thought_balloon":"💭","loud_sound":"🔊","mute":"🔇","art":"🎨","books":"📚","book":"📖","newspaper":"📰","label":"🏷️","bookmark":"🔖","scissors":"✂️","hourglass_done":"⌛","heavy_dollar_sign":"💲","handshake":"🤝","people_holding_hands":"🧑‍🤝‍🧑","woman":"👩","man":"👨","female_detective":"🕵️‍♀️","speaking_head_in_silhouette":"🗣️","arrow_heading_up":"⤴️","triangular_flag_on_post":"🚩","checkered_flag":"🏁","construction":"🚧","calling":"📲","satellite_antenna":"📡","battery":"🔋","electric_plug":"🔌","chart":"💹","receipt":"🧾","ledger":"📒","notebook":"📓","spiral_note_pad":"🗒️"};
@@ -979,10 +979,47 @@ window.addEventListener('nexus-scene-ready',bindOriginalScene,{once:true});if(wi
 function lockApi(message){clearAll();setAuthOverlay('NEXUS 접근 차단',message||'NEXUS 서버 권한을 확인할 수 없습니다.',{logout:true})}
 async function handleActiveUser(user){
   clearExternal();stopFirestore();stopPolling();state.user=user;greet99(user);setAuthOverlay('NEXUS 권한 확인 중','서버의 nexus_access 권한과 활성 임원 계정을 확인하고 있습니다.');
-  try{const status=await api('/status');if(String(status?.identity?.uid||'')!==String(user.uid))throw Object.assign(new Error('서버 사용자와 현재 로그인 계정이 일치하지 않습니다.'),{status:403});state.status=status;state.profile={uid:user.uid,name:status.identity.displayName||user.displayName||'',email:status.identity.email||user.email||'',role:status.identity.isAdmin?'관리자':(status.identity.permission==='read'?'조회 권한':'임원')};state.authorized=true;greet99(user,status.identity.displayName);$('viewer-name').textContent=`(${state.profile.name||state.profile.email})`;$('viewer-role').textContent=state.profile.role;renderViewerFace();$('logout-button').textContent=(state.profile.name||'나').slice(0,1);showApp();subscribeERP();if($('admin-tasks-btn'))$('admin-tasks-btn').hidden=false;await Promise.all([loadTrello(),loadMeetings(),loadSlackChannels(),loadPersonalTasks(),loadDeskWork()]);state.lastPollAt=Date.now();renderAll();startPolling()}catch(error){clearAll();setAuthOverlay('접근할 수 없습니다',error.message,{logout:true})}
+  try{const status=await api('/status');if(String(status?.identity?.uid||'')!==String(user.uid))throw Object.assign(new Error('서버 사용자와 현재 로그인 계정이 일치하지 않습니다.'),{status:403});state.status=status;state.profile={uid:user.uid,name:status.identity.displayName||user.displayName||'',email:status.identity.email||user.email||'',role:status.identity.isAdmin?'관리자':(status.identity.permission==='read'?'조회 권한':'임원')};state.authorized=true;greet99(user,status.identity.displayName);$('viewer-name').textContent=`(${state.profile.name||state.profile.email})`;$('viewer-role').textContent=state.profile.role;renderViewerFace();$('logout-button').textContent=(state.profile.name||'나').slice(0,1);showApp();subscribeERP();if($('admin-tasks-btn'))$('admin-tasks-btn').hidden=false;await Promise.all([loadTrello(),loadMeetings(),loadSlackChannels(),loadPersonalTasks(),loadDeskWork()]);state.lastPollAt=Date.now();renderAll();startPolling()}catch(error){clearAll();setAuthOverlay('접근할 수 없습니다',
+    (error.message||'')+' — 로그인한 계정: '+(user.email||'(이메일 없음)')
+    +'. 다른 계정으로 들어오셨다면 아래 로그아웃 후 다시 로그인해 주세요.',{logout:true})}
 }
 
-$('login-button').onclick=async()=>{ $('login-button').disabled=true; try{await signInWithPopup(auth,provider);}catch(error){if(error.code!=='auth/popup-closed-by-user')setAuthOverlay('로그인 오류',error.message,{login:true});}finally{$('login-button').disabled=false;}};
+/* live131: 로그인 실패를 삼키지 않는다. 앱 안 브라우저·팝업 차단을 각각 다르게 안내한다. */
+const IN_APP_BROWSER = /KAKAOTALK|NAVER\(inapp|Instagram|FBAN|FBAV|FB_IAB|Line\/|DaumApps|everytimeApp|band/i.test(navigator.userAgent||'');
+const POPUP_FALLBACK = ['auth/popup-blocked','auth/operation-not-supported-in-this-environment',
+  'auth/cancelled-popup-request','auth/web-storage-unsupported','auth/internal-error'];
+function loginError(error){
+  const code = (error && error.code) || '';
+  if (code === 'auth/popup-closed-by-user') {
+    setAuthOverlay('로그인 창이 닫혔습니다','구글 계정 선택 창이 끝까지 진행되지 않았습니다. 다시 눌러 주세요.',{login:true});
+    return;
+  }
+  if (code === 'auth/unauthorized-domain') {
+    setAuthOverlay('허용되지 않은 주소','이 주소는 로그인 허용 목록에 없습니다. 관리자에게 알려 주세요. ('+code+')',{login:true});
+    return;
+  }
+  setAuthOverlay('로그인 오류', ((error && error.message) || '알 수 없는 오류') + ' ('+ (code||'코드 없음') +')', {login:true});
+}
+async function startLogin(){
+  if (IN_APP_BROWSER) {
+    setAuthOverlay('앱 안 브라우저에서는 로그인할 수 없습니다',
+      '카카오톡·인스타그램 같은 앱 안의 브라우저는 구글이 로그인을 막습니다. 오른쪽 위 메뉴에서 "다른 브라우저로 열기"(크롬·사파리)를 눌러 주세요.',
+      {login:true});
+    return;
+  }
+  try { await signInWithPopup(auth, provider); return; }
+  catch(error){
+    if (POPUP_FALLBACK.indexOf((error&&error.code)||'') >= 0) {
+      setAuthOverlay('로그인 창으로 이동합니다','팝업이 막혀 있어 페이지를 옮겨 로그인합니다. 잠시만 기다려 주세요.');
+      try { await signInWithRedirect(auth, provider); return; }
+      catch(e2){ loginError(e2); return; }
+    }
+    loginError(error);
+  }
+}
+$('login-button').onclick=async()=>{ $('login-button').disabled=true; try{ await startLogin(); } finally { $('login-button').disabled=false; } };
+/* 리디렉트로 돌아왔을 때의 결과·오류를 받는다 (안 받으면 조용히 로그인 화면으로 되돌아간다) */
+getRedirectResult(auth).catch(loginError);
 $('auth-logout-button').onclick=async()=>{clearAll();await signOut(auth);}; $('logout-button').onclick=async()=>{clearAll();await signOut(auth);};
 function clearSlackThreadState({invalidate=false}={}){state.slack.replies.clear();state.slack.replyTarget=null;if(invalidate)state.slack.requestSeq++;renderReplyTarget();}
 async function selectSlackChannel(channelId){const channel=String(channelId||'');state.slack.channel=channel;$('slack-search35').value='';state.slack.messages=[];state.slack.error='';state.slack.loading=false;resetSlackHistory(channel);clearSlackThreadState({invalidate:true});renderSlack();$('slack-feed').scrollTop=0;if(state.slack.channel)await loadSlackMessages();else await loadSlackFeed();}
