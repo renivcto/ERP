@@ -375,9 +375,8 @@ function renderSlackOverviewCards(list){
     if(unavailable) body='<p class="slack-overview-empty">대화 기록을 불러올 수 없습니다.</p>';
     else if(!hasMsg) body='<p class="slack-overview-empty">아직 표시할 대화가 없습니다.</p>';
     else body=`<p class="slack-overview-preview">${escapeHtml(text||'(내용 없음)')}</p>`;
-    const lm=c?.latestMessage||null,rootTs=String(lm?.threadTs||lm?.thread_ts||lm?.ts||''),popTs=/^\d+\.\d+$/.test(rootTs)?rootTs:'';
     const starred=slackStars130().includes(id);
-    return `<button type="button" class="slack-overview-card${starred?' starred130':''}" data-open-channel="${escapeHtml(id)}"${popTs?` data-pop-ts="${escapeHtml(popTs)}"`:''}><div class="slack-overview-top"><span class="slack-star130${starred?' on':''}" role="button" tabindex="0" data-star130="${escapeHtml(id)}" title="${starred?'상단 고정 해제':'별표: 상단에 고정'}" aria-label="${starred?'상단 고정 해제':'상단에 고정'}">${starred?'★':'☆'}</span><span class="slack-overview-name">#${escapeHtml(name)}</span>${time?`<time>${escapeHtml(time)}</time>`:''}</div>${hasMsg?`<div class="slack-overview-meta">${escapeHtml(author)}</div>`:''}${body}<div class="slack-overview-foot">${replyCount>0?`<span class="slack-overview-replies">답글 ${replyCount}</span>`:'<span></span>'}<span class="slack-overview-open">채널 대화 보기 ›</span></div></button>`;
+    return `<button type="button" class="slack-overview-card${starred?' starred130':''}" data-open-channel="${escapeHtml(id)}"><div class="slack-overview-top"><span class="slack-star130${starred?' on':''}" role="button" tabindex="0" data-star130="${escapeHtml(id)}" title="${starred?'상단 고정 해제':'별표: 상단에 고정'}" aria-label="${starred?'상단 고정 해제':'상단에 고정'}">${starred?'★':'☆'}</span><span class="slack-overview-name">#${escapeHtml(name)}</span>${time?`<time>${escapeHtml(time)}</time>`:''}</div>${hasMsg?`<div class="slack-overview-meta">${escapeHtml(author)}</div>`:''}${body}${replyCount>0?`<div class="slack-overview-foot"><span class="slack-overview-replies">답글 ${replyCount}</span></div>`:''}</button>`;
   }).join('');
 }
 function renderSlackOverviewFeed(feed){
@@ -1448,15 +1447,8 @@ document.addEventListener('click',e=>{
   openTrelloPopup80(href,row.classList.contains('task-trello44')?(row.querySelector('a')?.textContent||''):'');
 },true);
 
-/* live81: overview channel cards open the latest message in the Slack popup; '채널 대화 보기' still opens the channel */
-document.addEventListener('click',e=>{
-  const card=e.target.closest('#slack-feed35 .slack-overview-card[data-pop-ts]'); if(!card) return;
-  if(e.target.closest('[data-star130]')) return;
-  if(e.target.closest('.slack-overview-open')) return;
-  const ch=card.dataset.openChannel, ts=card.dataset.popTs; if(!/^[CDG][A-Z0-9]{8,}$/.test(ch||'')) return;
-  e.preventDefault(); e.stopPropagation();
-  openSlackPopup77('https://reniv.slack.com/archives/'+ch+'/p'+ts.replace('.',''));
-},true);
+/* live132: live81 이 카드 클릭을 가로채 '메시지 하나짜리' 스레드 팝업을 열던 것을 걷어냈다.
+   이제 카드는 #slack-feed onclick 으로 내려가 openSlackChat103 (채널 대화 전체 + 입력창) 을 연다. */
 
 /* live83: spin the refresh icon briefly on click */
 document.addEventListener('click',e=>{ const b=e.target.closest('#slack-refresh-live'); if(!b) return; b.classList.add('spin83'); setTimeout(()=>b.classList.remove('spin83'),1200); },true);
@@ -1514,7 +1506,9 @@ function openSlackChat103(ch,opts={}){
   if(CHAT103.ch!==ch){ CHAT103.ch=ch; CHAT103.msgs=[]; CHAT103.cursor=''; CHAT103.hasMore=false; CHAT103.sig=''; CHAT103.atBottom=true; body.innerHTML='<p class="sp-loading77">대화를 불러오는 중…</p>'; ov.querySelector('.chat-compose103 textarea').value=''; }
   loadChat103(true);
   clearInterval(CHAT103.timer); CHAT103.timer=setInterval(()=>{ if(!document.hidden&&!ov.hidden&&!ov.querySelector('.sp-edit87')) loadChat103(false); },8000);
-  setTimeout(()=>ov.querySelector('.chat-compose103 textarea')?.focus(),60);
+  /* live132: 터치 기기에서는 포커스를 주지 않는다 — 소프트 키보드가 열자마자 올라와 대화를 덮는다.
+     데스크톱(정밀 포인터)에서는 그대로 바로 타이핑할 수 있다. */
+  if(!window.matchMedia?.('(pointer:coarse)')?.matches) setTimeout(()=>ov.querySelector('.chat-compose103 textarea')?.focus(),60);
 }
 function chatError103(error){
   const ov=chatEl103(); const body=ov.querySelector('.chat-body103'); ov.hidden=false;
