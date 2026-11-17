@@ -93,6 +93,8 @@
     }
     at();
   }
+  /* push140: 알림을 눌러 들어왔을 때 nexus-live.js 가 같은 경로로 ERP 를 연다 */
+  try{ window.__nxOpenErp=openErp; }catch(e){}
 
   /* 뒤로가기 — 폰에서 ERP 화면이나 대표이사실로 들어간 뒤 뒤로가기를 누르면
      사이트를 통째로 나가 버렸다. 들어갈 때 히스토리에 한 겹을 쌓아 두고,

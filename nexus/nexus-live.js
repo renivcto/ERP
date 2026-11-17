@@ -1,6 +1,6 @@
 import { initializeApp, getApps } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signOut } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-import { getFirestore, doc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { getFirestore, doc, onSnapshot, getDoc, runTransaction } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 /* live85: Slack :shortcode: -> emoji */
 const SLACK_EMOJI85={"100":"💯","white_check_mark":"✅","heavy_check_mark":"✔️","check":"✔️","ballot_box_with_check":"☑️","x":"❌","negative_squared_cross_mark":"❎","warning":"⚠️","exclamation":"❗","heavy_exclamation_mark":"❗","question":"❓","bangbang":"‼️","no_entry":"⛔","no_entry_sign":"🚫","rotating_light":"🚨","fire":"🔥","sparkles":"✨","star":"⭐","star2":"🌟","tada":"🎉","confetti_ball":"🎊","gift":"🎁","trophy":"🏆","medal":"🏅","first_place_medal":"🥇","dart":"🎯","rocket":"🚀","zap":"⚡","bulb":"💡","package":"📦","date":"📅","calendar":"📆","spiral_calendar_pad":"🗓️","alarm_clock":"⏰","stopwatch":"⏱️","hourglass":"⌛","hourglass_flowing_sand":"⏳","clock1":"🕐","moneybag":"💰","money_with_wings":"💸","dollar":"💵","won":"💴","credit_card":"💳","chart_with_upwards_trend":"📈","chart_with_downwards_trend":"📉","bar_chart":"📊","sunny":"☀️","cloud":"☁️","umbrella":"☔","snowflake":"❄️","rainbow":"🌈","factory":"🏭","office":"🏢","house":"🏠","hospital":"🏥","convenience_store":"🏪","mega":"📣","loudspeaker":"📢","bell":"🔔","clapper":"🎬","movie_camera":"🎥","camera":"📷","camera_with_flash":"📸","tv":"📺","brain":"🧠","open_file_folder":"📂","file_folder":"📁","card_index_dividers":"🗂️","wrench":"🔧","hammer":"🔨","hammer_and_wrench":"🛠️","gear":"⚙️","nut_and_bolt":"🔩","memo":"📝","pencil":"📝","pencil2":"✏️","page_facing_up":"📄","page_with_curl":"📃","clipboard":"📋","pushpin":"📌","round_pushpin":"📍","paperclip":"📎","link":"🔗","lock":"🔒","key":"🔑","mag":"🔍","mag_right":"🔎","email":"📧","envelope":"✉️","inbox_tray":"📥","outbox_tray":"📤","phone":"☎️","iphone":"📱","computer":"💻","desktop_computer":"🖥️","coffee":"☕","tea":"🍵","pizza":"🍕","cake":"🍰","bust_in_silhouette":"👤","busts_in_silhouette":"👥","robot_face":"🤖","robot":"🤖","recycle":"♻️","arrows_counterclockwise":"🔄","repeat":"🔁","arrow_right":"➡️","arrow_left":"⬅️","arrow_up":"⬆️","arrow_down":"⬇️","arrow_forward":"▶️","point_right":"👉","point_left":"👈","point_up":"☝️","point_down":"👇","thumbsup":"👍","+1":"👍","thumbsdown":"👎","-1":"👎","ok_hand":"👌","clap":"👏","pray":"🙏","muscle":"💪","raised_hands":"🙌","wave":"👋","eyes":"👀","heart":"❤️","heart_eyes":"😍","smile":"😄","smiley":"😃","grinning":"😀","laughing":"😆","joy":"😂","sweat_smile":"😅","wink":"😉","blush":"😊","thinking_face":"🤔","thinking":"🤔","sob":"😭","cry":"😢","scream":"😱","sunglasses":"😎","woman_raising_hand":"🙋‍♀️","woman-raising-hand":"🙋‍♀️","man_raising_hand":"🙋‍♂️","man-raising-hand":"🙋‍♂️","raising_hand":"🙋","information_source":"ℹ️","new":"🆕","sos":"🆘","ok":"🆗","red_circle":"🔴","large_blue_circle":"🔵","large_green_circle":"🟢","large_yellow_circle":"🟡","large_orange_circle":"🟠","white_circle":"⚪","black_circle":"⚫","small_blue_diamond":"🔹","small_orange_diamond":"🔸","large_blue_diamond":"🔷","heavy_plus_sign":"➕","heavy_minus_sign":"➖","one":"1️⃣","two":"2️⃣","three":"3️⃣","four":"4️⃣","five":"5️⃣","six":"6️⃣","seven":"7️⃣","eight":"8️⃣","nine":"9️⃣","keycap_ten":"🔟","lipstick":"💄","test_tube":"🧪","microscope":"🔬","pill":"💊","syringe":"💉","shopping_cart":"🛒","shopping_bags":"🛍️","truck":"🚚","airplane":"✈️","ship":"🚢","globe_with_meridians":"🌐","earth_asia":"🌏","flag_kr":"🇰🇷","flag-kr":"🇰🇷","kr":"🇰🇷","flag_cn":"🇨🇳","flag-cn":"🇨🇳","cn":"🇨🇳","jp":"🇯🇵","us":"🇺🇸","seedling":"🌱","herb":"🌿","four_leaf_clover":"🍀","hibiscus":"🌺","rose":"🌹","cherry_blossom":"🌸","droplet":"💧","sweat_drops":"💦","gem":"💎","crown":"👑","speech_balloon":"💬","thought_balloon":"💭","loud_sound":"🔊","mute":"🔇","art":"🎨","books":"📚","book":"📖","newspaper":"📰","label":"🏷️","bookmark":"🔖","scissors":"✂️","hourglass_done":"⌛","heavy_dollar_sign":"💲","handshake":"🤝","people_holding_hands":"🧑‍🤝‍🧑","woman":"👩","man":"👨","female_detective":"🕵️‍♀️","speaking_head_in_silhouette":"🗣️","arrow_heading_up":"⤴️","triangular_flag_on_post":"🚩","checkered_flag":"🏁","construction":"🚧","calling":"📲","satellite_antenna":"📡","battery":"🔋","electric_plug":"🔌","chart":"💹","receipt":"🧾","ledger":"📒","notebook":"📓","spiral_note_pad":"🗒️"};
 const SLACK_TONE85={"skin-tone-2":"🏻","skin-tone-3":"🏼","skin-tone-4":"🏽","skin-tone-5":"🏾","skin-tone-6":"🏿"};
@@ -1600,6 +1600,209 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const ov=document
 /* live109: 3D team signs -> that team's Slack channel in the internal chat window */
 const TEAM_CHANNELS109={'재무팀':{id:'C0C3VTT6RNF',name:'재무팀'},'디자인팀':{id:'C0BP6CCGCG3',name:'디자인팀'},'국내영업팀':{id:'C0BNTRA5A73',name:'국내영업팀'},'마케팅팀':{id:'C0BPL2G41BJ',name:'마케팅팀'}};
 window.NEXUS.teamChannelLabel=team=>TEAM_CHANNELS109[team]?'#'+TEAM_CHANNELS109[team].name+' 채널 대화 열기':'';
+
+/* ═══════════════════════════════════════════════════════════════════
+   push140: 푸시 알림 — 구독, 받을 알림 고르기, 알림 클릭 처리
+
+   VAPID 공개키는 공개해도 되는 값이다(개인키는 서버 /etc/reniv 에만 있다).
+   구독 정보는 erp_data/pushSubs 한 문서에 uid 별로 모아 둔다. 여러 사람이
+   동시에 저장할 수 있으므로 **반드시 트랜잭션**으로 읽고 쓴다 — 통째로
+   덮어쓰면 그 사이 다른 사람이 등록한 기기가 사라진다.
+   ═══════════════════════════════════════════════════════════════════ */
+const PUSH_VAPID='BJA_A2ZPVVQQoq3wZWxAddusLWcHYuFrKzF510TVdCaCGkfO7_tfxfYs-8t1q6KvId72D_oMFb1QdlgpYo9Z-EY';
+/* 슬랙은 켠 채널만 온다. 처음 켜는 사람에게는 이 둘만 켜 준다. */
+const PUSH_SLACK_DEFAULT=['C0C1FPRQ3F1','C0C1Q8VKMFF'];   // 광고이미지-제작 · 광고영상-제작
+const PUSH_ERP_ROWS=[['approval','결재 요청·완료','새 결재가 올라오거나 결재가 끝났을 때'],
+                     ['pay','지급 요청·완료','지출 결의·지급 관련'],
+                     ['board','업무 공유 새 글·댓글','운영 업무 공유 게시판'],
+                     ['etc','그 밖의 ERP 알림','위에 없는 ERP 알림']];
+const PUSH140={prefs:null,sub:null,ready:false,saveTimer:null,pending:''};
+
+function pushCan(){ try{ return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window; }catch(_){ return false; } }
+function pushPerm(){ try{ return Notification.permission; }catch(_){ return 'default'; } }
+function pushKey(b64){
+  const pad='='.repeat((4-b64.length%4)%4), raw=atob((b64+pad).replace(/-/g,'+').replace(/_/g,'/'));
+  const out=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++) out[i]=raw.charCodeAt(i); return out;
+}
+function pushDefaultPrefs(){
+  const p={}; PUSH_ERP_ROWS.forEach(r=>{p[r[0]]=true;});
+  PUSH_SLACK_DEFAULT.forEach(c=>{p['slack:'+c]=true;}); return p;
+}
+function pushChName(id){
+  const c=state.slack.channels.find(x=>String(x.id)===String(id));
+  return c?(c.name||c.displayName||id):id;
+}
+
+/* 내 구독 + 설정을 읽어 둔다. 설정이 없으면 기본값. */
+async function pushLoad(){
+  try{ PUSH140.sub=await (await navigator.serviceWorker.ready).pushManager.getSubscription(); }
+  catch(_){ PUSH140.sub=null; }
+  let rec=null;
+  try{
+    const snap=await getDoc(doc(db,'erp_data','pushSubs'));
+    const map=JSON.parse((snap.data()||{}).data||'{}')||{};
+    rec=map[state.user?.uid||'']||null;
+  }catch(_){}
+  PUSH140.prefs=(rec&&rec.prefs)?rec.prefs:pushDefaultPrefs();
+  PUSH140.ready=true;
+}
+
+/* uid 칸만 고쳐 쓴다. 다른 사람 칸은 트랜잭션이 읽어 온 그대로 돌려 놓는다. */
+async function pushWrite(mut){
+  const ref=doc(db,'erp_data','pushSubs');
+  await runTransaction(db,async tx=>{
+    const snap=await tx.get(ref);
+    let map={}; try{ map=JSON.parse((snap.data()||{}).data||'{}')||{}; }catch(_){ map={}; }
+    const uid=state.user?.uid||''; if(!uid) throw new Error('로그인이 필요합니다.');
+    const rec=map[uid]||{};
+    rec.name=state.profile?.name||state.user?.displayName||'';
+    rec.email=state.user?.email||'';
+    mut(rec);
+    if(!(rec.subs||[]).length) delete map[uid]; else map[uid]=rec;
+    tx.set(ref,{data:JSON.stringify(map),ts:Date.now()},{merge:true});
+  });
+}
+
+function pushChNames(prefs){
+  const out={};
+  Object.keys(prefs||{}).forEach(k=>{ if(prefs[k]===true&&k.indexOf('slack:')===0){ const id=k.slice(6); out[id]=pushChName(id); } });
+  return out;
+}
+
+async function pushEnable(){
+  if(!pushCan()) throw new Error('이 브라우저는 푸시 알림을 지원하지 않습니다.');
+  if(pushPerm()!=='granted'){
+    const r=await Notification.requestPermission();
+    if(r==='denied') throw new Error('알림이 차단되어 있습니다. 브라우저 설정에서 이 사이트의 알림을 허용해 주세요.');
+    if(r!=='granted') throw new Error('알림 권한이 필요합니다.');
+  }
+  const reg=await navigator.serviceWorker.ready;
+  let sub=await reg.pushManager.getSubscription();
+  if(sub){
+    /* VAPID 키가 바뀌었으면 옛 구독으로는 못 받는다 — 다시 만든다 */
+    const cur=sub.options&&sub.options.applicationServerKey;
+    let same=false;
+    try{ same=cur&&btoa(String.fromCharCode(...new Uint8Array(cur))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')===PUSH_VAPID; }catch(_){}
+    if(!same){ try{ await sub.unsubscribe(); }catch(_){} sub=null; }
+  }
+  if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:pushKey(PUSH_VAPID)});
+  const j=sub.toJSON(), prefs=PUSH140.prefs||pushDefaultPrefs();
+  await pushWrite(rec=>{
+    rec.subs=(rec.subs||[]).filter(x=>x.endpoint!==j.endpoint)
+      .concat([{endpoint:j.endpoint,keys:j.keys,ua:String(navigator.userAgent||'').slice(0,120),ts:Date.now()}]).slice(-6);
+    rec.prefs=prefs; rec.chNames=pushChNames(prefs);
+  });
+  PUSH140.sub=sub; PUSH140.prefs=prefs;
+}
+
+async function pushDisable(){
+  const sub=PUSH140.sub; const ep=sub?sub.endpoint:'';
+  try{ if(sub) await sub.unsubscribe(); }catch(_){}
+  PUSH140.sub=null;
+  if(ep) await pushWrite(rec=>{ rec.subs=(rec.subs||[]).filter(x=>x.endpoint!==ep); });
+}
+
+function pushSaveSoon(){
+  clearTimeout(PUSH140.saveTimer);
+  PUSH140.saveTimer=setTimeout(async()=>{
+    if(!PUSH140.sub) return;
+    const prefs=PUSH140.prefs||{};
+    try{ await pushWrite(rec=>{ rec.prefs=prefs; rec.chNames=pushChNames(prefs); }); pushMsg('저장했습니다'); }
+    catch(e){ pushMsg('저장 실패: '+e.message,true); }
+  },600);
+}
+
+function pushMsg(t,bad){ const el=document.getElementById('px-msg140'); if(!el) return; el.textContent=t||''; el.className=bad?'px-msg140 bad':'px-msg140'; if(t) setTimeout(()=>{ if(el.textContent===t) el.textContent=''; },3000); }
+
+function pushBodyHtml(){
+  if(!pushCan()){
+    return '<p class="px-warn140">이 브라우저에서는 푸시 알림을 쓸 수 없습니다.<br>'
+      +'아이폰은 <b>공유 → 홈 화면에 추가</b> 로 설치한 뒤 그 아이콘으로 열어야 알림을 받을 수 있습니다.</p>';
+  }
+  const on=!!PUSH140.sub, p=PUSH140.prefs||{};
+  let h='';
+  if(pushPerm()==='denied') h+='<p class="px-warn140">브라우저에서 이 사이트의 알림을 <b>차단</b>해 두었습니다. 주소창의 자물쇠 → 알림 → 허용으로 바꾼 뒤 다시 눌러 주세요.</p>';
+  h+='<div class="px-main140"><div><b>'+(on?'이 기기로 알림을 받습니다':'이 기기는 알림을 받지 않습니다')+'</b>'
+    +'<small>'+(on?'앱을 닫아 두어도 옵니다. 기기마다 따로 켜야 합니다.':'켜면 앱이 닫혀 있어도 알림이 옵니다.')+'</small></div>'
+    +'<button type="button" id="px-toggle140" class="'+(on?'off':'on')+'">'+(on?'끄기':'알림 켜기')+'</button></div>';
+  if(!on) return h;
+  h+='<section class="px-sec140"><h4>ERP</h4>'+PUSH_ERP_ROWS.map(r=>
+      '<label class="px-row140"><input type="checkbox" data-pk="'+r[0]+'"'+(p[r[0]]===false?'':' checked')+'>'
+      +'<span><b>'+escapeHtml(r[1])+'</b><small>'+escapeHtml(r[2])+'</small></span></label>').join('')+'</section>';
+  const chans=[...state.slack.channels];
+  chans.sort((a,b)=>{ const A=p['slack:'+a.id]===true?0:1, B=p['slack:'+b.id]===true?0:1;
+    return A-B||String(a.name||a.id).localeCompare(String(b.name||b.id),'ko'); });
+  h+='<section class="px-sec140"><h4>Slack <small>켠 채널만 알림이 옵니다</small></h4>';
+  h+=chans.length?chans.map(c=>
+      '<label class="px-row140"><input type="checkbox" data-pk="slack:'+escapeHtml(c.id)+'"'+(p['slack:'+c.id]===true?' checked':'')+'>'
+      +'<span><b># '+escapeHtml(c.name||c.displayName||c.id)+'</b></span></label>').join('')
+    :'<p class="px-none140">채널을 불러오는 중입니다.</p>';
+  h+='</section><div class="px-foot140"><button type="button" id="px-test140">테스트 알림</button><span id="px-msg140" class="px-msg140"></span></div>';
+  return h;
+}
+
+function pushRender(){ const b=document.getElementById('push-body140'); if(b) b.innerHTML=pushBodyHtml(); }
+
+async function openPushDialog(){
+  const dlg=document.getElementById('push-dialog140'); if(!dlg) return;
+  const b=document.getElementById('push-body140');
+  if(b) b.innerHTML='<p class="px-none140">확인 중…</p>';
+  if(typeof dlg.showModal==='function'){ if(!dlg.open) dlg.showModal(); } else dlg.setAttribute('open','');
+  await pushLoad(); pushRender();
+}
+
+document.addEventListener('click',async e=>{
+  if(e.target.closest('#push-btn140')){ e.preventDefault(); openPushDialog(); return; }
+  const dlg=document.getElementById('push-dialog140'); if(!dlg) return;
+  if(e.target.closest('.px-x140')||e.target===dlg){ try{ dlg.close(); }catch(_){ dlg.removeAttribute('open'); } return; }
+  const tg=e.target.closest('#px-toggle140');
+  if(tg){
+    tg.disabled=true; const was=tg.textContent; tg.textContent='잠시만…';
+    try{ if(PUSH140.sub) await pushDisable(); else await pushEnable(); pushRender(); }
+    catch(err){ tg.disabled=false; tg.textContent=was; pushRender(); pushMsg(err.message,true); alert(err.message); }
+    return;
+  }
+  if(e.target.closest('#px-test140')){
+    try{ const reg=await navigator.serviceWorker.ready;
+      reg.showNotification('RENIV 알림 테스트',{body:'이렇게 보입니다.',icon:'./icon-192.png',badge:'./icon-192.png',tag:'px-test'});
+      pushMsg('보냈습니다');
+    }catch(err){ pushMsg(err.message,true); }
+  }
+});
+document.addEventListener('change',e=>{
+  const box=e.target.closest('#push-body140 input[type=checkbox][data-pk]'); if(!box) return;
+  PUSH140.prefs=PUSH140.prefs||pushDefaultPrefs();
+  PUSH140.prefs[box.dataset.pk]=box.checked; pushSaveSoon();
+});
+
+/* ── 알림을 눌러 들어왔을 때 그 화면을 연다 ──────────────────────── */
+function pushGo(url){
+  let q=null; try{ q=new URL(url,location.href).searchParams; }catch(_){ return; }
+  const ch=q.get('slack'), page=q.get('erp');
+  if(ch){ PUSH140.pending='slack:'+ch; pushGoTry(); return; }
+  if(page){ PUSH140.pending='erp:'+page; pushGoTry(); }
+}
+function pushGoTry(tries){
+  const want=PUSH140.pending; if(!want) return;
+  const n=tries||0;
+  if(!state.authorized){ if(n<60) setTimeout(()=>pushGoTry(n+1),500); return; }
+  const [kind,val]=[want.slice(0,want.indexOf(':')),want.slice(want.indexOf(':')+1)];
+  if(kind==='erp'){
+    PUSH140.pending='';
+    try{ localStorage.setItem('reniv_last_page',val); sessionStorage.setItem('reniv_session_active','1'); }catch(_){}
+    if(window.__nxOpenErp){ window.__nxOpenErp(val); return; }
+    const fr=$('erp-frame37'), sh=$('erp-shell37');
+    if(fr&&sh){ if(!fr.getAttribute('src')) fr.src=ERP_URL; sh.hidden=false; }
+    return;
+  }
+  /* 채널 이름이 나오려면 목록이 와야 한다 — 조금 기다렸다가 그래도 없으면 그냥 연다 */
+  if(!state.slack.channels.length&&n<20){ setTimeout(()=>pushGoTry(n+1),500); return; }
+  PUSH140.pending='';
+  try{ openSlackChat103(val,{title:pushChName(val)}); }catch(_){}
+}
+try{ navigator.serviceWorker.addEventListener('message',e=>{ if(e.data&&e.data.nexusPush&&e.data.url) pushGo(e.data.url); }); }catch(_){}
+if(location.search&&/[?&](slack|erp)=/.test(location.search)) pushGo(location.href);
+
 window.NEXUS.openTeamChannel=team=>{ const c=TEAM_CHANNELS109[team]; if(!c||!state.authorized) return false; openSlackChat103(c.id,{title:c.name}); return true; };
 
 /* live112: quick add — connect a Trello board (existing open cards, optional list filter) or a Slack channel */

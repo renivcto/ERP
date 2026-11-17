@@ -19,7 +19,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-  import { getFirestore, doc, getDoc, getDocFromServer, getDocFromCache, setDoc, deleteDoc, collection, getDocs, waitForPendingWrites, writeBatch, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { getFirestore, doc, getDoc, getDocFromServer, getDocFromCache, setDoc, deleteDoc, collection, getDocs, waitForPendingWrites, writeBatch, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
   import { getStorage, ref as _storageRefFn, uploadString as _storageUploadString, uploadBytes as _storageUploadBytes, getDownloadURL as _storageGetUrl, deleteObject as _storageDelete } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
   import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";  // v2.3.341: onCall(스마트스토어 수동수집)
 
@@ -77,6 +77,9 @@
   window._firestoreOnSnapshot = onSnapshot;   // v2.3.739: 유통채널 수익계산 양방향 실시간 반영
   window._firestoreCollection = collection;
   window._firestoreGetDocs = getDocs;
+  // v2.3.951: 푸시 아웃박스는 여러 탭·여러 사람이 같은 문서에 덧붙인다 —
+  //   통째로 덮어쓰면 그 사이 들어온 알림이 사라지므로 트랜잭션으로만 쓴다.
+  window._firestoreRunTransaction = runTransaction;
   // v2.3.341: Cloud Functions(asia-northeast3) onCall 호출 SDK — 스마트스토어 수동 수집 등
   try {
     const _fns = getFunctions(app, 'asia-northeast3');
@@ -6427,7 +6430,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.950';
+const ERP_VERSION = 'v2.3.951';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -45653,7 +45656,78 @@ function _slackShouldSend(type, payload) {
     return true;
   } catch(_) { return true; }
 }
+// ═══════════════════════════════════════════════════════
+// v2.3.951: 푸시 알림 적재 — 보내는 건 서버(/srv/push/pushd.py)가 한다.
+//   여기서는 erp_data/pushOutbox 에 한 줄 적기만 한다.
+//   NEXUS 앱(폰)에서 알림을 켜 둔 사람에게 전달된다. 설정은 NEXUS 레일의 '알림'.
+// ═══════════════════════════════════════════════════════
+const _PUSH_NEXUS = 'https://renivcto.github.io/ERP/nexus/';
+const _PUSH_PAGE = { approval: 'approval', pay: 'approval', board: 'feedshare', etc: 'dashboard' };
+const _PUSH_LABEL = {
+  approval_request: '결재 요청', approval_done: '결재 완료',
+  pay_request: '지급 요청', pay_done: '지급 완료', pay_now: '즉시 지급 요청',
+  recurring_added: '정기 지출 등록'
+};
+const _PUSH_SEEN = new Map();   // 같은 알림이 두 번 불리는 경로가 있다
+
+function _pushKindOf(type) {
+  const t = String(type || '');
+  if (t.indexOf('approval') === 0) return 'approval';
+  if (t.indexOf('pay') === 0) return 'pay';
+  if (t.indexOf('board') === 0) return 'board';
+  return 'etc';
+}
+
+function _pushDup(key) {
+  const now = Date.now();
+  for (const [k, t] of _PUSH_SEEN) if (now - t > 120000) _PUSH_SEEN.delete(k);
+  if (_PUSH_SEEN.has(key)) return true;
+  _PUSH_SEEN.set(key, now);
+  return false;
+}
+
+async function _pushEnqueue(kind, title, body, page) {
+  try {
+    const db = window._firebaseDb, tx = window._firestoreRunTransaction;
+    const me = window._firebaseAuth && window._firebaseAuth.currentUser;
+    if (!db || !tx || !me) return;                       // 로그인 전이면 적지 않는다
+    const text = String(body || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    if (_pushDup(kind + '|' + title + '|' + text)) return;
+    const ev = {
+      id: 'erp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+      type: kind,
+      title: String(title || 'RENIV ERP').slice(0, 80),
+      body: text,
+      url: _PUSH_NEXUS + '?erp=' + (page || 'dashboard'),
+      actor: me.uid,                                     // 내가 한 일은 나한테 안 온다
+      ts: Date.now()
+    };
+    const ref = window._firestoreDoc(db, 'erp_data', 'pushOutbox');
+    await tx(db, async (t) => {
+      const snap = await t.get(ref);
+      let arr = [];
+      try { arr = JSON.parse((snap.data() || {}).data || '[]') || []; } catch(_) { arr = []; }
+      if (!Array.isArray(arr)) arr = [];
+      arr.push(ev);
+      if (arr.length > 200) arr = arr.slice(-200);       // 서버가 멈춰도 문서가 안 커지게
+      t.set(ref, { data: JSON.stringify(arr), ts: Date.now() }, { merge: true });
+    });
+  } catch(e) { console.warn('[push] 적재 실패:', e && e.message); }
+}
+
+// slackNotify 가 받는 payload 를 사람이 읽을 한 줄로
+function _pushFromNotify(type, p) {
+  const kind = _pushKindOf(type), label = _PUSH_LABEL[type] || 'ERP 알림';
+  p = p || {};
+  let amt = p.amountText || '';
+  if (!amt && p.amount) { try { amt = fmtW(p.amount); } catch(_) { amt = String(p.amount); } }
+  const body = [p.title || p.name || '-', p.vendor || '', amt].filter(Boolean).join(' · ');
+  _pushEnqueue(kind, label, body, _PUSH_PAGE[kind]);
+}
+
 async function slackNotify(type, payload) {
+  // v2.3.951: 푸시는 슬랙 설정과 무관하다 — 슬랙을 꺼 둔 사람도 폰 알림은 받아야 한다
+  try { _pushFromNotify(type, payload); } catch(_) {}
   try {
     if (!DB.appSettings || !DB.appSettings.slackEnabled) return;
     const url = _cleanWebhookUrl(DB.appSettings.slackWebhookUrl);
@@ -45706,6 +45780,12 @@ function _htmlToSlackMrkdwn(html){
 }
 // 새 글/댓글/대댓글을 릴레이(있으면) 또는 기존 webhook(없으면)으로 전송
 function _boardDispatch(postId, kind, text, images) {
+  // v2.3.951: 업무 공유 새 글·댓글도 푸시로
+  try {
+    _pushEnqueue('board',
+      kind === 'post' ? '업무 공유 새 글' : (kind === 'reply' ? '업무 공유 대댓글' : '업무 공유 댓글'),
+      text, 'feedshare');
+  } catch(_) {}
   try {
     if (_boardRelaySend(postId, kind, text, images)) return;  // chat.postMessage 경유
   } catch(_){}
