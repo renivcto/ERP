@@ -133,11 +133,13 @@
     if(document.getElementById('mquick')) return;
     var wrap=document.querySelector('.stage-wrap'); if(!wrap) return;
     var q=document.createElement('div'); q.id='mquick';
+    /* m26 (2026-11-17): '업무 현황' 을 빼고 '생산 현황' 을 넣었다.
+       첫 칸은 CSS 에서 grid-column:1/-1 이라 통줄 — 그 아래가 2x2 가 된다. */
     q.innerHTML='<button type="button" data-q="erp:hsbroadcast">📺 홈쇼핑 분석</button>'
-      +'<button type="button" data-q="panel:3">🗂️ 업무 현황</button>'
       +'<button type="button" data-q="erp:approval">🧾 결재 현황</button>'
+      +'<button type="button" data-q="erp:item">🏷️ 품목 현황</button>'
       +'<button type="button" data-q="erp:stock">📦 재고 현황</button>'
-      +'<button type="button" data-q="erp:item">🏷️ 품목 현황</button>';
+      +'<button type="button" data-q="erp:production">🏭 생산 현황</button>';
     wrap.appendChild(q);
     q.addEventListener('click',function(e){
       var b=e.target.closest('button'); if(!b) return;
