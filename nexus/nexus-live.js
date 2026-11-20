@@ -1616,6 +1616,8 @@ const PUSH_ERP_ROWS=[['approval','결재 요청·완료','새 결재가 올라�
                      ['pay','지급 요청·완료','지출 결의·지급 관련'],
                      ['board','업무 공유 새 글·댓글','운영 업무 공유 게시판'],
                      ['etc','그 밖의 ERP 알림','위에 없는 ERP 알림']];
+/* push141: 알림 종류가 아니라 '보낼지 말지' 설정. 서버 pref_on 이 종류로 안 읽도록 따로 둔다. */
+const PUSH_SELF_ROW=['selfEcho','내가 올린 것도 받기','내가 등록한 결재·글도 내 폰으로 보냅니다. 끄면 남이 올린 것만 옵니다.'];
 const PUSH140={prefs:null,sub:null,ready:false,saveTimer:null,pending:''};
 
 function pushCan(){ try{ return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window; }catch(_){ return false; } }
@@ -1625,7 +1627,7 @@ function pushKey(b64){
   const out=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++) out[i]=raw.charCodeAt(i); return out;
 }
 function pushDefaultPrefs(){
-  const p={}; PUSH_ERP_ROWS.forEach(r=>{p[r[0]]=true;});
+  const p={}; PUSH_ERP_ROWS.concat([PUSH_SELF_ROW]).forEach(r=>{p[r[0]]=true;});
   PUSH_SLACK_DEFAULT.forEach(c=>{p['slack:'+c]=true;}); return p;
 }
 function pushChName(id){
@@ -1737,7 +1739,11 @@ function pushBodyHtml(){
       '<label class="px-row140"><input type="checkbox" data-pk="slack:'+escapeHtml(c.id)+'"'+(p['slack:'+c.id]===true?' checked':'')+'>'
       +'<span><b># '+escapeHtml(c.name||c.displayName||c.id)+'</b></span></label>').join('')
     :'<p class="px-none140">채널을 불러오는 중입니다.</p>';
-  h+='</section><div class="px-foot140"><button type="button" id="px-test140">테스트 알림</button><span id="px-msg140" class="px-msg140"></span></div>';
+  h+='</section>';
+  h+='<section class="px-sec140"><h4>기타</h4>'
+    +'<label class="px-row140"><input type="checkbox" data-pk="'+PUSH_SELF_ROW[0]+'"'+(p[PUSH_SELF_ROW[0]]===false?'':' checked')+'>'
+    +'<span><b>'+escapeHtml(PUSH_SELF_ROW[1])+'</b><small>'+escapeHtml(PUSH_SELF_ROW[2])+'</small></span></label></section>';
+  h+='<div class="px-foot140"><button type="button" id="px-test140">테스트 알림</button><span id="px-msg140" class="px-msg140"></span></div>';
   return h;
 }
 
