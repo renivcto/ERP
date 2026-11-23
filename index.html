@@ -1204,6 +1204,8 @@ try{
     <div class="nav-item" onclick="clickNavItem('sales','sales-sub')" id="nav-sales"><span class="ico">📊</span>판매 관리</div>
     <div class="nav-sub" id="sales-sub">
       <div class="nav-item" onclick="go('sales');switchSalesTab('orders')"><span class="ico">📦</span>주문 관리</div>
+      <!-- v2.3.952: 업체(도매·거래처)에 직접 판 건 — 쇼핑몰 주문과 성격이 달라 따로 둔다 -->
+      <div class="nav-item" onclick="go('b2bsale')" title="업체에 직접 판매한 건 등록 · 거래명세서 · 세금계산서 연결"><span class="ico">🏢</span>업체 판매</div>
       <div class="nav-item" onclick="go('sales');switchSalesTab('margin')"><span class="ico">💰</span>마진 분석</div>
       <!-- v2.2.8: 쇼핑몰 메뉴는 거래처 정보 > 쇼핑몰 탭에서만 노출 (판매 관리에서 제거) -->
       <div class="nav-item" onclick="go('ads')"><span class="ico">📢</span>광고비 관리</div>
@@ -3329,6 +3331,35 @@ try{
             </tr></thead>
             <tbody id="tax-src-tbody"></tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ 🏢 업체 판매 ══════════════ v2.3.952
+         쇼핑몰(주문 관리)이 아니라 업체에 직접 판 건. 저장하면 재고에서 바로 빠지고
+         재무 관리 > 세금계산서가 자동으로 집계한다(위탁 출고와 같은 저장소, kind='sale'). -->
+    <div class="page" id="page-b2bsale">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+        <button class="btn" style="background:#1d4ed8;color:#fff;border:1px solid #1d4ed8;font-weight:700;font-size:13px;padding:8px 18px;border-radius:8px" onclick="openB2bSale()">＋ 업체 판매 등록</button>
+        <div class="period-filter" data-prefix="b2" style="display:flex;gap:5px;align-items:center;flex-wrap:nowrap">
+          <span style="font-size:12px;color:var(--gray-500);font-weight:500;flex-shrink:0">📅</span>
+          <select class="fs period-mode" onchange="_periodOnChange('b2')" style="width:80px;font-size:12px;height:32px;padding:5px 8px;flex-shrink:0">
+            <option value="month">월별</option><option value="week">주별</option><option value="day">일별</option><option value="range">기간별</option><option value="all">전체</option>
+          </select>
+          <input class="fi period-month" type="month" onchange="_periodOnChange('b2')" style="width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
+          <input class="fi period-week"  type="week"  onchange="_periodOnChange('b2')" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
+          <input class="fi period-day"   type="date"  onchange="_periodOnChange('b2')" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
+          <input class="fi period-from"  type="date"  onchange="_periodOnChange('b2')" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
+          <span class="period-tilde" style="display:none;color:var(--gray-400);font-size:12px;flex-shrink:0">~</span>
+          <input class="fi period-to"    type="date"  onchange="_periodOnChange('b2')" style="display:none;width:140px;font-size:12px;height:32px;padding:5px 10px;flex-shrink:0">
+          <button class="btn btn-primary btn-sm" onclick="_periodOnChange('b2')" style="height:32px;padding:5px 12px;font-size:12px;flex-shrink:0;white-space:nowrap">🔍 조회</button>
+        </div>
+        <span style="font-size:12px;color:var(--gray-400)">업체에 직접 판 건 · 저장하면 재고에서 차감되고 세금계산서 대상이 됩니다</span>
+      </div>
+      <div class="card">
+        <div class="card-hdr"><span class="card-title">🏢 업체 판매 목록</span><span id="b2b-count" style="margin-left:8px;font-size:12px;color:var(--gray-400)"></span></div>
+        <div class="card-body" style="overflow-x:auto">
+          <table class="tbl" style="text-align:center"><thead><tr><th style="width:100px">판매일</th><th>업체</th><th>품목</th><th style="width:80px">수량</th><th style="width:118px">공급가액</th><th style="width:124px">합계(VAT 포함)</th><th style="width:124px">거래명세서</th><th style="width:56px">관리</th></tr></thead><tbody id="b2b-table"></tbody></table>
         </div>
       </div>
     </div>
@@ -6430,7 +6461,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.951';
+const ERP_VERSION = 'v2.3.952';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -12891,7 +12922,7 @@ const PAGE_TITLES = {
   archive:'📥 아카이브',
   bom:'BOM 관리',partspec:'📑 부자재 사양서',production:'생산 현황',stock:'재고 관리',quote:'견적서',
   order:'발주서',sites:'사이트 / 계정',insight:'🌱 신제품 개발',accounts:'🔑 외부 계정',users:'사용자 관리',qc:'품질 관리',cost:'원가 분석',settings:'설정 프로필',
-  metaads:'📣 메타 광고',hsbroadcast:'📺 홈쇼핑 방송 기록',compads:'🔍 다른 회사 광고 분석',googleads:'🔎 구글 광고',gcompads:'🔍 구글 · 다른 회사 광고 분석',refads:'📌 구글 · 특정 레퍼런스 분석',mrefads:'📌 메타 · 특정 레퍼런스 분석',cs:'CS 관리',customers:'👥 고객 리스트',pharmacies:'💊 약국 리스트',claims:'⚠️ 클레임 관리',consign:'🧾 위탁 재고이동',sales:'판매 관리',approval:'🖋️ 결재 관리',ads:'📢 광고비 관리',
+  metaads:'📣 메타 광고',hsbroadcast:'📺 홈쇼핑 방송 기록',compads:'🔍 다른 회사 광고 분석',googleads:'🔎 구글 광고',gcompads:'🔍 구글 · 다른 회사 광고 분석',refads:'📌 구글 · 특정 레퍼런스 분석',mrefads:'📌 메타 · 특정 레퍼런스 분석',cs:'CS 관리',customers:'👥 고객 리스트',pharmacies:'💊 약국 리스트',claims:'⚠️ 클레임 관리',consign:'🧾 위탁 재고이동',b2bsale:'🏢 업체 판매',sales:'판매 관리',approval:'🖋️ 결재 관리',ads:'📢 광고비 관리',
   costest:'💰 생산 예상 비용',
   recurring:'🔁 정기 결제',
   finance:'💰 재무 관리',
@@ -12919,6 +12950,8 @@ function go(page) {
   if (page === 'claims') setTimeout(() => { try { renderClaims(); } catch(_){} }, 0);
   // v2.3.500 — 위탁 재고이동 페이지 진입 시 자동 렌더
   if (page === 'consign') setTimeout(() => { try { renderConsignPage(); } catch(_){} }, 0);
+  // v2.3.952 — 업체 판매 페이지 진입 시 자동 렌더
+  if (page === 'b2bsale') setTimeout(() => { try { renderB2bPage(); } catch(_){} }, 0);
   // v2.3.857 — 세금계산서 페이지 진입 시 자동 렌더
   if (page === 'taxinvoice') setTimeout(() => { try { renderTaxInvoicePage(); } catch(_){} }, 0);
 
@@ -29781,8 +29814,10 @@ async function _consignSaveShipments(){
 function _consignPriceKey(sellerId, itemId){ return String(sellerId) + '|' + String(itemId); }
 function _consignGetPrice(sellerId, itemId){ const v = (window._consign.prices||{})[_consignPriceKey(sellerId,itemId)]; return (v==null||v==='') ? '' : Number(v); }
 
-async function openConsignShip(editId){
+async function openConsignShip(editId, mode){
   if (typeof requireWrite==='function' && !requireWrite()) return;
+  // v2.3.952: 'sale' = 업체 판매(소유권 이전). 창은 같이 쓰되 저장은 _b2bSubmit 이 한다.
+  window._consignMode = (mode === 'sale') ? 'sale' : 'consign';
   window._consignEditId = editId || null;
   await _consignLoad(true);
   try { if (typeof _whEnsureLoaded==='function') await _whEnsureLoaded(); } catch(_){}
@@ -29811,11 +29846,11 @@ async function openConsignShip(editId){
     +   '<div class="fg" style="margin:0"><label>출고일<span class="req">*</span></label><input class="fi" type="date" id="cs-date"></div>'
     +   '<div class="fg" style="margin:0"><label>부가세</label><select class="fs" id="cs-vat" onchange="this.dataset.userset=\'1\';_consignRecalc()"><option value="exclude">별도(공급가+세액)</option><option value="include">포함(단가에 VAT 포함)</option></select></div>'
     + '</div>'
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+    + '<div id="cs-wh-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
     +   '<div class="fg" style="margin:0"><label>출고 창고(르니브)</label><select class="fs" id="cs-wh-from">'+whOptsFrom+'</select></div>'
-    +   '<div class="fg" style="margin:0"><label>입고 창고(바로팜)<span class="req">*</span></label><select class="fs" id="cs-wh-to" onchange="_consignFillWhInfo()">'+whOptsTo+'</select></div>'
+    +   '<div class="fg" id="cs-wh-to-box" style="margin:0"><label>입고 창고(바로팜)<span class="req">*</span></label><select class="fs" id="cs-wh-to" onchange="_consignFillWhInfo()">'+whOptsTo+'</select></div>'
     + '</div>'
-    + '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin-bottom:10px">'
+    + '<div id="cs-recv-row" style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin-bottom:10px">'
     +   '<div class="fg" style="margin:0"><label>입고지(주소)</label><input class="fi" id="cs-recv-addr" placeholder="입고 창고 주소"></div>'
     +   '<div class="fg" style="margin:0"><label>입고 담당자</label><input class="fi" id="cs-recv-mgr" placeholder="담당자명"></div>'
     +   '<div class="fg" style="margin:0"><label>담당자 연락처</label><input class="fi" id="cs-recv-phone" placeholder="010-…"></div>'
@@ -29839,6 +29874,21 @@ async function openConsignShip(editId){
     + '<div style="text-align:right;font-size:11px;color:#94a3b8;margin-top:5px">저장하면 재고이동이 완료되고 목록에 추가됩니다. 거래명세서 발행·이메일은 목록의 버튼으로.</div>'
     + '</div></div>';
   document.body.appendChild(ov);
+  // v2.3.952: 업체 판매 모드 — 창고 '이동' 이 아니라 '출고' 이므로 입고 창고·입고지를 감춘다
+  if (window._consignMode === 'sale') {
+    try {
+      const _h = ov.querySelector('div[style*="linear-gradient"] > span');
+      if (_h) { _h.textContent = '🏢 업체 판매 · 거래명세서'; _h.parentElement.style.background = 'linear-gradient(135deg,#93c5fd 0%,#c7d2fe 100%)'; }
+      const _wt = document.getElementById('cs-wh-to-box'); if (_wt) _wt.style.display = 'none';
+      const _wr = document.getElementById('cs-wh-row');    if (_wr) _wr.style.gridTemplateColumns = '1fr';
+      const _rr = document.getElementById('cs-recv-row');  if (_rr) _rr.style.display = 'none';
+      const _dl = document.querySelector('#consign-overlay label'); // 첫 라벨이 아님 — 날짜 라벨만 바꾼다
+      const _dt = document.getElementById('cs-date');
+      if (_dt && _dt.previousElementSibling) _dt.previousElementSibling.innerHTML = '판매일<span class="req">*</span>';
+      const _sb = document.getElementById('cs-submit-btn');
+      if (_sb) { _sb.textContent = '💾 저장 (판매 확정 · 재고 차감)'; _sb.style.background = '#1d4ed8'; _sb.style.borderColor = '#1d4ed8'; _sb.setAttribute('onclick', '_b2bSubmit()'); }
+    } catch(_) {}
+  }
   document.getElementById('cs-date').value = today();
   _consignRenderList();
   if (window._consignEditId){
@@ -31464,6 +31514,206 @@ function _consignDetail(shId){
   document.body.appendChild(ov);
 }
 /* v2.3.695 — 기간 조회. 주문 관리와 같은 공용 필터를 쓴다(_periodComputeRange). */
+// ═══════════════════════════════════════════════════════
+// v2.3.952: 업체 판매 — 업체에 직접 판 건(소유권 이전, 재고 차감)
+//   저장소는 위탁과 같다(window._consign.shipments). kind:'sale' 로만 가른다.
+//   그래야 세금계산서(_taxSourceRows)와 매출 집계가 손대지 않아도 그대로 잡는다.
+// ═══════════════════════════════════════════════════════
+function _b2bIsSale(sh){ return !!sh && String(sh.kind||'') === 'sale'; }
+function _b2bInPeriod(d){
+  const r = (typeof _periodComputeRange === 'function') ? _periodComputeRange('b2') : { start:'', end:'' };
+  if (!r.start && !r.end) return true;
+  const v = String(d || '');
+  if (!v) return false;
+  return (!r.start || v >= r.start) && (!r.end || v <= r.end);
+}
+function openB2bSale(editId){ return openConsignShip(editId, 'sale'); }
+
+// 재고 증감 한 곳. delta>0 = 판매로 빠짐 / delta<0 = 취소·수량감소로 되돌림.
+//   ⚠️ 위탁의 _applyStockMove(창고↔창고)와 다르다. 여기서는 회사 밖으로 나간다.
+function _b2bStockApply(it, whId, delta, note, dateStr){
+  if (!it || !delta) return { ok:true };
+  if (delta > 0) {
+    const eff = (typeof _itemWhEffective==='function') ? _itemWhEffective(it) : {};
+    const avail = (!whId || whId==='__un__') ? (Number(it.stock)||0) : (Number(eff[whId])||0);
+    if (delta > avail) return { ok:false, err:'가용 수량(' + fmt(avail) + ')을 초과했습니다' };
+    try { _deductFromWarehouse(it, whId, delta, note, { date: dateStr, stamp: true }); }
+    catch(e) { return { ok:false, err:(e && e.message) || '재고 차감 실패' }; }
+    return { ok:true };
+  }
+  const back = -delta;
+  const eff = (typeof _itemWhEffective==='function') ? _itemWhEffective(it) : {};
+  it.stock = (Number(it.stock)||0) + back;
+  if (whId && whId !== '__un__') {
+    eff[whId] = (Number(eff[whId])||0) + back;
+    try { _whApplyEff(it, eff); } catch(_){}
+  }
+  it.updatedAt = Date.now();
+  DB.stockHistory = DB.stockHistory || [];
+  const rec = { id: nextId('stock'), itemId: it.id, type:'in', qty: back, price: it.price||0,
+    toWh: (whId && whId!=='__un__') ? whId : '',
+    date: dateStr || new Date().toISOString().slice(0,10), lot: it.lot||'', note: note || '업체 판매 취소 — 재고 복원' };
+  try { _shStamp(rec); } catch(_){}
+  DB.stockHistory.push(rec);
+  return { ok:true };
+}
+
+async function _b2bSubmit(){
+  const sellerId = (document.getElementById('cs-seller')||{}).value;
+  let seller = (DB.sellers||[]).find(x => String(x.id) === String(sellerId));
+  if (!seller && String(sellerId).indexOf('shop:') === 0) {
+    const _sh = (DB.shops||[]).find(x => String(x.id) === String(sellerId).slice(5));
+    if (_sh) seller = { id: sellerId, company: _sh.name || '' };
+  }
+  if (!seller) { alert('판매한 업체를 선택하세요'); return; }
+  const whFromId = (document.getElementById('cs-wh-from')||{}).value || '__un__';
+  const date = (document.getElementById('cs-date')||{}).value || today();
+  const vatMode = (document.getElementById('cs-vat')||{}).value || 'exclude';
+  const lines = [];
+  let bad = '';
+  document.querySelectorAll('#cs-lines .cs-line').forEach(row => {
+    const it = (DB.items||[]).find(i => String(i.id) === String(row.querySelector('.cs-item').value));
+    const qty = Number(row.querySelector('.cs-qty').value) || 0;
+    const price = Number(row.querySelector('.cs-price').value) || 0;
+    if (!it) return;
+    if (qty <= 0) { bad = (it.name||'') + ' 수량'; return; }
+    const _sp = _itemSupplyPrice(it, sellerId);
+    lines.push({ itemId: it.id, code: it.code||'', name: (_sp && _sp.itemName) ? _sp.itemName : (it.name||''),
+      erpName: it.name||'', spec: it.spec||'', barcode: it.barcode||'',
+      stockId: (_sp && _sp.stockId) ? _sp.stockId : '', qty: qty, price: price });
+  });
+  if (!lines.length) { alert('품목을 1개 이상 추가하고 수량을 입력하세요'); return; }
+  if (bad) { alert(bad + '을(를) 입력하세요'); return; }
+  const _gv = id => (document.getElementById(id)||{}).value || '';
+  const editId = window._consignEditId;
+  const orig = editId ? (window._consign.shipments||[]).find(x => x && String(x.id) === String(editId)) : null;
+  if (editId && !orig) { alert('수정할 판매 건을 찾지 못했습니다. 목록을 새로고침해 주세요.'); return; }
+
+  const _btn = document.getElementById('cs-submit-btn'); if (_btn) { if (_btn.disabled) return; _btn.disabled = true; }
+  window._criticalSaving = true; try { _showSavingOverlay(); } catch(_){}
+  try {
+    const errs = [];
+    if (orig) {
+      // 수정 — 원래 창고 기준으로 수량 차이만 조정한다(이중 차감 방지)
+      const wh = orig.whFromId || whFromId;
+      const oM = {}; (orig.lines||[]).forEach(l => { oM[l.itemId] = (oM[l.itemId]||0) + (Number(l.qty)||0); });
+      const nM = {}; lines.forEach(l => { nM[l.itemId] = (nM[l.itemId]||0) + (Number(l.qty)||0); });
+      Array.from(new Set(Object.keys(oM).concat(Object.keys(nM)))).forEach(k => {
+        const delta = (nM[k]||0) - (oM[k]||0); if (!delta) return;
+        const it = (DB.items||[]).find(i => String(i.id) === String(k)); if (!it) return;
+        const r = _b2bStockApply(it, wh, delta, '업체 판매 수정 — ' + (seller.company||''), date);
+        if (!r.ok) errs.push((it.name||k) + ': ' + r.err);
+      });
+      if (errs.length && !confirm('일부 재고 조정 실패:\n' + errs.join('\n') + '\n\n그래도 판매 내용은 저장할까요?')) return;
+      orig.sellerId = seller.id; orig.sellerName = seller.company||''; orig.date = date; orig.vatMode = vatMode;
+      orig.whFromId = wh; orig.whFromName = wh === '__un__' ? '미지정' : _whName(wh);
+      orig.supplierManager = _gv('cs-sup-mgr'); orig.supplierPhone = _gv('cs-sup-phone');
+      orig.lines = lines; orig.updatedAt = Date.now();
+    } else {
+      for (const ln of lines) {
+        const it = (DB.items||[]).find(i => String(i.id) === String(ln.itemId));
+        const r = _b2bStockApply(it, whFromId, ln.qty, '업체 판매 — ' + (seller.company||''), date);
+        if (!r.ok) errs.push(ln.name + ': ' + r.err);
+      }
+      if (errs.length && !confirm('일부 품목 재고 차감 실패:\n' + errs.join('\n') + '\n\n실패분을 빼고 저장할까요?')) return;
+      const okLines = lines.filter(ln => !errs.some(e => e.indexOf(ln.name + ':') === 0));
+      if (!okLines.length) { alert('차감된 품목이 없습니다'); return; }
+      let sid; do { sid = Date.now()*1000 + Math.floor(Math.random()*1000); } while ((window._consign.shipments||[]).some(x => x && x.id === sid));
+      window._consign.shipments.push({
+        id: sid, kind: 'sale',
+        sellerId: seller.id, sellerName: seller.company||'', date: date, vatMode: vatMode,
+        whFromId: whFromId, whFromName: whFromId === '__un__' ? '미지정' : _whName(whFromId),
+        whToId: '', whToName: '',
+        recvAddr: '', recvManager: '', recvPhone: '',
+        supplierManager: _gv('cs-sup-mgr'), supplierPhone: _gv('cs-sup-phone'),
+        lines: okLines, createdAt: Date.now(),
+        createdBy: (window._currentUser && (window._currentUser.name || window._currentUser.email)) || ''
+      });
+    }
+    await _consignSaveShipments();
+    try { if (typeof renderStock === 'function') renderStock(); } catch(_){}
+    let wrote = true;
+    try { window._lastFsWriteOk = false; await saveDataNow(); wrote = (window._lastFsWriteOk !== false); }
+    catch(e) { wrote = false; console.error('[B2B] 저장 실패', e); }
+    if (!wrote) alert('⚠️ 서버 저장이 확인되지 않았습니다.\n\n이 기기에만 남아 있을 수 있습니다. 네트워크 확인 후 새로고침해 주세요.');
+    window._consignEditId = null;
+    showNotif(orig ? '✅ 업체 판매 수정 저장 — 재고 차이 반영됨' : '✅ 업체 판매 등록 — 재고 차감 완료', 'success');
+    try { document.getElementById('consign-overlay')?.remove(); } catch(_){}
+    try { renderB2bPage(); } catch(_){}
+  } catch(e) {
+    console.error('[B2B] 저장 오류', e);
+    alert('저장 중 오류가 발생했습니다:\n' + ((e && e.message) || e));
+  } finally {
+    window._criticalSaving = false; try { _hideSavingOverlay(); } catch(_){}
+    const b2 = document.getElementById('cs-submit-btn'); if (b2) b2.disabled = false;
+  }
+}
+
+async function _b2bDelete(id){
+  if (typeof requireWrite === 'function' && !requireWrite()) return;
+  const sh = (window._consign.shipments||[]).find(x => x && String(x.id) === String(id));
+  if (!sh) return;
+  const A = _consignAmounts(sh);
+  if (!confirm('업체 판매를 삭제할까요?\n\n' + (sh.sellerName||'') + ' · ' + (sh.date||'') + ' · ₩' + A.total.toLocaleString()
+    + '\n\n차감했던 재고를 되돌립니다. 세금계산서가 이미 발행된 건이면 먼저 확인하세요.')) return;
+  window._criticalSaving = true; try { _showSavingOverlay(); } catch(_){}
+  try {
+    (sh.lines||[]).forEach(ln => {
+      const it = (DB.items||[]).find(i => String(i.id) === String(ln.itemId));
+      if (it) _b2bStockApply(it, sh.whFromId || '__un__', -(Number(ln.qty)||0), '업체 판매 삭제 — ' + (sh.sellerName||''), sh.date);
+    });
+    window._consign.shipments = (window._consign.shipments||[]).filter(x => x && String(x.id) !== String(id));
+    await _consignSaveShipments();
+    try { window._lastFsWriteOk = false; await saveDataNow(); } catch(_){}
+    try { if (typeof renderStock === 'function') renderStock(); } catch(_){}
+    showNotif('🗑️ 업체 판매 삭제 — 재고 복원됨', 'success');
+    renderB2bPage();
+  } finally { window._criticalSaving = false; try { _hideSavingOverlay(); } catch(_){} }
+}
+
+async function renderB2bPage(){
+  const tb = document.getElementById('b2b-table'); if (!tb) return;
+  if (!window._consign.loaded) { tb.innerHTML = '<tr><td colspan="8" style="padding:24px;color:var(--gray-400)">불러오는 중…</td></tr>'; await _consignLoad(true); }
+  try { if (typeof _periodInit === 'function') _periodInit('b2'); } catch(_) {}
+  const all = (window._consign.shipments||[]).filter(_b2bIsSale)
+    .slice().sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')) || ((b.createdAt||0)-(a.createdAt||0)));
+  const list = all.filter(sh => _b2bInPeriod(sh && sh.date));
+  const sumSupply = list.reduce((t,sh) => t + _consignAmounts(sh).supplySum, 0);
+  const sumTotal  = list.reduce((t,sh) => t + _consignAmounts(sh).total, 0);
+  const cnt = document.getElementById('b2b-count');
+  if (cnt) cnt.textContent = '총 ' + list.length + '건' + (all.length !== list.length ? ' / 전체 ' + all.length + '건' : '')
+    + (list.length ? '  ·  공급가액 ₩' + sumSupply.toLocaleString() + '  ·  합계 ₩' + sumTotal.toLocaleString() : '');
+  if (!list.length) {
+    tb.innerHTML = '<tr><td colspan="8" style="padding:28px;color:var(--gray-400)">'
+      + (all.length ? '이 기간에는 기록이 없습니다. 기간을 바꾸거나 “전체” 를 선택하세요.'
+                    : '아직 업체 판매 기록이 없습니다. 상단 “＋ 업체 판매 등록” 으로 추가하세요.')
+      + '</td></tr>';
+    return;
+  }
+  tb.innerHTML = list.map(sh => {
+    const A = _consignAmounts(sh);
+    const lines = sh.lines || [];
+    const qtySum = lines.reduce((t,l) => t + (Number(l.qty)||0), 0);
+    const itemsTxt = lines.length ? (escapeHtml(lines[0].name||'') + (lines.length > 1 ? ' 외 ' + (lines.length-1) + '종' : '')) : '-';
+    return '<tr>'
+      + '<td>' + escapeHtml(sh.date||'-') + '</td>'
+      + '<td style="font-weight:600">' + escapeHtml(sh.sellerName||'-') + '</td>'
+      + '<td style="text-align:left;cursor:pointer" onclick="_consignDetail(\'' + sh.id + '\')" title="클릭하면 상세 내역 팝업">'
+      +   '<span style="color:var(--sky-700);font-weight:600">' + itemsTxt + '</span></td>'
+      + '<td>' + qtySum.toLocaleString() + '</td>'
+      + '<td style="text-align:right">₩' + A.supplySum.toLocaleString() + '</td>'
+      + '<td style="text-align:right;font-weight:700;color:#1d4ed8">₩' + A.total.toLocaleString() + '</td>'
+      + '<td style="white-space:nowrap"><div style="display:flex;flex-direction:column;gap:4px;align-items:center">'
+      +   '<button class="btn btn-outline btn-sm" style="padding:3px 9px;font-size:11.5px;width:106px;justify-content:center;background:#fef9c3;border-color:#fde68a;color:#854d0e" onclick="_consignPrint(\'' + sh.id + '\')">🖨 명세서</button>'
+      +   '<button class="btn btn-outline btn-sm" style="padding:3px 9px;font-size:11.5px;width:106px;justify-content:center" onclick="_consignEmail(\'' + sh.id + '\')">✉ 이메일</button>'
+      + '</div></td>'
+      + '<td><div style="display:flex;flex-direction:column;gap:3px;align-items:center">'
+      +   '<button class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:11px;line-height:1.3;min-width:30px" onclick="openB2bSale(\'' + sh.id + '\')" title="수정">✏️</button>'
+      +   '<button class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:11px;line-height:1.3;min-width:30px;color:#dc2626;border-color:#fca5a5" onclick="_b2bDelete(\'' + sh.id + '\')" title="삭제">🗑️</button>'
+      + '</div></td></tr>';
+  }).join('');
+}
+
 function _consignInPeriod(d){
   const r = (typeof _periodComputeRange === 'function') ? _periodComputeRange('cg') : { start:'', end:'' };
   if (!r.start && !r.end) return true;
@@ -31484,7 +31734,8 @@ async function renderConsignPage(){
   } catch(_) {}
   if(!window._consign.loaded){ tb.innerHTML='<tr><td colspan="8" style="padding:24px;color:var(--gray-400)">불러오는 중…</td></tr>'; await _consignLoad(true); }
   try { if (typeof _periodInit === 'function') _periodInit('cg'); } catch(_) {}
-  const all=(window._consign.shipments||[]).slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||( (b.createdAt||0)-(a.createdAt||0) ));
+  // v2.3.952: 같은 저장소를 쓰므로 업체 판매(kind='sale') 는 여기서 뺀다
+  const all=(window._consign.shipments||[]).filter(sh=>!_b2bIsSale(sh)).slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||( (b.createdAt||0)-(a.createdAt||0) ));
   const list=all.filter(sh=>_consignInPeriod(sh && sh.date));
   const cnt=document.getElementById('consign-count'); if(cnt) cnt.textContent='총 '+list.length+'건'+(all.length!==list.length?' / 전체 '+all.length+'건':'');
   if(!list.length){ tb.innerHTML='<tr><td colspan="8" style="padding:28px;color:var(--gray-400)">'
@@ -63694,7 +63945,7 @@ function initERPWhenReady() {
     try { updateBadges(); } catch(e) { console.warn('updateBadges 실패:', e); }
     // v1.9.316 — 새로고침 시 마지막 머물렀던 페이지 복원 (기본: dashboard)
     try {
-      const KNOWN_PAGES = ['dashboard','feedshare','workflow','calendar','gdrive','vendor','item','archive','bom','partspec','production','stock','quote','order','approval','sites','accounts','insight','users','qc','cost','cs','claims','consign','taxinvoice','sales','settings','recurring','hsbroadcast'];
+      const KNOWN_PAGES = ['dashboard','feedshare','workflow','calendar','gdrive','vendor','item','archive','bom','partspec','production','stock','quote','order','approval','sites','accounts','insight','users','qc','cost','cs','claims','consign','b2bsale','taxinvoice','sales','settings','recurring','hsbroadcast'];
       // v1.9.976: 같은 탭 새로고침이면 마지막 페이지 복원, 처음 접속/새 탭/브라우저 재시작이면 dashboard
       //   sessionStorage 는 같은 탭이 살아있는 동안만 유지(새로고침=유지, 탭닫기/재시작=초기화)
       if (typeof window._v976_freshSession === 'undefined') {
