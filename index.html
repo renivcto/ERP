@@ -6461,7 +6461,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.952';
+const ERP_VERSION = 'v2.3.953';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -11476,7 +11476,15 @@ function repairIncorrectProductionCompletion() {
 const $ = id => document.getElementById(id);
 const fmt = n => typeof n === 'number' ? n.toLocaleString('ko-KR') : n;
 const fmtW = n => '₩' + fmt(n);
-const today = () => new Date().toISOString().slice(0,10);
+// v2.3.953: 한국시간 기준 '오늘'. 종전 toISOString() 은 UTC 라 호주(UTC+11)에서는
+//   현지 오전 내내 '어제' 가 나왔다 — 실측 현지 11/24 09:42 에 today()='2026-11-23'.
+//   판매일·출고일 기본값이 하루 밀리고, 월말이면 세금계산서 귀속 월까지 틀어진다.
+//   회사가 한국 법인이므로 기준은 브라우저 위치가 아니라 KST 여야 한다.
+const today = () => {
+  const n = new Date();
+  const k = new Date(n.getTime() + n.getTimezoneOffset() * 60000 + 9 * 3600000);
+  return k.getFullYear() + '-' + String(k.getMonth()+1).padStart(2,'0') + '-' + String(k.getDate()).padStart(2,'0');
+};
 // v2.3.637: 발주번호 접두사 'PO<올해>' — 신규 작성 시 미리 채워두고 뒤 번호만 입력받는다
 function _poSerialPrefix(){ return 'PO' + new Date().getFullYear(); }
 // 접두사만 남긴 채 저장하면 의미 없는 번호가 되므로 빈 값으로 처리
@@ -29886,7 +29894,15 @@ async function openConsignShip(editId, mode){
       const _dt = document.getElementById('cs-date');
       if (_dt && _dt.previousElementSibling) _dt.previousElementSibling.innerHTML = '판매일<span class="req">*</span>';
       const _sb = document.getElementById('cs-submit-btn');
-      if (_sb) { _sb.textContent = '💾 저장 (판매 확정 · 재고 차감)'; _sb.style.background = '#1d4ed8'; _sb.style.borderColor = '#1d4ed8'; _sb.setAttribute('onclick', '_b2bSubmit()'); }
+      if (_sb) {
+        _sb.textContent = '💾 저장 (판매 확정 · 재고 차감)';
+        // .btn-primary 의 색이 !important 라 style.background 로는 안 바뀐다(실측 #2f6f5c 유지)
+        _sb.style.setProperty('background', '#1d4ed8', 'important');
+        _sb.style.setProperty('border-color', '#1d4ed8', 'important');
+        _sb.setAttribute('onclick', '_b2bSubmit()');
+      }
+      const _ft = ov.querySelector('div[style*="text-align:right"][style*="color:#94a3b8"]');
+      if (_ft) _ft.textContent = '저장하면 판매가 확정되고 재고에서 차감됩니다. 거래명세서 발행·이메일은 목록의 버튼으로.';
     } catch(_) {}
   }
   document.getElementById('cs-date').value = today();
