@@ -6461,7 +6461,7 @@ EXP YYYYMMDD 까지</textarea></div>
 // ═══════════════════════════════════════════════════════
 // DATA STORE — v1.2.4 (2026-04-13)
 // ═══════════════════════════════════════════════════════
-const ERP_VERSION = 'v2.3.953';
+const ERP_VERSION = 'v2.3.954';
 // v1.9.769: 정적 loader 의 timer 시작 (script 가 파싱 시작 시점)
 try {
   if (!window._loaderStartTime) {
@@ -29889,7 +29889,19 @@ async function openConsignShip(editId, mode){
       if (_h) { _h.textContent = '🏢 업체 판매 · 거래명세서'; _h.parentElement.style.background = 'linear-gradient(135deg,#93c5fd 0%,#c7d2fe 100%)'; }
       const _wt = document.getElementById('cs-wh-to-box'); if (_wt) _wt.style.display = 'none';
       const _wr = document.getElementById('cs-wh-row');    if (_wr) _wr.style.gridTemplateColumns = '1fr';
-      const _rr = document.getElementById('cs-recv-row');  if (_rr) _rr.style.display = 'none';
+      // v2.3.954: 업체 판매도 거래명세서 '공급받는 곳' 에 입고지·담당자·연락처가 필요하다.
+      //   창고 이동이 아니므로 라벨만 바꿔 그대로 쓴다(필드는 recvAddr/recvManager/recvPhone 공용).
+      const _relab = (id, txt, ph) => {
+        const el = document.getElementById(id); if (!el) return;
+        if (el.previousElementSibling) el.previousElementSibling.textContent = txt;
+        el.placeholder = ph;
+      };
+      _relab('cs-recv-addr', '입고지', '받는 곳 주소');
+      _relab('cs-recv-mgr',  '담당자', '담당자명');
+      _relab('cs-recv-phone','연락처', '010-…');
+      // 업체를 고르면 거래처 카드의 주소·담당자로 빈 칸만 채운다(입력한 값은 건드리지 않음)
+      const _ss = document.getElementById('cs-seller');
+      if (_ss) _ss.setAttribute('onchange', '_consignRefillPrices();_b2bFillRecvFromSeller()');
       const _dl = document.querySelector('#consign-overlay label'); // 첫 라벨이 아님 — 날짜 라벨만 바꾼다
       const _dt = document.getElementById('cs-date');
       if (_dt && _dt.previousElementSibling) _dt.previousElementSibling.innerHTML = '판매일<span class="req">*</span>';
@@ -30262,7 +30274,8 @@ function _consignStatementHtml(sh, opts){
   + '<tbody>'+rowsHtml+emptyRows+'</tbody>'
   + '<tfoot><tr><td colspan="5" class="r" style="font-weight:800">합계</td><td class="r" style="font-weight:800">'+(_hidePrice?'&nbsp;':won(A.total))+'</td><td></td></tr>'
   + '<tr><td colspan="5" class="r" style="font-weight:900;background:#fffbe6">합계금액 (VAT 포함)</td><td colspan="2" class="r" style="font-weight:900;background:#fffbe6;font-size:14px">'+(_hidePrice?'&nbsp;':won(A.total))+'</td></tr></tfoot></table>'
-  + '<div class="foot"><div>인수자 (입고 창고): _______________________ (서명/인)</div><div style="text-align:right">'+esc(sh.whToName||'')+' · '+esc(sh.recvManager||'')+'</div></div>'
+  // v2.3.954: 업체 판매(kind:'sale')는 창고 이동이 아니라 소유권 이전 — 인수자는 그 업체다
+  + '<div class="foot"><div>'+(String(sh.kind||'')==='sale'?'인수자':'인수자 (입고 창고)')+': _______________________ (서명/인)</div><div style="text-align:right">'+esc((String(sh.kind||'')==='sale'?sh.sellerName:sh.whToName)||'')+' · '+esc(sh.recvManager||'')+'</div></div>'
   + '</div>';
 }
 const _CONSIGN_PRINT_CSS = '@page{size:A4;margin:14mm}*{box-sizing:border-box;font-family:"Malgun Gothic",sans-serif}.stmt{color:#0f172a}h1{text-align:center;font-size:24px;letter-spacing:8px;margin:0 0 16px}table{border-collapse:collapse;width:100%}.hdr{margin-bottom:10px}.hdr>tbody>tr>td.party{width:50%;border:1px solid #333;padding:0;vertical-align:top}.pt{background:#f1f5f9;font-weight:800;text-align:center;padding:5px;border-bottom:1px solid #333;font-size:12px}.pinfo{width:100%}.pinfo th{background:#f8fafc;border:1px solid #e2e8f0;padding:5px 7px;font-size:11px;color:#475569;width:74px;text-align:left;font-weight:700}.pinfo td{border:1px solid #e2e8f0;padding:5px 8px;font-size:11.5px}.items th{background:#e2e8f0;border:1px solid #333;padding:6px 4px;font-size:11.5px}.items td{border:1px solid #333;padding:5px 6px;font-size:11.5px}.items .c{text-align:center}.items .r{text-align:right}.items tfoot td{border:1px solid #333;padding:6px}.foot{margin-top:22px;display:flex;justify-content:space-between;font-size:12px;color:#334155}';
@@ -31544,6 +31557,18 @@ function _b2bInPeriod(d){
   return (!r.start || v >= r.start) && (!r.end || v <= r.end);
 }
 function openB2bSale(editId){ return openConsignShip(editId, 'sale'); }
+// v2.3.954: 업체 판매 — 업체 선택 시 거래처 카드의 주소·첫 담당자로 '빈 칸만' 채운다.
+//   이미 적어 둔 값은 덮어쓰지 않는다(수정 모드에서 저장값이 날아가는 것을 막는다).
+function _b2bFillRecvFromSeller(){
+  const sel = document.getElementById('cs-seller'); if (!sel) return;
+  const s = (DB.sellers||[]).find(x => String(x.id) === String(sel.value)); if (!s) return;
+  const c = (Array.isArray(s.contacts) && s.contacts[0]) ? s.contacts[0] : null;
+  const first = v => String(v||'').split('\n')[0].trim();
+  const put = (id, v) => { const el = document.getElementById(id); if (el && !String(el.value||'').trim() && v) el.value = v; };
+  put('cs-recv-addr',  (s.address||'').trim());
+  put('cs-recv-mgr',   (c && c.name)  || first(s.contact));
+  put('cs-recv-phone', (c && c.phone) || first(s.phone));
+}
 
 // 재고 증감 한 곳. delta>0 = 판매로 빠짐 / delta<0 = 취소·수량감소로 되돌림.
 //   ⚠️ 위탁의 _applyStockMove(창고↔창고)와 다르다. 여기서는 회사 밖으로 나간다.
@@ -31624,6 +31649,8 @@ async function _b2bSubmit(){
       orig.sellerId = seller.id; orig.sellerName = seller.company||''; orig.date = date; orig.vatMode = vatMode;
       orig.whFromId = wh; orig.whFromName = wh === '__un__' ? '미지정' : _whName(wh);
       orig.supplierManager = _gv('cs-sup-mgr'); orig.supplierPhone = _gv('cs-sup-phone');
+      // v2.3.954: 거래명세서 '공급받는 곳' 입고지·담당자·연락처
+      orig.recvAddr = _gv('cs-recv-addr'); orig.recvManager = _gv('cs-recv-mgr'); orig.recvPhone = _gv('cs-recv-phone');
       orig.lines = lines; orig.updatedAt = Date.now();
     } else {
       for (const ln of lines) {
@@ -31640,7 +31667,7 @@ async function _b2bSubmit(){
         sellerId: seller.id, sellerName: seller.company||'', date: date, vatMode: vatMode,
         whFromId: whFromId, whFromName: whFromId === '__un__' ? '미지정' : _whName(whFromId),
         whToId: '', whToName: '',
-        recvAddr: '', recvManager: '', recvPhone: '',
+        recvAddr: _gv('cs-recv-addr'), recvManager: _gv('cs-recv-mgr'), recvPhone: _gv('cs-recv-phone'),
         supplierManager: _gv('cs-sup-mgr'), supplierPhone: _gv('cs-sup-phone'),
         lines: okLines, createdAt: Date.now(),
         createdBy: (window._currentUser && (window._currentUser.name || window._currentUser.email)) || ''
