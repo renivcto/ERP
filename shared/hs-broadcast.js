@@ -392,7 +392,8 @@ function _hMinFrom(start, t) {
 }
 function _hsbSummary(list, b) {
   const cut = (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10).replace(/-/g, ''); })();
-  const rec = list.filter(x => x.date >= cut);
+  const nowKey = _hNowKstKey();
+  const rec = list.filter(x => x.date >= cut && !_hsbIsSoon(x, nowKey));   // v2.3.956: 예정은 세지 않는다
   const brands = new Set(); rec.forEach(x => (x.brands || []).forEach(v => brands.add(v)));
 
   // 구성이 여러 개면 가장 많이 팔린 것을 대표로 쓴다
@@ -407,16 +408,17 @@ function _hsbSummary(list, b) {
   const isSch = !!(b && b.src === 'schedule');
   /* v2.3.944: 대표 숫자는 '마지막 관측값' = 그 방송의 판매 수량.
      종료 후에 찍었으면 최종, 방송 중에 찍었으면 최종은 그보다 크다 — 부연에 적는다. */
+  const schState = isSch ? _hsbSchedState(b, nowKey) : null;
   const qtyCard = isSch
-    ? ['방송 판매 수량', (b.sold ? (_hNum(b.sold) + '개') : '비공개'),
-       (b.sold ? '' : (b.broadcaster || '') + '은 수량을 공개하지 않습니다'), '#f8fafc', '#64748b', 19, 'sold']
+    ? ['방송 판매 수량', (b.sold ? (_hNum(b.sold) + '개') : schState.label),
+       (b.sold ? '' : schState.note), '#f8fafc', '#64748b', 19, 'sold']
     : isObs
     ? ['방송 판매 수량', _hNum(b.obsTotal || 0) + '개',
        b.obsFinal ? '방송 종료 후 관측 · 최종' : '방송 중 관측 · 최종은 더 큽니다',
        '#f0fdf4', '#15803d', 19, 'sold']
     : ['추적 판매 수량', b ? (_hNum(b.sold) + '개') : '-', '이 방송', '#f0fdf4', '#15803d', 19, 'sold'];
   const amtCard = (b && !b.amount)
-    ? ['추정 매출', '—', isSch ? '수량 비공개' : (isObs ? '판매가 미확인' : '-'), '#fefce8', '#a16207', 19, 'amount']
+    ? ['추정 매출', '—', isSch ? ('수량 ' + schState.label) : (isObs ? '판매가 미확인' : '-'), '#fefce8', '#a16207', 19, 'amount']
     : ['추정 매출', b ? _hWon(b.amount) : '-',
        (b && b._man && b._man.amountAuto) ? '수량 × 판매가'
          : (isObs ? (b.obsFinal ? '방송 종료 후 관측 · 최종' : '방송 중 관측 · 최종은 더 큼') : '이 방송'),
@@ -475,6 +477,31 @@ function _hNowKstKey() {
     + p(k.getHours()) + ':' + p(k.getMinutes());
 }
 
+/* v2.3.956: 아직 시작 전인가 */
+function _hsbIsSoon(b, nowKey) { return (b.date + (b.start || '')) > nowKey; }
+
+/* v2.3.956: 편성만 있는 기록의 수량 상태.
+   GS샵은 수량을 공개하므로 '비공개' 가 아니라 예정 / 집계 대기 / 기록 없음이다.
+   2026-11-23 03:00 ~ 11-28 08:10(KST) 은 GS 개편으로 수집이 멈췄던 구간. */
+function _hsbSchedState(b, nowKey) {
+  const key = b.date + (b.start || '');
+  const gs = b.broadcaster === 'GS샵';
+  if (_hsbIsSoon(b, nowKey)) {
+    return { label: '예정', note: gs ? '방송 시작 후 5분마다 기록됩니다' : (b.broadcaster || '') + '은 수량을 공개하지 않습니다' };
+  }
+  if (!gs) return { label: '비공개', note: (b.broadcaster || '') + '은 수량을 공개하지 않습니다' };
+  if (key >= '2026112303:00' && key < '2026112808:10') {
+    return { label: '기록 없음', note: '수집 중단 기간(11/23~28) 방송입니다' };
+  }
+  const end = String(b.end || '');
+  const endDay = new Date(Date.UTC(+b.date.slice(0, 4), +b.date.slice(4, 6) - 1,
+    +b.date.slice(6, 8) + (end < String(b.start || '') ? 1 : 0)));
+  if (end && nowKey < endDay.toISOString().slice(0, 10).replace(/-/g, '') + end) {
+    return { label: '집계 대기', note: '5분마다 기록됩니다. 새로고침해 주세요' };
+  }
+  return { label: '기록 없음', note: '이 방송은 수량이 기록되지 않았습니다' };
+}
+
 // ── 방송 목록 ──
 function _hsbListHtml(list, selId) {
   if (!list.length) {
@@ -486,7 +513,7 @@ function _hsbListHtml(list, selId) {
   let lastDate = '';
   list.forEach(b => {
     /* 시작 시각이 아직 안 왔으면 '예정' — 방송한 것과 눈에 띄게 갈라 둔다 */
-    const soon = (b.date + (b.start || '')) > nowKey;
+    const soon = _hsbIsSoon(b, nowKey);
     if (b.date !== lastDate) {
       lastDate = b.date;
       h += '<div style="background:#f8fafc;padding:7px 14px;font-size:11.5px;font-weight:800;color:#475569;'
@@ -511,7 +538,7 @@ function _hsbListHtml(list, selId) {
         : ('<b style="font-size:13px;color:#a16207;font-weight:800;letter-spacing:-.3px">'
            + (b.amount ? _hWon(b.amount) : '<span style="color:#cbd5e1">—</span>') + '</b>'
            + '<small style="font-size:11px;color:#15803d;font-weight:700">'
-           + (b.src === 'schedule' ? '<span style="color:#94a3b8;font-weight:600">비공개</span>'
+           + (b.src === 'schedule' ? '<span style="color:#94a3b8;font-weight:600">' + _hsbSchedState(b, nowKey).label + '</span>'
                : (_hNum(b.sold || 0) + '개'
                   + (b.src === 'app-observation' && !b.obsFinal ? '<span style="color:#94a3b8">+</span>' : ''))) + '</small>'))
       + '</span>'
@@ -791,7 +818,8 @@ const _HSB_TABS = [
   { bc: '현대홈쇼핑', label: '현대홈쇼핑', navId: 'nav-hsb-HD' },
 ];
 function _hsbTabsHtml(cur) {
-  const all = window._HSB.list || [];
+  const nowKey = _hNowKstKey();
+  const all = (window._HSB.list || []).filter(b => !_hsbIsSoon(b, nowKey));
   return '<div id="hsb-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">'
     + _HSB_TABS.map(t => {
       const n = all.filter(b => b.broadcaster === t.bc).length;
@@ -841,7 +869,9 @@ function renderHsBroadcastPage() {
   }
   /* v2.3.941: 선택한 방송사만 본다. 집계(최근 30일 등)도 그 방송사 안에서만 센다. */
   const list = H.list.filter(b => b.broadcaster === H.bc);
-  const sel = list.find(b => b.id === H.sel) || list[0];
+  /* v2.3.956: 목록은 최신순이라 맨 위가 먼 예정 방송이다 — 처음엔 가장 최근에 시작한 방송을 고른다 */
+  const nowKey = _hNowKstKey();
+  const sel = list.find(b => b.id === H.sel) || list.find(b => !_hsbIsSoon(b, nowKey)) || list[list.length - 1];
   H.sel = sel ? sel.id : null;
   host.innerHTML =
     _hsbTabsHtml(H.bc)
