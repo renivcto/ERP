@@ -5,6 +5,7 @@
      erp_data/hsBroadcasts  {data: JSON([방송]), ts, older:[{m:'YYYYMM', p:문서수}]}
      erp_data/hsBroadcasts_YYYYMM (_2, _3…)  그 달 방송 전부. older 에 있는 달은
        본문 문서에서 밀려난 방송이 있다 → '이전 기록 더 보기' 를 눌러야 읽는다. (v2.3.957)
+     erp_data/hsSchedule 도 같다: older:[{m, p, bc:[방송사]}] + hsSchedule_YYYYMM (v2.3.958)
        방송 = {id, broadcaster, date(YYYYMMDD), pgmId, start, end, title, host,
                brands[], products[{prdCd,name,brand,salePrice,benefit,first,last,sold,soldOut}],
                ticks[{t,sold,amount}], sold, amount, peak{t,sold,amount}, updatedAt}
@@ -56,6 +57,7 @@ async function _hsbLoad(force) {
     const man = await read('hsBroadcastsManual');// 손으로 넣은 기록
     H.src = { sch: sch.arr, auto: auto.arr, man: man.arr };
     H.older = auto.older || [];
+    H.schOlder = sch.older || [];
     H.obs = await readMap('hsbObservations');
     H.media = await readMap('hsbMedia');
     _hsbMerge(H);
@@ -65,26 +67,37 @@ async function _hsbLoad(force) {
   } finally { H.loading = false; }
 }
 
-/* 같은 id 면 manual > auto > 월별 보관 > schedule — 나중에 넣은 것이 이긴다 */
+/* 같은 id 면 manual > auto > 월별 보관(수량 > 편성) > schedule — 나중에 넣은 것이 이긴다 */
 function _hsbMerge(H) {
   const src = H.src || {};
-  const arch = Object.keys(H.arch || {}).reduce((a, m) => a.concat(H.arch[m]), []);
+  const flat = (o) => Object.keys(o || {}).reduce((a, m) => a.concat(o[m]), []);
+  /* GS 는 편성 보관보다 수량 보관이 진짜다 — 그 달 수량 보관을 아직 안 읽었으면 편성분을 숨긴다.
+     (안 그러면 다른 탭에서 읽은 편성 때문에 팔린 방송이 '기록 없음' 으로 보인다) */
+  const waiting = new Set((H.older || []).filter(o => !(H.arch || {})[o.m]).map(o => o.m));
+  const schArch = flat(H.schArch).filter(b => !(b.broadcaster === 'GS샵' && waiting.has(String(b.date).slice(0, 6))));
   const byId = new Map();
-  [src.sch, arch, src.auto, src.man].forEach(arr =>
+  [src.sch, schArch, flat(H.arch), src.auto, src.man].forEach(arr =>
     (arr || []).forEach(b => { if (b && b.id) byId.set(b.id, b); }));
   H.list = Array.from(byId.values())
     .map(b => _hsbApplyManual(_hsbApplyObs(b, (H.obs || {})[b.id]), (H.obs || {})[b.id]))
     .sort((a, b) => (a.date + a.start) < (b.date + b.start) ? 1 : -1);   // 최신 먼저
 }
 
-/* v2.3.957: 월별 보관 — 아직 안 읽은 달 중 가장 최근 것 */
+/* v2.3.957: 월별 보관 — 이 방송사에 아직 안 읽은 기록이 있는 달 중 가장 최근 것.
+   반환 {m, auto: 문서수|0, sch: 문서수|0} (v2.3.958: 편성 보관 추가) */
 function _hsbNextOlder(H) {
-  return (H.older || []).filter(o => o && o.m && !(H.arch || {})[o.m])
-    .sort((a, b) => a.m < b.m ? 1 : -1)[0] || null;
+  const need = {};
+  const add = (o, key, loaded) => {
+    if (!o || !o.m || (loaded || {})[o.m]) return;
+    (need[o.m] = need[o.m] || { m: o.m, auto: 0, sch: 0 })[key] = o.p || 1;
+  };
+  if (H.bc === 'GS샵') (H.older || []).forEach(o => add(o, 'auto', H.arch));
+  (H.schOlder || []).forEach(o => { if ((o.bc || []).indexOf(H.bc) >= 0) add(o, 'sch', H.schArch); });
+  const m = Object.keys(need).sort().pop();
+  return m ? need[m] : null;
 }
 function _hsbOlderHtml() {
-  const H = window._HSB;
-  const o = H.bc === 'GS샵' ? _hsbNextOlder(H) : null;
+  const o = _hsbNextOlder(window._HSB);
   if (!o) return '';
   return '<button type="button" id="hsb-older" onclick="window._hsbLoadOlder()" '
     + 'style="display:block;width:100%;height:38px;margin-top:8px;border-radius:10px;border:1px solid #cbd5e1;'
@@ -100,15 +113,20 @@ window._hsbLoadOlder = async function () {
     const db = window._firebaseDb, docF = window._firestoreDoc;
     const getFn = window._firestoreGetDocFromServer || window._firestoreGetDoc;
     if (!db || !docF || !getFn) throw new Error('Firestore 준비 안 됨');
-    let all = [];
-    for (let i = 1; i <= (o.p || 1); i++) {
-      const snap = await getFn(docF(db, 'erp_data', 'hsBroadcasts_' + o.m + (i > 1 ? '_' + i : '')));
-      const d = (snap && snap.exists && snap.exists()) ? snap.data() : null;
-      if (!d) throw new Error('보관 문서가 없습니다');   // 반쪽만 읽고 '다 읽음' 으로 치지 않는다
-      all = all.concat(typeof d.data === 'string' ? JSON.parse(d.data) : (d.data || []));
-    }
-    H.arch = H.arch || {};
-    H.arch[o.m] = all;
+    const readParts = async (base, parts) => {
+      let all = [];
+      for (let i = 1; i <= parts; i++) {
+        const snap = await getFn(docF(db, 'erp_data', base + '_' + o.m + (i > 1 ? '_' + i : '')));
+        const d = (snap && snap.exists && snap.exists()) ? snap.data() : null;
+        if (!d) throw new Error('보관 문서가 없습니다');   // 반쪽만 읽고 '다 읽음' 으로 치지 않는다
+        all = all.concat(typeof d.data === 'string' ? JSON.parse(d.data) : (d.data || []));
+      }
+      return all;
+    };
+    const auto = o.auto ? await readParts('hsBroadcasts', o.auto) : null;
+    const sch = o.sch ? await readParts('hsSchedule', o.sch) : null;
+    if (auto) (H.arch = H.arch || {})[o.m] = auto;
+    if (sch) (H.schArch = H.schArch || {})[o.m] = sch;
     _hsbMerge(H);
     renderHsBroadcastPage();
   } catch (e) { alert('이전 기록을 불러오지 못했습니다: ' + (e && e.message)); }
