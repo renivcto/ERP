@@ -2,7 +2,9 @@
    홈쇼핑 방송 기록 — 경쟁사 화장품 생방송 5분 단위 판매 추적        — v2.3.912~
    =============================================================================
    데이터는 서버(hermes-server /srv/hsmon)가 쓴다. 프론트는 읽기만 한다.
-     erp_data/hsBroadcasts  {data: JSON([방송]), ts}
+     erp_data/hsBroadcasts  {data: JSON([방송]), ts, older:[{m:'YYYYMM', p:문서수}]}
+     erp_data/hsBroadcasts_YYYYMM (_2, _3…)  그 달 방송 전부. older 에 있는 달은
+       본문 문서에서 밀려난 방송이 있다 → '이전 기록 더 보기' 를 눌러야 읽는다. (v2.3.957)
        방송 = {id, broadcaster, date(YYYYMMDD), pgmId, start, end, title, host,
                brands[], products[{prdCd,name,brand,salePrice,benefit,first,last,sold,soldOut}],
                ticks[{t,sold,amount}], sold, amount, peak{t,sold,amount}, updatedAt}
@@ -37,7 +39,7 @@ async function _hsbLoad(force) {
         const d = (snap && snap.exists && snap.exists()) ? snap.data() : null;
         let arr = d ? d.data : [];
         if (typeof arr === 'string') arr = JSON.parse(arr);
-        return { arr: Array.isArray(arr) ? arr : [], ts: (d && d.ts) || 0 };
+        return { arr: Array.isArray(arr) ? arr : [], ts: (d && d.ts) || 0, older: (d && d.older) || [] };
       } catch (e) { console.warn('hsb read ' + name, e); return { arr: [], ts: 0 }; }
     };
     const readMap = async (name) => {
@@ -52,20 +54,66 @@ async function _hsbLoad(force) {
     const auto = await read('hsBroadcasts');     // GS — 5분 자동 기록
     const sch = await read('hsSchedule');        // 롯데·CJ 편성 (수량 비공개)
     const man = await read('hsBroadcastsManual');// 손으로 넣은 기록
-    /* 같은 id 면 manual > auto > schedule — 나중에 넣은 것이 이긴다 */
-    const byId = new Map();
-    [sch.arr, auto.arr, man.arr].forEach(arr =>
-      (arr || []).forEach(b => { if (b && b.id) byId.set(b.id, b); }));
+    H.src = { sch: sch.arr, auto: auto.arr, man: man.arr };
+    H.older = auto.older || [];
     H.obs = await readMap('hsbObservations');
     H.media = await readMap('hsbMedia');
-    H.list = Array.from(byId.values())
-      .map(b => _hsbApplyManual(_hsbApplyObs(b, H.obs[b.id]), H.obs[b.id]))
-      .sort((a, b) => (a.date + a.start) < (b.date + b.start) ? 1 : -1);   // 최신 먼저
+    _hsbMerge(H);
     H.ts = Math.max(auto.ts || 0, man.ts || 0, sch.ts || 0);
     H.loadedAt = Date.now();
     /* v2.3.941: 선택 보정은 renderHsBroadcastPage 가 방송사별로 한다 */
   } finally { H.loading = false; }
 }
+
+/* 같은 id 면 manual > auto > 월별 보관 > schedule — 나중에 넣은 것이 이긴다 */
+function _hsbMerge(H) {
+  const src = H.src || {};
+  const arch = Object.keys(H.arch || {}).reduce((a, m) => a.concat(H.arch[m]), []);
+  const byId = new Map();
+  [src.sch, arch, src.auto, src.man].forEach(arr =>
+    (arr || []).forEach(b => { if (b && b.id) byId.set(b.id, b); }));
+  H.list = Array.from(byId.values())
+    .map(b => _hsbApplyManual(_hsbApplyObs(b, (H.obs || {})[b.id]), (H.obs || {})[b.id]))
+    .sort((a, b) => (a.date + a.start) < (b.date + b.start) ? 1 : -1);   // 최신 먼저
+}
+
+/* v2.3.957: 월별 보관 — 아직 안 읽은 달 중 가장 최근 것 */
+function _hsbNextOlder(H) {
+  return (H.older || []).filter(o => o && o.m && !(H.arch || {})[o.m])
+    .sort((a, b) => a.m < b.m ? 1 : -1)[0] || null;
+}
+function _hsbOlderHtml() {
+  const H = window._HSB;
+  const o = H.bc === 'GS샵' ? _hsbNextOlder(H) : null;
+  if (!o) return '';
+  return '<button type="button" id="hsb-older" onclick="window._hsbLoadOlder()" '
+    + 'style="display:block;width:100%;height:38px;margin-top:8px;border-radius:10px;border:1px solid #cbd5e1;'
+    + 'background:#fff;color:#334155;font-size:12.5px;font-weight:700;cursor:pointer">이전 기록 더 보기 ('
+    + _hEsc(o.m.slice(0, 4) + '년 ' + (+o.m.slice(4, 6)) + '월') + ')</button>';
+}
+window._hsbLoadOlder = async function () {
+  const H = window._HSB;
+  const o = _hsbNextOlder(H);
+  if (!o || H.olderLoading) return;
+  H.olderLoading = true;
+  try {
+    const db = window._firebaseDb, docF = window._firestoreDoc;
+    const getFn = window._firestoreGetDocFromServer || window._firestoreGetDoc;
+    if (!db || !docF || !getFn) throw new Error('Firestore 준비 안 됨');
+    let all = [];
+    for (let i = 1; i <= (o.p || 1); i++) {
+      const snap = await getFn(docF(db, 'erp_data', 'hsBroadcasts_' + o.m + (i > 1 ? '_' + i : '')));
+      const d = (snap && snap.exists && snap.exists()) ? snap.data() : null;
+      if (!d) throw new Error('보관 문서가 없습니다');   // 반쪽만 읽고 '다 읽음' 으로 치지 않는다
+      all = all.concat(typeof d.data === 'string' ? JSON.parse(d.data) : (d.data || []));
+    }
+    H.arch = H.arch || {};
+    H.arch[o.m] = all;
+    _hsbMerge(H);
+    renderHsBroadcastPage();
+  } catch (e) { alert('이전 기록을 불러오지 못했습니다: ' + (e && e.message)); }
+  finally { H.olderLoading = false; }
+};
 
 /* v2.3.942: 롯데 관측 캡처 — 본문(hsBroadcasts)과 분리해 따로 읽는다.
    한 번 읽으면 세션 동안 캐시한다. 없으면 조용히 비워 둔다. */
@@ -882,7 +930,8 @@ function renderHsBroadcastPage() {
     + '</div>'
     + (sel ? (_hsbSummary(list, sel) + _hsbDetailHtml(sel)) : '')
     + '<div style="font-size:12.5px;font-weight:800;color:#0f172a;margin-bottom:6px">방송 이력</div>'
-    + _hsbListHtml(list, sel && sel.id);
+    + _hsbListHtml(list, sel && sel.id)
+    + _hsbOlderHtml();
   _hsbSyncNav();
   try { _hsbChart(sel); } catch (e) { console.warn('hsb chart', e); }
   /* 관측 캡처는 무거워서 따로 읽는다 — 다 읽으면 그 자리만 다시 그린다 */
